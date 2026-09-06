@@ -91,6 +91,7 @@ namespace DS4WinWPF.DS4Forms
             System.Windows.Controls.Button button, string componentName,
             string bundledFileName, string expectedSha256)
         {
+            if (DS4Windows.PortableLabContext.IsActive) return;
             string target = Path.Combine(AppContext.BaseDirectory, "extras",
                 bundledFileName);
             try

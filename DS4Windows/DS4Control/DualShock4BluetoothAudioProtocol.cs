@@ -261,7 +261,7 @@ namespace DS4Windows
             byte rightFastRumble = 0, byte leftSlowRumble = 0,
             byte lightbarRed = 0, byte lightbarGreen = 0,
             byte lightbarBlue = 0, byte flashOn = 0, byte flashOff = 0,
-            byte bluetoothPollRate = 0)
+            byte bluetoothPollRate = 0, bool stopRumbleOnly = false)
         {
             if (report == null || report.Length != AudioControlReportLength)
             {
@@ -292,6 +292,14 @@ namespace DS4Windows
             // by the zero-dropout physical-controller trace. The normal effects
             // dispatcher resumes ownership immediately after this one-shot arm.
             byte validity = audioEnabled ? (byte)0xF3 : (byte)0xF0;
+
+            if (stopRumbleOnly)
+            {
+                // Preserve audio-mode/volume validity, stop both motors, and
+                // leave lightbar/flash untouched when profile effects are off.
+                validity = (byte)((validity & ~0x06) | 0x01);
+                rightFastRumble = leftSlowRumble = 0;
+            }
 
             report[3] = validity;
             report[6] = rightFastRumble;

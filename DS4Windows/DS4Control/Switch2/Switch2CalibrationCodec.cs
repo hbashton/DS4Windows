@@ -4,13 +4,41 @@ namespace DS4Windows.Switch2;
 
 public enum Switch2StickSide : byte
 {
+    Invalid = 0,
     Left = 1,
     Right = 2,
+}
+
+public enum Switch2FactoryCalibrationStorageSlot : byte
+{
+    Primary = 1,
+    Secondary = 2,
 }
 
 public readonly struct Switch2FactoryCalibrationMetadata
 {
     internal Switch2FactoryCalibrationMetadata(Switch2StickSide side,
+        Switch2FactoryCalibrationStorageSlot storageSlot, uint address,
+        byte length)
+    {
+        Side = side;
+        StorageSlot = storageSlot;
+        Address = address;
+        Length = length;
+    }
+
+    public Switch2StickSide Side { get; }
+
+    public Switch2FactoryCalibrationStorageSlot StorageSlot { get; }
+
+    public uint Address { get; }
+
+    public byte Length { get; }
+}
+
+public readonly struct Switch2UserCalibrationMetadata
+{
+    internal Switch2UserCalibrationMetadata(Switch2StickSide side,
         uint address, byte length)
     {
         Side = side;
@@ -25,7 +53,8 @@ public readonly struct Switch2FactoryCalibrationMetadata
     public byte Length { get; }
 }
 
-public readonly struct Switch2StickCalibration
+public readonly struct Switch2StickCalibration :
+    IEquatable<Switch2StickCalibration>
 {
     internal Switch2StickCalibration(ushort neutralX, ushort neutralY,
         ushort positiveRangeX, ushort positiveRangeY,
@@ -60,56 +89,109 @@ public readonly struct Switch2StickCalibration
         IsInterior(PositiveRangeX) && IsInterior(PositiveRangeY) &&
         IsInterior(NegativeRangeX) && IsInterior(NegativeRangeY);
 
+    public bool Equals(Switch2StickCalibration other) =>
+        NeutralX == other.NeutralX && NeutralY == other.NeutralY &&
+        PositiveRangeX == other.PositiveRangeX &&
+        PositiveRangeY == other.PositiveRangeY &&
+        NegativeRangeX == other.NegativeRangeX &&
+        NegativeRangeY == other.NegativeRangeY;
+
+    public override bool Equals(object obj) =>
+        obj is Switch2StickCalibration other && Equals(other);
+
+    public override int GetHashCode() => HashCode.Combine(NeutralX, NeutralY,
+        PositiveRangeX, PositiveRangeY, NegativeRangeX, NegativeRangeY);
+
     private static bool IsInterior(ushort value) => value is > 0 and < 0x0FFF;
 }
 
 /// <summary>
-/// Pure parsing and metadata for factory stick calibration. User calibration is
-/// intentionally unavailable because current sources conflict on the right-stick
-/// user address (0x1FC060 versus 0x1FC080).
+/// Pure parsing and metadata for factory and read-only user stick calibration.
+/// Current SDL and the independently implemented hid-nintendo2 driver both use
+/// 0x1FC080 for the Pro right stick and require the little-endian 0xA1B2 marker.
+/// Switch2Connect's conflicting 0x1FC060 address is deliberately not used.
 /// </summary>
 public static class Switch2CalibrationCodec
 {
     public const int StickCalibrationLength = 9;
-    public const uint LeftFactoryStickAddress = 0x0130A8;
-    public const uint RightFactoryStickAddress = 0x0130E8;
+    public const int UserStickCalibrationLength = 11;
+    public const ushort UserStickCalibrationMagic = 0xA1B2;
+    public const uint PrimaryFactoryStickAddress = 0x0130A8;
+    public const uint SecondaryFactoryStickAddress = 0x0130E8;
+    public const uint PrimaryUserStickAddress = 0x1FC040;
+    public const uint SecondaryUserStickAddress = 0x1FC080;
 
-    public static bool SupportsLiveUserCalibration => false;
+    public static bool SupportsLiveUserCalibration => true;
 
     public static bool TryGetFactoryStickMetadata(
         Switch2ControllerModel model, Switch2StickSide side,
         out Switch2FactoryCalibrationMetadata metadata)
     {
-        bool applicable = (model, side) switch
+        Switch2FactoryCalibrationStorageSlot storageSlot = (model, side) switch
         {
-            (Switch2ControllerModel.JoyCon2Left, Switch2StickSide.Left) => true,
-            (Switch2ControllerModel.JoyCon2Right, Switch2StickSide.Right) => true,
-            (Switch2ControllerModel.ProController2, Switch2StickSide.Left) => true,
-            (Switch2ControllerModel.ProController2, Switch2StickSide.Right) => true,
-            _ => false,
+            (Switch2ControllerModel.JoyCon2Left, Switch2StickSide.Left) =>
+                Switch2FactoryCalibrationStorageSlot.Primary,
+            (Switch2ControllerModel.JoyCon2Right, Switch2StickSide.Right) =>
+                Switch2FactoryCalibrationStorageSlot.Primary,
+            (Switch2ControllerModel.ProController2, Switch2StickSide.Left) =>
+                Switch2FactoryCalibrationStorageSlot.Primary,
+            (Switch2ControllerModel.ProController2, Switch2StickSide.Right) =>
+                Switch2FactoryCalibrationStorageSlot.Secondary,
+            _ => 0,
         };
-        if (!applicable)
+        if (storageSlot == 0)
         {
             metadata = default;
             return false;
         }
 
-        uint address = side == Switch2StickSide.Left ?
-            LeftFactoryStickAddress : RightFactoryStickAddress;
-        metadata = new Switch2FactoryCalibrationMetadata(side, address,
-            StickCalibrationLength);
+        uint address = storageSlot ==
+            Switch2FactoryCalibrationStorageSlot.Primary ?
+            PrimaryFactoryStickAddress : SecondaryFactoryStickAddress;
+        metadata = new Switch2FactoryCalibrationMetadata(side, storageSlot,
+            address, StickCalibrationLength);
         return true;
     }
 
-    /// <summary>
-    /// Always returns false in Phase 1. This explicit API prevents a caller from
-    /// silently choosing one of the conflicting user-calibration addresses.
-    /// </summary>
-    public static bool TryGetLiveUserStickAddress(
-        Switch2ControllerModel model, Switch2StickSide side, out uint address)
+    public static bool TryGetLiveUserStickMetadata(
+        Switch2ControllerModel model, Switch2StickSide side,
+        out Switch2UserCalibrationMetadata metadata)
     {
-        address = 0;
-        return false;
+        uint address = (model, side) switch
+        {
+            (Switch2ControllerModel.JoyCon2Left, Switch2StickSide.Left) =>
+                PrimaryUserStickAddress,
+            (Switch2ControllerModel.JoyCon2Right, Switch2StickSide.Right) =>
+                PrimaryUserStickAddress,
+            (Switch2ControllerModel.ProController2, Switch2StickSide.Left) =>
+                PrimaryUserStickAddress,
+            (Switch2ControllerModel.ProController2, Switch2StickSide.Right) =>
+                SecondaryUserStickAddress,
+            _ => 0,
+        };
+        if (address == 0)
+        {
+            metadata = default;
+            return false;
+        }
+
+        metadata = new Switch2UserCalibrationMetadata(side, address,
+            UserStickCalibrationLength);
+        return true;
+    }
+
+    public static bool TryDecodeUserStick(ReadOnlySpan<byte> data,
+        out Switch2StickCalibration calibration)
+    {
+        if (data.Length != UserStickCalibrationLength ||
+            (ushort)(data[0] | (data[1] << 8)) !=
+                UserStickCalibrationMagic)
+        {
+            calibration = default;
+            return false;
+        }
+
+        return TryDecodeStick(data.Slice(2), out calibration);
     }
 
     public static bool TryDecodeStick(ReadOnlySpan<byte> data,
@@ -128,6 +210,41 @@ public static class Switch2CalibrationCodec
             DecodePacked12(data[4], data[5], lowNibble: false),
             DecodePacked12(data[6], data[7], lowNibble: true),
             DecodePacked12(data[7], data[8], lowNibble: false));
+        return true;
+    }
+
+    /// <summary>
+    /// Fail-closed adoption gate for a structurally decoded factory record.
+    /// Besides erased/saturated sentinels, each signed range must terminate
+    /// inside the controller's 12-bit domain. This proves bounded arithmetic,
+    /// not the physical accuracy of a calibration captured from hardware.
+    /// </summary>
+    public static bool TryValidateAdoptable(
+        in Switch2StickCalibration calibration,
+        out Switch2CalibrationAdoptionFailure failure)
+    {
+        if (!calibration.IsUsable)
+        {
+            failure =
+                Switch2CalibrationAdoptionFailure.SentinelOrErased;
+            return false;
+        }
+        if (calibration.NeutralX < calibration.NegativeRangeX ||
+            calibration.NeutralY < calibration.NegativeRangeY)
+        {
+            failure = Switch2CalibrationAdoptionFailure.
+                NegativeEndpointOutOfRange;
+            return false;
+        }
+        if ((int)calibration.NeutralX + calibration.PositiveRangeX > 0x0FFF ||
+            (int)calibration.NeutralY + calibration.PositiveRangeY > 0x0FFF)
+        {
+            failure = Switch2CalibrationAdoptionFailure.
+                PositiveEndpointOutOfRange;
+            return false;
+        }
+
+        failure = Switch2CalibrationAdoptionFailure.None;
         return true;
     }
 

@@ -236,38 +236,95 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void ClaimEmitsOneReleaseWhenAppliedRevisionExpires()
+        public void ClaimAdvancesOnlyAfterSuccessfulCompletionAndRetriesFailure()
         {
             ControllerFeedbackMailbox mailbox = new();
-            ControllerFeedbackClaimCursor cursor = default;
+            ControllerFeedbackClaimCursor cursor = new();
             Assert.IsTrue(mailbox.TryPublish(CreateFrame(sequence: 1,
                 timestampMicroseconds: 1_000,
                 timeToLiveMicroseconds: 50)));
             Assert.AreEqual(ControllerFeedbackClaimDisposition.Frame,
-                mailbox.Claim(1_049, ref cursor,
-                    out ControllerFeedbackFrame first));
+                mailbox.Claim(1_049, cursor,
+                    out ControllerFeedbackFrame first,
+                    out ulong firstToken));
             Assert.AreEqual(1UL, first.Sequence);
-            Assert.AreEqual(1UL, cursor.Revision);
-            Assert.AreEqual(0UL, cursor.ReleaseRevision);
+            Assert.AreNotEqual(0UL, firstToken);
+            Assert.AreEqual(0UL, cursor.AppliedRevision);
+            Assert.AreEqual(0UL, cursor.ReleasedRevision);
             Assert.AreEqual(ControllerFeedbackClaimDisposition.None,
-                mailbox.Claim(1_049, ref cursor, out _));
+                mailbox.Claim(1_049, cursor, out _, out ulong blocked));
+            Assert.AreEqual(0UL, blocked);
+            ControllerFeedbackMailbox wrongMailbox = new();
+            Assert.IsTrue(wrongMailbox.TryPublish(CreateFrame()));
+            Assert.IsFalse(wrongMailbox.Complete(cursor, firstToken,
+                delivered: true), "Another mailbox completed the claim.");
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.None,
+                wrongMailbox.Claim(1_000, cursor, out _, out _),
+                "A cursor was silently reused by another mailbox.");
+            ControllerFeedbackClaimCursor wrongMailboxCursor = new();
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.Frame,
+                wrongMailbox.Claim(1_000, wrongMailboxCursor, out _,
+                    out ulong wrongMailboxToken));
+            Assert.IsTrue(wrongMailbox.Complete(wrongMailboxCursor,
+                wrongMailboxToken, delivered: true));
+            Assert.IsFalse(mailbox.Complete(cursor, firstToken + 1,
+                delivered: true), "A stale token disturbed the claim.");
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.None,
+                mailbox.Claim(1_049, cursor, out _, out _));
+            Assert.IsTrue(mailbox.Complete(cursor, firstToken,
+                delivered: false));
+            Assert.AreEqual(0UL, cursor.AppliedRevision);
+
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.Frame,
+                mailbox.Claim(1_049, cursor,
+                    out ControllerFeedbackFrame retried,
+                    out ulong retryToken));
+            Assert.AreEqual(first, retried);
+            Assert.AreNotEqual(firstToken, retryToken);
+            Assert.IsFalse(mailbox.Complete(cursor, firstToken,
+                delivered: true),
+                "The first token completed an active retry claim.");
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.None,
+                mailbox.Claim(1_049, cursor, out _, out _),
+                "A stale token disturbed the active retry claim.");
+            Assert.IsTrue(mailbox.Complete(cursor, retryToken,
+                delivered: true));
+            Assert.AreEqual(1UL, cursor.AppliedRevision);
+            Assert.AreEqual(0UL, cursor.ReleasedRevision);
+            Assert.IsFalse(mailbox.Complete(cursor, retryToken,
+                delivered: true), "A duplicate completion was accepted.");
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.None,
+                mailbox.Claim(1_049, cursor, out _, out _));
+
             Assert.AreEqual(ControllerFeedbackClaimDisposition.Release,
-                mailbox.Claim(1_050, ref cursor,
-                    out ControllerFeedbackFrame released));
+                mailbox.Claim(1_050, cursor,
+                    out ControllerFeedbackFrame released,
+                    out ulong releaseToken));
             Assert.AreEqual(default(ControllerFeedbackFrame), released);
-            Assert.AreEqual(1UL, cursor.ReleaseRevision);
+            Assert.IsTrue(mailbox.Complete(cursor, releaseToken,
+                delivered: false));
+            Assert.AreEqual(0UL, cursor.ReleasedRevision);
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.Release,
+                mailbox.Claim(1_050, cursor, out _,
+                    out ulong releaseRetryToken));
+            Assert.IsTrue(mailbox.Complete(cursor, releaseRetryToken,
+                delivered: true));
+            Assert.AreEqual(1UL, cursor.ReleasedRevision);
             Assert.AreEqual(ControllerFeedbackClaimDisposition.None,
-                mailbox.Claim(2_000, ref cursor, out _));
+                mailbox.Claim(2_000, cursor, out _, out _));
 
             Assert.IsTrue(mailbox.TryPublish(CreateFrame(sequence: 2,
                 timestampMicroseconds: 1_050,
                 timeToLiveMicroseconds: 50)));
             Assert.AreEqual(ControllerFeedbackClaimDisposition.Release,
-                mailbox.Claim(1_100, ref cursor,
-                    out ControllerFeedbackFrame expired));
+                mailbox.Claim(1_100, cursor,
+                    out ControllerFeedbackFrame expired,
+                    out ulong expiredToken));
             Assert.AreEqual(default(ControllerFeedbackFrame), expired);
-            Assert.AreEqual(2UL, cursor.Revision);
-            Assert.AreEqual(2UL, cursor.ReleaseRevision);
+            Assert.IsTrue(mailbox.Complete(cursor, expiredToken,
+                delivered: true));
+            Assert.AreEqual(2UL, cursor.AppliedRevision);
+            Assert.AreEqual(2UL, cursor.ReleasedRevision);
             Assert.IsFalse(mailbox.TryReadFresh(1_100, out _, out ulong staleRevision));
             Assert.AreEqual(2UL, staleRevision);
 
@@ -275,25 +332,307 @@ namespace DS4WindowsTests
                 timestampMicroseconds: 1_100,
                 timeToLiveMicroseconds: 50)));
             Assert.AreEqual(ControllerFeedbackClaimDisposition.Frame,
-                mailbox.Claim(1_100, ref cursor,
-                    out ControllerFeedbackFrame recovered));
+                mailbox.Claim(1_100, cursor,
+                    out ControllerFeedbackFrame recovered,
+                    out ulong recoveredToken));
             Assert.AreEqual(3UL, recovered.Sequence);
-            Assert.AreEqual(3UL, cursor.Revision);
+            Assert.IsTrue(mailbox.Complete(cursor, recoveredToken,
+                delivered: true));
+            Assert.AreEqual(3UL, cursor.AppliedRevision);
+        }
+
+        [TestMethod]
+        public void EmptyMailboxBindsCursorPermanently()
+        {
+            ControllerFeedbackMailbox empty = new();
+            ControllerFeedbackMailbox other = new();
+            ControllerFeedbackClaimCursor cursor = new();
+
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.None,
+                empty.Claim(1_000, cursor, out _, out ulong emptyToken));
+            Assert.AreEqual(0UL, emptyToken);
+            Assert.AreSame(empty, cursor.OwnerMailbox);
+
+            Assert.IsTrue(other.TryPublish(CreateFrame()));
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.None,
+                other.Claim(1_000, cursor, out _, out _));
+
+            ControllerFeedbackClaimCursor otherCursor = new();
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.Frame,
+                other.Claim(1_000, otherCursor, out _,
+                    out ulong otherToken));
+            Assert.IsTrue(other.Complete(otherCursor, otherToken,
+                delivered: true));
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.None,
+                empty.Claim(1_000, otherCursor, out _, out _),
+                "A completed cursor changed mailbox ownership.");
+        }
+
+        [TestMethod]
+        public void NewerPublicationSupersedesAnInFlightRevision()
+        {
+            ControllerFeedbackMailbox successful = new();
+            ControllerFeedbackClaimCursor successCursor = new();
+            ControllerFeedbackFrame first = CreateFrame(sequence: 1);
+            ControllerFeedbackFrame second = CreateFrame(sequence: 2);
+            Assert.IsTrue(successful.TryPublish(first));
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.Frame,
+                successful.Claim(1_000, successCursor, out _,
+                    out ulong firstToken));
+            Assert.IsTrue(successful.TryPublish(second));
+            Assert.IsTrue(successful.Complete(successCursor, firstToken,
+                delivered: true));
+            Assert.AreEqual(1UL, successCursor.AppliedRevision);
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.Frame,
+                successful.Claim(1_000, successCursor,
+                    out ControllerFeedbackFrame newest,
+                    out ulong newestToken));
+            Assert.AreEqual(second, newest);
+            Assert.IsTrue(successful.Complete(successCursor, newestToken,
+                delivered: true));
+            Assert.AreEqual(2UL, successCursor.AppliedRevision);
+
+            ControllerFeedbackMailbox failed = new();
+            ControllerFeedbackClaimCursor failureCursor = new();
+            Assert.IsTrue(failed.TryPublish(first));
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.Frame,
+                failed.Claim(1_000, failureCursor, out _,
+                    out ulong failedToken));
+            Assert.IsTrue(failed.TryPublish(second));
+            Assert.IsTrue(failed.Complete(failureCursor, failedToken,
+                delivered: false));
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.Frame,
+                failed.Claim(1_000, failureCursor,
+                    out ControllerFeedbackFrame afterFailure,
+                    out ulong afterFailureToken));
+            Assert.AreEqual(second, afterFailure,
+                "A replaced revision was replayed after failure.");
+            Assert.IsTrue(failed.Complete(failureCursor,
+                afterFailureToken, delivered: true));
+        }
+
+        [TestMethod]
+        public void PreAdmissionRevalidationPreventsStaleActuation()
+        {
+            ControllerFeedbackFrame apply = CreateFrame(sequence: 1,
+                timestampMicroseconds: 1_000,
+                timeToLiveMicroseconds: 50);
+            ControllerFeedbackFrame stop = CreateFrame(sequence: 2,
+                command: ControllerFeedbackCommand.Stop,
+                bodyLow: 0, bodyHigh: 0, leftTrigger: 0,
+                rightTrigger: 0, timestampMicroseconds: 1_001,
+                timeToLiveMicroseconds: 50);
+
+            ControllerFeedbackMailbox alreadyAdmitted = new();
+            ControllerFeedbackClaimCursor admittedCursor = new();
+            Assert.IsTrue(alreadyAdmitted.TryPublish(apply));
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.Frame,
+                alreadyAdmitted.Claim(1_000, admittedCursor, out _,
+                    out ulong admittedToken));
+            Assert.IsTrue(alreadyAdmitted.CanDeliver(admittedCursor,
+                admittedToken, 1_000));
+            Assert.IsTrue(alreadyAdmitted.TryPublish(stop));
+            Assert.IsTrue(alreadyAdmitted.Complete(admittedCursor,
+                admittedToken, delivered: true),
+                "An already admitted Apply lost its terminal completion.");
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.Frame,
+                alreadyAdmitted.Claim(1_001, admittedCursor,
+                    out ControllerFeedbackFrame admittedStop,
+                    out ulong admittedStopToken));
+            Assert.IsTrue(admittedStop.IsStop);
+            Assert.IsTrue(alreadyAdmitted.CanDeliver(admittedCursor,
+                admittedStopToken, 1_001));
+            Assert.IsTrue(alreadyAdmitted.Complete(admittedCursor,
+                admittedStopToken, delivered: true));
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.None,
+                alreadyAdmitted.Claim(1_051, admittedCursor, out _, out _),
+                "A completed Stop produced a duplicate expiry release.");
+
+            ControllerFeedbackMailbox notAdmitted = new();
+            ControllerFeedbackClaimCursor stoppedCursor = new();
+            Assert.IsTrue(notAdmitted.TryPublish(apply));
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.Frame,
+                notAdmitted.Claim(1_000, stoppedCursor, out _,
+                    out ulong staleApplyToken));
+            Assert.IsTrue(notAdmitted.TryPublish(stop));
+            Assert.IsFalse(notAdmitted.CanDeliver(stoppedCursor,
+                staleApplyToken, 1_001),
+                "A superseded Apply remained eligible for admission.");
+            Assert.IsTrue(notAdmitted.Complete(stoppedCursor,
+                staleApplyToken, delivered: false));
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.Frame,
+                notAdmitted.Claim(1_001, stoppedCursor,
+                    out ControllerFeedbackFrame directStop,
+                    out ulong directStopToken));
+            Assert.IsTrue(directStop.IsStop);
+            Assert.IsTrue(notAdmitted.CanDeliver(stoppedCursor,
+                directStopToken, 1_001));
+            Assert.IsTrue(notAdmitted.Complete(stoppedCursor,
+                directStopToken, delivered: true));
+
+            ControllerFeedbackMailbox expired = new();
+            ControllerFeedbackClaimCursor expiredCursor = new();
+            Assert.IsTrue(expired.TryPublish(apply));
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.Frame,
+                expired.Claim(1_049, expiredCursor, out _,
+                    out ulong expiringToken));
+            Assert.IsFalse(expired.CanDeliver(expiredCursor,
+                expiringToken, 1_050),
+                "An expired Apply remained eligible for admission.");
+            Assert.IsTrue(expired.Complete(expiredCursor, expiringToken,
+                delivered: false));
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.Release,
+                expired.Claim(1_050, expiredCursor, out _,
+                    out ulong releaseToken));
+            Assert.IsTrue(expired.CanDeliver(expiredCursor, releaseToken,
+                1_050));
+            Assert.IsTrue(expired.Complete(expiredCursor, releaseToken,
+                delivered: true));
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.None,
+                expired.Claim(2_000, expiredCursor, out _, out _));
+        }
+
+        [TestMethod]
+        public void PreAdmissionRevalidationRejectsInvalidClaimIdentity()
+        {
+            ControllerFeedbackMailbox mailbox = new();
+            ControllerFeedbackMailbox other = new();
+            ControllerFeedbackClaimCursor cursor = new();
+            ControllerFeedbackClaimCursor wrongCursor = new();
+            Assert.IsTrue(mailbox.TryPublish(CreateFrame()));
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.Frame,
+                mailbox.Claim(1_000, cursor, out _, out ulong token));
+
+            Assert.IsFalse(mailbox.CanDeliver(cursor, 0, 1_000));
+            Assert.IsFalse(mailbox.CanDeliver(cursor, token + 1, 1_000));
+            Assert.IsFalse(other.CanDeliver(cursor, token, 1_000));
+            Assert.IsFalse(mailbox.CanDeliver(wrongCursor, token, 1_000));
+            Assert.IsTrue(mailbox.CanDeliver(cursor, token, 1_000),
+                "Invalid checks disturbed the original claim.");
+            Assert.IsTrue(mailbox.Complete(cursor, token,
+                delivered: false));
+
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.Frame,
+                mailbox.Claim(1_000, cursor, out _, out ulong retryToken));
+            Assert.AreNotEqual(token, retryToken);
+            Assert.IsFalse(mailbox.CanDeliver(cursor, token, 1_000),
+                "A stale token admitted the retry claim.");
+            Assert.IsTrue(mailbox.CanDeliver(cursor, retryToken, 1_000));
+            Assert.IsTrue(mailbox.Complete(cursor, retryToken,
+                delivered: true));
+            Assert.IsFalse(mailbox.CanDeliver(cursor, retryToken, 1_000),
+                "A completed token remained admissible.");
+        }
+
+        [TestMethod]
+        public void TokenWrapSkipsZeroAndReferenceAliasCannotDuplicateCompletion()
+        {
+            ControllerFeedbackMailbox mailbox = new();
+            ControllerFeedbackClaimCursor cursor = new()
+            {
+                NextToken = ulong.MaxValue,
+            };
+            ControllerFeedbackClaimCursor alias = cursor;
+            Assert.IsTrue(mailbox.TryPublish(CreateFrame()));
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.Frame,
+                mailbox.Claim(1_000, cursor, out _, out ulong token));
+            Assert.AreEqual(1UL, token);
+            Assert.IsTrue(mailbox.Complete(alias, token, delivered: true));
+            Assert.IsFalse(mailbox.Complete(cursor, token,
+                delivered: true),
+                "A reference alias duplicated a completed token.");
+        }
+
+        [TestMethod]
+        public void FailedDeliveryFinallyMakesTheClaimRetryable()
+        {
+            ControllerFeedbackMailbox mailbox = new();
+            ControllerFeedbackClaimCursor cursor = new();
+            Assert.IsTrue(mailbox.TryPublish(CreateFrame()));
+            ulong token = 0;
+            bool delivered = false;
+
+            try
+            {
+                Assert.AreEqual(ControllerFeedbackClaimDisposition.Frame,
+                    mailbox.Claim(1_000, cursor, out _, out token));
+                throw new InvalidOperationException("simulated write failure");
+            }
+            catch (InvalidOperationException)
+            {
+                // A transport owner records/logs the write failure here.
+            }
+            finally
+            {
+                Assert.IsTrue(mailbox.Complete(cursor, token, delivered));
+            }
+
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.Frame,
+                mailbox.Claim(1_000, cursor, out _, out ulong retryToken));
+            Assert.AreNotEqual(token, retryToken);
+            Assert.IsTrue(mailbox.Complete(cursor, retryToken,
+                delivered: true));
+        }
+
+        [TestMethod]
+        public void CompletedStopSuppressesExpiryReleaseButNeutralDoesNot()
+        {
+            ControllerFeedbackMailbox stopMailbox = new();
+            ControllerFeedbackClaimCursor stopCursor = new();
+            Assert.IsTrue(stopMailbox.TryPublish(CreateFrame(
+                command: ControllerFeedbackCommand.Stop,
+                bodyLow: 0, bodyHigh: 0, leftTrigger: 0, rightTrigger: 0,
+                timestampMicroseconds: 1_000,
+                timeToLiveMicroseconds: 50)));
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.Frame,
+                stopMailbox.Claim(1_000, stopCursor,
+                    out ControllerFeedbackFrame stop,
+                    out ulong stopToken));
+            Assert.IsTrue(stop.IsStop);
+            Assert.IsTrue(stopMailbox.Complete(stopCursor, stopToken,
+                delivered: true));
+            Assert.AreEqual(1UL, stopCursor.AppliedRevision);
+            Assert.AreEqual(1UL, stopCursor.ReleasedRevision);
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.None,
+                stopMailbox.Claim(1_050, stopCursor, out _, out _));
+
+            ControllerFeedbackMailbox neutralMailbox = new();
+            ControllerFeedbackClaimCursor neutralCursor = new();
+            Assert.IsTrue(neutralMailbox.TryPublish(CreateFrame(
+                command: ControllerFeedbackCommand.Neutral,
+                bodyLow: 0, bodyHigh: 0, leftTrigger: 0, rightTrigger: 0,
+                timestampMicroseconds: 1_000,
+                timeToLiveMicroseconds: 50)));
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.Frame,
+                neutralMailbox.Claim(1_000, neutralCursor, out _,
+                    out ulong neutralToken));
+            Assert.IsTrue(neutralMailbox.Complete(neutralCursor,
+                neutralToken, delivered: true));
+            Assert.AreEqual(1UL, neutralCursor.AppliedRevision);
+            Assert.AreEqual(0UL, neutralCursor.ReleasedRevision);
+            Assert.AreEqual(ControllerFeedbackClaimDisposition.Release,
+                neutralMailbox.Claim(1_050, neutralCursor, out _,
+                    out ulong neutralReleaseToken));
+            Assert.IsTrue(neutralMailbox.Complete(neutralCursor,
+                neutralReleaseToken, delivered: true));
         }
 
         [TestMethod]
         public void FarFutureFrameProducesOneRelease()
         {
             ControllerFeedbackMailbox mailbox = new();
-            ControllerFeedbackClaimCursor cursor = default;
+            ControllerFeedbackClaimCursor cursor = new();
             Assert.IsTrue(mailbox.TryPublish(CreateFrame(
                 timestampMicroseconds: 10_001)));
             Assert.AreEqual(ControllerFeedbackClaimDisposition.Release,
-                mailbox.Claim(5_000, ref cursor,
-                    out ControllerFeedbackFrame released));
+                mailbox.Claim(5_000, cursor,
+                    out ControllerFeedbackFrame released,
+                    out ulong releaseToken));
             Assert.AreEqual(default(ControllerFeedbackFrame), released);
+            Assert.IsTrue(mailbox.Complete(cursor, releaseToken,
+                delivered: true));
             Assert.AreEqual(ControllerFeedbackClaimDisposition.None,
-                mailbox.Claim(5_000, ref cursor, out _));
+                mailbox.Claim(5_000, cursor, out _, out _));
         }
 
         [TestMethod]
@@ -345,7 +684,7 @@ namespace DS4WindowsTests
         {
             const ulong iterations = 20_000;
             ControllerFeedbackMailbox mailbox = new();
-            ControllerFeedbackClaimCursor cursor = default;
+            ControllerFeedbackClaimCursor cursor = new();
             Span<byte> packet = stackalloc byte[
                 ControllerFeedbackFrame.SerializedLength];
 
@@ -354,8 +693,9 @@ namespace DS4WindowsTests
                 ControllerFeedbackFrame frame = CreatePatternFrame(sequence);
                 mailbox.TryPublish(frame);
                 mailbox.TryReadLatest(out _, out _);
-                mailbox.Claim(frame.TimestampMicroseconds, ref cursor,
-                    out _);
+                mailbox.Claim(frame.TimestampMicroseconds, cursor,
+                    out _, out ulong claimToken);
+                mailbox.Complete(cursor, claimToken, delivered: true);
                 frame.TryWriteTo(packet);
                 ControllerFeedbackFrame.TryReadFrom(packet, out _);
             }
@@ -367,10 +707,14 @@ namespace DS4WindowsTests
                 ControllerFeedbackFrame frame = CreatePatternFrame(sequence);
                 mailbox.TryPublish(frame);
                 mailbox.TryReadLatest(out _, out _);
-                if (mailbox.Claim(frame.TimestampMicroseconds, ref cursor,
-                    out _) != ControllerFeedbackClaimDisposition.Frame)
+                if (mailbox.Claim(frame.TimestampMicroseconds, cursor,
+                    out _, out ulong claimToken) !=
+                        ControllerFeedbackClaimDisposition.Frame ||
+                    !mailbox.Complete(cursor, claimToken,
+                        delivered: true))
                 {
-                    throw new InvalidOperationException("claim failed");
+                    throw new InvalidOperationException(
+                        "claim completion failed");
                 }
                 frame.TryWriteTo(packet);
                 ControllerFeedbackFrame.TryReadFrom(packet, out _);

@@ -82,6 +82,8 @@ $script:SetupMutex = $null
 $script:SetupMutexOwned = $false
 $script:SetupTransactionStarted = $false
 $script:RequiredUsbipVersion = [Version]"0.9.7.7"
+$script:ViiperServerArguments =
+    "server --usb.retained-import-authority-id=4923336367393615921"
 $script:UsbipInstallerSha256 =
     "51620fa5f9f8be5932bc9d786deee557ce06d5407a99cab490dcfac71f185fea"
 $script:UsbipExecutableSha256 =
@@ -936,7 +938,7 @@ function Remove-MismatchedUsbipPackage($entry, [Version]$installedVersion,
 function Disable-ViiperStartup {
     $managedViiperPath = Join-Path $script:InstallDir "viiper.exe"
     [void](Remove-ManagedStartupTask "RunVIIPER" $managedViiperPath `
-        "server" $script:InstallDir)
+        $script:ViiperServerArguments $script:InstallDir)
     try {
         Remove-ItemProperty `
             -LiteralPath $script:TargetRunKeyPath `
@@ -1714,7 +1716,8 @@ function Start-AndVerifyViiper([string]$taskName) {
 function Start-AndVerifyViiperDirectly([string]$viiperPath) {
     if (Test-ViiperApi) { return $true }
     try {
-        Start-Process -FilePath $viiperPath -ArgumentList "server" `
+        Start-Process -FilePath $viiperPath `
+            -ArgumentList $script:ViiperServerArguments `
             -WorkingDirectory (Split-Path -Parent $viiperPath) `
             -WindowStyle Hidden -ErrorAction Stop | Out-Null
     }
@@ -1864,7 +1867,14 @@ function Test-LegacyManagedStartupTask($registered, [string]$taskName) {
         $expectedFileName = if ($isViiper) { "viiper.exe" } else {
             "DS4Windows.exe"
         }
-        $expectedArguments = if ($isViiper) { "server" } else { "-m" }
+        $expectedArguments = if ($isViiper) {
+            # Pre-authority releases used exactly "server". Recognize that
+            # historical action only after the same canonical-path/product
+            # checks below; registration still requests the current contract.
+            if ([string]::Equals([string]$action.Arguments, "server",
+                    [StringComparison]::Ordinal)) { "server" }
+            else { $script:ViiperServerArguments }
+        } else { "-m" }
         $expectedProduct = if ($isViiper) { "VIIPER" } else { "DS4Windows" }
 
         if (-not [string]::Equals(
@@ -1905,7 +1915,9 @@ function Test-ManagedStartupTaskOwnership($registered, [string]$taskName,
         $expectedRequestFile = if ($isViiperRequest) { "viiper.exe" } else {
             "DS4Windows.exe"
         }
-        $expectedRequestArguments = if ($isViiperRequest) { "server" } else {
+        $expectedRequestArguments = if ($isViiperRequest) {
+            $script:ViiperServerArguments
+        } else {
             "-m"
         }
         $requestedWorkingDirectory = [IO.Path]::GetFullPath(
@@ -1974,11 +1986,11 @@ function Remove-ManagedStartupTaskPair([string]$viiperPath,
     # This prevents a foreign second-name collision from causing a partial
     # deletion of the first DS4Windows-owned task.
     [void](Assert-StartupTaskMutationAllowed "RunVIIPER" $viiperPath `
-        "server" $viiperDirectory)
+        $script:ViiperServerArguments $viiperDirectory)
     [void](Assert-StartupTaskMutationAllowed "RunDS4Windows" `
         $ds4WindowsPath "-m" $ds4WindowsDirectory)
     [void](Remove-ManagedStartupTask "RunVIIPER" $viiperPath `
-        "server" $viiperDirectory)
+        $script:ViiperServerArguments $viiperDirectory)
     [void](Remove-ManagedStartupTask "RunDS4Windows" $ds4WindowsPath `
         "-m" $ds4WindowsDirectory)
 }
@@ -2166,7 +2178,8 @@ function Register-HighestLogonTask([string]$taskName,
 }
 
 function Register-ViiperRunTask([string]$viiperPath, [string]$taskName) {
-    return Register-HighestLogonTask $taskName $viiperPath "server" `
+    return Register-HighestLogonTask $taskName $viiperPath `
+        $script:ViiperServerArguments `
         (Split-Path -Parent $viiperPath)
 }
 
@@ -2181,7 +2194,8 @@ function Register-ManagedStartupTaskPair([string]$viiperPath,
     # A foreign RunDS4Windows task must not cause a newly created RunVIIPER
     # task to appear and then require rollback.
     $viiperBefore = Assert-StartupTaskMutationAllowed "RunVIIPER" `
-        $viiperPath "server" (Split-Path -Parent $viiperPath)
+        $viiperPath $script:ViiperServerArguments `
+        (Split-Path -Parent $viiperPath)
     [void](Assert-StartupTaskMutationAllowed "RunDS4Windows" `
         $ds4WindowsPath "-m" (Split-Path -Parent $ds4WindowsPath))
 
@@ -2200,7 +2214,8 @@ function Register-ManagedStartupTaskPair([string]$viiperPath,
         # disable it if required.
         if (-not $viiperBefore) {
             [void](Remove-ManagedStartupTask "RunVIIPER" $viiperPath `
-                "server" (Split-Path -Parent $viiperPath))
+                $script:ViiperServerArguments `
+                (Split-Path -Parent $viiperPath))
         }
         throw $registrationFailure
     }
@@ -2211,7 +2226,7 @@ function Register-ManagedStartupTaskPair([string]$viiperPath,
 function Suspend-StartupTasksUntilInfrastructureReady(
         [string]$viiperPath, [string]$ds4WindowsPath) {
     $contracts = @(
-        @("RunVIIPER", $viiperPath, "server",
+        @("RunVIIPER", $viiperPath, $script:ViiperServerArguments,
             (Split-Path -Parent $viiperPath)),
         @("RunDS4Windows", $ds4WindowsPath, "-m",
             (Split-Path -Parent $ds4WindowsPath))
@@ -2254,7 +2269,7 @@ function Suspend-StartupTasksUntilInfrastructureReady(
 function Set-InfrastructureStartupFailClosed(
         [string]$viiperPath, [string]$ds4WindowsPath) {
     $contracts = @(
-        @("RunVIIPER", $viiperPath, "server",
+        @("RunVIIPER", $viiperPath, $script:ViiperServerArguments,
             (Split-Path -Parent $viiperPath)),
         @("RunDS4Windows", $ds4WindowsPath, "-m",
             (Split-Path -Parent $ds4WindowsPath))
@@ -3031,7 +3046,8 @@ try {
 
         if ($script:RunAtStartupEnabled) {
             if (-not (Test-HighestLogonTask "RunVIIPER" $viiperPath `
-                        "server" (Split-Path -Parent $viiperPath)) -or
+                        $script:ViiperServerArguments `
+                        (Split-Path -Parent $viiperPath)) -or
                     -not (Test-HighestLogonTask "RunDS4Windows" `
                         $script:Ds4WindowsRestartPath "-m" `
                         (Split-Path -Parent $script:Ds4WindowsRestartPath))) {

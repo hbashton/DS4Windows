@@ -18,6 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 using System;
 using System.Buffers.Binary;
+using DS4Windows.Switch2;
 
 namespace DS4Windows
 {
@@ -32,7 +33,15 @@ namespace DS4Windows
             TouchLeft, Touch1Finger, Touch2Fingers, OutputTouchButton,
             Capture, SideL, SideR, FnL, FnR, BLP, BRP;
         public byte Touch1Identifier, Touch2Identifier;
-        public byte LX, RX, LY, RY, L2, R2;
+        // Mapping-owned coordinates. Byte access remains source-compatible for
+        // existing readers/writers; assigning a byte explicitly replaces any
+        // fractional value. Do not recover precision from raw metadata later.
+        internal DS4MappedStickAxis LXAxis, RXAxis, LYAxis, RYAxis;
+        public byte LX { get => LXAxis.LegacyValue; set => LXAxis = DS4MappedStickAxis.FromLegacy(value); }
+        public byte RX { get => RXAxis.LegacyValue; set => RXAxis = DS4MappedStickAxis.FromLegacy(value); }
+        public byte LY { get => LYAxis.LegacyValue; set => LYAxis = DS4MappedStickAxis.FromLegacy(value); }
+        public byte RY { get => RYAxis.LegacyValue; set => RYAxis = DS4MappedStickAxis.FromLegacy(value); }
+        public byte L2, R2;
         public byte L2Raw, R2Raw;
         public byte FrameCounter; // 0, 1, 2...62, 63, 0....
         public byte TouchPacketCounter; // we break these out automatically
@@ -53,6 +62,16 @@ namespace DS4Windows
         // This is metadata rather than mapped control state, so mapping and
         // debounce scratch copies carry it unchanged to the VIIPER boundary.
         public DualSenseRawInputStatus DualSenseRawInputStatus;
+        // Source metadata from the high-resolution Switch 2 profile boundary.
+        // This is never treated as already-mapped output: it preserves the
+        // physical 12-bit observation (including controls the legacy DS4State
+        // surface cannot represent) while the ordinary fields continue through
+        // the one existing profile/mapping pipeline.
+        public Switch2RawInputStatus Switch2RawInputStatus;
+        // Joined/standalone Joy-Con 2 metadata has independent per-half
+        // lifetime fences and four rail/paddle controls, so it remains a
+        // distinct copied sidecar rather than overloading the Pro status.
+        public Switch2JoyConRawInputStatus Switch2JoyConRawInputStatus;
         public SixAxis Motion = null;
         public static readonly int DEFAULT_AXISDIR_VALUE = 127;
         public Int32 SASteeringWheelEmulationUnit;
@@ -148,10 +167,10 @@ namespace DS4Windows
             TouchPacketCounter = state.TouchPacketCounter;
             Touch1Finger = state.Touch1Finger;
             Touch2Fingers = state.Touch2Fingers;
-            LX = state.LX;
-            RX = state.RX;
-            LY = state.LY;
-            RY = state.RY;
+            LXAxis = state.LXAxis;
+            RXAxis = state.RXAxis;
+            LYAxis = state.LYAxis;
+            RYAxis = state.RYAxis;
             FrameCounter = state.FrameCounter;
             Battery = state.Battery;
             LSAngle = state.LSAngle;
@@ -166,6 +185,8 @@ namespace DS4Windows
             totalMicroSec = state.totalMicroSec;
             ds4Timestamp = state.ds4Timestamp;
             DualSenseRawInputStatus = state.DualSenseRawInputStatus;
+            Switch2RawInputStatus = state.Switch2RawInputStatus;
+            Switch2JoyConRawInputStatus = state.Switch2JoyConRawInputStatus;
             Motion = state.Motion;
             TrackPadTouch0 = state.TrackPadTouch0;
             TrackPadTouch1 = state.TrackPadTouch1;
@@ -223,10 +244,10 @@ namespace DS4Windows
             state.TouchPacketCounter = TouchPacketCounter;
             state.Touch1Finger = Touch1Finger;
             state.Touch2Fingers = Touch2Fingers;
-            state.LX = LX;
-            state.RX = RX;
-            state.LY = LY;
-            state.RY = RY;
+            state.LXAxis = LXAxis;
+            state.RXAxis = RXAxis;
+            state.LYAxis = LYAxis;
+            state.RYAxis = RYAxis;
             state.FrameCounter = FrameCounter;
             state.Battery = Battery;
             state.LSAngle = LSAngle;
@@ -241,6 +262,8 @@ namespace DS4Windows
             state.totalMicroSec = totalMicroSec;
             state.ds4Timestamp = ds4Timestamp;
             state.DualSenseRawInputStatus = DualSenseRawInputStatus;
+            state.Switch2RawInputStatus = Switch2RawInputStatus;
+            state.Switch2JoyConRawInputStatus = Switch2JoyConRawInputStatus;
             state.Motion = Motion;
             state.TrackPadTouch0 = TrackPadTouch0;
             state.TrackPadTouch1 = TrackPadTouch1;
@@ -257,25 +280,33 @@ namespace DS4Windows
         /// <param name="state">State object to copy data to</param>
         public void CopyExtrasTo(DS4State state)
         {
+            // Mapped stick axes are controls, not physical metadata. Copying
+            // them here would undo custom mapping immediately before egress.
             state.Motion = Motion;
             state.ds4Timestamp = ds4Timestamp;
             state.FrameCounter = FrameCounter;
             state.TouchPacketCounter = TouchPacketCounter;
             state.DualSenseRawInputStatus = DualSenseRawInputStatus;
+            state.Switch2RawInputStatus = Switch2RawInputStatus;
+            state.Switch2JoyConRawInputStatus = Switch2JoyConRawInputStatus;
             state.TrackPadTouch0 = TrackPadTouch0;
             state.TrackPadTouch1 = TrackPadTouch1;
         }
 
         public void calculateStickAngles()
         {
-            double lsangle = Math.Atan2(-(LY - 128), (LX - 128));
+            double lsangle = LXAxis.IsHighResolution || LYAxis.IsHighResolution ?
+                Math.Atan2(-(LYAxis.ProfileCoordinate - 128), (LXAxis.ProfileCoordinate - 128)) :
+                Math.Atan2(-(LY - 128), (LX - 128));
             LSAngleRad = lsangle;
             lsangle = (lsangle >= 0 ? lsangle : (2 * Math.PI + lsangle)) * 180 / Math.PI;
             LSAngle = lsangle;
             LXUnit = Math.Abs(Math.Cos(LSAngleRad));
             LYUnit = Math.Abs(Math.Sin(LSAngleRad));
 
-            double rsangle = Math.Atan2(-(RY - 128), (RX - 128));
+            double rsangle = RXAxis.IsHighResolution || RYAxis.IsHighResolution ?
+                Math.Atan2(-(RYAxis.ProfileCoordinate - 128), (RXAxis.ProfileCoordinate - 128)) :
+                Math.Atan2(-(RY - 128), (RX - 128));
             RSAngleRad = rsangle;
             rsangle = (rsangle >= 0 ? rsangle : (2 * Math.PI + rsangle)) * 180 / Math.PI;
             RSAngle = rsangle;
@@ -289,10 +320,7 @@ namespace DS4Windows
         /// <param name="rotationRad">Rotation angle in radians</param>
         public void rotateLSCoordinates(double rotationRad)
         {
-            double sinAngle = Math.Sin(rotationRad), cosAngle = Math.Cos(rotationRad);
-            double tempLX = LX - 128.0, tempLY = LY - 128.0;
-            LX = (Byte)(Global.Clamp(-128.0, (tempLX * cosAngle - tempLY * sinAngle), 127.0) + 128.0);
-            LY = (Byte)(Global.Clamp(-128.0, (tempLX * sinAngle + tempLY * cosAngle), 127.0) + 128.0);
+            RotateStickCoordinates(ref LXAxis, ref LYAxis, rotationRad);
         }
 
         /// <summary>
@@ -301,10 +329,269 @@ namespace DS4Windows
         /// <param name="rotationRad">Rotation angle in radians</param>
         public void rotateRSCoordinates(double rotationRad)
         {
+            RotateStickCoordinates(ref RXAxis, ref RYAxis, rotationRad);
+        }
+
+        private static void RotateStickCoordinates(ref DS4MappedStickAxis x,
+            ref DS4MappedStickAxis y, double rotationRad)
+        {
             double sinAngle = Math.Sin(rotationRad), cosAngle = Math.Cos(rotationRad);
-            double tempRX = RX - 128.0, tempRY = RY - 128.0;
-            RX = (Byte)(Global.Clamp(-128.0, (tempRX * cosAngle - tempRY * sinAngle), 127.0) + 128.0);
-            RY = (Byte)(Global.Clamp(-128.0, (tempRX * sinAngle + tempRY * cosAngle), 127.0) + 128.0);
+            double tempX = x.ProfileCoordinate - 128.0, tempY = y.ProfileCoordinate - 128.0;
+            double rotatedX = Global.Clamp(-128.0, tempX * cosAngle - tempY * sinAngle, 127.0) + 128.0;
+            double rotatedY = Global.Clamp(-128.0, tempX * sinAngle + tempY * cosAngle, 127.0) + 128.0;
+            if (x.IsHighResolution || y.IsHighResolution)
+            {
+                DS4MappedStickAxis.TryFromProfileCoordinate(rotatedX, out x);
+                DS4MappedStickAxis.TryFromProfileCoordinate(rotatedY, out y);
+            }
+            else
+            {
+                // Preserve the historical truncation points for legacy input.
+                x = DS4MappedStickAxis.FromLegacy((byte)rotatedX);
+                y = DS4MappedStickAxis.FromLegacy((byte)rotatedY);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Fixed-size source observation retained across DS4Windows mapping copies.
+    /// The normalized axes follow the conventional gamepad sign convention
+    /// (negative left/up, positive right/down). Raw axes remain in Nintendo's
+    /// 12-bit wire units. The C button is retained explicitly and is never
+    /// aliased to the DualSense mute button.
+    /// </summary>
+    public struct Switch2RawInputStatus :
+        IEquatable<Switch2RawInputStatus>
+    {
+        public bool IsValid;
+        public ushort ContractVersion;
+        public Switch2Transport Transport;
+        public Switch2InputProtocolRevision ProtocolRevision;
+        public ulong DeviceGeneration;
+        public ulong TransportGeneration;
+        public long CompletionTimestampQpc;
+        public long QpcFrequency;
+        public uint DeviceCounterRaw;
+        public uint RawButtonBits;
+        public uint UnknownButtonBits;
+        public ushort LeftStickXRaw;
+        public ushort LeftStickYRaw;
+        public ushort RightStickXRaw;
+        public ushort RightStickYRaw;
+        public short LeftStickX;
+        public short LeftStickY;
+        public short RightStickX;
+        public short RightStickY;
+        public bool CButton;
+
+        public readonly bool Equals(Switch2RawInputStatus other) =>
+            IsValid == other.IsValid &&
+            ContractVersion == other.ContractVersion &&
+            Transport == other.Transport &&
+            ProtocolRevision == other.ProtocolRevision &&
+            DeviceGeneration == other.DeviceGeneration &&
+            TransportGeneration == other.TransportGeneration &&
+            CompletionTimestampQpc == other.CompletionTimestampQpc &&
+            QpcFrequency == other.QpcFrequency &&
+            DeviceCounterRaw == other.DeviceCounterRaw &&
+            RawButtonBits == other.RawButtonBits &&
+            UnknownButtonBits == other.UnknownButtonBits &&
+            LeftStickXRaw == other.LeftStickXRaw &&
+            LeftStickYRaw == other.LeftStickYRaw &&
+            RightStickXRaw == other.RightStickXRaw &&
+            RightStickYRaw == other.RightStickYRaw &&
+            LeftStickX == other.LeftStickX &&
+            LeftStickY == other.LeftStickY &&
+            RightStickX == other.RightStickX &&
+            RightStickY == other.RightStickY &&
+            CButton == other.CButton;
+
+        public override readonly bool Equals(object obj) =>
+            obj is Switch2RawInputStatus other && Equals(other);
+
+        public override readonly int GetHashCode() => HashCode.Combine(
+            HashCode.Combine(IsValid, ContractVersion, Transport,
+                ProtocolRevision, DeviceGeneration, TransportGeneration,
+                CompletionTimestampQpc, QpcFrequency),
+            HashCode.Combine(UnknownButtonBits, LeftStickXRaw, LeftStickYRaw,
+                RightStickXRaw, RightStickYRaw, LeftStickX, LeftStickY,
+                RightStickX),
+            DeviceCounterRaw, RawButtonBits, RightStickY, CButton);
+    }
+
+    /// <summary>
+    /// Fixed-size Joy-Con 2 source observation retained across every DS4State
+    /// copy path. Joined halves keep independent generations, counters, and raw
+    /// button masks. C and rail/paddle buttons remain explicit and are never
+    /// aliased to DualSense mute or to an ambiguous legacy paddle slot.
+    /// </summary>
+    public struct Switch2JoyConRawInputStatus :
+        IEquatable<Switch2JoyConRawInputStatus>
+    {
+        public bool IsValid;
+        public ushort ContractVersion;
+        public Switch2JoyConProfileMode Mode;
+        public ulong PairEpoch;
+        public long CompletionTimestampQpc;
+        public long QpcFrequency;
+        public bool LeftPresent;
+        public ulong LeftDeviceGeneration;
+        public ulong LeftTransportGeneration;
+        public uint LeftDeviceCounterRaw;
+        public uint LeftRawButtonBits;
+        public uint LeftUnknownButtonBits;
+        public ushort LeftPhysicalStickXRaw;
+        public ushort LeftPhysicalStickYRaw;
+        public bool LeftHasCommonMotion;
+        public uint LeftMotionTimestamp;
+        public Switch2Vector3Raw LeftAccelerometer;
+        public Switch2Vector3Raw LeftGyroscope;
+        public Switch2Vector3Raw LeftMagnetometer;
+        public ushort LeftIrX;
+        public ushort LeftIrY;
+        public ushort LeftIrRoughness;
+        public ushort LeftIrDistance;
+        public bool RightPresent;
+        public ulong RightDeviceGeneration;
+        public ulong RightTransportGeneration;
+        public uint RightDeviceCounterRaw;
+        public uint RightRawButtonBits;
+        public uint RightUnknownButtonBits;
+        public ushort RightPhysicalStickXRaw;
+        public ushort RightPhysicalStickYRaw;
+        public bool RightHasCommonMotion;
+        public uint RightMotionTimestamp;
+        public Switch2Vector3Raw RightAccelerometer;
+        public Switch2Vector3Raw RightGyroscope;
+        public Switch2Vector3Raw RightMagnetometer;
+        public ushort RightIrX;
+        public ushort RightIrY;
+        public ushort RightIrRoughness;
+        public ushort RightIrDistance;
+        public short LogicalLeftStickX;
+        public short LogicalLeftStickY;
+        public short LogicalRightStickX;
+        public short LogicalRightStickY;
+        public bool CButton;
+        public bool LeftPaddle1;
+        public bool LeftPaddle2;
+        public bool RightPaddle1;
+        public bool RightPaddle2;
+        public bool LeftRailSL;
+        public bool LeftRailSR;
+        public bool RightRailSL;
+        public bool RightRailSR;
+
+        public readonly bool Equals(Switch2JoyConRawInputStatus other) =>
+            IsValid == other.IsValid &&
+            ContractVersion == other.ContractVersion &&
+            Mode == other.Mode && PairEpoch == other.PairEpoch &&
+            CompletionTimestampQpc == other.CompletionTimestampQpc &&
+            QpcFrequency == other.QpcFrequency &&
+            LeftPresent == other.LeftPresent &&
+            LeftDeviceGeneration == other.LeftDeviceGeneration &&
+            LeftTransportGeneration == other.LeftTransportGeneration &&
+            LeftDeviceCounterRaw == other.LeftDeviceCounterRaw &&
+            LeftRawButtonBits == other.LeftRawButtonBits &&
+            LeftUnknownButtonBits == other.LeftUnknownButtonBits &&
+            LeftPhysicalStickXRaw == other.LeftPhysicalStickXRaw &&
+            LeftPhysicalStickYRaw == other.LeftPhysicalStickYRaw &&
+            LeftHasCommonMotion == other.LeftHasCommonMotion &&
+            LeftMotionTimestamp == other.LeftMotionTimestamp &&
+            LeftAccelerometer.Equals(other.LeftAccelerometer) &&
+            LeftGyroscope.Equals(other.LeftGyroscope) &&
+            LeftMagnetometer.Equals(other.LeftMagnetometer) &&
+            LeftIrX == other.LeftIrX && LeftIrY == other.LeftIrY &&
+            LeftIrRoughness == other.LeftIrRoughness &&
+            LeftIrDistance == other.LeftIrDistance &&
+            RightPresent == other.RightPresent &&
+            RightDeviceGeneration == other.RightDeviceGeneration &&
+            RightTransportGeneration == other.RightTransportGeneration &&
+            RightDeviceCounterRaw == other.RightDeviceCounterRaw &&
+            RightRawButtonBits == other.RightRawButtonBits &&
+            RightUnknownButtonBits == other.RightUnknownButtonBits &&
+            RightPhysicalStickXRaw == other.RightPhysicalStickXRaw &&
+            RightPhysicalStickYRaw == other.RightPhysicalStickYRaw &&
+            RightHasCommonMotion == other.RightHasCommonMotion &&
+            RightMotionTimestamp == other.RightMotionTimestamp &&
+            RightAccelerometer.Equals(other.RightAccelerometer) &&
+            RightGyroscope.Equals(other.RightGyroscope) &&
+            RightMagnetometer.Equals(other.RightMagnetometer) &&
+            RightIrX == other.RightIrX && RightIrY == other.RightIrY &&
+            RightIrRoughness == other.RightIrRoughness &&
+            RightIrDistance == other.RightIrDistance &&
+            LogicalLeftStickX == other.LogicalLeftStickX &&
+            LogicalLeftStickY == other.LogicalLeftStickY &&
+            LogicalRightStickX == other.LogicalRightStickX &&
+            LogicalRightStickY == other.LogicalRightStickY &&
+            CButton == other.CButton &&
+            LeftPaddle1 == other.LeftPaddle1 &&
+            LeftPaddle2 == other.LeftPaddle2 &&
+            RightPaddle1 == other.RightPaddle1 &&
+            RightPaddle2 == other.RightPaddle2 &&
+            LeftRailSL == other.LeftRailSL && LeftRailSR == other.LeftRailSR &&
+            RightRailSL == other.RightRailSL && RightRailSR == other.RightRailSR;
+
+        public override readonly bool Equals(object obj) =>
+            obj is Switch2JoyConRawInputStatus other && Equals(other);
+
+        public override readonly int GetHashCode()
+        {
+            HashCode hash = new();
+            hash.Add(IsValid);
+            hash.Add(ContractVersion);
+            hash.Add(Mode);
+            hash.Add(PairEpoch);
+            hash.Add(CompletionTimestampQpc);
+            hash.Add(QpcFrequency);
+            hash.Add(LeftPresent);
+            hash.Add(LeftDeviceGeneration);
+            hash.Add(LeftTransportGeneration);
+            hash.Add(LeftDeviceCounterRaw);
+            hash.Add(LeftRawButtonBits);
+            hash.Add(LeftUnknownButtonBits);
+            hash.Add(LeftPhysicalStickXRaw);
+            hash.Add(LeftPhysicalStickYRaw);
+            hash.Add(LeftHasCommonMotion);
+            hash.Add(LeftMotionTimestamp);
+            hash.Add(LeftAccelerometer);
+            hash.Add(LeftGyroscope);
+            hash.Add(LeftMagnetometer);
+            hash.Add(LeftIrX);
+            hash.Add(LeftIrY);
+            hash.Add(LeftIrRoughness);
+            hash.Add(LeftIrDistance);
+            hash.Add(RightPresent);
+            hash.Add(RightDeviceGeneration);
+            hash.Add(RightTransportGeneration);
+            hash.Add(RightDeviceCounterRaw);
+            hash.Add(RightRawButtonBits);
+            hash.Add(RightUnknownButtonBits);
+            hash.Add(RightPhysicalStickXRaw);
+            hash.Add(RightPhysicalStickYRaw);
+            hash.Add(RightHasCommonMotion);
+            hash.Add(RightMotionTimestamp);
+            hash.Add(RightAccelerometer);
+            hash.Add(RightGyroscope);
+            hash.Add(RightMagnetometer);
+            hash.Add(RightIrX);
+            hash.Add(RightIrY);
+            hash.Add(RightIrRoughness);
+            hash.Add(RightIrDistance);
+            hash.Add(LogicalLeftStickX);
+            hash.Add(LogicalLeftStickY);
+            hash.Add(LogicalRightStickX);
+            hash.Add(LogicalRightStickY);
+            hash.Add(CButton);
+            hash.Add(LeftPaddle1);
+            hash.Add(LeftPaddle2);
+            hash.Add(RightPaddle1);
+            hash.Add(RightPaddle2);
+            hash.Add(LeftRailSL);
+            hash.Add(LeftRailSR);
+            hash.Add(RightRailSL);
+            hash.Add(RightRailSR);
+            return hash.ToHashCode();
         }
     }
 

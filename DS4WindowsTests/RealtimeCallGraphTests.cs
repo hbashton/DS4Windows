@@ -6,6 +6,28 @@ namespace DS4WindowsTests
     public class RealtimeCallGraphTests
     {
         [TestMethod]
+        public void EveryCanonicalReportDefersDirectDiagnosticsAfterPublication()
+        {
+            string source = File.ReadAllText(FindRepositoryFile(
+                "DS4Windows", "DS4Control", "ControlService.cs"));
+            string report = Extract(source, "private void On_Report(",
+                "internal static void OSCPostMappingStep");
+            AssertDoesNotContain(report, "latencyCriticalReport");
+            AssertDoesNotContain(report, "LogDebug(");
+            AssertDoesNotContain(report, "LogToTray(");
+            AssertDoesNotContain(report, "StartupDiag(");
+            AssertDoesNotContain(report, "File.Exists(");
+            AssertDoesNotContain(report, "InvokeBatteryChanged(");
+            StringAssert.Contains(report, "ReportDiagnosticsWorker.Source diagnosticsSource");
+            Assert.IsTrue(report.IndexOf("ConvertandSendReport(cState, ind)", StringComparison.Ordinal) <
+                report.LastIndexOf("PublishReportDiagnostics(diagnosticsSource", StringComparison.Ordinal));
+            Assert.IsTrue(report.IndexOf("Mapping.Commit(ind)", StringComparison.Ordinal) <
+                report.LastIndexOf("PublishReportDiagnostics(diagnosticsSource", StringComparison.Ordinal));
+            // This guards direct report diagnostics, not every legacy mapping
+            // action or physical-device event reached through other callees.
+        }
+
+        [TestMethod]
         public void PhysicalReadLoopContainsNoOutputIoOrMicrophoneCallback()
         {
             string source = File.ReadAllText(FindRepositoryFile(
@@ -354,7 +376,7 @@ namespace DS4WindowsTests
             StringAssert.Contains(sendOutput,
                 "if (!outputWritten && !audioEffectDeferred)");
             StringAssert.Contains(sendOutput,
-                "return !audioEffectDeferred;");
+                "return !audioEffectDeferred && (!profileStopRequired || profileStopAccepted);");
             Assert.IsTrue(sendOutput.IndexOf(
                     "if (outputWritten)",
                     System.StringComparison.Ordinal) <

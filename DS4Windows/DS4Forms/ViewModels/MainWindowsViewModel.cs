@@ -98,6 +98,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             new List<OverviewOutputControllerChoice>
             {
                 new("Xbox 360", OutContType.ViiperX360),
+                new("Xbox One / Series", OutContType.ViiperXboxOne),
                 new("DualShock 4", OutContType.ViiperDS4),
                 new("DualSense", OutContType.ViiperDualSense),
                 new("DualSense Edge", OutContType.ViiperDualSenseEdge),
@@ -1132,6 +1133,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public bool RunUpdaterCheck(bool launch, out string upstreamVersion)
         {
+            upstreamVersion = string.Empty;
+            if (PortableLabContext.IsActive) return false;
             string destPath = Path.Combine(Global.exedirpath, "DS4Updater.exe");
             bool updaterExists = File.Exists(destPath);
             upstreamVersion = DownloadUpstreamUpdaterVersion();
@@ -1171,6 +1174,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public void DownloadUpstreamVersionInfo()
         {
+            if (PortableLabContext.IsActive) return;
             Uri url = new Uri("https://api.github.com/repos/hbashton/DS4Windows/releases/latest");
             string filename = Global.appdatapath + "\\version.txt";
             bool success = false;
@@ -1210,6 +1214,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public bool LauchDS4Updater(string releaseTag = null)
         {
+            if (PortableLabContext.IsActive) return false;
             bool launch = false;
             using (Process p = new Process())
             {

@@ -327,6 +327,56 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void PreparedProfileMatchesCanonicalExistingFixture()
+        {
+            string path = Path.Combine(Path.GetTempPath(), $"ds4w-existing-profile-{Guid.NewGuid():N}.xml");
+            try
+            {
+                File.WriteAllText(path, defaultProfileXml);
+                Assert.IsTrue(DS4Windows.DS4Control.PreparedProfileLoad.TryPrepare(path, 0,
+                    out var prepared, out _, out string error), error);
+                var actual = new BackingStore();
+                prepared.ApplyTo(actual);
+
+                // Use the existing migration/DTO path as the comparison oracle,
+                // then compare every serialized setting, not selected scalars.
+                var migration = new ProfileMigration(defaultProfileXml);
+                string migrated;
+                try
+                {
+                    if (migration.RequiresMigration())
+                        migration.Migrate();
+                    migrated = migration.CurrentMigrationText;
+                }
+                finally
+                {
+                    migration.Close();
+                }
+                var serializer = new XmlSerializer(typeof(ProfileDTO), ProfileDTO.GetAttributeOverrides());
+                using var reader = new StringReader(migrated);
+                var dto = (ProfileDTO)serializer.Deserialize(reader);
+                dto.DeviceIndex = 0;
+                var expected = new BackingStore();
+                dto.MapTo(expected);
+
+                string Serialize(BackingStore store)
+                {
+                    var output = new ProfileDTO { DeviceIndex = 0 };
+                    output.MapFrom(store);
+                    using var text = new StringWriter();
+                    serializer.Serialize(text, output);
+                    return text.ToString();
+                }
+                Assert.AreEqual(Serialize(expected), Serialize(actual));
+                Assert.AreEqual(defaultProfileXml, File.ReadAllText(path));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [TestMethod]
         public void CheckViiperOutputDeviceTypesRoundTrip()
         {
             OutContType[] outputTypes =
@@ -336,6 +386,7 @@ namespace DS4WindowsTests
                 OutContType.ViiperDualSense,
                 OutContType.ViiperDualSenseEdge,
                 OutContType.ViiperSwitch2Pro,
+                OutContType.ViiperXboxOne,
             };
 
             foreach (OutContType outputType in outputTypes)

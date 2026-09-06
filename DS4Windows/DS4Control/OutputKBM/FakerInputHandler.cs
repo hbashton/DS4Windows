@@ -139,6 +139,28 @@ namespace DS4Windows.DS4Control
             eventLock.ExitWriteLock();
         }
 
+        public override void MoveRelativeMouseImmediate(int x, int y)
+        {
+            const int MOUSE_MIN = -32767;
+            const int MOUSE_MAX = 32767;
+            if (x == 0 && y == 0)
+            {
+                return;
+            }
+
+            eventLock.EnterWriteLock();
+            int combinedX = mouseReport.MouseX + x;
+            int combinedY = mouseReport.MouseY + y;
+            mouseReport.MouseX = (short)(combinedX < MOUSE_MIN ? MOUSE_MIN :
+                (combinedX > MOUSE_MAX) ? MOUSE_MAX : combinedX);
+            mouseReport.MouseY = (short)(combinedY < MOUSE_MIN ? MOUSE_MIN :
+                (combinedY > MOUSE_MAX) ? MOUSE_MAX : combinedY);
+            fakerInput.UpdateRelativeMouse(mouseReport);
+            mouseReport.ResetMousePos();
+            syncRelativeMouse = false;
+            eventLock.ExitWriteLock();
+        }
+
         /// <summary>
         /// Move the mouse cursor to an absolute position on the virtual desktop
         /// </summary>

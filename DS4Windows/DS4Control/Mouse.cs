@@ -17,6 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 using DS4Windows.StickModifiers;
+using DS4Windows.Switch2;
 //using System.Diagnostics;
 using DS4WinWPF.DS4Control;
 using System;
@@ -29,7 +30,19 @@ namespace DS4Windows
         protected DateTime pastTime, firstTap, TimeofEnd;
         protected Touch firstTouch, secondTouch;
         private DS4State s = new DS4State();
+        private Switch2GyroTriggerModifierState
+            switch2GyroTriggerModifierState;
+        private Switch2GyroLockState switch2GyroLockState;
+        private int switch2GyroMouseTriggerTuningIndex = -1;
+        private int switch2GyroMouseJoystickTriggerTuningIndex = -1;
+        private ulong switch2GyroMousePreviousPressedMask;
+        private ulong switch2GyroMouseJoystickPreviousPressedMask;
+        private Switch2GyroActivationOrientation switch2GyroControlsOrientation;
+        private Switch2GyroActivationOrientation switch2GyroMouseOrientation;
+        private Switch2GyroActivationOrientation switch2GyroMouseJoystickOrientation;
         protected int deviceNum;
+        internal int LogicalSlot => deviceNum;
+        internal DS4Device BoundDevice => dev;
         private DS4Device dev = null;
         private readonly MouseCursor cursor;
         private readonly MouseWheel wheel;
@@ -124,7 +137,7 @@ namespace DS4Windows
         {
             deviceNum = deviceID;
             dev = d;
-            cursor = new MouseCursor(deviceNum, d.GyroMouseSensSettings);
+            cursor = new MouseCursor(deviceNum, d, d.GyroMouseSensSettings);
             wheel = new MouseWheel(deviceNum);
             trackballAccel = TRACKBALL_RADIUS * TRACKBALL_INIT_FICTION / TRACKBALL_INERTIA;
             firstTouch = new Touch(0, 0, 0, null);
@@ -136,6 +149,7 @@ namespace DS4Windows
 
             touchStickFilter = new OneEuroFilterPair(1.0, 1.0);
             touchStickTrackball = new FakeTrackball();
+            Mapping.RequestPostMapStickReset(deviceNum);
         }
 
         public void ResetTrackAccel(double friction)
@@ -150,6 +164,7 @@ namespace DS4Windows
 
         public void ResetToggleGyroModes()
         {
+            Mapping.RequestPostMapStickReset(deviceNum);
             currentToggleGyroControls = false;
             currentToggleGyroMouse = false;
             currentToggleGyroStick = false;
@@ -158,6 +173,48 @@ namespace DS4Windows
             previousGyroMouseTriggerActivated = false;
             previousGyroStickTriggerActivated = false;
             triggeractivated = false;
+            GyroMouseOutputActive = false;
+            GyroMouseJoystickOutputActive = false;
+            switch2GyroTriggerModifierState = default;
+            switch2GyroLockState = default;
+            switch2GyroMouseTriggerTuningIndex = -1;
+            switch2GyroMouseJoystickTriggerTuningIndex = -1;
+            switch2GyroMousePreviousPressedMask = 0;
+            switch2GyroMouseJoystickPreviousPressedMask = 0;
+            switch2GyroControlsOrientation = default;
+            switch2GyroMouseOrientation = default;
+            switch2GyroMouseJoystickOrientation = default;
+        }
+
+        // Called by the serialized, exact-lifetime Switch 2 report host. A
+        // terminal report has no SixAxis event, so old swipe/gyro contributions
+        // must be released explicitly before the canonical neutral mapping.
+        // Preserve release edges across retries; do not reset profile/output
+        // objects or synthesize a zero-rate motion sample.
+        internal void PrepareGyroNeutralReport(bool terminal)
+        {
+            if (terminal)
+                ResetToggleGyroModes();
+            else
+            {
+                Mapping.RequestPostMapStickReset(deviceNum);
+                GyroMouseOutputActive = false;
+                GyroMouseJoystickOutputActive = false;
+                // No-motion regular reports must stop an earlier continuous
+                // gyro source. Terminal reservation already stops that owner.
+                cursor.StopHighRateGyroMouse();
+            }
+
+            gyroSwipe.previousSwipeLeft = gyroSwipe.swipeLeft || terminal && gyroSwipe.previousSwipeLeft;
+            gyroSwipe.previousSwipeRight = gyroSwipe.swipeRight || terminal && gyroSwipe.previousSwipeRight;
+            gyroSwipe.previousSwipeUp = gyroSwipe.swipeUp || terminal && gyroSwipe.previousSwipeUp;
+            gyroSwipe.previousSwipeDown = gyroSwipe.swipeDown || terminal && gyroSwipe.previousSwipeDown;
+            gyroSwipe.swipeLeft = gyroSwipe.swipeRight = false;
+            gyroSwipe.swipeUp = gyroSwipe.swipeDown = false;
+            gyroSwipe.currentXDir = GyroSwipeData.XDir.None;
+            gyroSwipe.currentYDir = GyroSwipeData.YDir.None;
+            gyroSwipe.xActive = gyroSwipe.yActive = false;
+            gyroSwipe.initialTimeX = gyroSwipe.initialTimeY = default;
         }
 
         bool triggeractivated = false;
@@ -201,6 +258,106 @@ namespace DS4Windows
 
         public MouseCursor Cursor => cursor;
 
+        /// <summary>
+        /// True only when the established Gyro Mouse ratchet/toggle policy is
+        /// presenting motion for the current physical report. Switch 2 Stick
+        /// Assist observes this state instead of evaluating the toggle twice.
+        /// </summary>
+        public bool GyroMouseOutputActive { get; private set; }
+
+        /// <summary>
+        /// True only when the established Gyro Mouse Joystick trigger policy
+        /// is presenting motion for the current physical report. Mode Shift
+        /// observes this without consuming the mapper's output state.
+        /// </summary>
+        public bool GyroMouseJoystickOutputActive { get; private set; }
+
+        /// <summary>
+        /// Transfers the current report's gyro-mouse presentation decision to
+        /// the canonical mapper exactly once. A later input report without a
+        /// fresh SixAxis callback therefore cannot reuse stale activation.
+        /// </summary>
+        public bool ConsumeGyroMouseOutputActive()
+        {
+            bool active = GyroMouseOutputActive;
+            GyroMouseOutputActive = false;
+            return active;
+        }
+
+        private Switch2GyroTriggerModifierResult
+            ResolveSwitch2GyroTriggerModifier(DS4State state,
+                bool outputActive, GyroOutMode mode, int triggerIndex,
+                out bool gyroLocked)
+        {
+            gyroLocked = false;
+            if (dev is not Switch2RuntimeInputDevice || state == null)
+            {
+                switch2GyroTriggerModifierState = default;
+                switch2GyroLockState = default;
+                return default;
+            }
+
+            long profileRevision = Math.Max(0,
+                Global.ReadProfileSwitchRevision(deviceNum));
+            Switch2GyroTriggerTuningTable table =
+                Global.Switch2GyroTriggerTunings[deviceNum];
+            Switch2IrGyroTuning tuning = table?.Get(mode, triggerIndex) ??
+                Switch2IrGyroTuning.Default;
+            Switch2GyroLockBindingTable lockTable =
+                Global.Switch2GyroLockBindings[deviceNum];
+            Switch2GyroLockBinding lockBinding = lockTable?.Get(mode) ??
+                default;
+            bool modifierEnabled = tuning.DeadzoneButtons !=
+                    Switch2JoyConProfileButton.None ||
+                tuning.DampeningButtons !=
+                    Switch2JoyConProfileButton.None;
+            if (!modifierEnabled && !lockBinding.Enabled)
+            {
+                switch2GyroTriggerModifierState = default;
+                switch2GyroLockState = default;
+                return default;
+            }
+
+            if (!Switch2GyroTriggerModifier.TryReadInput(state,
+                    profileRevision,
+                    Switch2GyroTriggerTuningTable.GetSourceKey(mode,
+                        triggerIndex), outputActive,
+                    out Switch2GyroTriggerModifierInput input))
+            {
+                switch2GyroTriggerModifierState = default;
+                switch2GyroLockState = default;
+                return default;
+            }
+
+            if (lockBinding.Enabled)
+            {
+                if (!Switch2GyroLock.TryAdvance(input, mode, lockBinding,
+                    ref switch2GyroLockState, out gyroLocked))
+                {
+                    switch2GyroLockState = default;
+                    gyroLocked = false;
+                }
+            }
+            else
+            {
+                switch2GyroLockState = default;
+            }
+
+            if (!modifierEnabled)
+            {
+                switch2GyroTriggerModifierState = default;
+                return default;
+            }
+            if (!Switch2GyroTriggerModifier.TryAdvance(input, tuning,
+                ref switch2GyroTriggerModifierState,
+                out Switch2GyroTriggerModifierResult result))
+            {
+                switch2GyroTriggerModifierState = default;
+                return default;
+            }
+            return result;
+        }
+
         public bool TouchStarted
         {
             get
@@ -232,7 +389,27 @@ namespace DS4Windows
 
         public virtual void sixaxisMoved(DS4SixAxis sender, SixAxisEventArgs arg)
         {
+            // Capture before profile/activation work: a concurrent profile or
+            // source reset must retire this whole operation, not only its math.
+            Mapping.PostMapStickData postMap = (uint)deviceNum <
+                (uint)Mapping.mapStickActionData.Length ?
+                Mapping.PreparePostMapStickData(deviceNum) : null;
+            long postMapEpoch = postMap?.CaptureEpoch() ?? 0;
             GyroOutMode outMode = Global.GetGyroOutMode(deviceNum);
+            if (outMode != GyroOutMode.MouseJoystick)
+                postMap?.TryClearGyro(postMapEpoch, deviceNum);
+            GyroMouseOutputActive = false;
+            GyroMouseJoystickOutputActive = false;
+            if (outMode != GyroOutMode.Mouse)
+            {
+                cursor.StopHighRateGyroMouse();
+            }
+            if (outMode is not GyroOutMode.Mouse and not
+                GyroOutMode.MouseJoystick)
+            {
+                switch2GyroTriggerModifierState = default;
+                switch2GyroLockState = default;
+            }
             if (outMode == GyroOutMode.Controls)
             {
                 s = dev.getCurrentStateRef();
@@ -256,11 +433,17 @@ namespace DS4Windows
             {
                 s = dev.getCurrentStateRef();
 
-                var triggerActive = IsGyroTriggerActive(outMode);
-                if (useReverseRatchet && triggerActive)
-                    cursor.sixaxisMoved(arg);
-                else if (!useReverseRatchet && !triggerActive)
-                    cursor.sixaxisMoved(arg);
+                var triggerActive = IsGyroTriggerActive(outMode,
+                    out int triggerIndex);
+                GyroMouseOutputActive = useReverseRatchet && triggerActive ||
+                    !useReverseRatchet && !triggerActive;
+                Switch2GyroTriggerModifierResult modifier =
+                    ResolveSwitch2GyroTriggerModifier(s,
+                        GyroMouseOutputActive, outMode, triggerIndex,
+                        out bool gyroLocked);
+                if (GyroMouseOutputActive && !gyroLocked &&
+                    !modifier.Freeze)
+                    cursor.sixaxisMoved(arg, modifier);
                 else
                     cursor.mouseRemainderReset(arg);
 
@@ -268,16 +451,22 @@ namespace DS4Windows
             else if (outMode == GyroOutMode.MouseJoystick)
             {
                 s = dev.getCurrentStateRef();
-                Mapping.gyroStickX[deviceNum] = Mapping.gyroStickX[deviceNum] = 128;
+                var triggerActive = IsGyroTriggerActive(outMode,
+                    out int triggerIndex);
+                bool outputActive = useReverseRatchet && triggerActive ||
+                    !useReverseRatchet && !triggerActive;
+                GyroMouseJoystickOutputActive = outputActive;
+                Switch2GyroTriggerModifierResult modifier =
+                    ResolveSwitch2GyroTriggerModifier(s, outputActive,
+                        outMode, triggerIndex, out bool gyroLocked);
 
-                var triggerActive = IsGyroTriggerActive(outMode);
-
-                if (useReverseRatchet && triggerActive)
-                    SixMouseStick(arg);
-                else if (!useReverseRatchet && !triggerActive)
-                    SixMouseStick(arg);
+                if (outputActive && !gyroLocked && !modifier.Freeze)
+                    SixMouseStickCore(arg, modifier, postMap, postMapEpoch);
                 else
+                {
+                    postMap?.TryClearGyro(postMapEpoch, deviceNum);
                     SixMouseReset(arg);
+                }
             }
             else if (outMode == GyroOutMode.DirectionalSwipe)
             {
@@ -286,28 +475,8 @@ namespace DS4Windows
                 GyroDirectionalSwipeInfo swipeMapInfo = Global.GetGyroSwipeInfo(deviceNum);
 
                 useReverseRatchet = swipeMapInfo.triggerTurns;
-                int i = 0;
-                string[] ss = swipeMapInfo.triggers.Split(',');
-                bool andCond = swipeMapInfo.triggerCond;
-                triggeractivated = andCond ? true : false;
-                if (!string.IsNullOrEmpty(ss[0]))
-                {
-                    string s = string.Empty;
-                    for (int index = 0, arlen = ss.Length; index < arlen; index++)
-                    {
-                        s = ss[index];
-                        if (andCond && !(int.TryParse(s, out i) && getDS4ControlsByName(i)))
-                        {
-                            triggeractivated = false;
-                            break;
-                        }
-                        else if (!andCond && int.TryParse(s, out i) && getDS4ControlsByName(i))
-                        {
-                            triggeractivated = true;
-                            break;
-                        }
-                    }
-                }
+                triggeractivated = EvaluateGyroTriggers(
+                    swipeMapInfo.triggers, swipeMapInfo.triggerCond);
 
                 gyroSwipe.previousSwipeLeft = gyroSwipe.swipeLeft;
                 gyroSwipe.previousSwipeRight = gyroSwipe.swipeRight;
@@ -325,76 +494,201 @@ namespace DS4Windows
                 else
                 {
                     gyroSwipe.swipeLeft = gyroSwipe.swipeRight =
-                        gyroSwipe.swipeUp = gyroSwipe.swipeDown = false;
+                    gyroSwipe.swipeUp = gyroSwipe.swipeDown = false;
                 }
+            }
+            else
+            {
+                // Covers Gyro Mouse with zero sensitivity as well as None.
+                cursor.StopHighRateGyroMouse();
             }
         }
 
-        public bool IsGyroTriggerActive(GyroOutMode mode)
+        public bool IsGyroTriggerActive(GyroOutMode mode) =>
+            IsGyroTriggerActive(mode, out _);
+
+        private bool IsGyroTriggerActive(GyroOutMode mode,
+            out int triggerTuningIndex)
         {
-            string[] ss = [];
+            triggerTuningIndex = -1;
+            string triggers = string.Empty;
             var andCond = false;
             useReverseRatchet = Global.getGyroTriggerTurns(deviceNum);
             if (mode == GyroOutMode.Controls)
             {
                 GyroControlsInfo controlsMapInfo = Global.GetGyroControlsInfo(deviceNum);
-                ss = controlsMapInfo.triggers.Split(',');
+                triggers = controlsMapInfo.triggers;
                 andCond = controlsMapInfo.triggerCond;
             }
             else if (mode == GyroOutMode.Mouse)
             {
-                ss = Global.getSATriggers(deviceNum).Split(',');
+                triggers = Global.getSATriggers(deviceNum);
                 andCond = Global.getSATriggerCond(deviceNum);
             }
             else if (mode == GyroOutMode.MouseJoystick)
             {
                 useReverseRatchet = Global.GetGyroMouseStickTriggerTurns(deviceNum);
-                ss = Global.GetSAMouseStickTriggers(deviceNum).Split(',');
+                triggers = Global.GetSAMouseStickTriggers(deviceNum);
                 andCond = Global.GetSAMouseStickTriggerCond(deviceNum);
             }
-            var i = 0;
-            triggeractivated = andCond;
-            if (!string.IsNullOrEmpty(ss[0]))
-            {
-                var str = string.Empty;
-                for (int index = 0, arlen = ss.Length; index < arlen; index++)
-                {
-                    str = ss[index];
-                    if (andCond && !(int.TryParse(str, out i) && getDS4ControlsByName(i)))
-                    {
-                        triggeractivated = false;
-                        break;
-                    }
-                    else if (!andCond && int.TryParse(str, out i) && getDS4ControlsByName(i))
-                    {
-                        triggeractivated = true;
-                        break;
-                    }
-                }
-            }
+            triggeractivated = EvaluateGyroTriggers(triggers, andCond,
+                out int activeTriggerIndex, out int firstTriggerIndex,
+                out ulong pressedMask);
             switch (mode)
             {
                 case GyroOutMode.Controls:
+                    if (switch2GyroControlsOrientation.Observe(s))
+                        previousGyroControlsTriggerActivated = triggeractivated;
                     triggeractivated = ApplyGyroToggleState(
                         toggleGyroControls, triggeractivated,
                         ref previousGyroControlsTriggerActivated,
                         ref currentToggleGyroControls);
                     break;
                 case GyroOutMode.Mouse:
+                    if (switch2GyroMouseOrientation.Observe(s))
+                    {
+                        previousGyroMouseTriggerActivated = triggeractivated;
+                        switch2GyroMousePreviousPressedMask = pressedMask;
+                        switch2GyroMouseTriggerTuningIndex = -1;
+                    }
+                    int mouseEdgeTrigger = FirstTriggerIndex(pressedMask &
+                        ~switch2GyroMousePreviousPressedMask);
+                    switch2GyroMouseTriggerTuningIndex =
+                        SelectGyroTriggerTuningIndex(triggeractivated,
+                            previousGyroMouseTriggerActivated,
+                            mouseEdgeTrigger >= 0 ? mouseEdgeTrigger :
+                                activeTriggerIndex,
+                            firstTriggerIndex,
+                            switch2GyroMouseTriggerTuningIndex);
+                    switch2GyroMousePreviousPressedMask = pressedMask;
                     triggeractivated = ApplyGyroToggleState(
                         toggleGyroMouse, triggeractivated,
                         ref previousGyroMouseTriggerActivated,
                         ref currentToggleGyroMouse);
+                    triggerTuningIndex =
+                        switch2GyroMouseTriggerTuningIndex;
                     break;
                 case GyroOutMode.MouseJoystick:
+                    if (switch2GyroMouseJoystickOrientation.Observe(s))
+                    {
+                        previousGyroStickTriggerActivated = triggeractivated;
+                        switch2GyroMouseJoystickPreviousPressedMask = pressedMask;
+                        switch2GyroMouseJoystickTriggerTuningIndex = -1;
+                    }
+                    int mouseJoystickEdgeTrigger = FirstTriggerIndex(
+                        pressedMask &
+                        ~switch2GyroMouseJoystickPreviousPressedMask);
+                    switch2GyroMouseJoystickTriggerTuningIndex =
+                        SelectGyroTriggerTuningIndex(triggeractivated,
+                            previousGyroStickTriggerActivated,
+                            mouseJoystickEdgeTrigger >= 0 ?
+                                mouseJoystickEdgeTrigger :
+                                activeTriggerIndex,
+                            firstTriggerIndex,
+                            switch2GyroMouseJoystickTriggerTuningIndex);
+                    switch2GyroMouseJoystickPreviousPressedMask = pressedMask;
                     triggeractivated = ApplyGyroToggleState(
                         toggleGyroStick, triggeractivated,
                         ref previousGyroStickTriggerActivated,
                         ref currentToggleGyroStick);
+                    triggerTuningIndex =
+                        switch2GyroMouseJoystickTriggerTuningIndex;
                     break;
             }
 
             return triggeractivated;
+        }
+
+        /// <summary>
+        /// Evaluates the persisted comma-delimited gyro trigger contract
+        /// without allocating a string array on every physical motion report.
+        /// Numeric values remain stable for backwards-compatible profiles.
+        /// </summary>
+        private bool EvaluateGyroTriggers(string triggers, bool andCondition)
+        {
+            return EvaluateGyroTriggers(triggers, andCondition, out _, out _,
+                out _);
+        }
+
+        private bool EvaluateGyroTriggers(string triggers, bool andCondition,
+            out int activeTriggerIndex, out int firstTriggerIndex,
+            out ulong pressedMask)
+        {
+            activeTriggerIndex = -1;
+            firstTriggerIndex = -1;
+            pressedMask = 0;
+            bool active = andCondition;
+            if (string.IsNullOrEmpty(triggers))
+            {
+                return active;
+            }
+
+            ReadOnlySpan<char> span = triggers.AsSpan();
+            int start = 0;
+            while (start <= span.Length)
+            {
+                int relativeComma = span[start..].IndexOf(',');
+                int length = relativeComma < 0 ? span.Length - start :
+                    relativeComma;
+                ReadOnlySpan<char> token = span.Slice(start, length).Trim();
+                bool parsed = int.TryParse(token, out int trigger);
+                int normalizedTrigger = trigger == -1 ?
+                    Switch2GyroTriggerTuningTable.AlwaysOnTriggerIndex :
+                    trigger;
+                bool tunable = parsed && trigger !=
+                    Switch2GyroTriggerTuningTable.AlwaysOnTriggerIndex &&
+                    (uint)normalizedTrigger <
+                    Switch2GyroTriggerTuningTable.TriggerCount;
+                if (tunable && firstTriggerIndex < 0)
+                {
+                    firstTriggerIndex = normalizedTrigger;
+                }
+                bool pressed = parsed && getDS4ControlsByName(trigger);
+                if (pressed && activeTriggerIndex < 0 && tunable)
+                {
+                    activeTriggerIndex = normalizedTrigger;
+                }
+                if (pressed && tunable)
+                {
+                    pressedMask |= 1UL << normalizedTrigger;
+                }
+                active = andCondition ? active && pressed : active || pressed;
+                if (relativeComma < 0)
+                {
+                    break;
+                }
+                start += relativeComma + 1;
+            }
+            return active;
+        }
+
+        private static int FirstTriggerIndex(ulong mask)
+        {
+            for (int index = 0;
+                index < Switch2GyroTriggerTuningTable.TriggerCount; index++)
+            {
+                if ((mask & (1UL << index)) != 0)
+                {
+                    return index;
+                }
+            }
+            return -1;
+        }
+
+        internal static int SelectGyroTriggerTuningIndex(bool rawActive,
+            bool previousRawActive, int activeTriggerIndex,
+            int firstTriggerIndex, int currentTriggerIndex)
+        {
+            if (rawActive && !previousRawActive && activeTriggerIndex >= 0)
+            {
+                return activeTriggerIndex;
+            }
+            if (currentTriggerIndex < 0)
+            {
+                return activeTriggerIndex >= 0 ? activeTriggerIndex :
+                    firstTriggerIndex;
+            }
+            return currentTriggerIndex;
         }
 
         internal static bool ApplyGyroToggleState(bool toggleMode,
@@ -550,10 +844,19 @@ namespace DS4Windows
             }
         }
 
-        private void SixMouseStick(SixAxisEventArgs arg)
+        private void SixMouseStick(SixAxisEventArgs arg,
+            in Switch2GyroTriggerModifierResult modifier)
+        {
+            var postMap = Mapping.PreparePostMapStickData(deviceNum);
+            SixMouseStickCore(arg, modifier, postMap, postMap.CaptureEpoch());
+        }
+
+        private void SixMouseStickCore(SixAxisEventArgs arg,
+            in Switch2GyroTriggerModifierResult modifier,
+            Mapping.PostMapStickData postMap, long postMapEpoch)
         {
             int deltaX = 0, deltaY = 0;
-            deltaX = Global.getGyroMouseStickHorizontalAxis(0) == 0 ? arg.sixAxis.gyroYawFull :
+            deltaX = Global.getGyroMouseStickHorizontalAxis(deviceNum) == 0 ? arg.sixAxis.gyroYawFull :
                 arg.sixAxis.gyroRollFull;
             deltaY = -arg.sixAxis.gyroPitchFull;
             //int inputX = deltaX, inputY = deltaY;
@@ -604,6 +907,18 @@ namespace DS4Windows
             {
                 deltaY = 0;
             }
+
+            if (modifier.DeadzoneActive)
+            {
+                deltaX = (int)Switch2GyroTriggerModifier.ApplySoftDeadzone(
+                    deltaX, normX, modifier.DeadzoneAmount);
+                deltaY = (int)Switch2GyroTriggerModifier.ApplySoftDeadzone(
+                    deltaY, normY, modifier.DeadzoneAmount);
+            }
+            deltaX = (int)Switch2GyroTriggerModifier.ApplyDampening(
+                deltaX, modifier);
+            deltaY = (int)Switch2GyroTriggerModifier.ApplyDampening(
+                deltaY, modifier);
 
             if (msinfo.jitterCompensation)
             {
@@ -718,42 +1033,8 @@ namespace DS4Windows
             bool outputX = msinfo.OutputHorizontal();
             bool outputY = msinfo.OutputVertical();
 
-            Mapping.PostMapStickData tempMapStickData = Mapping.mapStickActionData[deviceNum];
-            if (outputX)
-            {
-                if (msinfo.outputStick == GyroMouseStickInfo.OutputStick.LeftStick &&
-                    Math.Abs(axisXOut - 128) > Math.Abs(tempMapStickData.LX - 128))
-                {
-                    tempMapStickData.LX = axisXOut;
-                    tempMapStickData.dirty = true;
-                }
-                else if (msinfo.outputStick == GyroMouseStickInfo.OutputStick.RightStick &&
-                    Math.Abs(axisXOut - 128) > Math.Abs(tempMapStickData.RX - 128))
-                {
-                    tempMapStickData.RX = axisXOut;
-                    tempMapStickData.dirty = true;
-                }
-
-                Mapping.gyroStickX[deviceNum] = axisXOut;
-            }
-
-            if (outputY)
-            {
-                if (msinfo.outputStick == GyroMouseStickInfo.OutputStick.LeftStick &&
-                    Math.Abs(axisYOut - 128) > Math.Abs(tempMapStickData.LY - 128))
-                {
-                    tempMapStickData.LY = axisYOut;
-                    tempMapStickData.dirty = true;
-                }
-                else if (msinfo.outputStick == GyroMouseStickInfo.OutputStick.RightStick &&
-                    Math.Abs(axisYOut - 128) > Math.Abs(tempMapStickData.RY - 128))
-                {
-                    tempMapStickData.RY = axisYOut;
-                    tempMapStickData.dirty = true;
-                }
-
-                Mapping.gyroStickY[deviceNum] = axisYOut;
-            }
+            postMap?.TrySubmit(postMapEpoch, msinfo.outputStick, outputX,
+                outputY, axisXOut, axisYOut, true, deviceNum);
         }
 
         private void SixDirectionalSwipe(SixAxisEventArgs arg, GyroDirectionalSwipeInfo swipeInfo)
@@ -844,6 +1125,8 @@ namespace DS4Windows
         //private void TouchpadMouseStick(TouchpadEventArgs arg)
         private void TouchpadMouseStick(int dx, int dy)
         {
+            Mapping.PostMapStickData tempMapStickData = Mapping.PreparePostMapStickData(deviceNum);
+            long postMapEpoch = tempMapStickData.CaptureEpoch();
             //Trace.WriteLine($"DX {dx}");
 
             s = dev.getCurrentStateRef();
@@ -1099,44 +1382,12 @@ namespace DS4Windows
             bool outputX = msinfo.OutputHorizontal();
             bool outputY = msinfo.OutputVertical();
 
-            //Mapping.touchStickX[deviceNum] = axisXOut;
-            //Mapping.touchStickY[deviceNum] = axisYOut;
-            Mapping.PostMapStickData tempMapStickData = Mapping.mapStickActionData[deviceNum];
-            if (outputX)
-            {
-                if (msinfo.outputStick == TouchMouseStickInfo.OutputStick.LeftStick &&
-                    Math.Abs(axisXOut - 128) > Math.Abs(tempMapStickData.LX - 128))
-                {
-                    tempMapStickData.LX = axisXOut;
-                    tempMapStickData.dirty = true;
-                }
-                else if (msinfo.outputStick == TouchMouseStickInfo.OutputStick.RightStick &&
-                    Math.Abs(axisXOut - 128) > Math.Abs(tempMapStickData.RX - 128))
-                {
-                    tempMapStickData.RX = axisXOut;
-                    tempMapStickData.dirty = true;
-                }
-
-                //Mapping.touchStickX[deviceNum] = axisXOut;
-            }
-
-            if (outputY)
-            {
-                if (msinfo.outputStick == TouchMouseStickInfo.OutputStick.LeftStick &&
-                    Math.Abs(axisYOut - 128) > Math.Abs(tempMapStickData.LY - 128))
-                {
-                    tempMapStickData.LY = axisYOut;
-                    tempMapStickData.dirty = true;
-                }
-                else if (msinfo.outputStick == TouchMouseStickInfo.OutputStick.RightStick &&
-                    Math.Abs(axisYOut - 128) > Math.Abs(tempMapStickData.RY - 128))
-                {
-                    tempMapStickData.RY = axisYOut;
-                    tempMapStickData.dirty = true;
-                }
-
-                //Mapping.touchStickY[deviceNum] = axisYOut;
-            }
+            var target = msinfo.outputStick == TouchMouseStickInfo.OutputStick.LeftStick ?
+                GyroMouseStickInfo.OutputStick.LeftStick :
+                msinfo.outputStick == TouchMouseStickInfo.OutputStick.RightStick ?
+                GyroMouseStickInfo.OutputStick.RightStick : GyroMouseStickInfo.OutputStick.None;
+            tempMapStickData.TrySubmit(postMapEpoch, target, outputX, outputY,
+                axisXOut, axisYOut, false);
         }
 
         private bool getDS4ControlsByName(int key)
@@ -1171,6 +1422,37 @@ namespace DS4Windows
                 case 24: return s.FnR;
                 case 25: return s.BLP;
                 case 26: return s.BRP;
+                case Switch2GyroTriggerTuningTable.CTriggerIndex:
+                    return DS4StateFieldMapping.GetValidatedSwitch2SourceButton(
+                        s, DS4Controls.Switch2C);
+                case Switch2GyroTriggerTuningTable.LeftSLTriggerIndex:
+                    return DS4StateFieldMapping.GetValidatedSwitch2SourceButton(
+                        s, DS4Controls.Switch2JoyConLeftSL);
+                case Switch2GyroTriggerTuningTable.LeftSRTriggerIndex:
+                    return DS4StateFieldMapping.GetValidatedSwitch2SourceButton(
+                        s, DS4Controls.Switch2JoyConLeftSR);
+                case Switch2GyroTriggerTuningTable.RightSLTriggerIndex:
+                    return DS4StateFieldMapping.GetValidatedSwitch2SourceButton(
+                        s, DS4Controls.Switch2JoyConRightSL);
+                case Switch2GyroTriggerTuningTable.RightSRTriggerIndex:
+                    return DS4StateFieldMapping.GetValidatedSwitch2SourceButton(
+                        s, DS4Controls.Switch2JoyConRightSR);
+                case Switch2.Switch2IrGyroMotionModifier.
+                    LeftIrGyroTriggerIndex:
+                    return DS4StateFieldMapping.GetValidatedSwitch2SourceButton(
+                        s, DS4Controls.Switch2JoyConLeftIrSensor,
+                        Global.Switch2JoyConLeftIrMouseActivationThreshold[
+                            deviceNum],
+                        Global.Switch2JoyConRightIrMouseActivationThreshold[
+                            deviceNum]);
+                case Switch2.Switch2IrGyroMotionModifier.
+                    RightIrGyroTriggerIndex:
+                    return DS4StateFieldMapping.GetValidatedSwitch2SourceButton(
+                        s, DS4Controls.Switch2JoyConRightIrSensor,
+                        Global.Switch2JoyConLeftIrMouseActivationThreshold[
+                            deviceNum],
+                        Global.Switch2JoyConRightIrMouseActivationThreshold[
+                            deviceNum]);
                 default: break;
             }
 

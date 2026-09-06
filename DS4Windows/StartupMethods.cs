@@ -82,6 +82,7 @@ namespace DS4WinWPF
 
         public static void RetargetExistingTaskToCurrentExecutable()
         {
+            if (DS4Windows.PortableLabContext.IsActive) return;
             try
             {
                 using TaskService ts = new TaskService();
@@ -132,6 +133,7 @@ namespace DS4WinWPF
 
         public static bool HasStartProgEntry()
         {
+            if (DS4Windows.PortableLabContext.IsActive) return false;
             // Exception handling should not be needed here. Method handles most cases
             bool exists = File.Exists(Environment.GetFolderPath(Environment.SpecialFolder.Startup) + "\\DS4Windows.lnk");
             return exists;
@@ -139,6 +141,7 @@ namespace DS4WinWPF
 
         public static bool HasTaskEntry()
         {
+            if (DS4Windows.PortableLabContext.IsActive) return false;
             using TaskService ts = new TaskService();
             using Task tasker = ts.GetTask(@"\RunDS4Windows");
             return tasker != null && TaskTargetsCurrentExecutable(tasker);
@@ -146,6 +149,7 @@ namespace DS4WinWPF
 
         public static bool IsRunAtStartupEnabled()
         {
+            if (DS4Windows.PortableLabContext.IsActive) return false;
             if (HasStartProgEntry())
             {
                 return true;
@@ -165,6 +169,7 @@ namespace DS4WinWPF
 
         public static void WriteStartProgEntry()
         {
+            if (DS4Windows.PortableLabContext.IsActive) return;
             Type t = Type.GetTypeFromCLSID(new Guid("72C24DD5-D70A-438B-8A42-98424B88AFB8")); // Windows Script Host Shell Object
             dynamic shell = Activator.CreateInstance(t);
             try
@@ -197,6 +202,7 @@ namespace DS4WinWPF
 
         public static void DeleteStartProgEntry()
         {
+            if (DS4Windows.PortableLabContext.IsActive) return;
             if (File.Exists(lnkpath) && !new FileInfo(lnkpath).IsReadOnly)
             {
                 File.Delete(lnkpath);
@@ -205,6 +211,7 @@ namespace DS4WinWPF
 
         public static void DeleteOldTaskEntry()
         {
+            if (DS4Windows.PortableLabContext.IsActive) return;
             using TaskService ts = new TaskService();
             using Task tasker = ts.GetTask(@"\RunDS4Windows");
             if (tasker != null && !TaskTargetsCurrentExecutable(tasker))
@@ -215,6 +222,7 @@ namespace DS4WinWPF
 
         public static bool CanWriteStartEntry()
         {
+            if (DS4Windows.PortableLabContext.IsActive) return false;
             bool result = false;
             if (!new FileInfo(lnkpath).IsReadOnly)
             {
@@ -226,6 +234,7 @@ namespace DS4WinWPF
 
         public static void WriteTaskEntry()
         {
+            if (DS4Windows.PortableLabContext.IsActive) return;
             DeleteTaskEntry();
 
             TaskService ts = new TaskService();
@@ -260,6 +269,7 @@ namespace DS4WinWPF
 
         public static void DeleteTaskEntry()
         {
+            if (DS4Windows.PortableLabContext.IsActive) return;
             TaskService ts = new TaskService();
             Task tasker = ts.GetTask(@"\RunDS4Windows");
             if (tasker != null)
@@ -270,12 +280,14 @@ namespace DS4WinWPF
 
         public static bool CheckStartupExeLocation()
         {
+            if (DS4Windows.PortableLabContext.IsActive) return false;
             string lnkprogpath = ResolveShortcut(lnkpath);
             return lnkprogpath != DS4Windows.Global.exelocation;
         }
 
         public static void LaunchOldTask()
         {
+            if (DS4Windows.PortableLabContext.IsActive) return;
             TaskService ts = new TaskService();
             Task tasker = ts.GetTask(@"\RunDS4Windows");
             if (tasker != null)

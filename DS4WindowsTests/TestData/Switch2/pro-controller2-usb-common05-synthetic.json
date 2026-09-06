@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "sourceKind": "synthetic",
+  "evidenceStatus": "fact",
+  "syntheticSourceId": "fact-20690000000000000000000000000500",
+  "constructionProcedure": "manually encode only the published report identifier, counter, common-button, and packed-stick fields; set every other byte to zero",
+  "reviewer": "independent-adversarial-review-2026-08-29",
+  "redactionManifest": {
+    "hardwareCaptureAncestry": false,
+    "keysOrCertificatesPresent": false,
+    "macOrConsoleAddressPresent": false,
+    "serialOrDevicePathPresent": false,
+    "accountOrHostIdentifierPresent": false,
+    "environmentalSensorValuesPresent": false,
+    "opaqueNonzeroFieldsPresent": false
+  },
+  "factSpecification": [
+    "all packet values are constructed protocol facts and were never captured from hardware",
+    "packet byte 0 is USB report identifier 0x05",
+    "packet bytes 1..4 are a synthetic little-endian counter",
+    "packet bytes 5..8 are a synthetic common button bitfield",
+    "packet bytes 11..16 contain deliberately chosen packed 12-bit stick values",
+    "all environmental, sensor, power, identity, and uninterpreted bytes are zero"
+  ],
+  "protocol": {
+    "controllerModel": "Switch 2 Pro Controller",
+    "vendorId": "0x057E",
+    "productId": "0x2069",
+    "transport": "USB HID",
+    "direction": "input",
+    "firmwareRevision": "not-applicable-synthetic-fixture",
+    "reportId": "0x05",
+    "reportBytes": 64
+  },
+  "hostClockDomain": "clock-00000000000000000000000000000500",
+  "hostTimestampFrequency": 10000000,
+  "records": [
+    {
+      "ordinal": 0,
+      "deviceGeneration": 1,
+      "hostTimestampTicks": 0,
+      "payloadSha256": "424b82be8e8ec5c6cdf1db03a16a5f395c96cd3f2f0b2e015850eebc6bb6fcd9",
+      "syntheticBytes": "054030201001000000000023614589C7AB0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "ordinal": 1,
+      "deviceGeneration": 1,
+      "hostTimestampTicks": 1,
+      "payloadSha256": "5eb1f0f488644c0e058eb44a19572c791ad95cd82ebfd4d9237a8c84e278f9b3",
+      "syntheticBytes": "054430201000000000000023614589C7AB0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ]
+}

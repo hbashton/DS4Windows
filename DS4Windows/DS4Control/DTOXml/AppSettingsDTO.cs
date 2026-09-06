@@ -944,6 +944,8 @@ namespace DS4WinWPF.DS4Control.DTOXml
                 JoyConSupportSettings = new JoyConSupportSettings()
                 {
                     Enabled = source.deviceOptions.JoyConDeviceOpts.Enabled,
+                    AutomaticPairing = source.deviceOptions.JoyConDeviceOpts.
+                        AutomaticPairing,
                     LinkMode = source.deviceOptions.JoyConDeviceOpts.LinkedMode,
                     JoinedGyroProvider = source.deviceOptions.JoyConDeviceOpts.JoinGyroProv,
                 },
@@ -1047,6 +1049,8 @@ namespace DS4WinWPF.DS4Control.DTOXml
             destination.deviceOptions.DualSenseOpts.Enabled = DeviceOptions.DualSenseSupportSettings.Enabled;
             destination.deviceOptions.SwitchProDeviceOpts.Enabled = DeviceOptions.SwitchProSupportSettings.Enabled;
             destination.deviceOptions.JoyConDeviceOpts.Enabled = DeviceOptions.JoyConSupportSettings.Enabled;
+            destination.deviceOptions.JoyConDeviceOpts.AutomaticPairing =
+                DeviceOptions.JoyConSupportSettings.AutomaticPairing;
             destination.deviceOptions.JoyConDeviceOpts.LinkedMode = DeviceOptions.JoyConSupportSettings.LinkMode;
             destination.deviceOptions.JoyConDeviceOpts.JoinGyroProv = DeviceOptions.JoyConSupportSettings.JoinedGyroProvider;
             destination.deviceOptions.DS3DeviceOpts.Enabled = DeviceOptions.DS3SupportSettings.Enabled;
@@ -1181,6 +1185,11 @@ namespace DS4WinWPF.DS4Control.DTOXml
 
     public class JoyConSupportSettings : BaseInputDeviceSettingsGroup
     {
+        public bool AutomaticPairing
+        {
+            get; set;
+        } = JoyConDeviceOptions.DEFAULT_AUTOMATIC_PAIRING;
+
         public JoyConDeviceOptions.LinkMode LinkMode
         {
             get; set;

@@ -18,6 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 using DS4Windows;
 using DS4Windows.InputDevices;
+using DS4Windows.Switch2;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -127,9 +128,47 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
             mappings.Add(new MappedControl(devIndex, DS4Controls.FnL, "Function Left", devType));
             mappings.Add(new MappedControl(devIndex, DS4Controls.FnR, "Function Right", devType));
-            mappings.Add(new MappedControl(devIndex, DS4Controls.BLP, "Bottom Left Paddle", devType));
-            mappings.Add(new MappedControl(devIndex, DS4Controls.BRP, "Bottom Right Paddle", devType));
+            // Display the physical Pro labels while preserving BLP/BRP as
+            // the existing profile keys and canonical mapper controls.
+            bool switch2Pro = physicalControllerType == InputDeviceType.Switch2Pro;
+            mappings.Add(new MappedControl(devIndex, DS4Controls.BLP,
+                switch2Pro ? "GL (Rear Left)" : "Bottom Left Paddle", devType));
+            mappings.Add(new MappedControl(devIndex, DS4Controls.BRP,
+                switch2Pro ? "GR (Rear Right)" : "Bottom Right Paddle", devType));
 
+            // These source-only controls intentionally have no controller-
+            // diagram hit target and no default virtual output. They remain in
+            // the ordinary mapping list so profiles can bind them without a
+            // Switch 2-specific mapping stack.
+            mappings.Add(new MappedControl(devIndex, DS4Controls.Switch2C,
+                "Switch 2 C", devType));
+            mappings.Add(new MappedControl(devIndex,
+                DS4Controls.Switch2JoyConLeftPaddle1,
+                "Switch 2 Joy-Con Left Paddle 1", devType));
+            mappings.Add(new MappedControl(devIndex,
+                DS4Controls.Switch2JoyConLeftPaddle2,
+                "Switch 2 Joy-Con Left Paddle 2", devType));
+            mappings.Add(new MappedControl(devIndex,
+                DS4Controls.Switch2JoyConRightPaddle1,
+                "Switch 2 Joy-Con Right Paddle 1", devType));
+            mappings.Add(new MappedControl(devIndex,
+                DS4Controls.Switch2JoyConRightPaddle2,
+                "Switch 2 Joy-Con Right Paddle 2", devType));
+            mappings.Add(new MappedControl(devIndex,
+                DS4Controls.Switch2JoyConLeftIrSensor,
+                "Switch 2 Joy-Con Left IR Sensor", devType));
+            mappings.Add(new MappedControl(devIndex,
+                DS4Controls.Switch2JoyConRightIrSensor,
+                "Switch 2 Joy-Con Right IR Sensor", devType));
+
+            mappings.Add(new MappedControl(devIndex, DS4Controls.Switch2JoyConLeftSL,
+                "Switch 2 Joy-Con Left SL", devType));
+            mappings.Add(new MappedControl(devIndex, DS4Controls.Switch2JoyConLeftSR,
+                "Switch 2 Joy-Con Left SR", devType));
+            mappings.Add(new MappedControl(devIndex, DS4Controls.Switch2JoyConRightSL,
+                "Switch 2 Joy-Con Right SL", devType));
+            mappings.Add(new MappedControl(devIndex, DS4Controls.Switch2JoyConRightSR,
+                "Switch 2 Joy-Con Right SR", devType));
             ControllerUiCapabilities uiCapabilities =
                 ControllerUiCapabilities.For(physicalControllerType);
             int controlIndex = 0;
@@ -301,6 +340,16 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 setting.shiftKeyType.HasFlag(DS4KeyType.ScanCode);
             bool extra = control >= DS4Controls.GyroXPos && control <= DS4Controls.SwipeDown;
             DS4ControlSettings.ActionType actionType = !shift ? setting.actionType : setting.shiftActionType;
+            if (shift && setting.shiftTrigger ==
+                Mapping.SWITCH2_MODE_SHIFT_TRIGGER)
+            {
+                Switch2ModeShiftAction lane =
+                    setting.GetSwitch2ModeShiftAction(
+                        Switch2ModeShift.ResolveEditingScope(devIndex));
+                action = lane.Action;
+                actionType = lane.ActionType;
+                sc = lane.KeyType.HasFlag(DS4KeyType.ScanCode);
+            }
             if (actionType != DS4ControlSettings.ActionType.Default)
             {
                 if (actionType == DS4ControlSettings.ActionType.Key)
@@ -339,10 +388,14 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public bool HasShiftAction()
         {
-            return setting.shiftActionType != DS4ControlSettings.ActionType.Default;
+            return setting.shiftTrigger ==
+                    Mapping.SWITCH2_MODE_SHIFT_TRIGGER ?
+                setting.HasAnySwitch2ModeShiftAction :
+                setting.shiftActionType !=
+                    DS4ControlSettings.ActionType.Default;
         }
 
-        private static string ShiftTrigger(int trigger)
+        internal static string ShiftTrigger(int trigger)
         {
             switch (trigger)
             {
@@ -373,13 +426,21 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 case 25: return Properties.Resources.TiltRight;
                 case 26: return "Finger on Touchpad";
                 case 27: return "Mute";
-                case 28: return "Capture";
-                case 29: return "Side L";
-                case 30: return "Side R";
-                case 31: return "Function Left";
-                case 32: return "Function Right";
-                case 33: return "Bottom Left Paddle";
-                case 43: return "Bottom Right Paddle";
+                case 28: return "Function Left";
+                case 29: return "Function Right";
+                case 30: return "Bottom Left Paddle";
+                case 31: return "Bottom Right Paddle";
+                case 32: return "Capture";
+                case 33: return "Side L";
+                case 34: return "Side R";
+                case 35: return "Switch 2 Joy-Con Left IR Sensor";
+                case 36: return "Switch 2 Joy-Con Right IR Sensor";
+                case 37: return "Switch 2 Mode Shift";
+                case 38: return "Switch 2 Joy-Con Left SL";
+                case 39: return "Switch 2 Joy-Con Left SR";
+                case 40: return "Switch 2 Joy-Con Right SL";
+                case 41: return "Switch 2 Joy-Con Right SR";
+                case 42: return "Switch 2 C / Chat";
                 default: return "";
             }
         }

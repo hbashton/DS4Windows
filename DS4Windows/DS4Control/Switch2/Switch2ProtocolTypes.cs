@@ -128,35 +128,48 @@ public readonly struct Switch2OpaqueBodyRegion
 public readonly struct Switch2CommonInputReport
 {
     internal Switch2CommonInputReport(uint counter, uint buttons,
+        ushort opaque08Raw,
         Switch2StickRaw leftStick, Switch2StickRaw rightStick,
         ushort mouseX, ushort mouseY, ushort mouseUnknown0Raw,
-        ushort mouseUnknown1Raw, Switch2Vector3Raw magnetometer,
-        ushort batteryVoltageMillivolts, byte chargingState,
-        ushort batteryCurrentRaw, uint motionTimestamp,
+        ushort mouseUnknown1Raw, byte opaque18Raw,
+        Switch2Vector3Raw magnetometer,
+        ushort batteryVoltageMillivolts, ushort batteryCurrentRaw,
+        byte opaque23Raw, ulong opaque24To29Raw,
+        uint motionTimestamp,
         ushort temperatureRawBits, Switch2Vector3Raw accelerometer,
-        Switch2Vector3Raw gyroscope)
+        Switch2Vector3Raw gyroscope, uint opaque3CTo3ERaw)
     {
         Counter = counter;
         Buttons = buttons;
+        Opaque08Raw = opaque08Raw;
         LeftStick = leftStick;
         RightStick = rightStick;
         MouseX = mouseX;
         MouseY = mouseY;
         MouseUnknown0Raw = mouseUnknown0Raw;
         MouseUnknown1Raw = mouseUnknown1Raw;
+        Opaque18Raw = opaque18Raw;
         Magnetometer = magnetometer;
         BatteryVoltageMillivolts = batteryVoltageMillivolts;
-        ChargingState = chargingState;
         BatteryCurrentRaw = batteryCurrentRaw;
+        Opaque23Raw = opaque23Raw;
+        Opaque24To29Raw = opaque24To29Raw;
         MotionTimestamp = motionTimestamp;
         TemperatureRawBits = temperatureRawBits;
         Accelerometer = accelerometer;
         Gyroscope = gyroscope;
+        Opaque3CTo3ERaw = opaque3CTo3ERaw;
     }
 
     public uint Counter { get; }
 
     public uint Buttons { get; }
+
+    /// <summary>
+    /// Uninterpreted body bytes <c>0x08..0x09</c>, retained losslessly in
+    /// little-endian order.
+    /// </summary>
+    public ushort Opaque08Raw { get; }
 
     public Switch2StickRaw LeftStick { get; }
 
@@ -170,13 +183,43 @@ public readonly struct Switch2CommonInputReport
 
     public ushort MouseUnknown1Raw { get; }
 
+    /// <summary>
+    /// Optical-surface roughness at body bytes <c>0x14..0x15</c>. This name is
+    /// a GPL-compatible adaptation of Switch2Connect's Common05 decoder; the
+    /// original raw alias remains available for byte-exact round trips.
+    /// </summary>
+    public ushort MouseRoughness => MouseUnknown0Raw;
+
+    /// <summary>
+    /// Optical-surface distance at body bytes <c>0x16..0x17</c>. Zero means no
+    /// active surface in the source-backed activation policy; it is not
+    /// assigned a physical unit here.
+    /// </summary>
+    public ushort MouseDistance => MouseUnknown1Raw;
+
+    /// <summary>
+    /// Uninterpreted body byte <c>0x18</c>.
+    /// </summary>
+    public byte Opaque18Raw { get; }
+
     public Switch2Vector3Raw Magnetometer { get; }
 
     public ushort BatteryVoltageMillivolts { get; }
 
-    public byte ChargingState { get; }
-
     public ushort BatteryCurrentRaw { get; }
+
+    /// <summary>
+    /// Uninterpreted body byte <c>0x23</c>. Public implementations establish
+    /// the preceding two bytes as one little-endian current field; no
+    /// charging-state meaning is assigned to this following byte.
+    /// </summary>
+    public byte Opaque23Raw { get; }
+
+    /// <summary>
+    /// Uninterpreted body bytes <c>0x24..0x29</c>, retained as a 48-bit
+    /// little-endian value. The upper 16 bits are always zero.
+    /// </summary>
+    public ulong Opaque24To29Raw { get; }
 
     public uint MotionTimestamp { get; }
 
@@ -189,6 +232,12 @@ public readonly struct Switch2CommonInputReport
     public Switch2Vector3Raw Accelerometer { get; }
 
     public Switch2Vector3Raw Gyroscope { get; }
+
+    /// <summary>
+    /// Uninterpreted body bytes <c>0x3C..0x3E</c>, retained as a 24-bit
+    /// little-endian value. The upper eight bits are always zero.
+    /// </summary>
+    public uint Opaque3CTo3ERaw { get; }
 
 }
 

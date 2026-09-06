@@ -1,4 +1,5 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using DS4WindowsTests;
 using NAudio.Dsp;
 using System;
 using System.Collections.Generic;
@@ -704,6 +705,7 @@ namespace DS4Windows.Tests
         }
 
         [TestMethod]
+        [DoNotParallelize]
         public void PcmFixedBlockPathDoesNotAllocateAfterWarmup()
         {
             const int sourceFrames = 1024;
@@ -718,19 +720,24 @@ namespace DS4Windows.Tests
                 capacity);
             converter.Convert(source, 0, source.Length, output, 0,
                 capacity);
-            long before = GC.GetAllocatedBytesForCurrentThread();
-            for (int iteration = 0; iteration < 1000; iteration++)
+            long allocated;
+            using (StrictAllocationMeasurementScope.Begin())
             {
-                converter.Convert(source, 0, source.Length, output, 0,
-                    capacity);
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                for (int iteration = 0; iteration < 1000; iteration++)
+                {
+                    converter.Convert(source, 0, source.Length, output, 0,
+                        capacity);
+                }
+                allocated = GC.GetAllocatedBytesForCurrentThread() - before;
             }
-            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
             Assert.AreEqual(0L, allocated,
                 "The fixed-block PCM path allocated after warmup.");
         }
 
         [TestMethod]
+        [DoNotParallelize]
         public void PcmUnityRatePathDoesNotAllocateAfterWarmup()
         {
             const int sourceFrames = 1024;
@@ -745,13 +752,17 @@ namespace DS4Windows.Tests
                 capacity);
             converter.Convert(source, 0, source.Length, output, 0,
                 capacity);
-            long before = GC.GetAllocatedBytesForCurrentThread();
-            for (int iteration = 0; iteration < 1000; iteration++)
+            long allocated;
+            using (StrictAllocationMeasurementScope.Begin())
             {
-                converter.Convert(source, 0, source.Length, output, 0,
-                    capacity);
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                for (int iteration = 0; iteration < 1000; iteration++)
+                {
+                    converter.Convert(source, 0, source.Length, output, 0,
+                        capacity);
+                }
+                allocated = GC.GetAllocatedBytesForCurrentThread() - before;
             }
-            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
             Assert.AreEqual(0L, allocated,
                 "The unity-rate PCM path allocated after warmup.");

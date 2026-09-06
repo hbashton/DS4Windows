@@ -17,16 +17,20 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 using System;
+using DS4Windows.Switch2;
 
 namespace DS4Windows
 {
     public class MouseCursor
     {
         private readonly int deviceNumber;
+        private readonly DS4Device inputDevice;
         private DS4Device.GyroMouseSens gyroMouseSensSettings;
-        public MouseCursor(int deviceNum, DS4Device.GyroMouseSens gyroMouseSens)
+        public MouseCursor(int deviceNum, DS4Device inputDevice,
+            DS4Device.GyroMouseSens gyroMouseSens)
         {
             deviceNumber = deviceNum;
+            this.inputDevice = inputDevice;
             gyroMouseSensSettings = gyroMouseSens;
             filterPair.axis1Filter.MinCutoff = filterPair.axis2Filter.MinCutoff = GyroMouseInfo.DEFAULT_MINCUTOFF;
             filterPair.axis1Filter.Beta = filterPair.axis2Filter.Beta = GyroMouseInfo.DEFAULT_BETA;
@@ -80,6 +84,13 @@ namespace DS4Windows
         //bool tempBool = false;
 
         public virtual void sixaxisMoved(SixAxisEventArgs arg)
+        {
+            Switch2GyroTriggerModifierResult modifier = default;
+            sixaxisMoved(arg, modifier);
+        }
+
+        internal virtual void sixaxisMoved(SixAxisEventArgs arg,
+            in Switch2GyroTriggerModifierResult modifier)
         {
             int deltaX = 0, deltaY = 0;
             deltaX = Global.getGyroMouseHorizontalAxis(deviceNumber) == 0 ? arg.sixAxis.gyroYawFull :
@@ -136,12 +147,31 @@ namespace DS4Windows
                 deltaY = 0;
             }
 
-            double xMotion = deltaX != 0 ? coefficient * (deltaX * tempDouble)
+            double projectedDeltaX = deltaX;
+            double projectedDeltaY = deltaY;
+            if (modifier.DeadzoneActive)
+            {
+                projectedDeltaX =
+                    Switch2GyroTriggerModifier.ApplySoftDeadzone(
+                        projectedDeltaX, normX, modifier.DeadzoneAmount);
+                projectedDeltaY =
+                    Switch2GyroTriggerModifier.ApplySoftDeadzone(
+                        projectedDeltaY, normY, modifier.DeadzoneAmount);
+            }
+
+            double xMotion = projectedDeltaX != 0 ? coefficient *
+                (projectedDeltaX * tempDouble)
                 + (normX * (offset * signX)) : 0;
 
             verticalScale = Global.getGyroSensVerticalScale(deviceNumber) * 0.01;
-            double yMotion = deltaY != 0 ? (coefficient * verticalScale) * (deltaY * tempDouble)
+            double yMotion = projectedDeltaY != 0 ?
+                (coefficient * verticalScale) *
+                (projectedDeltaY * tempDouble)
                 + (normY * (offset * signY)) : 0;
+            xMotion = Switch2GyroTriggerModifier.ApplyDampening(xMotion,
+                modifier);
+            yMotion = Switch2GyroTriggerModifier.ApplyDampening(yMotion,
+                modifier);
 
             if (tempInfo.jitterCompensation)
             {
@@ -226,7 +256,30 @@ namespace DS4Windows
             xAction = (int)xMotion;
             yAction = (int)yMotion;
 
-            if (tempInfo.minThreshold == 1.0)
+            bool highRateEnabled = inputDevice is
+                    Switch2RuntimeInputDevice &&
+                Global.Switch2HighRateMousePresentation[deviceNumber] &&
+                double.IsFinite(arg.sixAxis.elapsed) &&
+                arg.sixAxis.elapsed > 0.0;
+            bool thresholdPassed = tempInfo.minThreshold == 1.0 ||
+                distSqu >= tempInfo.minThreshold * tempInfo.minThreshold;
+            double continuousX = thresholdPassed ? xMotion : 0.0;
+            double continuousY = thresholdPassed ? yMotion : 0.0;
+
+            if (highRateEnabled)
+            {
+                // The scheduler owns fractional presentation while active. A
+                // below-threshold vector remains here so the established
+                // DS4Windows minimum-motion policy can still accumulate it.
+                hRemainder = thresholdPassed ? 0.0 : xMotion;
+                vRemainder = thresholdPassed ? 0.0 : yMotion;
+                if (!thresholdPassed)
+                {
+                    xAction = 0;
+                    yAction = 0;
+                }
+            }
+            else if (tempInfo.minThreshold == 1.0)
             {
                 hRemainder = xMotion - xAction;
                 vRemainder = yMotion - yAction;
@@ -250,12 +303,39 @@ namespace DS4Windows
 
             int gyroInvert = Global.getGyroInvert(deviceNumber);
             if ((gyroInvert & 0x02) == 2)
+            {
                 xAction *= -1;
+                continuousX *= -1.0;
+            }
 
             if ((gyroInvert & 0x01) == 1)
+            {
                 yAction *= -1;
+                continuousY *= -1.0;
+            }
 
-            if (yAction != 0 || xAction != 0)
+            if (inputDevice is Switch2RuntimeInputDevice switch2Runtime)
+            {
+                long profileRevision = Math.Max(0,
+                    Global.ReadProfileSwitchRevision(deviceNumber));
+                if (highRateEnabled)
+                {
+                    switch2Runtime.TrySetHighRateMouseSource(
+                            Switch2ContinuousMouseSource.Gyro,
+                            active: true,
+                            continuousX / arg.sixAxis.elapsed,
+                            continuousY / arg.sixAxis.elapsed,
+                            profileRevision);
+                }
+                else
+                {
+                    switch2Runtime.TrySetHighRateMouseSource(
+                        Switch2ContinuousMouseSource.Gyro,
+                        active: false, 0.0, 0.0, profileRevision);
+                }
+            }
+
+            if (!highRateEnabled && (yAction != 0 || xAction != 0))
                 Global.outputKBMHandler.MoveRelativeMouse(xAction, yAction);
 
             hDirection = xMotion > 0.0 ? Direction.Positive : xMotion < 0.0 ? Direction.Negative : Direction.Neutral;
@@ -276,6 +356,19 @@ namespace DS4Windows
                 double currentRate = 1.0 / arg.sixAxis.elapsed;
                 filterPair.axis1Filter.Filter(0.0, currentRate);
                 filterPair.axis2Filter.Filter(0.0, currentRate);
+            }
+
+            StopHighRateGyroMouse();
+        }
+
+        public void StopHighRateGyroMouse()
+        {
+            if (inputDevice is Switch2RuntimeInputDevice switch2Runtime)
+            {
+                switch2Runtime.TrySetHighRateMouseSource(
+                    Switch2ContinuousMouseSource.Gyro, active: false,
+                    0.0, 0.0, Math.Max(0,
+                        Global.ReadProfileSwitchRevision(deviceNumber)));
             }
         }
 

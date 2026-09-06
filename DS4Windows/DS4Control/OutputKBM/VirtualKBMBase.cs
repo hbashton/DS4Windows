@@ -43,6 +43,17 @@ namespace DS4Windows.DS4Control
 
         public abstract void MoveRelativeMouse(int x, int y);
 
+        /// <summary>
+        /// Presents one scheduler-owned relative mouse sample immediately.
+        /// Buffered virtual-HID implementations override this so state update
+        /// and flush remain one atomic operation.
+        /// </summary>
+        public virtual void MoveRelativeMouseImmediate(int x, int y)
+        {
+            MoveRelativeMouse(x, y);
+            Sync();
+        }
+
         public abstract void MoveAbsoluteMouse(double x, double y);
 
         public abstract void PerformMouseWheelEvent(int vertical, int horizontal);

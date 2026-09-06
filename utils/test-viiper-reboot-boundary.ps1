@@ -29,6 +29,25 @@ function Get-BackendFunctionDefinition([string]$name) {
     return $definition.Extent.Text
 }
 
+# Import the literal needed by the extracted startup functions without running
+# the installer's top-level code (which would touch real machine state).
+$argumentAssignments = @($ast.FindAll({
+    param($node)
+    $node -is [Management.Automation.Language.AssignmentStatementAst] -and
+        $node.Left -is [Management.Automation.Language.VariableExpressionAst] -and
+        $node.Left.VariablePath.UserPath -eq 'script:ViiperServerArguments'
+}, $true))
+if ($argumentAssignments.Count -ne 1 -or
+        $argumentAssignments[0].Right -isnot [Management.Automation.Language.CommandExpressionAst] -or
+        $argumentAssignments[0].Right.Expression -isnot [Management.Automation.Language.StringConstantExpressionAst]) {
+    throw 'Backend startup arguments must have one literal definition.'
+}
+$script:ViiperServerArguments = $argumentAssignments[0].Right.Expression.Value
+if ($script:ViiperServerArguments -ne
+        'server --usb.retained-import-authority-id=4923336367393615921') {
+    throw 'Backend startup arguments lost the required retained-import authority.'
+}
+
 foreach ($functionName in @(
         "ConvertTo-VersionFromObject",
         "Set-UsbipReplacementBoundary",

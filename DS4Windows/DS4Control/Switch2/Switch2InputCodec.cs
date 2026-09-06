@@ -78,8 +78,10 @@ public static class Switch2InputCodec
         Switch2ControllerModel model,
         out Switch2DecodedInputReport report)
     {
-        if (packet.Length != UsbPacketLength || !IsSupportedModel(model) ||
+        if (packet.Length != UsbPacketLength ||
+            model != Switch2ControllerModel.ProController2 ||
             !TryGetReportKind(packet[0], out Switch2InputReportKind kind) ||
+            kind != Switch2InputReportKind.Common05 ||
             !IsCompatible(model, kind))
         {
             report = default;
@@ -132,20 +134,71 @@ public static class Switch2InputCodec
         report = new Switch2CommonInputReport(
             BinaryPrimitives.ReadUInt32LittleEndian(body.Slice(0x00, 4)),
             BinaryPrimitives.ReadUInt32LittleEndian(body.Slice(0x04, 4)),
+            BinaryPrimitives.ReadUInt16LittleEndian(body.Slice(0x08, 2)),
             DecodePackedStick(body.Slice(0x0A, 3)),
             DecodePackedStick(body.Slice(0x0D, 3)),
             BinaryPrimitives.ReadUInt16LittleEndian(body.Slice(0x10, 2)),
             BinaryPrimitives.ReadUInt16LittleEndian(body.Slice(0x12, 2)),
             BinaryPrimitives.ReadUInt16LittleEndian(body.Slice(0x14, 2)),
             BinaryPrimitives.ReadUInt16LittleEndian(body.Slice(0x16, 2)),
+            body[0x18],
             DecodeVector3(body.Slice(0x19, 6)),
             BinaryPrimitives.ReadUInt16LittleEndian(body.Slice(0x1F, 2)),
-            body[0x21],
-            BinaryPrimitives.ReadUInt16LittleEndian(body.Slice(0x22, 2)),
+            BinaryPrimitives.ReadUInt16LittleEndian(body.Slice(0x21, 2)),
+            body[0x23],
+            ReadUInt48LittleEndian(body.Slice(0x24, 6)),
             BinaryPrimitives.ReadUInt32LittleEndian(body.Slice(0x2A, 4)),
             BinaryPrimitives.ReadUInt16LittleEndian(body.Slice(0x2E, 2)),
             DecodeVector3(body.Slice(0x30, 6)),
-            DecodeVector3(body.Slice(0x36, 6)));
+            DecodeVector3(body.Slice(0x36, 6)),
+            ReadUInt24LittleEndian(body.Slice(0x3C, 3)));
+        return true;
+    }
+
+    /// <summary>
+    /// Re-encodes every byte retained by <see cref="TryDecodeCommon05"/>. This
+    /// is an offline/replay invariant helper, not a controller output report.
+    /// </summary>
+    internal static bool TryEncodeCommon05(in Switch2CommonInputReport report,
+        Span<byte> body)
+    {
+        if (body.Length != BluetoothLeBodyLength)
+        {
+            return false;
+        }
+
+        BinaryPrimitives.WriteUInt32LittleEndian(body.Slice(0x00, 4),
+            report.Counter);
+        BinaryPrimitives.WriteUInt32LittleEndian(body.Slice(0x04, 4),
+            report.Buttons);
+        BinaryPrimitives.WriteUInt16LittleEndian(body.Slice(0x08, 2),
+            report.Opaque08Raw);
+        EncodePackedStick(report.LeftStick, body.Slice(0x0A, 3));
+        EncodePackedStick(report.RightStick, body.Slice(0x0D, 3));
+        BinaryPrimitives.WriteUInt16LittleEndian(body.Slice(0x10, 2),
+            report.MouseX);
+        BinaryPrimitives.WriteUInt16LittleEndian(body.Slice(0x12, 2),
+            report.MouseY);
+        BinaryPrimitives.WriteUInt16LittleEndian(body.Slice(0x14, 2),
+            report.MouseUnknown0Raw);
+        BinaryPrimitives.WriteUInt16LittleEndian(body.Slice(0x16, 2),
+            report.MouseUnknown1Raw);
+        body[0x18] = report.Opaque18Raw;
+        EncodeVector3(report.Magnetometer, body.Slice(0x19, 6));
+        BinaryPrimitives.WriteUInt16LittleEndian(body.Slice(0x1F, 2),
+            report.BatteryVoltageMillivolts);
+        BinaryPrimitives.WriteUInt16LittleEndian(body.Slice(0x21, 2),
+            report.BatteryCurrentRaw);
+        body[0x23] = report.Opaque23Raw;
+        WriteUInt48LittleEndian(report.Opaque24To29Raw, body.Slice(0x24, 6));
+        BinaryPrimitives.WriteUInt32LittleEndian(body.Slice(0x2A, 4),
+            report.MotionTimestamp);
+        BinaryPrimitives.WriteUInt16LittleEndian(body.Slice(0x2E, 2),
+            report.TemperatureRawBits);
+        EncodeVector3(report.Accelerometer, body.Slice(0x30, 6));
+        EncodeVector3(report.Gyroscope, body.Slice(0x36, 6));
+        WriteUInt24LittleEndian(report.Opaque3CTo3ERaw,
+            body.Slice(0x3C, 3));
         return true;
     }
 
@@ -258,8 +311,44 @@ public static class Switch2InputCodec
             BinaryPrimitives.ReadInt16LittleEndian(data.Slice(2, 2)),
             BinaryPrimitives.ReadInt16LittleEndian(data.Slice(4, 2)));
 
+    private static void EncodeVector3(in Switch2Vector3Raw value,
+        Span<byte> data)
+    {
+        BinaryPrimitives.WriteInt16LittleEndian(data.Slice(0, 2), value.X);
+        BinaryPrimitives.WriteInt16LittleEndian(data.Slice(2, 2), value.Y);
+        BinaryPrimitives.WriteInt16LittleEndian(data.Slice(4, 2), value.Z);
+    }
+
+    private static void EncodePackedStick(in Switch2StickRaw value,
+        Span<byte> data)
+    {
+        data[0] = (byte)value.X;
+        data[1] = (byte)(((value.X >> 8) & 0x0F) |
+            ((value.Y & 0x0F) << 4));
+        data[2] = (byte)(value.Y >> 4);
+    }
+
     private static uint ReadUInt24LittleEndian(ReadOnlySpan<byte> data) =>
         (uint)(data[0] | (data[1] << 8) | (data[2] << 16));
+
+    private static ulong ReadUInt48LittleEndian(ReadOnlySpan<byte> data) =>
+        BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(0, 4)) |
+        ((ulong)BinaryPrimitives.ReadUInt16LittleEndian(data.Slice(4, 2)) << 32);
+
+    private static void WriteUInt24LittleEndian(uint value, Span<byte> data)
+    {
+        data[0] = (byte)value;
+        data[1] = (byte)(value >> 8);
+        data[2] = (byte)(value >> 16);
+    }
+
+    private static void WriteUInt48LittleEndian(ulong value, Span<byte> data)
+    {
+        BinaryPrimitives.WriteUInt32LittleEndian(data.Slice(0, 4),
+            (uint)value);
+        BinaryPrimitives.WriteUInt16LittleEndian(data.Slice(4, 2),
+            (ushort)(value >> 32));
+    }
 
     private static bool TryGetReportKind(byte reportId,
         out Switch2InputReportKind kind)

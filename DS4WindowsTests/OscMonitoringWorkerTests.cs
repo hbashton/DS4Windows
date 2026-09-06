@@ -69,7 +69,8 @@ namespace DS4WindowsTests
             diagnostics.Resume();
             diagnostics.Dispose();
             diagnostics.Dispose();
-            Assert.IsFalse(diagnostics.IsAlive);
+            Assert.IsTrue(SpinWait.SpinUntil(() => !diagnostics.IsAlive, 2_000),
+                "Nonblocking diagnostics disposal must eventually retire its worker.");
         }
     }
 }

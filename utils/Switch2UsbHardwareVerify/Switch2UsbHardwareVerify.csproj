@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PlatformTarget>x64</PlatformTarget>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>Switch2UsbHardwareVerify</AssemblyName>
+    <RootNamespace>DS4Windows.Switch2.Verification</RootNamespace>
+    <!-- The two linked codec warnings predate this standalone nullable build. -->
+    <NoWarn>$(NoWarn);CS8765</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\DS4Windows\DS4Control\Switch2\Switch2UsbCommandCodec.cs"
+             Link="Linked\Switch2UsbCommandCodec.cs" />
+    <Compile Include="..\..\DS4Windows\DS4Control\Switch2\Switch2HdRumbleCodec.cs"
+             Link="Linked\Switch2HdRumbleCodec.cs" />
+  </ItemGroup>
+</Project>

@@ -178,7 +178,12 @@ namespace DS4Windows.InputDevices
         private const string BLUETOOTH_HID_GUID = "{00001124-0000-1000-8000-00805F9B34FB}";
 
         private byte frameCount = 0;
-        public byte FrameCount { get => frameCount; set => frameCount = value; }
+        private readonly object nintendoOutputLock = new();
+        public byte FrameCount
+        {
+            get { lock (nintendoOutputLock) return frameCount; }
+            set { lock (nintendoOutputLock) frameCount = value; }
+        }
 
         private JoyConSide sideType;
         public JoyConSide SideType { get => sideType; }
@@ -217,6 +222,9 @@ namespace DS4Windows.InputDevices
         private byte[] inputReportBuffer;
         private byte[] outputReportBuffer;
         private byte[] rumbleReportBuffer;
+        private LegacyNintendoRumbleOutput rumbleOutput;
+        private byte[] neutralRumbleReportBuffer;
+        private int rumbleStopWarningLogged;
         private int inputReportLen;
         private int outputReportLen;
         private int rumbleReportLen;
@@ -244,33 +252,33 @@ namespace DS4Windows.InputDevices
         private JoyConControllerOptions nativeOptionsStore;
 
         private ReaderWriterLockSlim lockSlim = new ReaderWriterLockSlim();
+        private readonly DS4StateOwnedSnapshot physicalPreviousState = new DS4StateOwnedSnapshot();
         private JoyConDevice jointDevice;
         public JoyConDevice JointDevice
         {
-            get => jointDevice;
-            set
-            {
-                jointDevice = value;
-                if (jointDevice == null)
-                {
-                }
-                else
-                {
-                }
-            }
+            get => Volatile.Read(ref jointDevice);
+            set => Volatile.Write(ref jointDevice, value);
+        }
+
+        // Removal subscriptions can outlive a pairing. A departed peer may
+        // detach only its own association, never a different successor. This
+        // protects peer identity; it is not a lease for shared report state.
+        internal bool TryDetachJointDevice(JoyConDevice expectedPeer)
+        {
+            return expectedPeer != null && ReferenceEquals(
+                Interlocked.CompareExchange(ref jointDevice, null,
+                    expectedPeer), expectedPeer);
         }
 
         public override int JointDeviceSlotNumber
         {
             get
             {
-                int result = DEFAULT_JOINT_SLOT_NUMBER;
-                if (jointDevice != null)
-                {
-                    result = jointDevice.deviceSlotNumber;
-                }
-
-                return result;
+                // Capture once: removal can clear the association between a
+                // null check and a second field read. The slot is advisory,
+                // not authorization to publish to that numeric slot.
+                JoyConDevice peer = Volatile.Read(ref jointDevice);
+                return peer?.deviceSlotNumber ?? DEFAULT_JOINT_SLOT_NUMBER;
             }
         }
 
@@ -289,6 +297,7 @@ namespace DS4Windows.InputDevices
             base(hidDevice, disName, featureSet)
         {
             runCalib = false;
+            pState = physicalPreviousState.State;
             synced = true;
             DeviceSlotNumberChanged += (sender, e) => {
                 CalculateDeviceSlotMask();
@@ -605,16 +614,38 @@ namespace DS4Windows.InputDevices
             }
             else if (ds4Input == null)
             {
-                ds4Input = new Thread(ReadInput);
-                ds4Input.IsBackground = true;
-                ds4Input.Priority = ThreadPriority.AboveNormal;
-                ds4Input.Name = "JoyCon Reader Thread";
-                ds4Input.Start();
+                InitializeRumbleOutput();
+                rumbleOutput.Start("Joy-Con Rumble Writer");
+                try
+                {
+                    ds4Input = new Thread(() =>
+                    {
+                        try { ReadInput(); }
+                        finally { StopOutputUpdate(); }
+                    });
+                    ds4Input.IsBackground = true;
+                    ds4Input.Priority = ThreadPriority.AboveNormal;
+                    ds4Input.Name = "JoyCon Reader Thread";
+                    ds4Input.Start();
+                }
+                catch { StopOutputUpdate(); throw; }
             }
         }
 
         protected override void StopOutputUpdate()
         {
+            if (rumbleOutput != null && !rumbleOutput.StopAndJoin(neutralRumbleReportBuffer) &&
+                Interlocked.Exchange(ref rumbleStopWarningLogged, 1) == 0)
+                AppLogger.LogToGui("Joy-Con rumble stop could not be confirmed before output retirement. " +
+                    (rumbleOutput.LastWriteException?.GetType().Name ?? "HID write rejected."), true);
+        }
+
+        internal LegacyNintendoRumbleOutput InitializeRumbleOutput()
+        {
+            if (rumbleOutput != null) return rumbleOutput;
+            neutralRumbleReportBuffer = new byte[rumbleReportBuffer.Length];
+            EncodeRumbleData(neutralRumbleReportBuffer, 0, 0);
+            return rumbleOutput = new LegacyNintendoRumbleOutput(rumbleReportBuffer.Length, SubmitRumbleReport);
         }
 
         protected unsafe void ReadInput()
@@ -696,9 +727,10 @@ namespace DS4Windows.InputDevices
                                 inputReportErrorCount++;
                                 if (inputReportErrorCount > 10)
                                 {
-                                    exitInputThread = true;
-                                    isDisconnecting = true;
-                                    Removal?.Invoke(this, EventArgs.Empty);
+                                exitInputThread = true;
+                                isDisconnecting = true;
+                                StopOutputUpdate();
+                                Removal?.Invoke(this, EventArgs.Empty);
                                 }
 
                                 continue;
@@ -725,6 +757,7 @@ namespace DS4Windows.InputDevices
                         readWaitEv.Reset();
                         exitInputThread = true;
                         isDisconnecting = true;
+                        StopOutputUpdate();
                         Removal?.Invoke(this, EventArgs.Empty);
                         continue;
                     }
@@ -1013,8 +1046,7 @@ namespace DS4Windows.InputDevices
                     tempMotion.angVelPitch = -gyroPitch * GYRO_IN_DEG_SEC_FACTOR;
                     tempMotion.angVelRoll = gyroRoll * GYRO_IN_DEG_SEC_FACTOR;
 
-                    SixAxisEventArgs args = new SixAxisEventArgs(cState.ReportTimeStamp, cState.Motion);
-                    sixAxis.FireSixAxisEvent(args);
+                    PublishPhysicalMotion();
 
                     if (conType == ConnectionType.USB)
                     {
@@ -1082,8 +1114,7 @@ namespace DS4Windows.InputDevices
                     else if (!string.IsNullOrEmpty(error))
                         error = string.Empty;
 
-                    pState.Motion.copy(cState.Motion);
-                    cState.CopyTo(pState);
+                    PreservePhysicalStateData();
 
                     if (hasInputEvts)
                     {
@@ -1241,10 +1272,12 @@ namespace DS4Windows.InputDevices
             byte[] tmpRumble = new byte[rumbleReportLen];
             Array.Copy(rumble_data, 0, tmpRumble, 2, rumble_data.Length);
             tmpRumble[0] = 0x10;
-            tmpRumble[1] = frameCount;
-            frameCount = (byte)(++frameCount & 0x0F);
-
-            result = hDevice.WriteOutputReportViaInterrupt(tmpRumble, 0);
+            lock (nintendoOutputLock)
+            {
+                tmpRumble[1] = frameCount;
+                frameCount = (byte)(++frameCount & 0x0F);
+                result = hDevice.WriteOutputReportViaInterrupt(tmpRumble, 0);
+            }
             //res = hidDevice.ReadWithFileStream(tmpReport, 500);
             //res = hidDevice.ReadFile(tmpReport);
         }
@@ -1263,11 +1296,13 @@ namespace DS4Windows.InputDevices
                 Array.Copy(tmpBuffer, 0, commandBuffer, 11, bufLen);
 
                 commandBuffer[0] = 0x01;
-                commandBuffer[1] = frameCount;
-                frameCount = (byte)(++frameCount & 0x0F);
                 commandBuffer[10] = subcommand;
-
-                result = hDevice.WriteOutputReportViaInterrupt(commandBuffer, 0);
+                lock (nintendoOutputLock)
+                {
+                    commandBuffer[1] = frameCount;
+                    frameCount = (byte)(++frameCount & 0x0F);
+                    result = hDevice.WriteOutputReportViaInterrupt(commandBuffer, 0);
+                }
 
                 tmpReport = null;
                 if (result && checkResponse)
@@ -1321,6 +1356,7 @@ namespace DS4Windows.InputDevices
 
         public void WriteReport()
         {
+            if (rumbleOutput == null) return;
             MergeStates();
 
             bool dirty = false;
@@ -1340,10 +1376,24 @@ namespace DS4Windows.InputDevices
 
             if (dirty)
             {
-                PrepareRumbleData(rumbleReportBuffer);
-                bool result = hDevice.WriteOutputReportViaInterrupt(rumbleReportBuffer, 100);
+                EncodeRumbleData(rumbleReportBuffer, currentLeftAmpRatio, currentRightAmpRatio);
+                rumbleOutput.Publish(rumbleReportBuffer, currentLeftAmpRatio != 0 || currentRightAmpRatio != 0);
+            }
+            else rumbleOutput.RequestRetry();
+        }
+
+        private bool SubmitRumbleReport(byte[] report)
+        {
+            lock (nintendoOutputLock)
+            {
+                report[1] = frameCount;
+                frameCount = (byte)(++frameCount & 0x0F);
+                return WriteRumbleReport(report);
             }
         }
+
+        protected virtual bool WriteRumbleReport(byte[] report) =>
+            hDevice.WriteOutputReportViaInterrupt(report, 100);
 
         public override bool IsAlive()
         {
@@ -1352,12 +1402,21 @@ namespace DS4Windows.InputDevices
 
         public void PrepareRumbleData(byte[] buffer)
         {
+            lock (nintendoOutputLock)
+            {
+                EncodeRumbleData(buffer, currentLeftAmpRatio, currentRightAmpRatio);
+                buffer[1] = frameCount;
+                frameCount = (byte)(++frameCount & 0x0F);
+            }
+        }
+
+        private void EncodeRumbleData(byte[] buffer, double leftRatio, double rightRatio)
+        {
             // Using rumble frequency and amplitude values documented at
             // https://github.com/dekuNukem/Nintendo_Switch_Reverse_Engineering/blob/master/rumble_data_table.md
             //Array.Copy(commandBuffHeader, 0, buffer, 2, SUBCOMMAND_HEADER_LEN);
             buffer[0] = 0x10;
-            buffer[1] = frameCount;
-            frameCount = (byte)(++frameCount & 0x0F);
+            buffer[1] = 0; // the sole native writer assigns the counter at submission
 
             ushort freq_data_high = 0x0001; // 320 Hz
             byte freq_data_low = 0x60; // 320 Hz
@@ -1368,7 +1427,7 @@ namespace DS4Windows.InputDevices
 
             if (sideType == JoyConSide.Left)
             {
-                idx = (int)(currentLeftAmpRatio * AMP_LIMIT_MAX);
+                idx = (int)(leftRatio * AMP_LIMIT_MAX);
                 RumbleTableData entry = compiledRumbleTable[idx];
                 amp_high = entry.high;
                 amp_low = entry.low;
@@ -1383,7 +1442,7 @@ namespace DS4Windows.InputDevices
             }
             else if (sideType == JoyConSide.Right)
             {
-                idx = (int)(currentRightAmpRatio * AMP_LIMIT_MAX);
+                idx = (int)(rightRatio * AMP_LIMIT_MAX);
                 RumbleTableData entry = compiledRumbleTable[idx];
                 amp_high = entry.high;
                 amp_low = entry.low;
@@ -1737,6 +1796,7 @@ namespace DS4Windows.InputDevices
 
         private void Detach()
         {
+            StopOutputUpdate();
             //bool result;
 
             if (connectionOpened)
@@ -1840,6 +1900,20 @@ namespace DS4Windows.InputDevices
             }
 
             return tempState;
+        }
+
+        // The physical reader is the sole caller. This reuses the existing
+        // synchronous borrowed envelope, not one allocation per IMU sample.
+        internal void PublishPhysicalMotion() => sixAxis.FireProjectedSixAxisEvent(cState);
+
+        // CopyTo alone aliases Motion and makes the next physical sample
+        // overwrite its own previous frame. Preserve exact scalar motion in
+        // preallocated storage, including a bounded previous-motion snapshot.
+        // This is source history only, not ownership of joined publication.
+        internal void PreservePhysicalStateData()
+        {
+            physicalPreviousState.Capture(cState);
+            pState = physicalPreviousState.State;
         }
 
         public override DS4State getPreviousStateRef()

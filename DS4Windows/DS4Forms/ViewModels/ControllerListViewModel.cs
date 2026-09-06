@@ -29,6 +29,7 @@ using System.Windows.Data;
 using System.Windows.Media;
 using DS4Windows;
 using DS4Windows.InputDevices;
+using DS4Windows.Switch2;
 
 namespace DS4WinWPF.DS4Forms.ViewModels
 {
@@ -61,27 +62,24 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         //public ControllerListViewModel(Tester tester, ProfileList profileListHolder)
         public ControllerListViewModel(ControlService service, ProfileList profileListHolder)
+            : this(profileListHolder)
         {
-            this.profileListHolder = profileListHolder;
             this.controlService = service;
             service.ServiceStarted += ControllersChanged;
             service.PreServiceStop += ClearControllerList;
             service.HotplugController += Service_HotplugController;
+            service.RemovedController += Service_RemovedController;
             //tester.StartControllers += ControllersChanged;
             //tester.ControllersRemoved += ClearControllerList;
 
-            int idx = 0;
-            foreach (DS4Device currentDev in controlService.slotManager.ControllerColl)
-            {
-                CompositeDeviceModel temp = new CompositeDeviceModel(currentDev,
-                    idx, Global.ProfilePath[idx], profileListHolder);
-                controllerCol.Add(temp);
-                controllerDict.Add(idx, temp);
-                currentDev.Removal += Controller_Removal;
-                idx++;
-            }
+            ControllersChanged(service, EventArgs.Empty);
+        }
 
-            //BindingOperations.EnableCollectionSynchronization(controllerCol, _colLockobj);
+        // The same list model can be exercised without constructing a live
+        // ControlService (and therefore without discovery or controller I/O).
+        internal ControllerListViewModel(ProfileList profileListHolder)
+        {
+            this.profileListHolder = profileListHolder;
             BindingOperations.EnableCollectionSynchronization(controllerCol, _colListLocker,
                 ColLockCallback);
         }
@@ -108,70 +106,57 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         private void Service_HotplugController(ControlService sender,
             DS4Device device, int index)
         {
-            // Engage write lock pre-maturely
-            using (WriteLocker readLock = new WriteLocker(_colListLocker))
-            {
-                // Look if device exists. Also, check if disconnect might be occurring
-                if (!controllerDict.ContainsKey(index) && !device.IsRemoving)
-                {
-                    CompositeDeviceModel temp = new CompositeDeviceModel(device,
-                        index, Global.ProfilePath[index], profileListHolder);
-                    controllerCol.Add(temp);
-                    controllerDict.Add(index, temp);
+            if (!ReferenceEquals(sender.DS4Controllers[index], device)) return;
+            AddController(device, index);
+        }
 
-                    device.Removal += Controller_Removal;
+        internal void AddController(DS4Device device, int index)
+        {
+            using (WriteLocker writeLock = new WriteLocker(_colListLocker))
+            {
+                if (device.IsRemoving || device.IsRemoved) return;
+                if (controllerDict.TryGetValue(index, out CompositeDeviceModel existing))
+                {
+                    if (ReferenceEquals(existing.Device, device)) return;
+                    // A delayed removal notification must neither hide the
+                    // replacement nor keep the old row in a reused slot.
+                    RemoveModelNoLock(existing);
                 }
+                CompositeDeviceModel temp = new CompositeDeviceModel(device,
+                    index, Global.ProfilePath[index], profileListHolder);
+                controllerDict.Add(index, temp);
+                device.Removal += Controller_Removal;
+                controllerCol.Add(temp);
             }
+        }
+
+        private void Service_RemovedController(ControlService sender,
+            DS4Device device, int index)
+        {
+            if (RemoveController(device, index)) SaveAfterRemoval();
         }
 
         private void ClearControllerList(object sender, EventArgs e)
         {
-            _colListLocker.EnterReadLock();
-            foreach (CompositeDeviceModel temp in controllerCol)
+            using (WriteLocker locker = new WriteLocker(_colListLocker))
             {
-                temp.Device.Removal -= Controller_Removal;
+                foreach (CompositeDeviceModel temp in controllerCol)
+                {
+                    temp.Device.Removal -= Controller_Removal;
+                }
+                controllerCol.Clear();
+                controllerDict.Clear();
             }
-            _colListLocker.ExitReadLock();
-
-            _colListLocker.EnterWriteLock();
-            controllerCol.Clear();
-            controllerDict.Clear();
-            _colListLocker.ExitWriteLock();
         }
 
         private void ControllersChanged(object sender, EventArgs e)
         {
-            //IEnumerable<DS4Device> devices = DS4Windows.DS4Devices.getDS4Controllers();
             using (ReadLocker locker = new ReadLocker(controlService.slotManager.CollectionLocker))
             {
                 foreach (DS4Device currentDev in controlService.slotManager.ControllerColl)
                 {
-                    bool found = false;
-                    _colListLocker.EnterReadLock();
-                    foreach (CompositeDeviceModel temp in controllerCol)
-                    {
-                        if (temp.Device == currentDev)
-                        {
-                            found = true;
-                            break;
-                        }
-                    }
-                    _colListLocker.ExitReadLock();
-
-                    // Check for new device. Also, check if disconnect might be occurring
-                    if (!found && !currentDev.IsRemoving)
-                    {
-                        //int idx = controllerCol.Count;
-                        _colListLocker.EnterWriteLock();
-                        int idx = controlService.slotManager.ReverseControllerDict[currentDev];
-                        CompositeDeviceModel temp = new CompositeDeviceModel(currentDev,
-                            idx, Global.ProfilePath[idx], profileListHolder);
-                        controllerCol.Add(temp);
-                        controllerDict.Add(idx, temp);
-                        _colListLocker.ExitWriteLock();
-
-                        currentDev.Removal += Controller_Removal;
-                    }
+                    AddController(currentDev,
+                        controlService.slotManager.ReverseControllerDict[currentDev]);
                 }
             }
         }
@@ -179,29 +164,55 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         private void Controller_Removal(object sender, EventArgs e)
         {
             DS4Device currentDev = sender as DS4Device;
-            CompositeDeviceModel found = null;
-            _colListLocker.EnterReadLock();
-            foreach (CompositeDeviceModel temp in controllerCol)
+            bool removed = false;
+            using (WriteLocker locker = new WriteLocker(_colListLocker))
             {
-                if (temp.Device == currentDev)
+                for (int index = 0; index < controllerCol.Count; index++)
                 {
-                    found = temp;
-                    break;
+                    CompositeDeviceModel candidate = controllerCol[index];
+                    if (ReferenceEquals(candidate.Device, currentDev))
+                    {
+                        RemoveModelNoLock(candidate);
+                        Global.linkedProfileCheck[candidate.DevIndex] = false;
+                        removed = true;
+                        break;
+                    }
                 }
             }
-            _colListLocker.ExitReadLock();
+            if (removed) SaveAfterRemoval();
+        }
 
-            if (found != null)
+        internal bool RemoveController(DS4Device device, int index)
+        {
+            using (WriteLocker locker = new WriteLocker(_colListLocker))
             {
-                _colListLocker.EnterWriteLock();
-                controllerCol.Remove(found);
-                controllerDict.Remove(found.DevIndex);
-                System.Windows.Application.Current.Dispatcher.Invoke(() =>
+                if (!controllerDict.TryGetValue(index, out CompositeDeviceModel current) ||
+                    !ReferenceEquals(current.Device, device)) return false;
+                RemoveModelNoLock(current);
+                Global.linkedProfileCheck[index] = false;
+                return true;
+            }
+        }
+
+        private void RemoveModelNoLock(CompositeDeviceModel model)
+        {
+            model.Device.Removal -= Controller_Removal;
+            controllerDict.Remove(model.DevIndex);
+            controllerCol.Remove(model);
+        }
+
+        private static void SaveAfterRemoval()
+        {
+            var dispatcher = System.Windows.Application.Current?.Dispatcher;
+            if (dispatcher != null && !dispatcher.HasShutdownStarted &&
+                !dispatcher.HasShutdownFinished)
+            {
+                // Never synchronously enter the UI dispatcher while holding
+                // the collection lock: WPF may need that lock to render removal.
+                dispatcher.BeginInvoke(new Action(() =>
                 {
                     Global.Save();
-                });
-                Global.linkedProfileCheck[found.DevIndex] = false;
-                _colListLocker.ExitWriteLock();
+                }));
             }
         }
     }
@@ -270,6 +281,25 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         }
 
         public bool IsWireless => device.ConnectionType != ConnectionType.USB;
+
+        public bool SupportsSwitch2StandaloneHoldMode =>
+            device is Switch2RuntimeInputDevice runtime &&
+            runtime.SupportsStandaloneJoyConHoldMode;
+
+        public bool SupportsSwitch2Identification =>
+            device is Switch2RuntimeInputDevice;
+
+        public string Switch2StandaloneHoldModeText =>
+            EffectiveSwitch2StandaloneHoldMode() ==
+                Switch2JoyConHoldMode.Horizontal ? "Horizontal" :
+                "Vertical";
+
+        public event EventHandler Switch2StandaloneHoldModeTextChanged;
+
+        public string Switch2StandaloneHoldModeToolTip =>
+            "Switch this standalone Joy-Con between vertical controller " +
+            "and horizontal mini-pad presentation. The choice applies on " +
+            "the next input report and is remembered for this Joy-Con.";
 
         public bool SupportsControllerAudio =>
             UiCapabilities.SupportsControllerAudio;
@@ -363,6 +393,41 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             }
         }
         public event EventHandler SelectedIndexChanged;
+
+        public bool TryToggleSwitch2StandaloneHoldMode(out bool persisted)
+        {
+            persisted = false;
+            if (device is not Switch2RuntimeInputDevice runtime ||
+                !runtime.SupportsStandaloneJoyConHoldMode)
+            {
+                return false;
+            }
+
+            Switch2JoyConHoldMode next =
+                EffectiveSwitch2StandaloneHoldMode() ==
+                    Switch2JoyConHoldMode.Horizontal ?
+                    Switch2JoyConHoldMode.Vertical :
+                    Switch2JoyConHoldMode.Horizontal;
+            if (!runtime.TrySetStandaloneJoyConHoldMode(next,
+                    out persisted))
+            {
+                return false;
+            }
+            Switch2StandaloneHoldModeTextChanged?.Invoke(this,
+                EventArgs.Empty);
+            return true;
+        }
+
+        private Switch2JoyConHoldMode EffectiveSwitch2StandaloneHoldMode()
+        {
+            Switch2JoyConHoldMode fallback = devIndex >= 0 &&
+                devIndex < Global.MAX_DS4_CONTROLLER_COUNT ?
+                Global.Switch2JoyConStandaloneHoldMode[devIndex] :
+                Switch2JoyConHoldMode.Vertical;
+            return device is Switch2RuntimeInputDevice runtime ?
+                runtime.ResolveStandaloneJoyConHoldMode(fallback) :
+                Switch2JoyConHoldMode.Vertical;
+        }
 
         public string StatusSource
         {
@@ -538,7 +603,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             }
 
             Mapping.RequestRegularProfileReload(devIndex, true, App.rootHub,
-                loaded => CompleteProfileReload(loaded, prof, logSelection: true));
+                loaded => CompleteProfileReload(loaded, prof, logSelection: true), profileName: prof);
         }
 
         /// <summary>
@@ -627,6 +692,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 }
 
                 LightColorChanged?.Invoke(this, EventArgs.Empty);
+                Switch2StandaloneHoldModeTextChanged?.Invoke(this,
+                    EventArgs.Empty);
                 return true;
             }
             finally
@@ -710,6 +777,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             {
                 IsSynchronizingRuntimeProfile = false;
             }
+            Switch2StandaloneHoldModeTextChanged?.Invoke(this,
+                EventArgs.Empty);
         }
 
         private void SelectedEntity_ProfileSaved(object sender, EventArgs e)
@@ -744,6 +813,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 }
 
                 LightColorChanged?.Invoke(this, EventArgs.Empty);
+                Switch2StandaloneHoldModeTextChanged?.Invoke(this,
+                    EventArgs.Empty);
             }
 
             System.Windows.Threading.Dispatcher dispatcher =

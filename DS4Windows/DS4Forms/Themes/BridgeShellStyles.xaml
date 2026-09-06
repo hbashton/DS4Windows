@@ -630,6 +630,7 @@
                                         <ListBoxItem Content="Gyro" Tag="&#x25CE;" ToolTip="Motion aiming, steering, and swipes" />
                                         <ListBoxItem Content="Audio Haptics" Tag="&#xE767;" ToolTip="Turn system or app audio into advanced haptics" />
                                         <ListBoxItem Content="Trigger Lab" Tag="TriggerPair" ToolTip="Build persistent adaptive-trigger effects" />
+                                        <ListBoxItem Content="Switch 2 Controls" Tag="&#xE7FC;" ToolTip="HD rumble, motion, optical mouse, and calibration" />
                                         <ListBoxItem Content="Advanced" Tag="&#x2699;" ToolTip="Output, rumble, latency, and compatibility" />
                                         <ListBoxItem Content="Log" Tag="&#x2261;" ToolTip="Service events without leaving the editor" />
                                     </ListBox>

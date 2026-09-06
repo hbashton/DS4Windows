@@ -376,6 +376,9 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 case OutContType.ViiperSwitch2Pro:
                     result = 5;
                     break;
+                case OutContType.ViiperXboxOne:
+                    result = 6;
+                    break;
                 default:
                     break;
             }
@@ -422,6 +425,9 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                     break;
                 case 5:
                     result = OutContType.ViiperSwitch2Pro;
+                    break;
+                case 6:
+                    result = OutContType.ViiperXboxOne;
                     break;
                 default:
                     break;

@@ -18,6 +18,7 @@ namespace DS4Windows
                 outputType == OutContType.ViiperDualSense ||
                 outputType == OutContType.ViiperDualSenseEdge ||
                 outputType == OutContType.ViiperX360 ||
+                outputType == OutContType.ViiperXboxOne ||
                 outputType == OutContType.ViiperSwitch2Pro;
         }
 

@@ -58,6 +58,22 @@ namespace DS4WinWPF
         private static IEnumerable<string> CandidateDirectories(
             string configuredDataPath)
         {
+            if (DS4Windows.PortableLabContext.Requested || DS4Windows.PortableLabContext.IsActive)
+            {
+                // Invalid lab arguments/path must not cause a shared-log write.
+                if (DS4Windows.PortableLabContext.Current is { } lab)
+                {
+                    string directory = null;
+                    try
+                    {
+                        lab.ValidateDataTree();
+                        directory = Path.Combine(lab.DataPath, "Logs");
+                    }
+                    catch { }
+                    if (directory != null) yield return directory;
+                }
+                yield break;
+            }
             if (!string.IsNullOrWhiteSpace(configuredDataPath))
             {
                 yield return Path.Combine(configuredDataPath, "Logs");

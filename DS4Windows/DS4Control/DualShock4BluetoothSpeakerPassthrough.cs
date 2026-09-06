@@ -4104,7 +4104,8 @@ namespace DS4Windows
             {
                 try
                 {
-                    string logDirectory = Path.Combine(
+                    string logDirectory = PortableLabContext.Current is { } lab
+                        ? Path.Combine(lab.DataPath, "Logs") : Path.Combine(
                         Environment.GetFolderPath(
                             Environment.SpecialFolder.ApplicationData),
                         "DS4Windows", "Logs");

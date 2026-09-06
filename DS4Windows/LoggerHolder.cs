@@ -35,7 +35,7 @@ namespace DS4WinWPF
 
         public LoggerHolder(DS4Windows.ControlService service)
         {
-            string dataPath = DS4Windows.Global.appdatapath;
+            string dataPath = PortableLabContext.Current?.DataPath ?? DS4Windows.Global.appdatapath;
             if (string.IsNullOrWhiteSpace(dataPath))
             {
                 dataPath = Path.Combine(Environment.GetFolderPath(

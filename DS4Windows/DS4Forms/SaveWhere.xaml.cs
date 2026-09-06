@@ -33,6 +33,8 @@ namespace DS4WinWPF.DS4Forms
 
         public SaveWhere(bool multisavespots)
         {
+            if (DS4Windows.PortableLabContext.IsActive)
+                throw new InvalidOperationException("Portable lab configuration location is fixed.");
             InitializeComponent();
             multisaves = multisavespots;
             if (!multisavespots)

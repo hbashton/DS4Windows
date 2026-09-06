@@ -425,6 +425,7 @@ namespace DS4Windows
     public class JoyConDeviceOptions
     {
         public const bool DEFAULT_ENABLE = false;
+        public const bool DEFAULT_AUTOMATIC_PAIRING = false;
         private bool enabled = DEFAULT_ENABLE;
         public bool Enabled
         {
@@ -437,6 +438,13 @@ namespace DS4Windows
             }
         }
         public event EventHandler EnabledChanged;
+
+        private bool automaticPairing = DEFAULT_AUTOMATIC_PAIRING;
+        public bool AutomaticPairing
+        {
+            get => automaticPairing;
+            set => automaticPairing = value;
+        }
 
         public enum LinkMode : ushort
         {

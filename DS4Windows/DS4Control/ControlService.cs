@@ -32,7 +32,10 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Threading;
 using DS4WinWPF.DS4Forms;
+using DS4Windows.Switch2;
 using static DS4Windows.Global;
+using Switch2CemuhookYawPolicy =
+    DS4Windows.Switch2.Switch2CemuhookYawSensitivity;
 
 namespace DS4Windows
 {
@@ -68,6 +71,9 @@ namespace DS4Windows
         public DS4Device[] DS4Controllers = new DS4Device[MAX_DS4_CONTROLLER_COUNT];
         public int activeControllers = 0;
         public Mouse[] touchPad = new Mouse[MAX_DS4_CONTROLLER_COUNT];
+        private readonly ControlServiceMouseCallbackRegistry mouseCallbackRegistry = new();
+        private readonly int[] mouseCallbackRetirementWarning = new int[MAX_DS4_CONTROLLER_COUNT];
+        private const int MouseCallbackRetirementTimeoutMilliseconds = 5_000;
         public bool running = false;
         public bool loopControllers = true;
         public bool inServiceTask = false;
@@ -101,6 +107,7 @@ namespace DS4Windows
         public bool suspending;
 
         private UdpServer _udpServer;
+        private readonly UdpMotionObservationWorker switch2UdpObservations;
         private OutputSlotManager outputslotMan;
 
         private HashSet<string> hidDeviceHidingAffectedDevs = new HashSet<string>();
@@ -111,6 +118,33 @@ namespace DS4Windows
         private bool stickMouseFakerInputMissingNoticeShown = false;
         private readonly object outputKbmHandlerLock = new object();
         private readonly object serviceLifecycleLock = new object();
+        private readonly InputControllerRegistrationTable inputRegistrationTable;
+        private readonly ControlServiceInputSlotAdmission inputSlotAdmission;
+        private readonly ControlServiceLegacyHidSlotAuthority
+            legacyHidSlotAuthority;
+        private readonly Switch2RuntimeRegistrationService
+            switch2RuntimeRegistrationService;
+        private readonly Switch2ControlServiceReversibleProfileSlotHost
+            switch2ControlServiceSlotHost;
+        private readonly Switch2BluetoothProductionCoordinator
+            switch2BluetoothProductionCoordinator;
+        private readonly Switch2ProUsbProductionCoordinator
+            switch2ProUsbProductionCoordinator;
+        private readonly Switch2JoyConPairFileStore switch2JoyConPairStore;
+        private readonly Switch2MagnetometerCalibrationFileStore
+            switch2MagnetometerCalibrationStore;
+        private readonly Switch2JoyConHoldModeFileStore
+            switch2JoyConHoldModeStore;
+        private readonly Switch2GyroCalibrationFileStore
+            switch2GyroCalibrationStore;
+        private readonly Switch2RawStickCalibrationFileStore switch2RawStickCalibrationStore;
+        private readonly Switch2PersistentPeerIdentityDeriver
+            switch2PersistentPeerIdentityDeriver;
+        private CancellationTokenSource switch2BluetoothStartupCancellation;
+        private readonly Switch2BluetoothDiscoveryStartupState
+            switch2BluetoothDiscoveryStartupState = new();
+        private ulong inputRegistrationCloseGeneration;
+        private bool exactTypedStopRetryPending;
 
         private ControlServiceDeviceOptions deviceOptions;
         public ControlServiceDeviceOptions DeviceOptions { get => deviceOptions; }
@@ -125,6 +159,7 @@ namespace DS4Windows
         //public event EventHandler HotplugFinished;
         public delegate void HotplugControllerHandler(ControlService sender, DS4Device device, int index);
         public event HotplugControllerHandler HotplugController;
+        public event HotplugControllerHandler RemovedController;
 
         private byte[][] udpOutBuffers = new byte[UdpServer.NUMBER_SLOTS][]
         {
@@ -152,6 +187,17 @@ namespace DS4Windows
             meta.Model = DsModel.DS4;
 
             var d = DS4Controllers[padIdx];
+            if (d is Switch2RuntimeInputDevice)
+            {
+                // Runtime registration, not a fabricated Sony serial or a
+                // current numeric slot, owns Switch 2 DSU identity/status.
+                if (switch2UdpObservations != null &&
+                    switch2UdpObservations.TryGetMetadata(padIdx, d, out var observed))
+                    meta = observed;
+                else
+                    meta = new DualShockPadMeta { PadId = (byte)padIdx, PadState = DsState.Disconnected };
+                return;
+            }
             if (d == null)
             {
                 meta.PadMacAddress = null;
@@ -215,6 +261,77 @@ namespace DS4Windows
         public ControlService(DS4WinWPF.ArgumentParser cmdParser)
         {
             this.cmdParser = cmdParser;
+            inputRegistrationTable =
+                new InputControllerRegistrationTable(
+                    MAX_DS4_CONTROLLER_COUNT);
+            inputSlotAdmission = new ControlServiceInputSlotAdmission(
+                inputRegistrationTable, DS4Controllers, slotManager,
+                CURRENT_DS4_CONTROLLER_LIMIT);
+            legacyHidSlotAuthority =
+                new ControlServiceLegacyHidSlotAuthority(
+                    inputRegistrationTable, DS4Devices.RemoveDevice,
+                    new ControlServiceLegacyHidDeviceWorkerLifecycle());
+            switch2RuntimeRegistrationService =
+                new Switch2RuntimeRegistrationService(
+                    inputRegistrationTable, slotAdmission: inputSlotAdmission);
+            switch2RuntimeRegistrationService.RuntimeRemoved +=
+                OnSwitch2RuntimeRemoved;
+            switch2UdpObservations = new UdpMotionObservationWorker();
+            reportDiagnosticsWorker = new ReportDiagnosticsWorker(
+                MAX_DS4_CONTROLLER_COUNT, ProcessReportDiagnostics,
+                ex => LogDebug("Deferred report diagnostics failed: " +
+                    ex.Message));
+            switch2ControlServiceSlotHost =
+                new Switch2ControlServiceReversibleProfileSlotHost(
+                    inputRegistrationTable,
+                    switch2RuntimeRegistrationService.LifecycleGate,
+                    DS4Controllers, touchPad, slotManager,
+                    new Switch2ControlServiceProfileStage(this),
+                    On_Report, new Switch2UdpMotionObserver(switch2UdpObservations,
+                        () => Volatile.Read(ref _udpServer)?.CurrentSession),
+                    reportDiagnosticsWorker, On_Report);
+
+            Switch2JoyConPairFileStore.TryOpen(
+                Path.Combine(appdatapath, "Switch2"),
+                out switch2JoyConPairStore,
+                out switch2PersistentPeerIdentityDeriver);
+            Switch2MagnetometerCalibrationFileStore.TryOpen(
+                Path.Combine(appdatapath, "Switch2"),
+                out switch2MagnetometerCalibrationStore);
+            Switch2JoyConHoldModeFileStore.TryOpen(
+                Path.Combine(appdatapath, "Switch2"),
+                out switch2JoyConHoldModeStore);
+            Switch2GyroCalibrationFileStore.TryOpen(
+                Path.Combine(appdatapath, "Switch2"),
+                out switch2GyroCalibrationStore);
+            Switch2RawStickCalibrationFileStore.TryOpen(
+                Path.Combine(appdatapath, "Switch2"), out switch2RawStickCalibrationStore);
+            switch2BluetoothProductionCoordinator =
+                new Switch2BluetoothProductionCoordinator(
+                    new Switch2BluetoothWindowsAdapter(
+                        new Switch2BluetoothWinRtPlatform(),
+                        new Switch2BluetoothCandidateRegistry(),
+                        TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(5),
+                        switch2PersistentPeerIdentityDeriver),
+                    switch2RuntimeRegistrationService,
+                    switch2ControlServiceSlotHost,
+                    OnSwitch2RuntimeAttached,
+                    message => LogDebug(message),
+                    switch2JoyConPairStore,
+                    () => Global.DeviceOptions.JoyConDeviceOpts.
+                        AutomaticPairing,
+                    switch2MagnetometerCalibrationStore,
+                    switch2JoyConHoldModeStore,
+                    switch2GyroCalibrationStore, switch2RawStickCalibrationStore);
+            switch2ProUsbProductionCoordinator =
+                new Switch2ProUsbProductionCoordinator(
+                    switch2RuntimeRegistrationService,
+                    switch2ControlServiceSlotHost,
+                    OnSwitch2RuntimeAttached,
+                    message => LogDebug(message),
+                    switch2PersistentPeerIdentityDeriver,
+                    switch2MagnetometerCalibrationStore,
+                    switch2GyroCalibrationStore, switch2RawStickCalibrationStore);
 
             Crc32Algorithm.InitializeTable(DS4Device.DefaultPolynomial);
 
@@ -270,11 +387,6 @@ namespace DS4Windows
                 MAX_DS4_CONTROLLER_COUNT, OSCMonitoringPostPublication,
                 ex => LogDebug("OSC monitoring output failed: " +
                     ex.Message));
-            reportDiagnosticsWorker = new ReportDiagnosticsWorker(
-                MAX_DS4_CONTROLLER_COUNT, ProcessReportDiagnostics,
-                ex => LogDebug("Deferred report diagnostics failed: " +
-                    ex.Message));
-
             SystemEvents.DisplaySettingsChanged += SystemEvents_DisplaySettingsChanged;
             //oscListener = new UDPListener(Global.getOSCServerPortNum(), callback: oscCallback);
             //AppLogger.LogToGui("OSC LISTENER STARTED", false);
@@ -646,19 +758,40 @@ namespace DS4Windows
         private static bool StickDirectionMapsToMouse(int ind, DS4Controls control)
         {
             DS4ControlSettings setting = GetDS4CSetting(ind, control);
-            return ActionMapsToMouse(setting.actionType, setting.action.actionBtn) ||
-                ActionMapsToMouse(setting.shiftActionType, setting.shiftAction.actionBtn);
+            if (ActionMapsToMouse(setting.actionType,
+                    setting.action.actionBtn) ||
+                ActionMapsToMouse(setting.shiftActionType,
+                    setting.shiftAction.actionBtn))
+            {
+                return true;
+            }
+            foreach (Switch2ModeShiftScope scope in Enum.GetValues<
+                Switch2ModeShiftScope>())
+            {
+                Switch2ModeShiftAction lane =
+                    setting.GetSwitch2ModeShiftAction(scope);
+                if (ActionMapsToMouse(lane.ActionType,
+                        lane.Action.actionBtn))
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
-        private static bool ActionMapsToMouse(DS4ControlSettings.ActionType actionType, X360Controls outputControl)
+        internal static bool ActionMapsToMouse(
+            DS4ControlSettings.ActionType actionType,
+            X360Controls outputControl)
         {
             if (actionType != DS4ControlSettings.ActionType.Button)
             {
                 return false;
             }
 
-            return outputControl >= X360Controls.MouseUp &&
-                outputControl <= X360Controls.AbsMouseRight;
+            return (outputControl >= X360Controls.LeftMouse &&
+                    outputControl < X360Controls.Unbound) ||
+                outputControl is X360Controls.WLEFT or
+                    X360Controls.WRIGHT;
         }
 
         private static void RefreshLoadedActionAliases()
@@ -670,6 +803,12 @@ namespace DS4Windows
                     DS4ControlSettings setting = GetDS4CSetting(device, control);
                     Global.RefreshActionAlias(setting, false);
                     Global.RefreshActionAlias(setting, true);
+                    foreach (Switch2ModeShiftScope scope in Enum.GetValues<
+                        Switch2ModeShiftScope>())
+                    {
+                        Global.RefreshSwitch2ModeShiftActionAlias(
+                            setting.GetSwitch2ModeShiftAction(scope));
+                    }
                 }
             }
         }
@@ -763,20 +902,23 @@ namespace DS4Windows
 
         public void ShutDown()
         {
+            if (ControlServiceMouseCallbackSubscription.IsInsideCallback) return;
             lock (serviceLifecycleLock)
             {
+                if (exactTypedStopRetryPending) return;
                 ShutDownCore();
             }
         }
 
         public void StopAndShutDown(bool immediateUnplug)
         {
+            if (ControlServiceMouseCallbackSubscription.IsInsideCallback) return;
             lock (serviceLifecycleLock)
             {
-                if (running)
+                if (running || exactTypedStopRetryPending)
                 {
-                    StopCore(showlog: true,
-                        immediateUnplug: immediateUnplug);
+                    if (!StopCore(showlog: true,
+                            immediateUnplug: immediateUnplug)) return;
                 }
 
                 ShutDownCore();
@@ -806,10 +948,16 @@ namespace DS4Windows
             }
             oscMonitoringWorker.Dispose();
             reportDiagnosticsWorker.Dispose();
+            switch2UdpObservations?.Dispose();
         }
 
         private void DS4Devices_RequestElevation(RequestElevationArgs args)
         {
+            if (PortableLabContext.IsActive)
+            {
+                args.StatusCode = RequestElevationArgs.STATUS_INIT_FAILURE;
+                return;
+            }
             // Launches an elevated child process to re-enable device
             ProcessStartInfo startInfo =
                 new ProcessStartInfo(Global.exelocation);
@@ -844,6 +992,7 @@ namespace DS4Windows
 
         public void CheckHidHidePresence(string ExePath = "", string ExeName = "Autoprofile Exe", bool AddExe = true) // Default value for D4W Startup
         {
+            if (PortableLabContext.IsActive) return;
             if (!Global.hidHideInstalled)
             {
                 return;
@@ -955,6 +1104,23 @@ namespace DS4Windows
             }
         }
 
+        // Cold prepared application only. Do not wait with publication paused:
+        // queued profile work can itself be switching the shared KBM backend.
+        // Backend switching must not acquire ProfileMutationGate under this lock.
+        internal bool TryRunWithStableProfileKbmMapping(Action apply)
+        {
+            if (!Monitor.TryEnter(outputKbmHandlerLock))
+                return false;
+            try
+            {
+                if (Global.outputKBMMapping == null)
+                    return false;
+                apply();
+                return true;
+            }
+            finally { Monitor.Exit(outputKbmHandlerLock); }
+        }
+
         public void LoadPermanentSlotsConfig()
         {
             OutputSlotPersist.ReadConfig(outputslotMan);
@@ -1050,6 +1216,19 @@ namespace DS4Windows
                 case InputDevices.InputDeviceType.SwitchPro:
                     result.AddRange(new DS4Controls[] { DS4Controls.Capture });
                     break;
+                case InputDevices.InputDeviceType.Switch2Pro:
+                    // GL/GR use the canonical paddle sources. Decoding them
+                    // is not enough: these controls are deliberately outside
+                    // ControlSettingsGroup's ordinary button loop.
+                    result.AddRange(new[] { DS4Controls.Capture,
+                        DS4Controls.BLP, DS4Controls.BRP });
+                    break;
+                case InputDevices.InputDeviceType.Switch2JoyConLeft:
+                case InputDevices.InputDeviceType.Switch2JoyConJoined:
+                    // The right Joy-Con has no Capture button. Its C/rail
+                    // sources already belong to the standard mapping loop.
+                    result.Add(DS4Controls.Capture);
+                    break;
                 default:
                     break;
             }
@@ -1071,7 +1250,18 @@ namespace DS4Windows
         /// </summary>
         private bool EnsureHidHideSessionForDevice(DS4Device dev)
         {
+            if (PortableLabContext.IsActive) return false;
             if (!Global.hidHideInstalled || dev == null) return false;
+
+            HidDevice hidDevice = dev.HidDevice;
+            if (hidDevice == null ||
+                string.IsNullOrWhiteSpace(hidDevice.DevicePath))
+            {
+                // Transport-owned logical devices (Switch 2 WinUSB/WinRT)
+                // intentionally do not expose a legacy HID handle. HidHide
+                // has no DS4Device HID identity to manage for that lifetime.
+                return false;
+            }
 
             // Never cloak a controller unless this process has first proved
             // that it can see through HidHide.  Without this gate the initial
@@ -1088,7 +1278,8 @@ namespace DS4Windows
                 }
             }
 
-            string instanceId = Global.GetInstanceIdFromDevicePath(dev.HidDevice.DevicePath);
+            string instanceId = Global.GetInstanceIdFromDevicePath(
+                hidDevice.DevicePath);
             if (string.IsNullOrEmpty(instanceId)) return false;
 
             IReadOnlyList<string> instanceIds =
@@ -1231,6 +1422,7 @@ namespace DS4Windows
         private void ReleasePersistentHidHideIds(
             IEnumerable<string> candidateIds, string reason)
         {
+            if (PortableLabContext.IsActive) return;
             IReadOnlyList<string> candidates =
                 hidHideManagedDevices.RevalidatePersistentRelease(candidateIds);
             if (candidates.Count == 0) return;
@@ -1294,6 +1486,7 @@ namespace DS4Windows
 
         private void QueueSteamInputReclaim(DS4Device device)
         {
+            if (PortableLabContext.IsActive) return;
             if (!Global.ReclaimSteamInput || !Global.hidHideInstalled ||
                 device?.CurrentExclusiveStatus !=
                     DS4Device.ExclusiveStatus.HidHideAffected ||
@@ -1454,6 +1647,7 @@ namespace DS4Windows
 
         private void ReleaseHidHideManagedDevices()
         {
+            if (PortableLabContext.IsActive) return;
             if (!Global.hidHideInstalled) return;
 
             try
@@ -1613,6 +1807,14 @@ namespace DS4Windows
                 return;
             }
 
+            if (device.HidDevice == null)
+            {
+                StartupDiag($"HidHide legacy-HID containment is not " +
+                    $"applicable to transport-owned {device.DisplayName} " +
+                    $"input index={index}");
+                return;
+            }
+
             if (EnsureHidHideSessionForDevice(device))
             {
                 ChangeExclusiveStatus(device);
@@ -1634,6 +1836,7 @@ namespace DS4Windows
         private void EnsureHidHideDoesNotCloakVirtualSonyOutputs(
             IReadOnlyCollection<string> devicePaths)
         {
+            if (PortableLabContext.IsActive) return;
             if (!Global.hidHideInstalled || devicePaths == null ||
                 devicePaths.Count == 0)
             {
@@ -1815,11 +2018,7 @@ namespace DS4Windows
                 {
                     dev.queueEvent(() =>
                     {
-                        if (dev.MotionEvent != null)
-                        {
-                            dev.Report -= dev.MotionEvent;
-                            dev.MotionEvent = null;
-                        }
+                        RemoveDevUDPMotion(dev);
                     });
                 }
             }
@@ -1835,10 +2034,7 @@ namespace DS4Windows
             {
                 dev.queueEvent(() =>
                 {
-                    if (dev.MotionEvent != null)
-                    {
-                        dev.Report -= dev.MotionEvent;
-                    }
+                    SetDevUDPMotionSubscription(dev, subscribe: false);
                 });
             }
 
@@ -1854,10 +2050,7 @@ namespace DS4Windows
                 {
                     dev.queueEvent(() =>
                     {
-                        if (dev.MotionEvent != null)
-                        {
-                            dev.Report += dev.MotionEvent;
-                        }
+                        SetDevUDPMotionSubscription(dev, subscribe: true);
                     });
                 }
                 LogDebug($"UDP server listening on address {UDP_SERVER_LISTEN_ADDRESS} port {UDP_SERVER_PORT}");
@@ -1967,6 +2160,30 @@ namespace DS4Windows
         public void PluginOutDev(int index, DS4Device device,
             OutContType requestedContType = OutContType.None)
         {
+            Switch2ControlServiceProfileStageInverse ownership =
+                BeginSwitch2OutputOwnershipChange(index, device);
+            OutputDevice produced = outputDevices[index];
+            bool completed = false;
+            try
+            {
+                PluginOutDevCore(index, device, requestedContType, ref produced);
+                completed = true;
+            }
+            finally
+            {
+                // Only the exact object allocated/rebound below may become
+                // this input lifetime's cleanup responsibility. Failed creation
+                // before publication may legitimately leave the slot empty
+                // only when creation returned normally. A connected candidate
+                // lost before publication remains uncertain on a thrown path.
+                ownership?.CompleteOutputChange(produced,
+                    allowUnpublishedNull: completed, operationSucceeded: true);
+            }
+        }
+
+        private void PluginOutDevCore(int index, DS4Device device,
+            OutContType requestedContType, ref OutputDevice produced)
+        {
             OutContType contType = requestedContType == OutContType.None ?
                 Global.OutContType[index].Normalize() :
                 requestedContType.Normalize();
@@ -1986,18 +2203,34 @@ namespace DS4Windows
 
             if (useDInputOnly[index])
             {
+                var outputAttempt = new ControllerVirtualOutputAttempt(device, contType);
+                Volatile.Write(ref virtualOutputAttempts[index], outputAttempt);
+                try
+                {
                 EnsureHidHideForVirtualOutput(index, device, contType);
 
                 bool success = false;
                 if (ViiperOutDevice.IsViiperType(contType))
                 {
                     activeOutDevType[index] = contType;
+                    if (slotDevice != null)
+                    {
+                        if (outputslotMan.TryBindExistingUnboundOutput(slotDevice,
+                                outputDevices, index, $"{device.DisplayName} [{device.MacAddress}]",
+                                contType, out produced))
+                        {
+                            success = true;
+                        }
+                        else
+                            slotDevice = null;
+                    }
                     if (slotDevice == null)
                     {
                         slotDevice = outputslotMan.FindOpenSlot();
                         if (slotDevice != null)
                         {
                             OutputDevice tempViiper = EstablishOutDevice(index, contType);
+                            produced = tempViiper;
                             outputslotMan.DeferredPlugin(tempViiper, index,
                                 $"{device.DisplayName} [{device.MacAddress}]", outputDevices, contType);
                             success = true;
@@ -2007,13 +2240,6 @@ namespace DS4Windows
                             LogDebug("Failed. No open output slot found");
                         }
                     }
-                    else
-                    {
-                        slotDevice.CurrentInputBound = OutSlotDevice.InputBound.Bound;
-                        outputDevices[index] = slotDevice.OutputDevice;
-                        slotDevice.CurrentType = contType;
-                        success = true;
-                    }
                 }
 
                 if (success && slotDevice.OutputDevice != null)
@@ -2021,11 +2247,21 @@ namespace DS4Windows
                     LogDebug($"Associated input controller #{index + 1} ({device.DisplayName}) to virtual {slotDevice.CurrentType.ToDisplayName()} Controller in{(slotDevice.PermanentType != OutContType.None ? " permanent" : "")} output slot #{slotDevice.Index + 1}");
                     useDInputOnly[index] = false;
                     StartupDiag($"PluginOutDev success index={index} slot={slotDevice.Index + 1} output={slotDevice.OutputDevice.GetDeviceType()}");
+                    Interlocked.CompareExchange(ref virtualOutputAttempts[index], null, outputAttempt);
                 }
                 else
                 {
+                    outputAttempt.MarkFailed();
                     LogDebug("Failed. No output device was associated");
                     StartupDiag($"PluginOutDev failed index={index} success={success} slotNull={slotDevice == null} slotOutputNull={slotDevice?.OutputDevice == null}");
+                }
+                }
+                catch
+                {
+                    // Published output ownership remains independently retained
+                    // for cleanup, but an interrupted creation is not Ready.
+                    outputAttempt.MarkFailed();
+                    throw;
                 }
             }
             else
@@ -2036,8 +2272,32 @@ namespace DS4Windows
 
         public void UnplugOutDev(int index, DS4Device device, bool immediate = false, bool force = false)
         {
+            Switch2ControlServiceProfileStageInverse ownership =
+                BeginSwitch2OutputOwnershipChange(index, device);
+            bool completed = false;
+            try
+            {
+                UnplugOutDevCore(index, device, immediate, force);
+                completed = true;
+            }
+            finally
+            {
+                // Null-after-throw is not evidence of a successful detach:
+                // legacy removal clears its array before Disconnect returns.
+                ownership?.CompleteOutputChange(null,
+                    allowUnpublishedNull: false, operationSucceeded: completed);
+            }
+        }
+
+        private void UnplugOutDevCore(int index, DS4Device device, bool immediate, bool force)
+        {
+            if (device is Switch2RuntimeInputDevice && outputDevices[index] != null &&
+                (useDInputOnly[index] ||
+                    !outputslotMan.IsExactBoundOutput(outputDevices[index], index)))
+                throw new InvalidOperationException("Switch 2 output has no exact active manager binding; removal was rejected.");
             if (!useDInputOnly[index])
             {
+                bool preserveUncertainPermanentBinding = false;
                 try
                 {
                     //OutContType contType = Global.OutContType[index];
@@ -2048,20 +2308,24 @@ namespace DS4Windows
                         string tempType = slotDevice.CurrentType.ToDisplayName();
                         LogDebug($"Disassociated virtual {tempType} Controller in{(slotDevice.CurrentReserveStatus == OutSlotDevice.ReserveStatus.Permanent ? " permanent" : "")} output slot #{slotDevice.Index + 1} from input controller #{index + 1} ({device.DisplayName})", false);
 
-                        OutContType currentType = activeOutDevType[index];
-                        outputDevices[index] = null;
-                        activeOutDevType[index] = OutContType.None;
                         if ((slotDevice.CurrentAttachedStatus == OutSlotDevice.AttachedStatus.Attached &&
                             slotDevice.CurrentReserveStatus == OutSlotDevice.ReserveStatus.Dynamic) || force)
                         {
+                            outputDevices[index] = null;
+                            activeOutDevType[index] = OutContType.None;
                             //slotDevice.CurrentInputBound = OutSlotDevice.InputBound.Unbound;
                             outputslotMan.DeferredRemoval(dev, index, outputDevices, immediate);
                         }
                         else if (slotDevice.CurrentAttachedStatus == OutSlotDevice.AttachedStatus.Attached)
                         {
-                            slotDevice.CurrentInputBound = OutSlotDevice.InputBound.Unbound;
-                            dev.ResetState();
-                            dev.RemoveFeedbacks();
+                            // Keep the exact binding private until neutral and
+                            // old feedback cleanup finish. Another controller
+                            // may reserve it only after the manager publishes
+                            // the completed unbind under its existing lock.
+                            preserveUncertainPermanentBinding = true;
+                            if (!outputslotMan.TryReleaseBoundOutput(dev, outputDevices, index))
+                                throw new InvalidOperationException("The permanent output binding changed before release.");
+                            preserveUncertainPermanentBinding = false;
                         }
                         //dev.Disconnect();
                         //LogDebug(tempType + " Controller # " + (index + 1) + " unplugged");
@@ -2069,15 +2333,19 @@ namespace DS4Windows
                 }
                 finally
                 {
-                    outputDevices[index] = null;
-                    activeOutDevType[index] = OutContType.None;
-                    useDInputOnly[index] = true;
+                    if (!preserveUncertainPermanentBinding)
+                    {
+                        outputDevices[index] = null;
+                        activeOutDevType[index] = OutContType.None;
+                        useDInputOnly[index] = true;
+                    }
                 }
             }
         }
 
         public bool Start(bool showlog = true)
         {
+            if (ControlServiceMouseCallbackSubscription.IsInsideCallback) return false;
             lock (serviceLifecycleLock)
             {
                 if (running)
@@ -2085,10 +2353,191 @@ namespace DS4Windows
                     StartupDiag("ControlService.Start ignored because the service is already running");
                     return true;
                 }
+                if (exactTypedStopRetryPending)
+                {
+                    StartupDiag("ControlService.Start rejected while exact typed legacy retirement requires a Stop retry");
+                    return false;
+                }
 
                 return StartCore(showlog);
             }
         }
+
+        private Switch2ControlServiceProfileStageInverse[] switch2ProfileOutputOwners;
+
+        private Switch2ControlServiceProfileStageInverse BeginSwitch2OutputOwnershipChange(
+            int index, DS4Device device)
+        {
+            if (device is not Switch2RuntimeInputDevice) return null;
+            object gate = switch2RuntimeRegistrationService?.LifecycleGate;
+            if (gate == null)
+                throw new InvalidOperationException("Switch 2 output change has no exact input lifetime.");
+            lock (gate)
+            {
+                Switch2ControlServiceProfileStageInverse ownership =
+                    switch2ProfileOutputOwners != null &&
+                    (uint)index < switch2ProfileOutputOwners.Length ?
+                        switch2ProfileOutputOwners[index] : null;
+                if (ownership == null || !ownership.TryBeginOutputChange(device))
+                    throw new InvalidOperationException("Switch 2 output ownership changed; the output operation was rejected.");
+                return ownership;
+            }
+        }
+
+        private void BeginSwitch2BluetoothDiscovery(
+            ulong inputServiceGeneration)
+        {
+            switch2BluetoothStartupCancellation?.Cancel();
+            switch2BluetoothStartupCancellation?.Dispose();
+            var cancellation = new CancellationTokenSource();
+            switch2BluetoothStartupCancellation = cancellation;
+            Switch2BluetoothDiscoveryStatus starting = switch2BluetoothDiscoveryStartupState.Begin();
+            _ = StartSwitch2BluetoothDiscoveryAsync(inputServiceGeneration,
+                cancellation, starting);
+        }
+
+        private async Task StartSwitch2BluetoothDiscoveryAsync(
+            ulong inputServiceGeneration,
+            CancellationTokenSource exactCancellation,
+            Switch2BluetoothDiscoveryStatus exactStartingStatus)
+        {
+            try
+            {
+                byte[] hostAddress = await Switch2BluetoothWinRtPlatform.
+                    GetDefaultHostAddressAsync(exactCancellation.Token).
+                    ConfigureAwait(false);
+                if (exactCancellation.IsCancellationRequested)
+                    return;
+                if (hostAddress == null)
+                {
+                    switch2BluetoothDiscoveryStartupState.TryComplete(exactStartingStatus,
+                        Switch2BluetoothDiscoveryState.Unavailable);
+                    StartupDiag("Switch 2 Bluetooth discovery unavailable because Windows reported no default Bluetooth adapter");
+                    return;
+                }
+
+                lock (serviceLifecycleLock)
+                {
+                    if (!running || exactCancellation.IsCancellationRequested ||
+                        !ReferenceEquals(switch2BluetoothStartupCancellation,
+                            exactCancellation) ||
+                        legacyHidSlotAuthority.CurrentServiceGeneration !=
+                            inputServiceGeneration)
+                    {
+                        return;
+                    }
+
+                    if (!switch2BluetoothProductionCoordinator.TryStart(
+                            inputServiceGeneration, hostAddress,
+                            out Switch2BluetoothWindowsScanStartFailure failure))
+                    {
+                        LogDebug($"Switch 2 Bluetooth discovery could not start: {failure}.", true);
+                    }
+                    // Once the host lookup/start call finishes, the coordinator
+                    // supplies live scan/cleanup status. A late attempt cannot
+                    // overwrite Stop or a newer discovery attempt.
+                    switch2BluetoothDiscoveryStartupState.TryComplete(exactStartingStatus,
+                        Switch2BluetoothDiscoveryState.Stopped);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                switch2BluetoothDiscoveryStartupState.TryComplete(exactStartingStatus,
+                    Switch2BluetoothDiscoveryState.Stopped);
+            }
+            catch (Exception exception)
+            {
+                switch2BluetoothDiscoveryStartupState.TryComplete(exactStartingStatus,
+                    Switch2BluetoothDiscoveryState.StartFailed);
+                StartupDiag($"Switch 2 Bluetooth discovery startup failed: {exception.GetType().Name}");
+                LogDebug("Switch 2 Bluetooth discovery could not start.", true);
+            }
+        }
+
+        private void OnSwitch2RuntimeAttached(
+            InputControllerSlotToken token)
+        {
+            if (!token.IsValid || token.Registration.Device is not
+                    Switch2RuntimeInputDevice device ||
+                !ReferenceEquals(DS4Controllers[token.Slot], device))
+            {
+                return;
+            }
+
+            using (ReadLocker locker = new ReadLocker(
+                       slotManager.CollectionLocker))
+            {
+                activeControllers = slotManager.ControllerColl.Count;
+            }
+            HotplugController?.Invoke(this, device, token.Slot);
+        }
+
+        private void OnSwitch2RuntimeRemoved(InputControllerSlotToken token)
+        {
+            if (!token.IsValid || token.Registration.Device is not
+                    Switch2RuntimeInputDevice device)
+            {
+                return;
+            }
+            // Do not raise the legacy DS4Device.Removal event: its subscribers
+            // own the HID teardown path. This is a completed typed retirement,
+            // identified by the old object even if the slot is already reused.
+            Dispatcher dispatcher = eventDispatcher;
+            if (dispatcher == null || dispatcher.HasShutdownStarted ||
+                dispatcher.HasShutdownFinished) return;
+            dispatcher.BeginInvoke(new Action(() =>
+            {
+                using (ReadLocker locker = new ReadLocker(slotManager.CollectionLocker))
+                {
+                    activeControllers = slotManager.ControllerColl.Count;
+                }
+                RemovedController?.Invoke(this, device, token.Slot);
+            }));
+        }
+
+        internal Switch2BluetoothDiscoveryStatus GetSwitch2BluetoothDiscoveryStatus()
+        {
+            if (!Volatile.Read(ref running))
+                return Switch2BluetoothDiscoveryStatus.Stopped;
+            Switch2BluetoothDiscoveryStatus startup =
+                switch2BluetoothDiscoveryStartupState.Snapshot;
+            return startup.State == Switch2BluetoothDiscoveryState.Stopped ?
+                switch2BluetoothProductionCoordinator.GetDiscoveryStatus() : startup;
+        }
+
+        internal Switch2BluetoothAssociationCandidate[]
+            GetSwitch2BluetoothAssociationCandidates() =>
+            switch2BluetoothProductionCoordinator.GetAssociationCandidates();
+
+        internal ValueTask<Switch2BluetoothWindowsAssociationResult>
+            AssociateSwitch2BluetoothAsync(int candidateId,
+                CancellationToken cancellationToken = default) =>
+            switch2BluetoothProductionCoordinator.AssociateAsync(candidateId,
+                cancellationToken);
+
+        internal Switch2JoyConPairCandidate[]
+            GetSwitch2JoyConPairCandidates() =>
+            switch2BluetoothProductionCoordinator.GetJoyConPairCandidates();
+
+        internal ValueTask<Switch2JoyConPairActivationResult>
+            CreateAndActivateSwitch2JoyConPairAsync(int leftCandidateId,
+                int rightCandidateId,
+                CancellationToken cancellationToken = default) =>
+            switch2BluetoothProductionCoordinator.
+                CreateAndActivateJoyConPairAsync(leftCandidateId,
+                    rightCandidateId, cancellationToken);
+
+        internal ValueTask<Switch2JoyConStandaloneActivationResult>
+            ActivateSwitch2JoyConSeparatelyAsync(int candidateId,
+                CancellationToken cancellationToken = default) =>
+            switch2BluetoothProductionCoordinator.
+                ActivateJoyConSeparatelyAsync(candidateId,
+                    cancellationToken);
+
+        internal ValueTask<int> ReconcileAutomaticSwitch2JoyConPairsAsync(
+            CancellationToken cancellationToken = default) =>
+            switch2BluetoothProductionCoordinator.
+                ReconcileAutomaticJoyConPairsAsync(cancellationToken);
 
         private bool StartCore(bool showlog)
         {
@@ -2165,6 +2614,26 @@ namespace DS4Windows
                     StartupDiag("UDP change-status start end");
                 }
 
+                if (!legacyHidSlotAuthority.TryOpenNext(
+                        out ulong inputServiceGeneration,
+                        out ControlServiceLegacyHidSlotFailure slotFailure,
+                        out InputControllerSlotTableFailure tableFailure))
+                {
+                    throw new InvalidOperationException(
+                        $"Input slot authority could not open: {slotFailure}/{tableFailure}.");
+                }
+                StartupDiag($"Input slot authority opened generation={inputServiceGeneration}");
+                if (!switch2RuntimeRegistrationService.TryAdoptOpen(
+                        inputServiceGeneration,
+                        out Switch2RuntimeRegistrationTransactionFailure
+                            switch2OpenFailure))
+                {
+                    legacyHidSlotAuthority.TryClose(out _, out _, out _);
+                    throw new InvalidOperationException(
+                        $"Switch 2 input registration could not adopt the shared generation: {switch2OpenFailure.Kind}/{switch2OpenFailure.TableFailure}.");
+                }
+                StartupDiag($"Switch 2 input registration adopted shared generation={inputServiceGeneration}");
+
                 try
                 {
                     loopControllers = true;
@@ -2200,6 +2669,9 @@ namespace DS4Windows
                         devEnum.MoveNext() && loopControllers; i++)
                     {
                         DS4Device device = devEnum.Current;
+                        while (i < CURRENT_DS4_CONTROLLER_LIMIT &&
+                            !inputSlotAdmission.TryClaimLegacySlot(i, device)) i++;
+                        if (i >= CURRENT_DS4_CONTROLLER_LIMIT) break;
                         StartupDiag($"Prepare controller loop index={i} type={device.DeviceType} display={device.DisplayName} mac={device.MacAddress} conn={device.ConnectionType} synced={device.isSynced()} primary={device.PrimaryDevice}");
 
                         StartupDiag($"BeginPrepareConnectedInputController begin index={i}");
@@ -2226,11 +2698,11 @@ namespace DS4Windows
                                     InputDevices.JoyConDevice parentJoy = tempPrimaryJoyDev;
                                     tempPrimaryJoyDev.Removal += (sender, args) =>
                                     {
-                                        currentJoyDev.JointDevice = null;
+                                        currentJoyDev.TryDetachJointDevice(parentJoy);
                                     };
                                     currentJoyDev.Removal += (sender, args) =>
                                     {
-                                        parentJoy.JointDevice = null;
+                                        parentJoy.TryDetachJointDevice(currentJoyDev);
                                     };
 
                                     tempPrimaryJoyDev = null;
@@ -2238,10 +2710,9 @@ namespace DS4Windows
                             }
                         }
 
-                        DS4Controllers[i] = device;
-                        device.DeviceSlotNumber = i;
                         StartupDiag($"PrepareConnectedInputControllerSettingEvents begin index={i}");
-                        PrepareConnectedInputControllerSettingEvents(numControllers, device, index: i);
+                        PrepareConnectedInputControllerAtSlot(numControllers,
+                            device, index: i);
                         StartupDiag($"PrepareConnectedInputControllerSettingEvents end index={i}");
 
                         if (i >= CURRENT_DS4_CONTROLLER_LIMIT) // out of Xinput devices!
@@ -2258,6 +2729,13 @@ namespace DS4Windows
                 StartupDiag("ControlService.Start setting running=true");
                 running = true;
                 StartGameBarStateTimer();
+                if (!switch2ProUsbProductionCoordinator.TryStart(
+                        inputServiceGeneration))
+                {
+                    LogDebug(
+                        "Switch 2 Pro USB discovery could not start.", true);
+                }
+                BeginSwitch2BluetoothDiscovery(inputServiceGeneration);
 
                 if (_udpServer != null)
                 {
@@ -2297,15 +2775,58 @@ namespace DS4Windows
 
         private void PrepareDevUDPMotion(DS4Device device, int index)
         {
-            int tempIdx = index;
-            DS4Device.ReportHandler<EventArgs> tempEvnt = (sender, args) =>
+            DS4Device.ReportHandler<EventArgs> motionHandler =
+                CreateDevUDPMotionHandler(index, device);
+
+            if (legacyHidSlotAuthority.TryGetExactBinding(index, device,
+                    out ControlServiceLegacyHidSlotBinding binding))
             {
+                DS4Device.ReportHandler<EventArgs> admittedHandler =
+                    (sender, args) =>
+                    {
+                        if (!legacyHidSlotAuthority.TryAcquireReport(binding,
+                                sender, out InputControllerReportLease lease,
+                                out _))
+                        {
+                            return;
+                        }
+                        using (lease)
+                        {
+                            motionHandler(sender, args);
+                        }
+                    };
+                if (!legacyHidSlotAuthority.TryReplaceMotionHandler(binding,
+                        admittedHandler, subscribe: true, out var failure))
+                {
+                    throw new InvalidOperationException(
+                        $"Exact UDP motion hook failed: {failure}.");
+                }
+                return;
+            }
+
+            device.MotionEvent = motionHandler;
+            device.Report += motionHandler;
+        }
+
+        private DS4Device.ReportHandler<EventArgs>
+            CreateDevUDPMotionHandler(int index, DS4Device sourceDevice)
+        {
+            int tempIdx = index;
+            // UDP filtering/yaw policy is an observation consumer, not a
+            // producer of mapper motion. Keep its mutable scratch independent
+            // of both CurrentState.Motion and the mapper's TempState buffer.
+            var udpObservation = new DS4StateOwnedSnapshot();
+            return (sender, args) =>
+            {
+                if (!ReferenceEquals(sender, sourceDevice) ||
+                    !ReferenceEquals(DS4Controllers[tempIdx], sourceDevice))
+                    return;
                 DualShockPadMeta padDetail = new DualShockPadMeta();
                 GetPadDetailForIdx(tempIdx, ref padDetail);
-                DS4State stateForUdp = TempState[tempIdx];
+                udpObservation.Capture(CurrentState[tempIdx]);
+                DS4State stateForUdp = udpObservation.State;
 
-                CurrentState[tempIdx].CopyTo(stateForUdp);
-                if (Global.IsUsingUDPServerSmoothing())
+                if (Global.IsUsingUDPServerSmoothing() && stateForUdp.Motion != null)
                 {
                     if (stateForUdp.elapsedTime == 0)
                     {
@@ -2325,11 +2846,59 @@ namespace DS4Windows
                     stateForUdp.Motion.angVelRoll = gyroFilter.axis3Filter.Filter(stateForUdp.Motion.angVelRoll, rate);
                 }
 
+                if (sourceDevice is Switch2RuntimeInputDevice &&
+                    stateForUdp.Motion != null)
+                {
+                    stateForUdp.Motion.angVelYaw =
+                        Switch2CemuhookYawPolicy.ApplyYaw(
+                            stateForUdp.Motion.angVelYaw,
+                            Global.Switch2CemuhookYawSensitivity[tempIdx]);
+                }
+
                 _udpServer?.NewReportIncoming(ref padDetail, stateForUdp, udpOutBuffers[tempIdx]);
             };
+        }
 
-            device.MotionEvent = tempEvnt;
-            device.Report += tempEvnt;
+        private void RemoveDevUDPMotion(DS4Device device)
+        {
+            int slot = device?.DeviceSlotNumber ?? -1;
+            if (legacyHidSlotAuthority.TryGetExactBinding(slot, device,
+                    out ControlServiceLegacyHidSlotBinding binding))
+            {
+                legacyHidSlotAuthority.TryReplaceMotionHandler(binding, null,
+                    subscribe: false, out _);
+                return;
+            }
+            if (device?.MotionEvent != null)
+            {
+                device.Report -= device.MotionEvent;
+                device.MotionEvent = null;
+            }
+        }
+
+        private void SetDevUDPMotionSubscription(DS4Device device,
+            bool subscribe)
+        {
+            int slot = device?.DeviceSlotNumber ?? -1;
+            if (legacyHidSlotAuthority.TryGetExactBinding(slot, device,
+                    out ControlServiceLegacyHidSlotBinding binding))
+            {
+                legacyHidSlotAuthority.TrySetMotionSubscription(binding,
+                    subscribe, out _);
+                return;
+            }
+            if (device?.MotionEvent == null)
+            {
+                return;
+            }
+            if (subscribe)
+            {
+                device.Report += device.MotionEvent;
+            }
+            else
+            {
+                device.Report -= device.MotionEvent;
+            }
         }
 
         private void CheckQuickCharge(object sender, EventArgs e)
@@ -2358,6 +2927,7 @@ namespace DS4Windows
 
         public bool Stop(bool showlog = true, bool immediateUnplug = false)
         {
+            if (ControlServiceMouseCallbackSubscription.IsInsideCallback) return false;
             lock (serviceLifecycleLock)
             {
                 return StopCore(showlog, immediateUnplug);
@@ -2371,37 +2941,139 @@ namespace DS4Windows
             // Ensure prevents work that entered before running became false
             // from mutating HidHide after service-wide cleanup starts.
             hidHideManagedDevices.CloseLifecycle();
-            if (running)
+            bool resumingExactTypedStop = !running &&
+                exactTypedStopRetryPending;
+            if (running || resumingExactTypedStop)
             {
-                if (OpenRGBServer.Instance.IsRunning)
+                if (!resumingExactTypedStop)
                 {
-                    StartupDiag("ControlService.Stop OpenRGB stop begin");
-                    OpenRGBServer.Instance.Stop();
-                    StartupDiag("ControlService.Stop OpenRGB stop end");
+                    bool switch2UsbStopped =
+                        switch2ProUsbProductionCoordinator.StopAsync().
+                            AsTask().GetAwaiter().GetResult();
+                    if (!switch2UsbStopped)
+                    {
+                        StartupDiag("ControlService.Stop Switch 2 Pro USB " +
+                            "runtime did not quiesce");
+                        hidHideManagedDevices.OpenLifecycle();
+                        return false;
+                    }
+                    switch2BluetoothDiscoveryStartupState.Set(Switch2BluetoothDiscoveryState.Stopping);
+                    switch2BluetoothStartupCancellation?.Cancel();
+                    bool switch2DiscoveryStopped =
+                        switch2BluetoothProductionCoordinator.StopAsync().
+                            AsTask().GetAwaiter().GetResult();
+                    switch2BluetoothStartupCancellation?.Dispose();
+                    switch2BluetoothStartupCancellation = null;
+                    // A false bounded Stop can still be draining. Hand status
+                    // back to the exact coordinator task instead of freezing a
+                    // timeout as a permanent failure in the Settings UI.
+                    switch2BluetoothDiscoveryStartupState.Set(Switch2BluetoothDiscoveryState.Stopped);
+                    if (!switch2DiscoveryStopped)
+                    {
+                        StartupDiag("ControlService.Stop Switch 2 Bluetooth discovery did not quiesce");
+                        hidHideManagedDevices.OpenLifecycle();
+                        return false;
+                    }
+
+                    ulong inputServiceGeneration =
+                        legacyHidSlotAuthority.CurrentServiceGeneration;
+                    InputControllerSlotSnapshot[] inputSnapshots =
+                        Array.Empty<InputControllerSlotSnapshot>();
+                    if (inputServiceGeneration != 0 &&
+                        !legacyHidSlotAuthority.TryClose(
+                            out inputSnapshots,
+                            out ControlServiceLegacyHidSlotFailure closeFailure,
+                            out InputControllerSlotTableFailure tableFailure))
+                    {
+                        StartupDiag($"ControlService.Stop input slot close rejected: {closeFailure}/{tableFailure}");
+                        hidHideManagedDevices.OpenLifecycle();
+                        return false;
+                    }
+                    if (inputServiceGeneration != 0)
+                    {
+                        if (!switch2RuntimeRegistrationService.
+                                TryObserveExternalTableClose(
+                                    inputServiceGeneration, inputSnapshots,
+                                    out Switch2RuntimeRegistrationTransactionFailure
+                                        switch2ObserveFailure))
+                        {
+                            throw new InvalidOperationException(
+                                $"Switch 2 input registration rejected the shared close snapshot: {switch2ObserveFailure.Kind}/{switch2ObserveFailure.TableFailure}.");
+                        }
+                        inputRegistrationCloseGeneration =
+                            inputServiceGeneration;
+                    }
+                    if (OpenRGBServer.Instance.IsRunning)
+                    {
+                        StartupDiag("ControlService.Stop OpenRGB stop begin");
+                        OpenRGBServer.Instance.Stop();
+                        StartupDiag("ControlService.Stop OpenRGB stop end");
+                    }
+
+                    running = false;
+                    reportDiagnosticsWorker.Pause();
+                    runHotPlug = false;
+                    inServiceTask = true;
+                    StopGameBarStateTimer();
+                    StopAllGameBarCompatibilityOutputs();
+                    StartupDiag("ControlService.Stop PreServiceStop begin");
+                    PreServiceStop?.Invoke(this, EventArgs.Empty);
+                    StartupDiag("ControlService.Stop PreServiceStop end");
+
+                    if (showlog)
+                        LogDebug(DS4WinWPF.Properties.Resources.StoppingX360);
+
+                    LogDebug("Closing VIIPER virtual-controller connections");
+                }
+                else
+                {
+                    inServiceTask = true;
+                    StartupDiag("ControlService.Stop resuming exact typed legacy retirement without replaying stop preamble");
                 }
 
-                running = false;
-                reportDiagnosticsWorker.Pause();
-                runHotPlug = false;
-                inServiceTask = true;
-                StopGameBarStateTimer();
-                StopAllGameBarCompatibilityOutputs();
-                StartupDiag("ControlService.Stop PreServiceStop begin");
-                PreServiceStop?.Invoke(this, EventArgs.Empty);
-                StartupDiag("ControlService.Stop PreServiceStop end");
-
-                if (showlog)
-                    LogDebug(DS4WinWPF.Properties.Resources.StoppingX360);
-
-                LogDebug("Closing VIIPER virtual-controller connections");
+                if (inputRegistrationCloseGeneration != 0)
+                {
+                    if (!switch2RuntimeRegistrationService.TryClose(
+                            inputRegistrationCloseGeneration, 5_000,
+                            out Switch2RuntimeRegistrationTransactionFailure
+                                switch2CloseFailure))
+                    {
+                        StartupDiag($"ControlService.Stop Switch 2 registration close requires retry: {switch2CloseFailure.Kind}/{switch2CloseFailure.TableFailure}");
+                        exactTypedStopRetryPending = true;
+                        inServiceTask = false;
+                        return false;
+                    }
+                    inputRegistrationCloseGeneration = 0;
+                }
 
                 bool anyUnplugged = false;
+                bool typedLegacyStopFailed = false;
                 for (int i = 0, arlength = DS4Controllers.Length; i < arlength; i++)
                 {
                     DS4Device tempDevice = DS4Controllers[i];
                     if (tempDevice != null)
                     {
                         StartupDiag($"ControlService.Stop controller loop index={i} display={tempDevice.DisplayName} mac={tempDevice.MacAddress} conn={tempDevice.ConnectionType} charging={tempDevice.isCharging()}");
+                        if (!TryRetireMouseCallbacks(i, tempDevice))
+                        {
+                            typedLegacyStopFailed = true;
+                            break;
+                        }
+                        if (legacyHidSlotAuthority.TryGetExactBinding(i,
+                                tempDevice,
+                                out ControlServiceLegacyHidSlotBinding
+                                    typedBinding))
+                        {
+                            bool hadOutput = outputDevices[i] != null;
+                            if (!RetireTypedLegacyControllerForServiceStop(
+                                    typedBinding, immediateUnplug))
+                            {
+                                typedLegacyStopFailed = true;
+                                break;
+                            }
+                            anyUnplugged |= hadOutput;
+                            continue;
+                        }
                         if ((DCBTatStop && !tempDevice.isCharging()) || suspending)
                         {
                             if (tempDevice.getConnectionType() == ConnectionType.BT)
@@ -2450,13 +3122,22 @@ namespace DS4Windows
                         //useDInputOnly[i] = true;
                         //Global.activeOutDevType[i] = OutContType.None;
                         useDInputOnly[i] = true;
-                        DS4Controllers[i] = null;
                         oscState[i] = new DS4State();
                         touchPad[i] = null;
                         lag[i] = false;
                         inWarnMonitor[i] = false;
+                        inputSlotAdmission.TryReleaseLegacySlot(i, tempDevice);
                     }
                 }
+
+                if (typedLegacyStopFailed)
+                {
+                    StartupDiag("ControlService.Stop fail-closed because exact typed legacy retirement was not proven");
+                    exactTypedStopRetryPending = true;
+                    inServiceTask = false;
+                    return false;
+                }
+                exactTypedStopRetryPending = false;
 
                 if (showlog)
                     LogDebug(DS4WinWPF.Properties.Resources.StoppingDS4);
@@ -2544,6 +3225,15 @@ namespace DS4Windows
 
         public bool HotPlug()
         {
+            if (ControlServiceMouseCallbackSubscription.IsInsideCallback) return false;
+            lock (serviceLifecycleLock)
+            {
+                return HotPlugCore();
+            }
+        }
+
+        private bool HotPlugCore()
+        {
             if (running)
             {
                 inServiceTask = true;
@@ -2601,7 +3291,7 @@ namespace DS4Windows
                     for (int Index = 0, arlength = DS4Controllers.Length;
                         Index < arlength && Index < CURRENT_DS4_CONTROLLER_LIMIT; Index++)
                     {
-                        if (DS4Controllers[Index] == null)
+                        if (inputSlotAdmission.TryClaimLegacySlot(Index, device))
                         {
                             BeginPrepareConnectedInputController(device);
 
@@ -2622,11 +3312,11 @@ namespace DS4Windows
                                         InputDevices.JoyConDevice secondaryJoy = tempSecondaryJoyDev;
                                         secondaryJoy.Removal += (sender, args) =>
                                         {
-                                            currentJoyDev.JointDevice = null;
+                                            currentJoyDev.TryDetachJointDevice(secondaryJoy);
                                         };
                                         currentJoyDev.Removal += (sender, args) =>
                                         {
-                                            secondaryJoy.JointDevice = null;
+                                            secondaryJoy.TryDetachJointDevice(currentJoyDev);
                                         };
 
                                         tempSecondaryJoyDev = null;
@@ -2644,11 +3334,11 @@ namespace DS4Windows
                                         InputDevices.JoyConDevice parentJoy = tempPrimaryJoyDev;
                                         tempPrimaryJoyDev.Removal += (sender, args) =>
                                         {
-                                            currentJoyDev.JointDevice = null;
+                                            currentJoyDev.TryDetachJointDevice(parentJoy);
                                         };
                                         currentJoyDev.Removal += (sender, args) =>
                                         {
-                                            parentJoy.JointDevice = null;
+                                            parentJoy.TryDetachJointDevice(currentJoyDev);
                                         };
 
                                         tempPrimaryJoyDev = null;
@@ -2656,9 +3346,8 @@ namespace DS4Windows
                                 }
                             }
 
-                            DS4Controllers[Index] = device;
-                            device.DeviceSlotNumber = Index;
-                            PrepareConnectedInputControllerSettingEvents(numControllers, device, Index);
+                            PrepareConnectedInputControllerAtSlot(
+                                numControllers, device, Index);
 
                             HotplugController?.Invoke(this, device, Index);
                             break;
@@ -2672,9 +3361,176 @@ namespace DS4Windows
             return true;
         }
 
-        private void PrepareConnectedInputControllerSettingEvents(int numControllers, DS4Device device, int index)
+        private void PrepareConnectedInputControllerAtSlot(int numControllers,
+            DS4Device device, int index)
+        {
+            if (device.WorkerLifecycleSupport !=
+                DS4DeviceWorkerLifecycleSupport.SupportedLegacyHid)
+            {
+                device.DeviceSlotNumber = index;
+                PrepareConnectedInputControllerSettingEvents(numControllers,
+                    device, index);
+                return;
+            }
+
+            bool hasPersistentIdentity = device.AllowsPersistentIdentity &&
+                device.isValidSerial();
+            if (!legacyHidSlotAuthority.TryBindExactSlot(index, device,
+                    hasPersistentIdentity,
+                    out ControlServiceLegacyHidSlotBinding binding,
+                    out ControlServiceLegacyHidSlotFailure slotFailure,
+                    out InputControllerSlotTableFailure tableFailure))
+            {
+                throw new InvalidOperationException(
+                    $"Typed legacy slot bind failed at {index}: {slotFailure}/{tableFailure}.");
+            }
+
+            device.DeviceSlotNumber = index;
+            try
+            {
+                PrepareTypedLegacyInputControllerSettingEvents(numControllers,
+                    binding);
+            }
+            catch
+            {
+                // Shared profile/output staging still contains legacy hooks
+                // without exact inverse tokens. Any exception after binding is
+                // therefore quarantined; it is never mislabeled as a clean
+                // rollback or made reusable by clearing only the array slot.
+                legacyHidSlotAuthority.TryQuarantinePrepared(binding, out _,
+                    out _);
+                throw;
+            }
+        }
+
+        private void PrepareConnectedInputControllerSettingEvents(
+            int numControllers, DS4Device device, int index)
         {
             StartupDiag($"Controller prep begin index={index} numControllers={numControllers} display={device.DisplayName} mac={device.MacAddress} type={device.DeviceType}");
+            PrepareConnectedInputControllerSettingsBeforeLifecycle(
+                numControllers, device, index);
+
+            ReportDiagnosticsWorker.Source diagnosticsSource =
+                reportDiagnosticsWorker.Register(index, device);
+            device.Removal += (sender, e) =>
+            {
+                diagnosticsSource?.Retire();
+                On_DS4Removal(sender, e);
+            };
+            device.Removal += DS4Devices.On_Removal;
+            device.SyncChange += this.On_SyncChange;
+            device.SyncChange += DS4Devices.UpdateSerial;
+            device.SerialChange += this.On_SerialChange;
+            device.ChargingChanged += CheckQuickCharge;
+
+            PrepareConnectedInputControllerProfileMappingOutput(device,
+                index);
+
+            int tempIdx = index;
+            device.Report += (sender, e) =>
+            {
+                this.On_Report(sender, e, tempIdx, diagnosticsSource);
+            };
+            StartupDiag($"Report hook added index={index}");
+
+            if (_udpServer != null && index < UdpServer.NUMBER_SLOTS)
+            {
+                StartupDiag($"PrepareDevUDPMotion begin index={index}");
+                PrepareDevUDPMotion(device, tempIdx);
+                StartupDiag($"PrepareDevUDPMotion end index={index}");
+            }
+
+            StartupDiag($"device.StartUpdate begin index={index}");
+            device.StartUpdate();
+            QueueSteamInputReclaim(device);
+            StartupDiag($"device.StartUpdate end index={index}");
+            StartupDiag($"Controller prep end index={index}");
+        }
+
+        private void PrepareTypedLegacyInputControllerSettingEvents(
+            int numControllers, ControlServiceLegacyHidSlotBinding binding)
+        {
+            DS4Device device = binding.Device;
+            int index = binding.Slot;
+            StartupDiag($"Typed controller prep begin index={index} generation={binding.ConnectionGeneration} display={device.DisplayName}");
+            PrepareConnectedInputControllerSettingsBeforeLifecycle(
+                numControllers, device, index);
+
+            ReportDiagnosticsWorker.Source diagnosticsSource =
+                reportDiagnosticsWorker.Register(index, device);
+            binding.DiagnosticsSource = diagnosticsSource;
+            EventHandler<EventArgs> removalHandler = (sender, e) =>
+            {
+                if (!ReferenceEquals(sender, binding.Device) ||
+                    !legacyHidSlotAuthority.TryClaimRemovalQueue(binding))
+                {
+                    return;
+                }
+                diagnosticsSource?.Retire();
+                Task.Run(() => RetireTypedLegacyController(binding));
+            };
+            EventHandler<EventArgs> syncHandler = this.On_SyncChange;
+            EventHandler<EventArgs> registrySyncHandler =
+                DS4Devices.UpdateSerial;
+            EventHandler<EventArgs> serialHandler = this.On_SerialChange;
+            EventHandler chargingHandler = CheckQuickCharge;
+            if (!legacyHidSlotAuthority.TrySubscribeLegacyLifecycle(binding,
+                    removalHandler, syncHandler, registrySyncHandler,
+                    serialHandler, chargingHandler,
+                    out ControlServiceLegacyHidSlotFailure lifecycleFailure))
+            {
+                throw new InvalidOperationException(
+                    $"Typed legacy lifecycle hooks failed: {lifecycleFailure}.");
+            }
+
+            PrepareConnectedInputControllerProfileMappingOutput(device,
+                index);
+
+            DS4Device.ReportHandler<EventArgs> reportHandler = (sender, e) =>
+            {
+                if (!legacyHidSlotAuthority.TryAcquireReport(binding, sender,
+                        out InputControllerReportLease lease, out _))
+                {
+                    return;
+                }
+                using (lease)
+                {
+                    On_Report(sender, e, index, diagnosticsSource);
+                }
+            };
+            if (!legacyHidSlotAuthority.TrySubscribeReport(binding,
+                    reportHandler, out ControlServiceLegacyHidSlotFailure
+                        reportFailure))
+            {
+                throw new InvalidOperationException(
+                    $"Typed legacy report hook failed: {reportFailure}.");
+            }
+            StartupDiag($"Typed report hook added index={index}");
+
+            if (_udpServer != null && index < UdpServer.NUMBER_SLOTS)
+            {
+                StartupDiag($"PrepareDevUDPMotion begin index={index}");
+                PrepareDevUDPMotion(device, index);
+                StartupDiag($"PrepareDevUDPMotion end index={index}");
+            }
+
+            StartupDiag($"typed device.StartUpdate begin index={index}");
+            if (!legacyHidSlotAuthority.TryStartAndActivate(binding,
+                    out ControlServiceLegacyHidSlotFailure startFailure,
+                    out InputControllerSlotTableFailure tableFailure,
+                    out DS4DeviceWorkerLifecycleResult workerResult))
+            {
+                throw new InvalidOperationException(
+                    $"Typed legacy worker start failed: {startFailure}/{tableFailure}/{workerResult.FailureKind}.");
+            }
+            QueueSteamInputReclaim(device);
+            StartupDiag($"typed device.StartUpdate end index={index}");
+            StartupDiag($"Typed controller prep end index={index}");
+        }
+
+        private void PrepareConnectedInputControllerSettingsBeforeLifecycle(
+            int numControllers, DS4Device device, int index)
+        {
             StartupDiag($"RefreshExtrasButtons begin index={index}");
             Global.RefreshExtrasButtons(index, GetKnownExtraButtons(device));
             StartupDiag($"RefreshExtrasButtons end index={index}");
@@ -2693,15 +3549,25 @@ namespace DS4Windows
             {
                 oscSender.Send(new OscMessage("/ds4windows/monitor/" + index + "/plug", 1));
             }
-            device.Removal += this.On_DS4Removal;
-            device.Removal += DS4Devices.On_Removal;
-            device.SyncChange += this.On_SyncChange;
-            device.SyncChange += DS4Devices.UpdateSerial;
-            device.SerialChange += this.On_SerialChange;
-            device.ChargingChanged += CheckQuickCharge;
+        }
 
+        private void PrepareConnectedInputControllerProfileMappingOutput(
+            DS4Device device, int index)
+        {
             StartupDiag($"TouchPad create begin index={index}");
-            touchPad[index] = new Mouse(index, device);
+            if (ControlServiceMouseCallbackSubscription.IsInsideCallback)
+                throw new InvalidOperationException("Mouse callback replacement requires a cold lifecycle boundary.");
+            lock (serviceLifecycleLock)
+            {
+                Mouse previousMouse = touchPad[index];
+                if (!mouseCallbackRegistry.TryRetireMouse(index, previousMouse,
+                        MouseCallbackRetirementTimeoutMilliseconds))
+                {
+                    WarnMouseCallbackRetirement(index);
+                    throw new InvalidOperationException("The previous Mouse callback lifetime has not drained.");
+                }
+                touchPad[index] = new Mouse(index, device);
+            }
             StartupDiag($"TouchPad create end index={index}");
             bool profileLoaded = false;
             bool useAutoProfile = useTempProfile[index];
@@ -2732,6 +3598,7 @@ namespace DS4Windows
             {
                 device.LightBarColor = getMainColor(index);
 
+                int outputPeerSlot = device.JointDeviceSlotNumber;
                 if (!getDInputOnly(index) && device.isSynced())
                 {
                     if (device.PrimaryDevice)
@@ -2740,9 +3607,9 @@ namespace DS4Windows
                         PluginOutDev(index, device);
                         StartupDiag($"PluginOutDev end index={index} useDInputOnly={useDInputOnly[index]} activeOut={activeOutDevType[index]} outDev={outputDevices[index]?.GetDeviceType() ?? "null"}");
                     }
-                    else if (device.JointDeviceSlotNumber != DS4Device.DEFAULT_JOINT_SLOT_NUMBER)
+                    else if ((uint)outputPeerSlot < (uint)outputDevices.Length)
                     {
-                        int otherIdx = device.JointDeviceSlotNumber;
+                        int otherIdx = outputPeerSlot;
                         OutputDevice tempOutDev = outputDevices[otherIdx];
                         if (tempOutDev != null)
                         {
@@ -2758,15 +3625,16 @@ namespace DS4Windows
                     Global.activeOutDevType[index] = OutContType.None;
                 }
 
+                int gyroPeerSlot = device.JointDeviceSlotNumber;
                 if (device.PrimaryDevice && device.OutputMapGyro)
                 {
                     StartupDiag($"TouchPadOn begin index={index}");
                     TouchPadOn(index, device);
                     StartupDiag($"TouchPadOn end index={index}");
                 }
-                else if (device.JointDeviceSlotNumber != DS4Device.DEFAULT_JOINT_SLOT_NUMBER)
+                else if ((uint)gyroPeerSlot < (uint)DS4Controllers.Length)
                 {
-                    int otherIdx = device.JointDeviceSlotNumber;
+                    int otherIdx = gyroPeerSlot;
                     DS4Device tempDev = DS4Controllers[otherIdx];
                     if (tempDev != null)
                     {
@@ -2790,26 +3658,6 @@ namespace DS4Windows
             {
                 StartupDiag($"Controller prep profile not loaded index={index} profile=\"{ProfilePath[index]}\"");
             }
-
-            int tempIdx = index;
-            device.Report += (sender, e) =>
-            {
-                this.On_Report(sender, e, tempIdx);
-            };
-            StartupDiag($"Report hook added index={index}");
-
-            if (_udpServer != null && index < UdpServer.NUMBER_SLOTS)
-            {
-                StartupDiag($"PrepareDevUDPMotion begin index={index}");
-                PrepareDevUDPMotion(device, tempIdx);
-                StartupDiag($"PrepareDevUDPMotion end index={index}");
-            }
-
-            StartupDiag($"device.StartUpdate begin index={index}");
-            device.StartUpdate();
-            QueueSteamInputReclaim(device);
-            StartupDiag($"device.StartUpdate end index={index}");
-            StartupDiag($"Controller prep end index={index}");
         }
 
         private void BeginPrepareConnectedInputController(DS4Device device, bool showlog = false)
@@ -2999,7 +3847,17 @@ namespace DS4Windows
             OutContType playStationFeatureOutputType =
                 playStationFeatureOutput?.OutputType ?? OutContType.None;
 
-            device.ModifyFeatureSetFlag(VidPidFeatureSet.NoOutputData, !getEnableOutputDataToDS4(ind));
+            if (device.DeviceType == InputDevices.InputDeviceType.DS4)
+                device.ConfigureDualShock4ProfileOutput(getEnableOutputDataToDS4(ind));
+            else
+                device.ModifyFeatureSetFlag(VidPidFeatureSet.NoOutputData, !getEnableOutputDataToDS4(ind));
+            if (device is Switch2RuntimeInputDevice)
+            {
+                (outputDevices[ind] as ViiperOutDevice)?.
+                    QueueSwitch2DualSenseConversionPolicyRefresh(ind);
+            }
+            (outputDevices[ind] as ViiperOutDevice)?.
+                QueueXboxFeedbackPolicyRefresh(ind);
             if (!getEnableOutputDataToDS4(ind))
                 LogDebug("Output data to DS4 disabled. Lightbar and rumble events are not written to DS4 gamepad. If the gamepad is connected over BT then IdleDisconnect option is recommended to let DS4Windows to close the connection after long period of idling.");
 
@@ -3486,21 +4344,42 @@ namespace DS4Windows
 
         public void TouchPadOn(int ind, DS4Device device)
         {
-            Mouse tPad = touchPad[ind];
-            //ITouchpadBehaviour tPad = touchPad[ind];
-            device.Touchpad.TouchButtonDown += tPad.touchButtonDown;
-            device.Touchpad.TouchButtonUp += tPad.touchButtonUp;
-            device.Touchpad.TouchesBegan += tPad.touchesBegan;
-            device.Touchpad.TouchesBegan += tPad.TouchStartedOrEnded;
-            device.Touchpad.TouchesMoved += tPad.touchesMoved;
-            device.Touchpad.TouchesEnded += tPad.touchesEnded;
-            device.Touchpad.TouchesEnded += tPad.TouchStartedOrEnded;
-            device.Touchpad.TouchUnchanged += tPad.touchUnchanged;
-            //device.Touchpad.PreTouchProcess += delegate { touchPad[ind].populatePriorButtonStates(); };
-            device.Touchpad.PreTouchProcess += (sender, args) => { touchPad[ind].populatePriorButtonStates(); };
-            device.SixAxis.SixAccelMoved += tPad.sixaxisMoved;
-            //LogDebug("Touchpad mode for " + device.MacAddress + " is now " + tmode.ToString());
-            //Log.LogToTray("Touchpad mode for " + device.MacAddress + " is now " + tmode.ToString());
+            if (ControlServiceMouseCallbackSubscription.IsInsideCallback)
+                throw new InvalidOperationException("Mouse callback replacement requires a cold lifecycle boundary.");
+            lock (serviceLifecycleLock)
+            {
+                Mouse tPad = touchPad[ind];
+                if (tPad == null || !ReferenceEquals(DS4Controllers[ind], tPad.BoundDevice) ||
+                    tPad.BoundDevice.IsRemoving || device.IsRemoving ||
+                    (uint)device.DeviceSlotNumber >= (uint)DS4Controllers.Length ||
+                    !ReferenceEquals(DS4Controllers[device.DeviceSlotNumber], device))
+                    throw new InvalidOperationException("Mouse callback source or logical owner is no longer current.");
+                if (!mouseCallbackRegistry.TryReplace(ind, tPad, device,
+                        MouseCallbackRetirementTimeoutMilliseconds))
+                {
+                    WarnMouseCallbackRetirement(ind);
+                    throw new InvalidOperationException("The previous Mouse callback lifetime has not drained.");
+                }
+                Interlocked.Exchange(ref mouseCallbackRetirementWarning[ind], 0);
+            }
+        }
+
+        private bool TryRetireMouseCallbacks(int index, DS4Device source)
+        {
+            if (!mouseCallbackRegistry.TryRetireSource(source,
+                    MouseCallbackRetirementTimeoutMilliseconds))
+            {
+                WarnMouseCallbackRetirement(index);
+                return false;
+            }
+            Interlocked.Exchange(ref mouseCallbackRetirementWarning[index], 0);
+            return true;
+        }
+
+        private void WarnMouseCallbackRetirement(int index)
+        {
+            if (Interlocked.Exchange(ref mouseCallbackRetirementWarning[index], 1) == 0)
+                LogDebug($"Controller {index + 1} callback retirement has not drained; its exact slot remains unavailable for replacement.", true);
         }
 
         public string GetDS4Battery(int index)
@@ -3589,98 +4468,21 @@ namespace DS4Windows
         protected void On_DS4Removal(object sender, EventArgs e)
         {
             DS4Device device = (DS4Device)sender;
-            int ind = -1;
-            for (int i = 0, arlength = DS4Controllers.Length; ind == -1 && i < arlength; i++)
+            if (ControlServiceMouseCallbackSubscription.IsInsideCallback)
             {
-                if (DS4Controllers[i] != null && device.getMacAddress() == DS4Controllers[i].getMacAddress())
-                    ind = i;
+                TryClaimControllerRemoval(device);
+                mouseCallbackRegistry.RevokeSourceFromCallback(device);
+                return;
             }
-
-            if (ind != -1)
+            lock (serviceLifecycleLock)
             {
-                bool removingStatus = false;
-                lock (device.removeLocker)
+                int ind = FindExactControllerSlot(device);
+                if (ind != -1 && (TryClaimControllerRemoval(device) || device.IsRemoving))
                 {
-                    if (!device.IsRemoving)
-                    {
-                        removingStatus = true;
-                        device.IsRemoving = true;
-                    }
-                }
-
-                if (removingStatus)
-                {
-                    DeactivateGameBarCompatibilityOutput(ind);
-                    CurrentState[ind].Battery = PreviousState[ind].Battery = 0; // Reset for the next connection's initial status change.
-                    if (!useDInputOnly[ind])
-                    {
-                        UnplugOutDev(ind, device);
-                    }
-                    else if (!device.PrimaryDevice)
-                    {
-                        OutputDevice outDev = outputDevices[ind];
-                        if (outDev != null)
-                        {
-                            outDev.RemoveFeedback(ind);
-                            outputDevices[ind] = null;
-                        }
-                    }
-
-                    // Use Task to reset device synth state and commit it
-                    Task.Run(() =>
-                    {
-                        Mapping.Commit(ind);
-                    }).Wait();
-
-                    string removed = DS4WinWPF.Properties.Resources.ControllerWasRemoved.Replace("*Mac address*", (ind + 1).ToString());
-                    if (device.getBattery() <= 20 &&
-                        device.getConnectionType() == ConnectionType.BT && !device.isCharging())
-                    {
-                        removed += ". " + DS4WinWPF.Properties.Resources.ChargeController;
-                    }
-
-                    LogDebug(removed);
-                    AppLogger.LogToTray(removed);
-                    dualSenseAudioPassthrough.Stop(ind);
-                    dualShock4AudioPassthrough.Stop(ind);
-                    dualSenseMicrophonePassthrough.Stop();
-                    audioHapticsService.Stop(ind);
-                    DisconnectPlayStationFeatureOutput(ind);
-                    /*Stopwatch sw = new Stopwatch();
-                    sw.Start();
-                    while (sw.ElapsedMilliseconds < XINPUT_UNPLUG_SETTLE_TIME)
-                    {
-                        // Use SpinWait to keep control of current thread. Using Sleep could potentially
-                        // cause other events to get run out of order
-                        System.Threading.Thread.SpinWait(500);
-                    }
-                    sw.Stop();
-                    */
-
-                    device.IsRemoved = true;
-                    device.Synced = false;
-                    DS4Controllers[ind] = null;
-                    oscState[ind] = new DS4State();
-                    //eventDispatcher.Invoke(() =>
-                    //{
-                    slotManager.RemoveController(device, ind);
-                    if (isUsingOSCSender())
-                    {
-                        oscSender.Send(new SharpOSC.OscMessage("/ds4windows/monitor/" + ind + "/plug", 0));
-                    }
-                    //});
-
-                    touchPad[ind] = null;
-                    lag[ind] = false;
-                    inWarnMonitor[ind] = false;
-                    useDInputOnly[ind] = true;
-                    Global.activeOutDevType[ind] = OutContType.None;
-                    /* Leave up to Auto Profile system to change the following flags? */
-                    //Global.useTempProfile[ind] = false;
-                    //Global.tempprofilename[ind] = string.Empty;
-                    //Global.tempprofileDistance[ind] = false;
-
-                    //Thread.Sleep(XINPUT_UNPLUG_SETTLE_TIME);
+                    if (!TryRetireMouseCallbacks(ind, device)) return;
+                    RetireControllerPresentation(device, ind,
+                        commitNeutralMapping: true);
+                    if (!ClearExactControllerSlot(device, ind)) return;
                 }
             }
 
@@ -3689,6 +4491,275 @@ namespace DS4Windows
             // was live, so release only this connection generation's exact
             // persistent additions after its virtual output has retired.
             ReleaseHidHideManagedDevice(device);
+        }
+
+        private void RetireTypedLegacyController(
+            ControlServiceLegacyHidSlotBinding binding)
+        {
+            binding.DiagnosticsSource?.Retire();
+            DS4Device device = binding.Device;
+            lock (serviceLifecycleLock)
+            {
+                int index = binding.Slot;
+                if (!ReferenceEquals(DS4Controllers[index], device) ||
+                    !legacyHidSlotAuthority.TryGetExactBinding(index, device,
+                        out ControlServiceLegacyHidSlotBinding exact) ||
+                    !ReferenceEquals(exact, binding))
+                {
+                    return;
+                }
+
+                if (!TryClaimControllerRemoval(device) && !device.IsRemoving)
+                {
+                    return;
+                }
+                if (!TryRetireMouseCallbacks(index, device)) return;
+                if (!legacyHidSlotAuthority.TryBeginRetirement(binding,
+                        out ControlServiceLegacyHidSlotFailure beginFailure,
+                        out InputControllerSlotTableFailure tableFailure))
+                {
+                    StartupDiag($"Typed legacy retirement rejected index={index}: {beginFailure}/{tableFailure}");
+                    return;
+                }
+
+                if (!legacyHidSlotAuthority.TryPublishTerminalNeutral(binding,
+                        () =>
+                        {
+                            // Drain admitted profile actions before touching
+                            // their output/profile presentation. Retirement
+                            // has already closed admission for new actions.
+                            RetireControllerPresentation(device, index,
+                                commitNeutralMapping: false, logRemoval: true);
+                            CommitNeutralMapping(index);
+                        },
+                        InputControllerRegistration.
+                            MaximumStopTimeoutMilliseconds,
+                        out ControlServiceLegacyHidSlotFailure neutralFailure,
+                        out tableFailure))
+                {
+                    StartupDiag($"Typed legacy terminal neutral failed index={index}: {neutralFailure}/{tableFailure}");
+                    return;
+                }
+                if (!legacyHidSlotAuthority.TryFinalizeRetirement(binding,
+                        InputControllerRegistration.
+                            MaximumStopTimeoutMilliseconds,
+                        out ControlServiceLegacyHidSlotFailure retireFailure,
+                        out tableFailure))
+                {
+                    StartupDiag($"Typed legacy final retirement failed index={index}: {retireFailure}/{tableFailure}");
+                    return;
+                }
+                if (!ClearExactControllerSlot(device, index)) return;
+            }
+            ReleaseHidHideManagedDevice(device);
+        }
+
+        private bool RetireTypedLegacyControllerForServiceStop(
+            ControlServiceLegacyHidSlotBinding binding,
+            bool immediateUnplug)
+        {
+            binding.DiagnosticsSource?.Retire();
+            DS4Device device = binding.Device;
+            int index = binding.Slot;
+            if (!ReferenceEquals(DS4Controllers[index], device))
+            {
+                StartupDiag($"Typed legacy stop rejected stale slot index={index}");
+                return false;
+            }
+            if (!TryRetireMouseCallbacks(index, device)) return false;
+            if (binding.State ==
+                ControlServiceLegacyHidSlotState.Quarantined)
+            {
+                TryClaimControllerRemoval(device);
+                if (binding.RetirementClaim.IsValid &&
+                    !inputRegistrationTable.TryWaitForDrain(binding.RetirementClaim,
+                        InputControllerRegistration.MaximumStopTimeoutMilliseconds,
+                        out var drainFailure))
+                {
+                    StartupDiag($"Typed legacy quarantined presentation drain failed index={index}: {drainFailure}");
+                    return false;
+                }
+                RetireControllerPresentation(device, index,
+                    commitNeutralMapping: true, logRemoval: false);
+                if (!legacyHidSlotAuthority.
+                        TryRecoverQuarantinedActivation(binding,
+                            InputControllerRegistration.
+                                MaximumStopTimeoutMilliseconds,
+                            out ControlServiceLegacyHidSlotFailure
+                                recoveryFailure))
+                {
+                    StartupDiag($"Typed legacy quarantined recovery failed index={index}: {recoveryFailure}");
+                    return false;
+                }
+                if (!ClearExactControllerSlot(device, index)) return false;
+                ReleaseHidHideManagedDevice(device);
+                return true;
+            }
+            if (!legacyHidSlotAuthority.TryBeginRetirement(binding,
+                    out ControlServiceLegacyHidSlotFailure beginFailure,
+                    out InputControllerSlotTableFailure tableFailure))
+            {
+                StartupDiag($"Typed legacy stop retirement rejected index={index}: {beginFailure}/{tableFailure}");
+                return false;
+            }
+            TryClaimControllerRemoval(device);
+
+            if (!legacyHidSlotAuthority.TryPublishTerminalNeutral(binding,
+                    () =>
+                    {
+                        if (!immediateUnplug)
+                        {
+                            DS4LightBar.forcelight[index] = false;
+                            DS4LightBar.forcedFlash[index] = 0;
+                            DS4LightBar.defaultLight = true;
+                            DS4LightBar.updateLightBar(device, index);
+                        }
+                        RetireControllerPresentation(device, index,
+                            commitNeutralMapping: false, logRemoval: false);
+                        CommitNeutralMapping(index);
+                    },
+                    InputControllerRegistration.MaximumStopTimeoutMilliseconds,
+                    out ControlServiceLegacyHidSlotFailure neutralFailure,
+                    out tableFailure))
+            {
+                StartupDiag($"Typed legacy stop terminal neutral failed index={index}: {neutralFailure}/{tableFailure}");
+                return false;
+            }
+
+            Action<DS4Device> afterStop = null;
+            if ((DCBTatStop && !device.isCharging()) || suspending)
+            {
+                if (device.getConnectionType() == ConnectionType.BT)
+                {
+                    afterStop = static stopped => stopped.DisconnectBT(true);
+                }
+                else if (device.getConnectionType() == ConnectionType.SONYWA)
+                {
+                    afterStop = static stopped =>
+                        stopped.DisconnectDongle(true);
+                }
+            }
+            if (!legacyHidSlotAuthority.TryFinalizeRetirement(binding,
+                    InputControllerRegistration.MaximumStopTimeoutMilliseconds,
+                    out ControlServiceLegacyHidSlotFailure retireFailure,
+                    out tableFailure, afterStop))
+            {
+                StartupDiag($"Typed legacy stop final retirement failed index={index}: {retireFailure}/{tableFailure}");
+                return false;
+            }
+            Thread.Sleep(50);
+            if (!ClearExactControllerSlot(device, index)) return false;
+            ReleaseHidHideManagedDevice(device);
+            return true;
+        }
+
+        internal bool TryCaptureProfileActionTarget(int slot, DS4Device source,
+            out ControllerProfileActionTarget target) =>
+            ControllerProfileActionTarget.TryCapture(this, inputRegistrationTable,
+                slot, source, out target);
+
+        private int FindExactControllerSlot(DS4Device device)
+        {
+            for (int index = 0; index < DS4Controllers.Length; index++)
+            {
+                if (ReferenceEquals(DS4Controllers[index], device))
+                {
+                    return index;
+                }
+            }
+            return -1;
+        }
+
+        private static bool TryClaimControllerRemoval(DS4Device device)
+        {
+            lock (device.removeLocker)
+            {
+                if (device.IsRemoving)
+                {
+                    return false;
+                }
+                device.IsRemoving = true;
+                return true;
+            }
+        }
+
+        private void RetireControllerPresentation(DS4Device device, int index,
+            bool commitNeutralMapping, bool logRemoval = true)
+        {
+            if (!ReferenceEquals(DS4Controllers[index], device))
+            {
+                return;
+            }
+            DeactivateGameBarCompatibilityOutput(index);
+            CurrentState[index].Battery = PreviousState[index].Battery = 0;
+            if (!useDInputOnly[index])
+            {
+                UnplugOutDev(index, device);
+            }
+            else if (!device.PrimaryDevice)
+            {
+                OutputDevice outDev = outputDevices[index];
+                if (outDev != null)
+                {
+                    outDev.RemoveFeedback(index);
+                    outputDevices[index] = null;
+                }
+            }
+            if (commitNeutralMapping)
+            {
+                CommitNeutralMapping(index);
+            }
+
+            if (logRemoval)
+            {
+                string removed = DS4WinWPF.Properties.Resources.
+                    ControllerWasRemoved.Replace("*Mac address*",
+                        (index + 1).ToString());
+                if (device.getBattery() <= 20 &&
+                    device.getConnectionType() == ConnectionType.BT &&
+                    !device.isCharging())
+                {
+                    removed += ". " +
+                        DS4WinWPF.Properties.Resources.ChargeController;
+                }
+                LogDebug(removed);
+                AppLogger.LogToTray(removed);
+            }
+            dualSenseAudioPassthrough.Stop(index);
+            dualShock4AudioPassthrough.Stop(index);
+            dualSenseMicrophonePassthrough.Stop();
+            audioHapticsService.Stop(index);
+            DisconnectPlayStationFeatureOutput(index);
+        }
+
+        private static void CommitNeutralMapping(int index)
+        {
+            Task.Run(() => Mapping.Commit(index)).Wait();
+        }
+
+        private bool ClearExactControllerSlot(DS4Device device, int index)
+        {
+            if (!ReferenceEquals(DS4Controllers[index], device))
+            {
+                return false;
+            }
+            if (!TryRetireMouseCallbacks(index, device)) return false;
+            device.IsRemoved = true;
+            device.Synced = false;
+            Mapping.RequestPostMapStickReset(index);
+            oscState[index] = new DS4State();
+            slotManager.RemoveController(device, index);
+            if (isUsingOSCSender())
+            {
+                oscSender.Send(new SharpOSC.OscMessage(
+                    "/ds4windows/monitor/" + index + "/plug", 0));
+            }
+            touchPad[index] = null;
+            lag[index] = false;
+            inWarnMonitor[index] = false;
+            useDInputOnly[index] = true;
+            Global.activeOutDevType[index] = OutContType.None;
+            return inputSlotAdmission.TryReleaseLegacySlot(index, device);
         }
 
         public bool[] lag = new bool[MAX_DS4_CONTROLLER_COUNT] { false, false, false, false, false, false, false, false };
@@ -3728,6 +4799,9 @@ namespace DS4Windows
             new long[MAX_DS4_CONTROLLER_COUNT];
         private string[] dualSenseMuteRememberedOffProfileName = new string[MAX_DS4_CONTROLLER_COUNT] { string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty };
 
+        private readonly ControllerVirtualOutputAttempt[] virtualOutputAttempts =
+            new ControllerVirtualOutputAttempt[MAX_DS4_CONTROLLER_COUNT];
+
         public ControllerRuntimeSignals GetControllerRuntimeSignals(int index)
         {
             if (index < 0 || index >= CURRENT_DS4_CONTROLLER_LIMIT)
@@ -3742,7 +4816,9 @@ namespace DS4Windows
             }
 
             DS4Device device = DS4Controllers[index];
-            bool physicalPresent = device != null && !device.IsRemoving;
+            bool physicalCleanupQuarantined = ControllerRuntimeStatusPolicy.
+                HasQuarantinedPhysicalRuntime(device, index, inputRegistrationTable);
+            bool physicalPresent = device != null && (!device.IsRemoving || physicalCleanupQuarantined);
             bool physicalSynced = physicalPresent && device.isSynced();
             bool physicalAlive = physicalSynced && device.IsAlive();
             bool virtualRequired = !Global.getDInputOnly(index);
@@ -3756,6 +4832,14 @@ namespace DS4Windows
                 viiperOutput?.IsRuntimeConnected == true;
             bool virtualTypeMatches = !virtualRequired ||
                 Global.activeOutDevType[index].Normalize() == desiredType;
+            ControllerVirtualOutputAttempt outputAttempt = virtualOutputAttempts == null ? null :
+                Volatile.Read(ref virtualOutputAttempts[index]);
+            bool attemptMatches = outputAttempt?.Matches(physicalPresent ? device : null,
+                desiredType, virtualRequired) == true;
+            if (outputAttempt != null && !attemptMatches)
+                Interlocked.CompareExchange(ref virtualOutputAttempts[index], null, outputAttempt);
+            bool virtualFailed = virtualRequired &&
+                ((attemptMatches && outputAttempt.Failed) || viiperOutput?.HasRuntimeFault == true);
 
             bool advancedHapticsRequired = virtualRequired &&
                 (desiredType == OutContType.ViiperDualSense ||
@@ -3771,7 +4855,13 @@ namespace DS4Windows
                             ? ControllerRuntimeLaneState.Unavailable
                             : ControllerRuntimeLaneState.Starting;
 
-            bool speakerRequired = physicalPresent &&
+            // A shared profile can retain Sony media settings while running
+            // on Switch 2 or another controller. Require a lane only when the
+            // exact physical model/transport supports it; missing runtime
+            // readiness on supported hardware still remains an error.
+            bool controllerAudioApplicable = physicalPresent &&
+                ControllerAudioCapabilityPolicy.SupportsControllerAudio(device);
+            bool speakerRequired = controllerAudioApplicable &&
                 IsControllerSpeakerEnabled(index);
             ControllerRuntimeLaneState speaker =
                 ControllerRuntimeLaneState.NotRequired;
@@ -3782,7 +4872,7 @@ namespace DS4Windows
                     : dualShock4AudioPassthrough.GetStatus(index);
             }
 
-            bool microphoneRequired = physicalPresent &&
+            bool microphoneRequired = controllerAudioApplicable &&
                 Global.DualSenseEnableMicrophonePassthrough[index];
             ControllerRuntimeLaneState microphone =
                 ControllerRuntimeLaneState.NotRequired;
@@ -3815,7 +4905,10 @@ namespace DS4Windows
                 }
             }
 
+            // Match AudioHapticsService.Start's physical-device applicability.
+            // This is separate from native feedback translated to HD rumble.
             bool audioHapticsRequired = physicalPresent &&
+                device is InputDevices.DualSenseDevice &&
                 Global.store.audioHapticsSettings[index]?.Enabled == true;
             ControllerRuntimeLaneState audioHaptics =
                 ControllerRuntimeLaneState.NotRequired;
@@ -3835,7 +4928,7 @@ namespace DS4Windows
                 physicalSynced, physicalAlive, virtualRequired,
                 virtualConnected, virtualTypeMatches, advancedHaptics,
                 speaker, microphone, audioHaptics,
-                desiredType.ToDisplayName());
+                desiredType.ToDisplayName(), virtualFailed, physicalCleanupQuarantined);
         }
 
         internal static bool ShouldUseGameBarControllerCompatibility(bool enabled,
@@ -4573,15 +5666,15 @@ namespace DS4Windows
         }
 
         // Called every time a new input report has arrived
-        protected void On_Report(DS4Device device, EventArgs e, int ind)
+        protected void On_Report(DS4Device device, EventArgs e, int ind) =>
+            On_Report(device, e, ind, null);
+
+        private void On_Report(DS4Device device, EventArgs e, int ind,
+            ReportDiagnosticsWorker.Source diagnosticsSource)
         {
-            if (ind != -1)
+            if ((uint)ind < (uint)DS4Controllers.Length)
             {
                 OutContType normalizedOutput = activeOutDevType[ind].Normalize();
-                bool latencyCriticalReport =
-                    device is InputDevices.DualSenseDevice &&
-                    (normalizedOutput == OutContType.ViiperDualSense ||
-                        normalizedOutput == OutContType.ViiperDualSenseEdge);
                 ReportDiagnosticsSnapshot deferredDiagnostics = new()
                 {
                     Controller = ind,
@@ -4595,15 +5688,12 @@ namespace DS4Windows
                 {
                     startupReportCount = ++startupReportDiagCounts[ind];
                     startupReportDiag = startupReportCount <= 5 || startupReportCount == 50;
-                    if (startupReportDiag && !latencyCriticalReport)
-                    {
-                        StartupDiag($"On_Report enter index={ind} count={startupReportCount} synced={device.isSynced()} latency={device.Latency} useDInputOnly={useDInputOnly[ind]} activeOut={activeOutDevType[ind]} outDev={outputDevices[ind]?.GetDeviceType() ?? "null"}");
-                    }
-                    else if (startupReportDiag)
+                    if (startupReportDiag)
                     {
                         deferredDiagnostics.StartupDiagnostic = true;
                         deferredDiagnostics.StartupReportCount =
                             startupReportCount;
+                        deferredDiagnostics.StartupLatency = device.Latency;
                         deferredDiagnostics.Synced = device.isSynced();
                         deferredDiagnostics.UseDInputOnly =
                             useDInputOnly[ind];
@@ -4613,14 +5703,7 @@ namespace DS4Windows
                 string devError = tempStrings[ind] = device.error;
                 if (!string.IsNullOrEmpty(devError))
                 {
-                    if (latencyCriticalReport)
-                    {
-                        deferredDiagnostics.DeviceError = devError;
-                    }
-                    else
-                    {
-                        LogDebug(devError);
-                    }
+                    deferredDiagnostics.DeviceError = devError;
                 }
 
                 if (inWarnMonitor[ind])
@@ -4629,32 +5712,20 @@ namespace DS4Windows
                     if (!lag[ind] && device.Latency >= flashWhenLateAt)
                     {
                         lag[ind] = true;
-                        if (latencyCriticalReport)
-                        {
-                            ApplyLagFlashState(device, ind, true);
-                            deferredDiagnostics.LagChanged = true;
-                            deferredDiagnostics.LagOn = true;
-                            deferredDiagnostics.Latency = device.Latency;
-                        }
-                        else
-                        {
-                            LagFlashWarning(device, ind, true);
-                        }
+                        // Lightbar state remains immediate; only its log is deferred.
+                        ApplyLagFlashState(device, ind, true);
+                        deferredDiagnostics.LagChanged = true;
+                        deferredDiagnostics.LagOn = true;
+                        deferredDiagnostics.Latency = device.Latency;
                     }
                     else if (lag[ind] && device.Latency < flashWhenLateAt)
                     {
                         lag[ind] = false;
-                        if (latencyCriticalReport)
-                        {
-                            ApplyLagFlashState(device, ind, false);
-                            deferredDiagnostics.LagChanged = true;
-                            deferredDiagnostics.LagOn = false;
-                            deferredDiagnostics.Latency = device.Latency;
-                        }
-                        else
-                        {
-                            LagFlashWarning(device, ind, false);
-                        }
+                        // Lightbar state remains immediate; only its log is deferred.
+                        ApplyLagFlashState(device, ind, false);
+                        deferredDiagnostics.LagChanged = true;
+                        deferredDiagnostics.LagOn = false;
+                        deferredDiagnostics.Latency = device.Latency;
                     }
                 }
                 else
@@ -4688,43 +5759,17 @@ namespace DS4Windows
                 if (device.firstReport && device.isSynced())
                 {
                     // Only send Log message when device is considered a primary device
-                    if (device.PrimaryDevice && latencyCriticalReport)
+                    if (device.PrimaryDevice)
                     {
                         deferredDiagnostics.FirstReport = true;
                         deferredDiagnostics.ProfileName = ProfilePath[ind];
-                        deferredDiagnostics.Battery = device.Battery;
-                    }
-                    else if (device.PrimaryDevice)
-                    {
-                        if (File.Exists(Path.Combine(appdatapath, "Profiles", $"{ProfilePath[ind]}.xml")))
-                        {
-                            string prolog = string.Format(DS4WinWPF.Properties.Resources.UsingProfile, (ind + 1).ToString(), ProfilePath[ind], $"{device.Battery}");
-                            LogDebug(prolog);
-                            AppLogger.LogToTray(prolog);
-                        }
-                        else
-                        {
-                            string prolog = string.Format(DS4WinWPF.Properties.Resources.NotUsingProfile, (ind + 1).ToString(), $"{device.Battery}");
-                            LogDebug(prolog);
-                            AppLogger.LogToTray(prolog);
-                        }
+                        deferredDiagnostics.InitialBattery = device.Battery;
                     }
 
                     device.firstReport = false;
                 }
 
-                if (device.PrimaryDevice && Global.UseIconChoice == TrayIconChoice.Battery)
-                {
-                    if (latencyCriticalReport)
-                    {
-                        deferredDiagnostics.BatteryNotification = true;
-                        deferredDiagnostics.Battery = cState.Battery;
-                    }
-                    else
-                    {
-                        InvokeBatteryChanged(cState.Battery);
-                    }
-                }
+                CaptureReportBatteryDiagnostic(device, ref deferredDiagnostics);
 
                 if (!device.PrimaryDevice)
                 {
@@ -4734,7 +5779,7 @@ namespace DS4Windows
                         jointInd != DS4Device.DEFAULT_JOINT_SLOT_NUMBER)
                     {
                         // Output changes from Gyro data early. Seems better to ME... REE
-                        GyroOutMode imuOutMode = Global.GetGyroOutMode(device.JointDeviceSlotNumber);
+                        GyroOutMode imuOutMode = Global.GetGyroOutMode(jointInd);
                         if (imuOutMode != GyroOutMode.None)
                         {
                             if (imuOutMode == GyroOutMode.Mouse)
@@ -4760,6 +5805,8 @@ namespace DS4Windows
                         tempControlState.Motion = device.GetRawCurrentStateRef().Motion;
                     }
 
+                    // Secondary sources still own their own diagnostics.
+                    PublishReportDiagnostics(diagnosticsSource, ref deferredDiagnostics, cState);
                     // Skip mapping routine if part of a joined device
                     return;
                 }
@@ -4774,12 +5821,8 @@ namespace DS4Windows
 
                 cState = device.Debouncer.ProcessInput(cState);
 
-                if (startupReportDiag && !latencyCriticalReport)
-                {
-                    StartupDiag($"On_Report pre-map index={ind} count={startupReportCount} buttons Cross={cState.Cross} Circle={cState.Circle} PS={cState.PS} LX={cState.LX} LY={cState.LY} RX={cState.RX} RY={cState.RY} L2={cState.L2} R2={cState.R2}");
-                }
 
-                cState = Mapping.SetCurveAndDeadzone(ind, cState, TempState[ind]);
+                cState = Mapping.SetCurveAndDeadzone(ind, cState, TempState[ind], device);
 
                 bool oscMonitoringPending = false;
 
@@ -4798,15 +5841,7 @@ namespace DS4Windows
                         oscMonitoringPending = true;
                     }
 
-                    if (startupReportDiag && !latencyCriticalReport)
-                    {
-                        StartupDiag($"On_Report MapCustom begin index={ind} count={startupReportCount}");
-                    }
                     Mapping.MapCustom(ind, cState, tempMapState, ExposedState[ind], touchPad[ind], this);
-                    if (startupReportDiag && !latencyCriticalReport)
-                    {
-                        StartupDiag($"On_Report MapCustom end index={ind} count={startupReportCount}");
-                    }
 
                     // Mapping owns controls; same-report physical metadata,
                     // touch, and motion remain observations from cState.
@@ -4819,6 +5854,13 @@ namespace DS4Windows
 
                     cState = tempMapState;
 
+                }
+                else
+                {
+                    // No consumer in this report (for example, macro recording
+                    // or a profile without mapping). Do not replay this report's
+                    // deferred gyro/touch contribution when mapping resumes.
+                    Mapping.DiscardPostMapStickData(ind);
                 }
 
                 if (!useDInputOnly[ind])
@@ -4843,15 +5885,7 @@ namespace DS4Windows
                     }
 
                     OutputDevice reportOutput = GetReportOutputDevice(ind);
-                    if (startupReportDiag && !latencyCriticalReport)
-                    {
-                        StartupDiag($"On_Report ConvertandSendReport begin index={ind} count={startupReportCount} outDev={reportOutput?.GetDeviceType() ?? "null"}");
-                    }
                     reportOutput?.ConvertandSendReport(cState, ind);
-                    if (startupReportDiag && !latencyCriticalReport)
-                    {
-                        StartupDiag($"On_Report ConvertandSendReport end index={ind} count={startupReportCount}");
-                    }
                     //testNewReport(ref x360reports[ind], cState, ind);
                     //x360controls[ind]?.SendReport(x360reports[ind]);
 
@@ -4898,20 +5932,6 @@ namespace DS4Windows
                     }
                 }
 
-                if (latencyCriticalReport && deferredDiagnostics.HasWork)
-                {
-                    deferredDiagnostics.Cross = cState.Cross;
-                    deferredDiagnostics.Circle = cState.Circle;
-                    deferredDiagnostics.PS = cState.PS;
-                    deferredDiagnostics.LX = cState.LX;
-                    deferredDiagnostics.LY = cState.LY;
-                    deferredDiagnostics.RX = cState.RX;
-                    deferredDiagnostics.RY = cState.RY;
-                    deferredDiagnostics.L2 = cState.L2;
-                    deferredDiagnostics.R2 = cState.R2;
-                    reportDiagnosticsWorker.Publish(deferredDiagnostics);
-                }
-
                 if (oscMonitoringPending)
                 {
                     oscMonitoringWorker.Publish(ind,
@@ -4920,26 +5940,10 @@ namespace DS4Windows
                 }
 
                 // Output any synthetic events.
-                if (startupReportDiag && !latencyCriticalReport)
-                {
-                    StartupDiag($"On_Report Mapping.Commit begin index={ind} count={startupReportCount}");
-                }
                 Mapping.Commit(ind);
-                if (startupReportDiag && !latencyCriticalReport)
-                {
-                    StartupDiag($"On_Report Mapping.Commit end index={ind} count={startupReportCount}");
-                }
 
                 // Update the Lightbar color
-                if (startupReportDiag && !latencyCriticalReport)
-                {
-                    StartupDiag($"On_Report updateLightBar begin index={ind} count={startupReportCount}");
-                }
                 DS4LightBar.updateLightBar(device, ind);
-                if (startupReportDiag && !latencyCriticalReport)
-                {
-                    StartupDiag($"On_Report updateLightBar end index={ind} count={startupReportCount}");
-                }
 
                 if (device.PerformStateMerge)
                 {
@@ -4952,14 +5956,41 @@ namespace DS4Windows
                     tempControlState.Motion = device.GetRawCurrentStateRef().Motion;
                 }
 
-                if (startupReportDiag && !latencyCriticalReport)
-                {
-                    StartupDiag($"On_Report exit index={ind} count={startupReportCount}");
-                }
+                PublishReportDiagnostics(diagnosticsSource, ref deferredDiagnostics, cState);
             }
         }
 
-        private static void OSCPostMappingStep(DS4State tempMapState, DS4State oscMapState)
+        internal static void CaptureReportBatteryDiagnostic(DS4Device device,
+            ref ReportDiagnosticsSnapshot snapshot)
+        {
+            if (!device.PrimaryDevice || Global.UseIconChoice != TrayIconChoice.Battery) return;
+            snapshot.BatteryNotification = true;
+            // The runtime's compatibility battery is authoritative. Switch 2
+            // telemetry does not populate the legacy DS4State.Battery field.
+            snapshot.Battery = device.Battery;
+            snapshot.BatteryPolicyRevision = Global.TrayIconPolicyRevision;
+        }
+
+        private static void PublishReportDiagnostics(ReportDiagnosticsWorker.Source source,
+            ref ReportDiagnosticsSnapshot snapshot, DS4State state)
+        {
+            if (source == null || !snapshot.HasWork) return;
+            if (snapshot.StartupDiagnostic)
+            {
+                snapshot.Cross = state.Cross;
+                snapshot.Circle = state.Circle;
+                snapshot.PS = state.PS;
+                snapshot.LX = state.LX;
+                snapshot.LY = state.LY;
+                snapshot.RX = state.RX;
+                snapshot.RY = state.RY;
+                snapshot.L2 = state.L2;
+                snapshot.R2 = state.R2;
+            }
+            source.TryPublish(snapshot);
+        }
+
+        internal static void OSCPostMappingStep(DS4State tempMapState, DS4State oscMapState)
         {
             tempMapState.Cross |= oscMapState.Cross;
             tempMapState.Square |= oscMapState.Square;
@@ -4976,15 +6007,15 @@ namespace DS4Windows
             tempMapState.Options |= oscMapState.Options;
             tempMapState.Share |= oscMapState.Share;
 
-            tempMapState.LX = oscMapState.LX != 128 ? oscMapState.LX : tempMapState.LX;
-            tempMapState.LY = oscMapState.LY != 128 ? oscMapState.LY : tempMapState.LY;
+            if (oscMapState.LXAxis.ProfileCoordinate != 128) tempMapState.LXAxis = oscMapState.LXAxis;
+            if (oscMapState.LYAxis.ProfileCoordinate != 128) tempMapState.LYAxis = oscMapState.LYAxis;
             tempMapState.L2 = oscMapState.L2 != 0 ? oscMapState.L2 : tempMapState.L2;
-            tempMapState.RX = oscMapState.RX != 128 ? oscMapState.RX : tempMapState.RX;
-            tempMapState.RY = oscMapState.RY != 128 ? oscMapState.RY : tempMapState.RY;
+            if (oscMapState.RXAxis.ProfileCoordinate != 128) tempMapState.RXAxis = oscMapState.RXAxis;
+            if (oscMapState.RYAxis.ProfileCoordinate != 128) tempMapState.RYAxis = oscMapState.RYAxis;
             tempMapState.R2 = oscMapState.R2 != 0 ? oscMapState.R2 : tempMapState.R2;
         }
 
-        private static void OSCPreMappingStep(DS4State cState,
+        internal static void OSCPreMappingStep(DS4State cState,
             DS4State oscMapState)
         {
             cState.Cross |= oscMapState.Cross;
@@ -5002,11 +6033,11 @@ namespace DS4Windows
             cState.Options |= oscMapState.Options;
             cState.Share |= oscMapState.Share;
 
-            cState.LX = oscMapState.LX != 128 ? oscMapState.LX : cState.LX;
-            cState.LY = oscMapState.LY != 128 ? oscMapState.LY : cState.LY;
+            if (oscMapState.LXAxis.ProfileCoordinate != 128) cState.LXAxis = oscMapState.LXAxis;
+            if (oscMapState.LYAxis.ProfileCoordinate != 128) cState.LYAxis = oscMapState.LYAxis;
             cState.L2 = oscMapState.L2 != 0 ? oscMapState.L2 : cState.L2;
-            cState.RX = oscMapState.RX != 128 ? oscMapState.RX : cState.RX;
-            cState.RY = oscMapState.RY != 128 ? oscMapState.RY : cState.RY;
+            if (oscMapState.RXAxis.ProfileCoordinate != 128) cState.RXAxis = oscMapState.RXAxis;
+            if (oscMapState.RYAxis.ProfileCoordinate != 128) cState.RYAxis = oscMapState.RYAxis;
             cState.R2 = oscMapState.R2 != 0 ? oscMapState.R2 : cState.R2;
         }
 
@@ -5144,6 +6175,10 @@ namespace DS4Windows
         private void ProcessReportDiagnostics(
             ReportDiagnosticsSnapshot snapshot)
         {
+            // An admitted historical log may complete during retirement, but
+            // no queued observation is admitted for a replacement source.
+            if (snapshot.Source?.IsCurrent != true ||
+                !ReferenceEquals(DS4Controllers[snapshot.Controller], snapshot.Device)) return;
             if (!string.IsNullOrEmpty(snapshot.DeviceError))
             {
                 LogDebug(snapshot.DeviceError);
@@ -5172,18 +6207,18 @@ namespace DS4Windows
                 string prolog = profileExists ?
                     string.Format(DS4WinWPF.Properties.Resources.UsingProfile,
                         (snapshot.Controller + 1).ToString(),
-                        snapshot.ProfileName, $"{snapshot.Battery}") :
+                        snapshot.ProfileName, $"{snapshot.InitialBattery}") :
                     string.Format(
                         DS4WinWPF.Properties.Resources.NotUsingProfile,
                         (snapshot.Controller + 1).ToString(),
-                        $"{snapshot.Battery}");
+                        $"{snapshot.InitialBattery}");
                 LogDebug(prolog);
                 AppLogger.LogToTray(prolog);
             }
 
             if (snapshot.BatteryNotification)
             {
-                InvokeBatteryChanged((byte)snapshot.Battery);
+                InvokeBatteryChanged((byte)snapshot.Battery, snapshot.Source);
             }
 
             if (snapshot.StartupDiagnostic)
@@ -5191,7 +6226,7 @@ namespace DS4Windows
                 StartupDiag($"On_Report deferred index={snapshot.Controller} " +
                     $"count={snapshot.StartupReportCount} " +
                     $"synced={snapshot.Synced} " +
-                    $"latency={snapshot.Latency} " +
+                    $"latency={snapshot.StartupLatency} " +
                     $"useDInputOnly={snapshot.UseDInputOnly} " +
                     $"activeOut={snapshot.ActiveOutput} " +
                     $"buttons Cross={snapshot.Cross} Circle={snapshot.Circle} " +
@@ -5438,6 +6473,353 @@ namespace DS4Windows
         public DS4State getDS4StateTemp(int ind)
         {
             return TempState[ind];
+        }
+
+        /// <summary>
+        /// Production Switch 2 profile/output facet. Profile values are the
+        /// user's persistent per-slot configuration and intentionally survive
+        /// a controller lifetime. The returned inverse owns only resources and
+        /// per-device presentation state created for this exact registration.
+        /// </summary>
+        private sealed class Switch2ControlServiceProfileStage :
+            ISwitch2ControlServiceReversibleProfileStage,
+            ISwitch2ControlServiceProfileStageDiagnostics
+        {
+            private readonly ControlService service;
+            private string lastPrepareDiagnostic = "never-entered";
+
+            internal Switch2ControlServiceProfileStage(ControlService service)
+            {
+                this.service = service ?? throw new ArgumentNullException(
+                    nameof(service));
+            }
+
+            public Switch2ControlServiceReversibleStageResult TryPrepare(
+                in Switch2ControlServiceProfileStageRequest request,
+                out ISwitch2ControlServiceReversibleProfileStageInverse inverse)
+            {
+                lastPrepareDiagnostic = "entered";
+                inverse = null;
+                if (!Monitor.IsEntered(
+                        service.switch2RuntimeRegistrationService.
+                            LifecycleGate) ||
+                    !request.IsValid || request.Slot < 0 ||
+                    request.Slot >= service.DS4Controllers.Length ||
+                    !ReferenceEquals(service.DS4Controllers[request.Slot],
+                        request.Device) ||
+                    service.touchPad[request.Slot] == null)
+                {
+                    return Switch2ControlServiceReversibleStageResult.Reject(
+                        Switch2ControlServiceReversibleStageFailureKind.
+                            InvalidCredential);
+                }
+
+                int slot = request.Slot;
+                if (service.outputDevices[slot] != null ||
+                    activeOutDevType[slot].Normalize() !=
+                        OutContType.None || !useDInputOnly[slot])
+                {
+                    return Switch2ControlServiceReversibleStageResult.Reject(
+                        Switch2ControlServiceReversibleStageFailureKind.
+                            SlotOccupied);
+                }
+
+                var retained = new Switch2ControlServiceProfileStageInverse(
+                    service, request, request.Device.LightBarColor,
+                    useDInputOnly[slot], activeOutDevType[slot]);
+                inverse = retained;
+                try
+                {
+                    DS4Device device = request.Device;
+                    // This transactional path does not run the legacy HID
+                    // setup routine. Establish the same model-specific mapper
+                    // inventory before a profile or report can consume it.
+                    lastPrepareDiagnostic = "extra-button-registration";
+                    Global.RefreshExtrasButtons(slot,
+                        service.GetKnownExtraButtons(device));
+                    bool useAutoProfile = useTempProfile[slot];
+                    bool profileLoaded = useAutoProfile;
+                    lastPrepareDiagnostic = "profile-selection";
+                    if (!useAutoProfile)
+                    {
+                        if (device.isValidSerial() &&
+                            containsLinkedProfile(device.getMacAddress()))
+                        {
+                            ProfilePath[slot] = getLinkedProfile(
+                                device.getMacAddress());
+                            Global.linkedProfileCheck[slot] = true;
+                        }
+                        else
+                        {
+                            ProfilePath[slot] = OlderProfilePath[slot];
+                            Global.linkedProfileCheck[slot] = false;
+                        }
+
+                        lastPrepareDiagnostic = "profile-loading";
+                        profileLoaded = LoadProfile(slot, false, service,
+                            false, false);
+                    }
+
+                    if (profileLoaded)
+                    {
+                        lastPrepareDiagnostic = "profile-presentation";
+                        device.LightBarColor = getMainColor(slot);
+                        if (!getDInputOnly(slot) && device.isSynced())
+                        {
+                            lastPrepareDiagnostic = "output-plug";
+                            service.PluginOutDev(slot, device);
+                        }
+                        else
+                        {
+                            useDInputOnly[slot] = true;
+                            activeOutDevType[slot] = OutContType.None;
+                        }
+
+                        lastPrepareDiagnostic = "device-post-setup";
+                        device.setIdleTimeout(getIdleDisconnectTimeout(slot));
+                        device.setBTPollRate(getBTPollRate(slot));
+                        service.touchPad[slot].ResetTrackAccel(
+                            getTrackballFriction(slot));
+                        service.touchPad[slot].ResetToggleGyroModes();
+                        service.touchPad[slot].PostSetup();
+                        device.RumbleAutostopTime = getRumbleAutostopTime(slot);
+                        device.setRumble(0, 0);
+                    }
+
+                    lastPrepareDiagnostic = "output-validation";
+                    retained.PreparedOutput = service.outputDevices[slot];
+                    bool virtualRequired = profileLoaded &&
+                        !getDInputOnly(slot);
+                    if (!profileLoaded || virtualRequired &&
+                        (retained.PreparedOutput == null ||
+                            useDInputOnly[slot]))
+                    {
+                        return Switch2ControlServiceReversibleStageResult.
+                            Uncertain(
+                                Switch2ControlServiceReversibleStageFailureKind.
+                                    ProfileSetupRejected);
+                    }
+
+                    retained.Prepared = true;
+                    lastPrepareDiagnostic = "succeeded";
+                    return Switch2ControlServiceReversibleStageResult.Success();
+                }
+                catch (Exception exception)
+                {
+                    lastPrepareDiagnostic += $":threw:" +
+                        exception.GetType().FullName;
+                    retained.PreparedOutput = service.outputDevices[slot];
+                    return Switch2ControlServiceReversibleStageResult.Uncertain(
+                        Switch2ControlServiceReversibleStageFailureKind.
+                            DependencyThrew);
+                }
+            }
+
+            string ISwitch2ControlServiceProfileStageDiagnostics.
+                LastPrepareDiagnostic => lastPrepareDiagnostic;
+        }
+
+        private sealed class Switch2ControlServiceProfileStageInverse :
+            ISwitch2ControlServiceReversibleProfileStageInverse
+        {
+            private readonly ControlService service;
+            private readonly InputControllerSlotToken token;
+            private readonly DS4Device device;
+            private readonly int slot;
+            private readonly DS4Color previousLightBarColor;
+            private readonly bool previousUseDInputOnly;
+            private readonly OutContType previousActiveOutput;
+            private readonly List<DS4Controls> previousExtraButtons;
+            private bool consumed;
+            private bool outputChangeActive;
+            private bool outputChangeUncertain;
+            private bool cleanupWarningReported;
+            private bool undoActive;
+            private int outputChangeThread;
+            private OutputDevice outputBeforeChange;
+            private OutputDevice uncertainProducedOutput;
+
+            internal Switch2ControlServiceProfileStageInverse(
+                ControlService service,
+                in Switch2ControlServiceProfileStageRequest request,
+                DS4Color previousLightBarColor, bool previousUseDInputOnly,
+                OutContType previousActiveOutput)
+            {
+                this.service = service;
+                token = request.Token;
+                device = request.Device;
+                slot = request.Slot;
+                this.previousLightBarColor = previousLightBarColor;
+                this.previousUseDInputOnly = previousUseDInputOnly;
+                this.previousActiveOutput = previousActiveOutput;
+                previousExtraButtons = Global.GetControlSettingsGroup(slot)
+                    .ExtraDeviceButtons.Select(setting => setting.control)
+                    .ToList();
+                if (!Monitor.IsEntered(service.switch2RuntimeRegistrationService.LifecycleGate) ||
+                    !ReferenceEquals(service.DS4Controllers[slot], device) ||
+                    !service.inputRegistrationTable.TryAuthenticateBoundExternalStage(token, out _))
+                    throw new InvalidOperationException("Switch 2 profile output ownership requires an exact staged input lifetime.");
+                service.switch2ProfileOutputOwners ??=
+                    new Switch2ControlServiceProfileStageInverse[service.DS4Controllers.Length];
+                if (service.switch2ProfileOutputOwners[slot] != null)
+                    throw new InvalidOperationException("Switch 2 profile output ownership is already retained for this slot.");
+                service.switch2ProfileOutputOwners[slot] = this;
+            }
+
+            internal OutputDevice PreparedOutput { get; set; }
+
+            internal bool Prepared { get; set; }
+
+            private bool IsCurrentOutputOwner(bool completing = false)
+            {
+                if (consumed || !ReferenceEquals(service.switch2ProfileOutputOwners?[slot], this) ||
+                    !ReferenceEquals(service.DS4Controllers[slot], device)) return false;
+                InputControllerSlotSnapshot snapshot = service.inputRegistrationTable.GetSnapshot()[slot];
+                return snapshot.Token == token &&
+                    (snapshot.State is InputControllerSlotState.Bound or InputControllerSlotState.Attached ||
+                        snapshot.State == InputControllerSlotState.Retiring &&
+                            (completing && outputChangeActive ||
+                                snapshot.ActionActive && device is Switch2RuntimeInputDevice runtime &&
+                                runtime.IsCurrentVirtualOutputTransitionThread) ||
+                        undoActive && snapshot.State == InputControllerSlotState.Quiesced);
+            }
+
+            internal bool TryBeginOutputChange(DS4Device source)
+            {
+                if (!ReferenceEquals(source, device) || outputChangeActive || outputChangeUncertain ||
+                    !IsCurrentOutputOwner() ||
+                    !ReferenceEquals(service.outputDevices[slot], PreparedOutput)) return false;
+                outputChangeActive = true;
+                outputChangeThread = Environment.CurrentManagedThreadId;
+                outputBeforeChange = PreparedOutput;
+                return true;
+            }
+
+            internal void CompleteOutputChange(OutputDevice produced,
+                bool allowUnpublishedNull, bool operationSucceeded)
+            {
+                lock (service.switch2RuntimeRegistrationService.LifecycleGate)
+                {
+                    if (!outputChangeActive || outputChangeThread != Environment.CurrentManagedThreadId)
+                        throw new InvalidOperationException("Switch 2 output ownership completion has no matching operation.");
+                    try
+                    {
+                        OutputDevice current = service.outputDevices[slot];
+                        if (!operationSucceeded)
+                        {
+                            // Preserve the prior exact output even though the
+                            // legacy array may already be null. This generation
+                            // remains quarantinable; a retry cannot invent proof.
+                            outputChangeUncertain = true;
+                            return;
+                        }
+                        if (!IsCurrentOutputOwner(completing: true) ||
+                            !ReferenceEquals(PreparedOutput, outputBeforeChange) ||
+                            !(ReferenceEquals(current, produced) ||
+                                allowUnpublishedNull && current == null && outputBeforeChange == null))
+                        {
+                            // Connect may have completed before publication
+                            // threw. Retain the exact candidate, but do not
+                            // invent a successful detach from an empty array.
+                            uncertainProducedOutput ??= produced;
+                            outputChangeUncertain = true;
+                            throw new InvalidOperationException("Switch 2 output ownership changed during the output operation.");
+                        }
+                        PreparedOutput = current;
+                    }
+                    finally
+                    {
+                        outputChangeActive = false;
+                        outputChangeThread = 0;
+                        outputBeforeChange = null;
+                    }
+                }
+            }
+
+            public bool Authenticates(
+                in Switch2ControlServiceProfileStageRequest request) =>
+                !consumed && request.IsValid && request.Token == token &&
+                request.Slot == slot && ReferenceEquals(request.Device,
+                    device);
+
+            public Switch2ControlServiceReversibleStageResult TryUndo(
+                in Switch2ControlServiceProfileStageRequest request)
+            {
+                if (!Monitor.IsEntered(
+                        service.switch2RuntimeRegistrationService.
+                            LifecycleGate) ||
+                    !Authenticates(request) ||
+                    !ReferenceEquals(service.DS4Controllers[slot], device))
+                {
+                    return Switch2ControlServiceReversibleStageResult.Reject(
+                        Switch2ControlServiceReversibleStageFailureKind.
+                            InvalidCredential);
+                }
+
+                try
+                {
+                    OutputDevice current = service.outputDevices[slot];
+                    if (outputChangeActive || outputChangeUncertain ||
+                        !ReferenceEquals(service.switch2ProfileOutputOwners?[slot], this) ||
+                        !ReferenceEquals(current, PreparedOutput))
+                    {
+                        ReportUnprovenCleanupOnce(
+                            Switch2ControlServiceReversibleStageFailureKind.SlotChanged);
+                        return Switch2ControlServiceReversibleStageResult.
+                            Uncertain(
+                                Switch2ControlServiceReversibleStageFailureKind.
+                                    SlotChanged);
+                    }
+                    if (current != null)
+                    {
+                        // Every admitted output replacement transferred this
+                        // retained proof to its exact synchronous result.
+                        useDInputOnly[slot] = false;
+                        undoActive = true;
+                        try
+                        {
+                            service.UnplugOutDev(slot, device, immediate: true,
+                                force: true);
+                        }
+                        finally { undoActive = false; }
+                    }
+
+                    service.outputDevices[slot] = null;
+                    useDInputOnly[slot] = previousUseDInputOnly;
+                    activeOutDevType[slot] = previousActiveOutput;
+                    device.LightBarColor = previousLightBarColor;
+                    service.touchPad[slot]?.Reset();
+                    // Restore the retained slot inventory only after this
+                    // exact runtime has emitted terminal neutral and stopped.
+                    Global.RefreshExtrasButtons(slot, previousExtraButtons);
+                    consumed = true;
+                    service.switch2ProfileOutputOwners[slot] = null;
+                    return Switch2ControlServiceReversibleStageResult.Success();
+                }
+                catch
+                {
+                    ReportUnprovenCleanupOnce(
+                        Switch2ControlServiceReversibleStageFailureKind.CleanupRejected);
+                    return Switch2ControlServiceReversibleStageResult.Uncertain(
+                        Switch2ControlServiceReversibleStageFailureKind.
+                            CleanupRejected);
+                }
+            }
+
+            private void ReportUnprovenCleanupOnce(
+                Switch2ControlServiceReversibleStageFailureKind failure)
+            {
+                if (cleanupWarningReported) return;
+                cleanupWarningReported = true;
+                try
+                {
+                    service.LogDebug($"Switch 2 input slot #{slot + 1} cleanup could not prove exact virtual-output retirement ({failure}). The physical slot is retained pending cleanup proof.", warning: true);
+                }
+                catch
+                {
+                    // A diagnostic observer cannot alter cleanup authority.
+                }
+            }
         }
     }
 }

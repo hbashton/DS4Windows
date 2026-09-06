@@ -43,6 +43,7 @@ using DS4WinWPF.DS4Forms.ViewModels;
 using DS4Windows;
 using DS4WinWPF.DS4Control;
 using DS4WinWPF.Translations;
+using DS4Windows.Switch2;
 using H.NotifyIcon.Core;
 
 namespace DS4WinWPF.DS4Forms
@@ -101,6 +102,14 @@ namespace DS4WinWPF.DS4Forms
             overviewAudioHapticsOverrideReleaseRequests = new();
         private DispatcherTimer overviewProfileSaveTimer;
         private DispatcherTimer overviewStatusRefreshTimer;
+        private readonly Switch2JoyConManualPairSelection
+            switch2JoyConManualPairSelection = new();
+        private string switch2JoyConManualRowsSignature = string.Empty;
+        private bool switch2JoyConMutationBusy;
+        private bool switch2AssociationBusy;
+        private bool switch2AssociationAdmissionEnabled;
+        private bool Switch2ControllerActionBusy =>
+            switch2AssociationBusy || switch2JoyConMutationBusy;
         private bool preserveSize = true;
         private Size oldSize;
         private bool contextclose;
@@ -119,6 +128,7 @@ namespace DS4WinWPF.DS4Forms
         public MainWindow(ArgumentParser parser)
         {
             InitializeComponent();
+            if (PortableLabContext.IsActive) Title = "DS4Windows — Portable controller lab";
             profileEditorReturnTabIndex = mainTabCon.Items.IndexOf(profilesTab);
 
             mainWinVM = new MainWindowsViewModel();
@@ -138,7 +148,10 @@ namespace DS4WinWPF.DS4Forms
                 Interval = TimeSpan.FromMilliseconds(250),
             };
             overviewStatusRefreshTimer.Tick += (sender, e) =>
+            {
                 mainWinVM.RefreshRuntimeState(App.rootHub);
+                RefreshSwitch2JoyConManualRows();
+            };
             overviewStatusRefreshTimer.Start();
 
             App root = Application.Current as App;
@@ -282,7 +295,7 @@ namespace DS4WinWPF.DS4Forms
             tempTask = Task.Delay(100).ContinueWith(_ =>
             {
                 int checkwhen = Global.CheckWhen;
-                if (checkwhen > 0 && DateTime.Now >= Global.LastChecked + TimeSpan.FromHours(checkwhen))
+                if (!PortableLabContext.IsActive && checkwhen > 0 && DateTime.Now >= Global.LastChecked + TimeSpan.FromHours(checkwhen))
                 {
                     try
                     {
@@ -1109,10 +1122,13 @@ Suspend support not enabled.", true);
 
         private void ChangeControllerPanel()
         {
+            bool manualRowsVisible = switch2JoyConManualPanel?.Visibility ==
+                Visibility.Visible;
             if (conLvViewModel.ControllerCol.Count == 0)
             {
                 controllerLV.Visibility = Visibility.Hidden;
-                noContLb.Visibility = Visibility.Visible;
+                noContLb.Visibility = manualRowsVisible ? Visibility.Hidden :
+                    Visibility.Visible;
             }
             else
             {
@@ -1312,6 +1328,10 @@ Suspend support not enabled.", true);
 
         public async void ChangeService()
         {
+            if (!StartStopBtn.IsEnabled)
+            {
+                return;
+            }
             StartStopBtn.IsEnabled = false;
             App root = Application.Current as App;
             //Tester service = root.rootHubtest;
@@ -1326,7 +1346,25 @@ Suspend support not enabled.", true);
 
             // Log exceptions that might occur
             Util.LogAssistBackgroundTask(serviceTask);
-            await serviceTask;
+            try
+            {
+                await serviceTask;
+            }
+            catch
+            {
+                // The background-task observer logs the original exception.
+                // An async-void UI handler must not rethrow it to the dispatcher.
+            }
+            finally
+            {
+                // A rejected/retryable stop need not raise ServiceChanged.
+                // Always recover the button, without pretending the service stopped.
+                StartStopBtn.Content = service.running ?
+                    Translations.Strings.StopText : Translations.Strings.StartText;
+                StartStopBtn.IsEnabled = true;
+                slotManControl.IsEnabled = service.running;
+                mainWinVM.RefreshRuntimeState(service);
+            }
         }
 
         private void LogListView_MouseDoubleClick(object sender, MouseButtonEventArgs e)
@@ -1349,6 +1387,8 @@ Suspend support not enabled.", true);
 
         private void MainTabCon_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            // Nested controller/profile selectors bubble this event too.
+            if (!ReferenceEquals(e.Source, mainTabCon)) return;
             if (mainWinVM?.ProfileEditorMode == true &&
                 mainTabCon.SelectedItem != profilesTab && mainTabCon.SelectedItem != logTab)
             {
@@ -1359,10 +1399,16 @@ Suspend support not enabled.", true);
             if (mainTabCon.SelectedItem == settingsTab)
             {
                 lastMsgLb.Visibility = Visibility.Hidden;
+                RefreshSwitch2AssociationCandidates();
+                RefreshSwitch2JoyConPairCandidates();
             }
             else
             {
                 lastMsgLb.Visibility = Visibility.Visible;
+            }
+            if (mainTabCon.SelectedItem == controllersTab)
+            {
+                RefreshSwitch2JoyConManualRows(force: true);
             }
         }
 
@@ -1675,10 +1721,14 @@ Suspend support not enabled.", true);
                     description = "Build persistent L2 and R2 adaptive-trigger effects saved directly in this profile.";
                     break;
                 case 10:
+                    title = "Switch 2 Controls";
+                    description = "Tune HD rumble, motion, Joy-Con mouse modes, calibration, and controller behavior.";
+                    break;
+                case 11:
                     title = "Advanced";
                     description = "Manage output devices, rumble, audio, latency, compatibility, and custom hooks.";
                     break;
-                case 11:
+                case 12:
                     title = "Log";
                     description = "View live service events without leaving the profile editing workspace.";
                     break;
@@ -1689,7 +1739,7 @@ Suspend support not enabled.", true);
             mainWinVM.ProfileEditorSectionTitle = title;
             mainWinVM.ProfileEditorSectionDescription = description;
 
-            if (navigationIndex == 11)
+            if (navigationIndex == 12)
             {
                 editor.DeactivateLiveReadings();
                 mainTabCon.SelectedItem = logTab;
@@ -1802,6 +1852,36 @@ Suspend support not enabled.", true);
             button.ContextMenu.IsOpen = true;
         }
 
+        private void Switch2JoyConHoldModeBtn_Click(object sender,
+            RoutedEventArgs e)
+        {
+            if (sender is not Button button ||
+                button.DataContext is not CompositeDeviceModel controller ||
+                !controller.TryToggleSwitch2StandaloneHoldMode(
+                    out bool persisted))
+            {
+                return;
+            }
+
+            if (!persisted)
+            {
+                button.ToolTip =
+                    "The new hold mode is active for this connection, but " +
+                    "its controller-specific record could not be saved.";
+            }
+        }
+
+        private void Switch2IdentifyBtn_Click(object sender,
+            RoutedEventArgs e)
+        {
+            if (sender is Button button &&
+                button.DataContext is CompositeDeviceModel controller &&
+                controller.Device is Switch2RuntimeInputDevice runtime)
+            {
+                _ = runtime.TryStartIdentificationHaptic();
+            }
+        }
+
         private void MainDS4Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
         {
             FlushOverviewQuickSettings(reloadProfile: false);
@@ -1911,6 +1991,13 @@ Suspend support not enabled.", true);
                 }
                 case WM_COPYDATA:
                 {
+                    // Shared legacy IPC is not a lab-control channel. A normal
+                    // launcher must not redirect this run to another profile.
+                    if (PortableLabContext.IsActive)
+                    {
+                        handled = true;
+                        return IntPtr.Zero;
+                    }
                     // Received InterProcessCommunication (IPC) message. DS4Win command is embedded as a string value in lpData buffer
                     try
                     {
@@ -2056,6 +2143,8 @@ Suspend support not enabled.", true);
                                             Program.rootHub.AttachUnboundOutDev(slotDevice, OutContType.ViiperDualSenseEdge);
                                         else if (strData[2] == "plugviiperswitch2pro")
                                             Program.rootHub.AttachUnboundOutDev(slotDevice, OutContType.ViiperSwitch2Pro);
+                                        else if (strData[2] == "plugviiperxboxone")
+                                            Program.rootHub.AttachUnboundOutDev(slotDevice, OutContType.ViiperXboxOne);
                                     }
                                 }
                                 else if (strData[0] == "query" && strData.Length >= 3)
@@ -2364,6 +2453,7 @@ Suspend support not enabled.", true);
         // Ex Mode Re-Enable
         private async void HideDS4ContCk_Click(object sender, RoutedEventArgs e)
         {
+            if (PortableLabContext.IsActive) return;
             StartStopBtn.IsEnabled = false;
             //bool checkStatus = hideDS4ContCk.IsChecked == true;
             hideDS4ContCk.IsEnabled = false;
@@ -2383,6 +2473,7 @@ Suspend support not enabled.", true);
 
         private void ReclaimSteamInputCk_Click(object sender, RoutedEventArgs e)
         {
+            if (PortableLabContext.IsActive) return;
             bool enabled = reclaimSteamInputCk.IsChecked == true;
             Global.ReclaimSteamInput = enabled;
             if (enabled && hideDS4ContCk.IsChecked != true)
@@ -2450,6 +2541,7 @@ Suspend support not enabled.", true);
 
         private async void DriverSetupBtn_Click(object sender, RoutedEventArgs e)
         {
+            if (PortableLabContext.IsActive) return;
             StartStopBtn.IsEnabled = false;
             await Task.Run(() =>
             {
@@ -2502,8 +2594,532 @@ Suspend support not enabled.", true);
                 $"server: {(status.ServerRunning ? "running" : "not running")}.";
         }
 
+        private sealed class Switch2AssociationListItem
+        {
+            internal Switch2AssociationListItem(int id, string label, bool isRemembered = false)
+            {
+                Id = id;
+                Label = label;
+                IsRemembered = isRemembered;
+            }
+
+            internal int Id { get; }
+
+            internal bool IsRemembered { get; }
+
+            public string Label { get; }
+        }
+
+        private sealed class Switch2JoyConManualRow
+        {
+            internal Switch2JoyConManualRow(
+                in Switch2JoyConPairCandidate candidate, bool isArmed)
+            {
+                Candidate = candidate;
+                IsArmed = isArmed;
+                Label = candidate.Model ==
+                    Switch2ControllerModel.JoyCon2Left ?
+                    $"Joy-Con 2 (Left) #{candidate.Id}" :
+                    $"Joy-Con 2 (Right) #{candidate.Id}";
+                PairButtonToolTip = isArmed ?
+                    "Cancel this Joy-Con pairing selection" :
+                    "Select this Joy-Con for manual pairing";
+            }
+
+            internal Switch2JoyConPairCandidate Candidate { get; }
+            public string Label { get; }
+            public bool IsArmed { get; }
+            public string PairButtonToolTip { get; }
+        }
+
+        private void RefreshSwitch2JoyConManualRows(bool force = false)
+        {
+            if (switch2JoyConManualPanel == null ||
+                switch2JoyConManualRows == null || App.rootHub == null)
+            {
+                return;
+            }
+            if (!force && mainTabCon?.SelectedItem != controllersTab)
+            {
+                return;
+            }
+
+            bool automatic = settingsWrapVM?.AutomaticJoyConPairing == true;
+            Switch2JoyConPairCandidate[] candidates = App.rootHub.running ?
+                App.rootHub.GetSwitch2JoyConPairCandidates() :
+                Array.Empty<Switch2JoyConPairCandidate>();
+            if (switch2JoyConManualPairSelection.Reconcile(candidates))
+            {
+                force = true;
+            }
+
+            bool canSelect = GetSwitch2JoyConActionAvailability().CanSelect;
+            var signature = new StringBuilder();
+            signature.Append(automatic).Append('|').
+                Append(canSelect).Append('|');
+            foreach (Switch2JoyConPairCandidate candidate in candidates)
+            {
+                signature.Append(candidate.Id).Append(':').
+                    Append((byte)candidate.Model).Append(':').
+                    Append(candidate.ArrivalOrdinal).Append(':').
+                    Append(switch2JoyConManualPairSelection.IsArmed(candidate)).
+                    Append(';');
+            }
+            string nextSignature = signature.ToString();
+            if (!force && string.Equals(nextSignature,
+                    switch2JoyConManualRowsSignature,
+                    StringComparison.Ordinal))
+            {
+                return;
+            }
+            switch2JoyConManualRowsSignature = nextSignature;
+
+            bool show = !automatic && candidates.Length != 0;
+            switch2JoyConManualPanel.Visibility = show ? Visibility.Visible :
+                Visibility.Collapsed;
+            switch2JoyConManualRows.IsEnabled = canSelect;
+            var rows = new List<Switch2JoyConManualRow>(candidates.Length);
+            foreach (Switch2JoyConPairCandidate candidate in candidates)
+            {
+                rows.Add(new Switch2JoyConManualRow(candidate,
+                    switch2JoyConManualPairSelection.IsArmed(candidate)));
+            }
+            switch2JoyConManualRows.ItemsSource = rows;
+            if (!show)
+            {
+                switch2JoyConManualPairSelection.Clear();
+            }
+            ChangeControllerPanel();
+        }
+
+        private async void Switch2JoyConManualPairBtn_Click(object sender,
+            RoutedEventArgs e)
+        {
+            if (!GetSwitch2JoyConActionAvailability().CanSelect || sender is not Button button ||
+                button.DataContext is not Switch2JoyConManualRow row)
+            {
+                return;
+            }
+
+            Switch2JoyConManualPairSelectionResult selection =
+                switch2JoyConManualPairSelection.Select(row.Candidate);
+            switch (selection.Disposition)
+            {
+                case Switch2JoyConManualPairSelectionDisposition.Armed:
+                    switch2JoyConManualStatusText.Text =
+                        $"{row.Label} selected. Click an opposite-side Joy-Con to join them.";
+                    RefreshSwitch2JoyConManualRows(force: true);
+                    return;
+                case Switch2JoyConManualPairSelectionDisposition.Cancelled:
+                    switch2JoyConManualStatusText.Text =
+                        "Pair selection cancelled.";
+                    RefreshSwitch2JoyConManualRows(force: true);
+                    return;
+                case Switch2JoyConManualPairSelectionDisposition.
+                        IncompatibleSide:
+                    switch2JoyConManualStatusText.Text =
+                        "Choose one left and one right Joy-Con 2.";
+                    return;
+                case Switch2JoyConManualPairSelectionDisposition.PairReady:
+                    break;
+                default:
+                    switch2JoyConManualStatusText.Text =
+                        "That Joy-Con is no longer available.";
+                    RefreshSwitch2JoyConManualRows(force: true);
+                    return;
+            }
+
+            SetSwitch2JoyConMutationBusy(true);
+            switch2JoyConManualStatusText.Text =
+                "Joining and remembering the selected Joy-Con pair…";
+            try
+            {
+                Switch2JoyConPairActivationResult result = await App.rootHub.
+                    CreateAndActivateSwitch2JoyConPairAsync(
+                        selection.LeftCandidateId,
+                        selection.RightCandidateId);
+                switch2JoyConManualStatusText.Text = result.Succeeded ?
+                    "Joy-Con 2 pair connected as one controller." :
+                    $"Joy-Con 2 pair could not be joined: {result.Failure}.";
+            }
+            catch (Exception exception)
+            {
+                switch2JoyConManualStatusText.Text =
+                    $"Joy-Con 2 pair could not be joined: {exception.GetType().Name}.";
+            }
+            finally
+            {
+                SetSwitch2JoyConMutationBusy(false);
+            }
+        }
+
+        private async void Switch2AutomaticJoyConPairingCheck_Click(
+            object sender, RoutedEventArgs e)
+        {
+            if (Switch2ControllerActionBusy) return;
+            bool enabled = switch2AutomaticJoyConPairingCheck.IsChecked ==
+                true;
+            settingsWrapVM.AutomaticJoyConPairing = enabled;
+            switch2JoyConManualPairSelection.Clear();
+            SetSwitch2JoyConMutationBusy(true);
+            try
+            {
+                if (enabled && IsSwitch2JoyConLifecycleAvailable())
+                {
+                    switch2JoyConPairStatusText.Text =
+                        "Pairing the oldest compatible Joy-Con halves…";
+                    int activated = await App.rootHub.
+                        ReconcileAutomaticSwitch2JoyConPairsAsync();
+                    switch2JoyConPairStatusText.Text = activated == 0 ?
+                        "Automatic pairing is on. Waiting for compatible left/right halves." :
+                        $"Automatically connected {activated} Joy-Con pair{(activated == 1 ? string.Empty : "s")}.";
+                }
+                else
+                {
+                    switch2JoyConPairStatusText.Text =
+                        enabled ? "Automatic pairing is on and will apply when compatible Joy-Con connections are available." :
+                        "Automatic pairing is off. Use the link buttons on the Controllers tab to choose exact pairs.";
+                }
+            }
+            catch (Exception exception)
+            {
+                switch2JoyConPairStatusText.Text =
+                    $"Automatic Joy-Con pairing could not be reconciled: {exception.GetType().Name}.";
+            }
+            finally
+            {
+                SetSwitch2JoyConMutationBusy(false);
+            }
+        }
+
+        private void Switch2AssociationRefreshBtn_Click(object sender,
+            RoutedEventArgs e)
+        {
+            RefreshSwitch2AssociationCandidates();
+            RefreshSwitch2JoyConPairCandidates();
+        }
+
+        private void RefreshSwitch2AssociationCandidates()
+        {
+            if (switch2AssociationCandidatesList == null ||
+                switch2DiscoveryStatusText == null || Switch2ControllerActionBusy)
+            {
+                return;
+            }
+            Switch2BluetoothDiscoveryStatus discovery = App.rootHub?.
+                GetSwitch2BluetoothDiscoveryStatus() ?? Switch2BluetoothDiscoveryStatus.Stopped;
+            switch2AssociationAdmissionEnabled = discovery.CanAssociate;
+            int selectedId = (switch2AssociationCandidatesList.SelectedItem as
+                Switch2AssociationListItem)?.Id ?? 0;
+            switch2AssociationCandidatesList.Items.Clear();
+            Switch2BluetoothAssociationCandidate[] candidates = discovery.CanAssociate ?
+                App.rootHub.GetSwitch2BluetoothAssociationCandidates() :
+                Array.Empty<Switch2BluetoothAssociationCandidate>();
+            foreach (Switch2BluetoothAssociationCandidate candidate in
+                     candidates)
+            {
+                string name = candidate.Model switch
+                {
+                    Switch2ControllerModel.ProController2 =>
+                        "Switch 2 Pro Controller",
+                    Switch2ControllerModel.JoyCon2Left => "Joy-Con 2 (Left)",
+                    Switch2ControllerModel.JoyCon2Right => "Joy-Con 2 (Right)",
+                    _ => "Switch 2 controller",
+                };
+                var item = new Switch2AssociationListItem(candidate.Id,
+                    candidate.IsRemembered ? $"{name} — already associated; reconnect available" : name,
+                    candidate.IsRemembered);
+                switch2AssociationCandidatesList.Items.Add(item);
+                if (candidate.Id == selectedId)
+                    switch2AssociationCandidatesList.SelectedItem = item;
+            }
+            // Keep the last association result in its separate text block.
+            // A refresh must not erase the error/recovery detail the user needs.
+            switch2DiscoveryStatusText.Text =
+                Switch2BluetoothDiscoveryPresentation.Describe(discovery, candidates.Length);
+            switch2AssociationCandidatesList.IsEnabled = discovery.CanAssociate;
+            UpdateSwitch2AssociationAdmission();
+        }
+
+        private void Switch2AssociationCandidatesList_SelectionChanged(object sender,
+            SelectionChangedEventArgs e) => UpdateSwitch2AssociationAdmission();
+
+        private void UpdateSwitch2AssociationAdmission()
+        {
+            if (switch2AssociateBtn != null)
+            {
+                switch2AssociateBtn.Content = Switch2BluetoothDiscoveryPresentation.ActionLabel(
+                    (switch2AssociationCandidatesList?.SelectedItem as Switch2AssociationListItem)?.IsRemembered == true);
+                switch2AssociateBtn.IsEnabled = !Switch2ControllerActionBusy &&
+                    switch2AssociationAdmissionEnabled &&
+                    switch2AssociationCandidatesList?.SelectedItem is Switch2AssociationListItem;
+            }
+        }
+
+        private async void Switch2AssociateBtn_Click(object sender,
+            RoutedEventArgs e)
+        {
+            if (Switch2ControllerActionBusy) return;
+            if (App.rootHub?.GetSwitch2BluetoothDiscoveryStatus().CanAssociate != true)
+            {
+                RefreshSwitch2AssociationCandidates();
+                switch2AssociationStatusText.Text =
+                    "Association is unavailable until Bluetooth discovery is active.";
+                return;
+            }
+            if (switch2AssociationCandidatesList.SelectedItem is not
+                    Switch2AssociationListItem selected)
+            {
+                switch2AssociationStatusText.Text =
+                    "Select a controller to associate or reconnect first.";
+                return;
+            }
+
+            switch2AssociationBusy = true;
+            switch2AssociationCandidatesList.IsEnabled = false;
+            UpdateSwitch2ControllerActionAdmission();
+            RefreshSwitch2JoyConManualRows(force: true);
+            switch2AssociationStatusText.Text =
+                selected.IsRemembered ? "Reconnecting the selected controller without changing its association…" :
+                    $"Associating {selected.Label}…";
+            try
+            {
+                Switch2BluetoothWindowsAssociationResult result = await
+                    App.rootHub.AssociateSwitch2BluetoothAsync(selected.Id);
+                switch2AssociationStatusText.Text = selected.IsRemembered ?
+                    Switch2BluetoothDiscoveryPresentation.DescribeReconnect(result) : result.Succeeded ?
+                    $"{selected.Label} associated. It will connect automatically when it resumes advertising." :
+                    $"Association failed at {result.LastCompletedStep}: {result.Failure}.";
+            }
+            catch (Exception exception)
+            {
+                switch2AssociationStatusText.Text =
+                    $"{(selected.IsRemembered ? "Reconnect" : "Association")} failed: {exception.GetType().Name}.";
+            }
+            finally
+            {
+                switch2AssociationBusy = false;
+                UpdateSwitch2ControllerActionAdmission();
+                RefreshSwitch2AssociationCandidates();
+                RefreshSwitch2JoyConPairCandidates();
+                RefreshSwitch2JoyConManualRows(force: true);
+            }
+        }
+
+        private bool IsSwitch2JoyConLifecycleAvailable()
+        {
+            // Existing GATT connections can still be joined after the
+            // advertisement watcher stops; only lifecycle shutdown blocks them.
+            Switch2BluetoothDiscoveryState? state = App.rootHub?.
+                GetSwitch2BluetoothDiscoveryStatus().State;
+            return state is Switch2BluetoothDiscoveryState.Scanning or
+                Switch2BluetoothDiscoveryState.Interrupted;
+        }
+
+        private Switch2JoyConActionAvailability GetSwitch2JoyConActionAvailability() =>
+            new(IsSwitch2JoyConLifecycleAvailable(),
+                settingsWrapVM?.AutomaticJoyConPairing == true,
+                Switch2ControllerActionBusy,
+                (switch2JoyConLeftCandidates?.SelectedItem as Switch2AssociationListItem)?.Id ?? 0,
+                (switch2JoyConRightCandidates?.SelectedItem as Switch2AssociationListItem)?.Id ?? 0);
+
+        private void UpdateSwitch2JoyConActionAdmission()
+        {
+            if (switch2JoyConLeftCandidates == null || switch2JoyConRightCandidates == null ||
+                switch2CreateJoyConPairBtn == null || switch2UseLeftJoyConSeparatelyBtn == null ||
+                switch2UseRightJoyConSeparatelyBtn == null) return;
+            Switch2JoyConActionAvailability available = GetSwitch2JoyConActionAvailability();
+            switch2JoyConLeftCandidates.IsEnabled = available.CanSelect &&
+                switch2JoyConLeftCandidates.Items.Count != 0;
+            switch2JoyConRightCandidates.IsEnabled = available.CanSelect &&
+                switch2JoyConRightCandidates.Items.Count != 0;
+            switch2CreateJoyConPairBtn.IsEnabled = available.CanJoin;
+            switch2UseLeftJoyConSeparatelyBtn.IsEnabled = available.CanUseLeft;
+            switch2UseRightJoyConSeparatelyBtn.IsEnabled = available.CanUseRight;
+        }
+
+        private void Switch2JoyConCandidates_SelectionChanged(object sender,
+            SelectionChangedEventArgs e) => UpdateSwitch2JoyConActionAdmission();
+
+        private void UpdateSwitch2ControllerActionAdmission()
+        {
+            if (switch2AssociationRefreshBtn != null)
+                switch2AssociationRefreshBtn.IsEnabled = !Switch2ControllerActionBusy;
+            if (switch2AssociationCandidatesList != null)
+                switch2AssociationCandidatesList.IsEnabled = !Switch2ControllerActionBusy &&
+                    switch2AssociationAdmissionEnabled;
+            if (switch2AutomaticJoyConPairingCheck != null)
+                switch2AutomaticJoyConPairingCheck.IsEnabled = !Switch2ControllerActionBusy;
+            UpdateSwitch2AssociationAdmission();
+            UpdateSwitch2JoyConActionAdmission();
+        }
+
+        private void SetSwitch2JoyConMutationBusy(bool busy)
+        {
+            switch2JoyConMutationBusy = busy;
+            UpdateSwitch2ControllerActionAdmission();
+            RefreshSwitch2JoyConManualRows(force: true);
+            if (!busy)
+            {
+                RefreshSwitch2AssociationCandidates();
+                RefreshSwitch2JoyConPairCandidates();
+            }
+        }
+
+        private void RefreshSwitch2JoyConPairCandidates()
+        {
+            if (switch2JoyConLeftCandidates == null ||
+                switch2JoyConRightCandidates == null ||
+                switch2JoyConCandidateStatusText == null)
+            {
+                return;
+            }
+            if (Switch2ControllerActionBusy)
+            {
+                UpdateSwitch2JoyConActionAdmission();
+                return;
+            }
+
+            int previousLeft = (switch2JoyConLeftCandidates.SelectedItem as
+                Switch2AssociationListItem)?.Id ?? 0;
+            int previousRight = (switch2JoyConRightCandidates.SelectedItem as
+                Switch2AssociationListItem)?.Id ?? 0;
+            switch2JoyConLeftCandidates.Items.Clear();
+            switch2JoyConRightCandidates.Items.Clear();
+            bool automatic = settingsWrapVM?.AutomaticJoyConPairing == true;
+            if (App.rootHub?.running != true)
+            {
+                switch2JoyConCandidateStatusText.Text =
+                    "Start DS4Windows before joining Joy-Con 2 controllers.";
+                UpdateSwitch2JoyConActionAdmission();
+                return;
+            }
+
+            Switch2JoyConPairCandidate[] candidates = App.rootHub.
+                GetSwitch2JoyConPairCandidates();
+            int selectedLeft = Switch2JoyConActionAvailability.PreserveSelection(
+                previousLeft, candidates, Switch2ControllerModel.JoyCon2Left);
+            int selectedRight = Switch2JoyConActionAvailability.PreserveSelection(
+                previousRight, candidates, Switch2ControllerModel.JoyCon2Right);
+            int leftCount = 0;
+            int rightCount = 0;
+            foreach (Switch2JoyConPairCandidate candidate in candidates)
+            {
+                if (candidate.Model == Switch2ControllerModel.JoyCon2Left)
+                {
+                    var item = new Switch2AssociationListItem(candidate.Id,
+                        $"Joy-Con 2 (Left) #{candidate.Id}");
+                    switch2JoyConLeftCandidates.Items.Add(item);
+                    if (candidate.Id == selectedLeft)
+                        switch2JoyConLeftCandidates.SelectedItem = item;
+                    leftCount++;
+                }
+                else if (candidate.Model ==
+                         Switch2ControllerModel.JoyCon2Right)
+                {
+                    var item = new Switch2AssociationListItem(candidate.Id,
+                        $"Joy-Con 2 (Right) #{candidate.Id}");
+                    switch2JoyConRightCandidates.Items.Add(item);
+                    if (candidate.Id == selectedRight)
+                        switch2JoyConRightCandidates.SelectedItem = item;
+                    rightCount++;
+                }
+            }
+
+            switch2JoyConCandidateStatusText.Text =
+                automatic ?
+                $"Automatic pairing is on; {leftCount} left and {rightCount} right half{(leftCount + rightCount == 1 ? string.Empty : "s")} are waiting for compatible partners." :
+                $"{leftCount} left and {rightCount} right unmatched Joy-Con 2 connection{(leftCount + rightCount == 1 ? string.Empty : "s")} available.";
+            UpdateSwitch2JoyConActionAdmission();
+        }
+
+        private async void Switch2CreateJoyConPairBtn_Click(object sender,
+            RoutedEventArgs e)
+        {
+            if (!GetSwitch2JoyConActionAvailability().CanJoin) return;
+            if (switch2JoyConLeftCandidates.SelectedItem is not
+                    Switch2AssociationListItem left ||
+                switch2JoyConRightCandidates.SelectedItem is not
+                    Switch2AssociationListItem right)
+            {
+                switch2JoyConPairStatusText.Text =
+                    "Select one left and one right Joy-Con 2 first.";
+                return;
+            }
+
+            SetSwitch2JoyConMutationBusy(true);
+            switch2JoyConPairStatusText.Text = "Joining the selected pair…";
+            try
+            {
+                Switch2JoyConPairActivationResult result = await App.rootHub.
+                    CreateAndActivateSwitch2JoyConPairAsync(left.Id, right.Id);
+                switch2JoyConPairStatusText.Text = result.Succeeded ?
+                    "Joy-Con 2 pair saved and connected as one controller." :
+                    $"Joy-Con 2 pair could not be joined: {result.Failure}.";
+            }
+            catch (Exception exception)
+            {
+                switch2JoyConPairStatusText.Text =
+                    $"Joy-Con 2 pair could not be joined: {exception.GetType().Name}.";
+            }
+            finally
+            {
+                SetSwitch2JoyConMutationBusy(false);
+            }
+        }
+
+        private async void Switch2UseLeftJoyConSeparatelyBtn_Click(
+            object sender, RoutedEventArgs e) =>
+            await ActivateSelectedJoyConSeparatelyAsync(
+                switch2JoyConLeftCandidates);
+
+        private async void Switch2UseRightJoyConSeparatelyBtn_Click(
+            object sender, RoutedEventArgs e) =>
+            await ActivateSelectedJoyConSeparatelyAsync(
+                switch2JoyConRightCandidates);
+
+        private async Task ActivateSelectedJoyConSeparatelyAsync(
+            System.Windows.Controls.ComboBox candidates)
+        {
+            Switch2JoyConActionAvailability available = GetSwitch2JoyConActionAvailability();
+            bool allowed = ReferenceEquals(candidates, switch2JoyConLeftCandidates) ?
+                available.CanUseLeft : ReferenceEquals(candidates, switch2JoyConRightCandidates) &&
+                    available.CanUseRight;
+            if (!allowed) return;
+            if (candidates.SelectedItem is not
+                    Switch2AssociationListItem selected)
+            {
+                switch2JoyConPairStatusText.Text =
+                    "Select the Joy-Con 2 to use separately first.";
+                return;
+            }
+
+            SetSwitch2JoyConMutationBusy(true);
+            switch2JoyConPairStatusText.Text =
+                $"Connecting {selected.Label} separately…";
+            try
+            {
+                Switch2JoyConStandaloneActivationResult result = await
+                    App.rootHub.ActivateSwitch2JoyConSeparatelyAsync(
+                        selected.Id);
+                switch2JoyConPairStatusText.Text = result.Succeeded ?
+                    $"{selected.Label} connected as a separate controller." :
+                    $"{selected.Label} could not connect separately: {result.Failure}.";
+            }
+            catch (Exception exception)
+            {
+                switch2JoyConPairStatusText.Text =
+                    $"{selected.Label} could not connect separately: {exception.GetType().Name}.";
+            }
+            finally
+            {
+                SetSwitch2JoyConMutationBusy(false);
+            }
+        }
+
         private void CheckUpdatesBtn_Click(object sender, RoutedEventArgs e)
         {
+            if (PortableLabContext.IsActive) return;
             Task.Run(() =>
             {
                 try
@@ -2885,6 +3501,7 @@ Suspend support not enabled.", true);
 
         private void HidHideBtn_Click(object sender, RoutedEventArgs e)
         {
+            if (PortableLabContext.IsActive) return;
             string path = Util.GetHidHideClientPath();
             if (!string.IsNullOrEmpty(path))
             {

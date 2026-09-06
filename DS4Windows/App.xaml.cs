@@ -145,6 +145,11 @@ namespace DS4WinWPF
             runShutdown = true;
             skipSave = true;
 
+            // Validate explicit lab policy before any maintenance helper can
+            // repair tasks, install packages, or signal a running mapper.
+            DS4Windows.PortableLabContext.Initialize(e.Args,
+                Path.GetDirectoryName(DS4Windows.Global.exelocation));
+
             if (StartupMethods.TryRunTaskRefreshHelper(e.Args,
                     out int startupTaskExitCode))
             {
@@ -247,11 +252,16 @@ namespace DS4WinWPF
                 EventWaitHandleRights.Modify,
                 out EventWaitHandle tempComEvent))
                 {
-                    tempComEvent.Set();  // signal the other instance.
+                    if (!DS4Windows.PortableLabContext.IsActive)
+                        tempComEvent.Set();  // signal the other instance.
                     tempComEvent.Close();
 
+                    if (DS4Windows.PortableLabContext.IsActive)
+                        MessageBox.Show("Another DS4Windows instance owns the controllers. Close it before starting this portable lab. No existing instance was activated or changed.",
+                            "Portable controller lab", MessageBoxButton.OK, MessageBoxImage.Information);
+
                     runShutdown = false;
-                    Current.Shutdown();    // Quit temp instance
+                    Current.Shutdown(DS4Windows.PortableLabContext.IsActive ? 1 : 0);
                     return;
                 }
             }
@@ -262,7 +272,7 @@ namespace DS4WinWPF
                 // but never make the new process appear to do nothing.
                 ShowSingleInstanceAccessError();
                 runShutdown = false;
-                Current.Shutdown();
+                Current.Shutdown(DS4Windows.PortableLabContext.IsActive ? 1 : 0);
                 return;
             }
 
@@ -272,25 +282,27 @@ namespace DS4WinWPF
             // Create the Event handle
             try
             {
-                threadComEvent = CreateSingleAppComEvent();
+                threadComEvent = CreateSingleAppComEvent(SingleAppComEventName,
+                    requireNew: DS4Windows.PortableLabContext.IsActive);
+                if (threadComEvent == null)
+                {
+                    MessageBox.Show("Another DS4Windows instance started first. Portable lab startup was cancelled.",
+                        "Portable controller lab", MessageBoxButton.OK, MessageBoxImage.Information);
+                    runShutdown = false;
+                    Current.Shutdown(1);
+                    return;
+                }
             }
             catch (UnauthorizedAccessException)
             {
                 // Another elevated instance can win the race with older event security.
                 ShowSingleInstanceAccessError();
                 runShutdown = false;
-                Current.Shutdown();
+                Current.Shutdown(DS4Windows.PortableLabContext.IsActive ? 1 : 0);
                 return;
             }
 
             CreateTempWorkerThread();
-
-            CreateControlService(parser);
-            // Let WPF use the best renderer available for the current session. The
-            // previous SoftwareOnly override made the card-based UI noticeably laggy
-            // during resize, scrolling, and page changes. WPF still falls back to
-            // software automatically when hardware acceleration is unavailable.
-            RenderOptions.ProcessRenderMode = RenderMode.Default;
 
             DS4Windows.Global.FindConfigLocation();
             bool firstRun = DS4Windows.Global.firstRun;
@@ -298,7 +310,7 @@ namespace DS4WinWPF
             // Could not find unique profile location; does not exist or multiple places.
             // Advise user to specify where DS4Windows should save its configuation files
             // and profiles
-            if (firstRun)
+            if (firstRun && !DS4Windows.PortableLabContext.IsActive)
             {
                 DS4Forms.SaveWhere savewh =
                     new DS4Forms.SaveWhere(DS4Windows.Global.multisavespots);
@@ -320,6 +332,18 @@ namespace DS4WinWPF
                 return;
             }
 
+            // Switch 2 runtime construction opens profile-owned persistence
+            // stores. Resolve the one authoritative configuration directory
+            // before ControlService is allowed to construct those stores;
+            // otherwise a fresh process can pass a null path into the store
+            // factories before the SaveWhere transaction has completed.
+            CreateControlService(parser);
+            // Let WPF use the best renderer available for the current session. The
+            // previous SoftwareOnly override made the card-based UI noticeably laggy
+            // during resize, scrolling, and page changes. WPF still falls back to
+            // software automatically when hardware acceleration is unavailable.
+            RenderOptions.ProcessRenderMode = RenderMode.Default;
+
             logHolder = new LoggerHolder(rootHub);
             Logger logger = logHolder.Logger;
             string version = DS4Windows.Global.exeDisplayVersion;
@@ -331,6 +355,8 @@ namespace DS4WinWPF
             logger.Info($"OS Release ID: {DS4Windows.Util.GetOSReleaseId()}");
             logger.Info($"System Architecture: {(Environment.Is64BitOperatingSystem ? "x64" : "x86")}");
             logger.Info("Logger created");
+            if (DS4Windows.PortableLabContext.Current is { } lab)
+                logger.Info($"Portable controller lab: data={lab.DataPath}; VIIPER SHA256={lab.ExpectedSha256}. Startup maintenance, installation, updates, HidHide policy changes and legacy IPC are disabled. The backend is externally managed.");
             StartupDiag(logger, $"App bootstrap pid={Environment.ProcessId} admin={DS4Windows.Global.IsAdministrator()} cwd=\"{Environment.CurrentDirectory}\" cmd=\"{Environment.CommandLine}\"");
             StartupDiag(logger, $"Exe location=\"{DS4Windows.Global.exelocation}\" configPath=\"{DS4Windows.Global.appdatapath}\" firstRun={firstRun}");
 
@@ -521,7 +547,8 @@ namespace DS4WinWPF
             }
         }
 
-        private static EventWaitHandle CreateSingleAppComEvent()
+        internal static EventWaitHandle CreateSingleAppComEvent(string eventName,
+            bool requireNew)
         {
             EventWaitHandleSecurity security = new EventWaitHandleSecurity();
             EventWaitHandleRights appRights = EventWaitHandleRights.Synchronize |
@@ -540,8 +567,14 @@ namespace DS4WinWPF
                     EventWaitHandleRights.FullControl, AccessControlType.Allow));
             }
 
-            return EventWaitHandleAcl.Create(false, EventResetMode.ManualReset,
-                SingleAppComEventName, out _, security);
+            EventWaitHandle result = EventWaitHandleAcl.Create(false, EventResetMode.ManualReset,
+                eventName, out bool createdNew, security);
+            if (requireNew && !createdNew)
+            {
+                result.Dispose();
+                return null;
+            }
+            return result;
         }
 
         private void App_DispatcherUnhandledException(object sender, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)
@@ -605,6 +638,14 @@ namespace DS4WinWPF
         {
             if (!DS4Windows.Global.Save()) //if can't write to file
             {
+                if (DS4Windows.PortableLabContext.IsActive)
+                {
+                    skipSave = true;
+                    MessageBox.Show("Cannot save portable lab settings. No settings were copied to AppData.",
+                        "Portable controller lab", MessageBoxButton.OK, MessageBoxImage.Error);
+                    Current.Shutdown(1);
+                    return;
+                }
                 if (MessageBox.Show("Cannot write at current location\nCopy Settings to appdata?", "DS4Windows",
                     MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
                 {
@@ -1062,11 +1103,15 @@ namespace DS4WinWPF
 
         private void Application_Exit(object sender, ExitEventArgs e)
         {
-            if (runShutdown)
+            try
             {
-                logHolder?.Logger?.Info("Request App Shutdown");
-                CleanShutdown();
+                if (runShutdown)
+                {
+                    logHolder?.Logger?.Info("Request App Shutdown");
+                    CleanShutdown();
+                }
             }
+            finally { DS4Windows.PortableLabContext.Current?.Dispose(); }
         }
 
         private void Application_SessionEnding(object sender, SessionEndingCancelEventArgs e)

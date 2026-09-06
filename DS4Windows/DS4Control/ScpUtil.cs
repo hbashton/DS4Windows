@@ -19,6 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 using DS4Windows.DS4Control;
 using DS4Windows.InputDevices;
 using DS4Windows.StickModifiers;
+using DS4Windows.Switch2;
 using DS4WinWPF.DS4Control.DTOXml;
 using DS4WinWPF.DS4Forms.ViewModels;
 using Sensorit.Base;
@@ -47,14 +48,21 @@ using WpfScreenHelper;
 using static DS4Windows.Mouse;
 using static DS4Windows.Util;
 using LightbarMacro = DS4WinWPF.DS4Forms.ViewModels.LightbarMacro;
+using Switch2CemuhookYawPolicy =
+    DS4Windows.Switch2.Switch2CemuhookYawSensitivity;
 
 namespace DS4Windows
 {
     [Flags]
     public enum DS4KeyType : byte { None = 0, ScanCode = 1, Toggle = 2, Unbound = 4, Macro = 8, HoldMacro = 16, RepeatMacro = 32 }; // Increment by exponents of 2*, starting at 2^0
     public enum Ds3PadId : byte { None = 0xFF, One = 0x00, Two = 0x01, Three = 0x02, Four = 0x03, All = 0x04 };
-    public enum DS4Controls : byte { None, LXNeg, LXPos, LYNeg, LYPos, RXNeg, RXPos, RYNeg, RYPos, L1, L2, L3, R1, R2, R3, Square, Triangle, Circle, Cross, DpadUp, DpadRight, DpadDown, DpadLeft, PS, TouchLeft, TouchUpper, TouchMulti, TouchRight, Share, Options, Mute, FnL, FnR, BLP, BRP, GyroXPos, GyroXNeg, GyroZPos, GyroZNeg, SwipeLeft, SwipeRight, SwipeUp, SwipeDown, L2FullPull, R2FullPull, GyroSwipeLeft, GyroSwipeRight, GyroSwipeUp, GyroSwipeDown, Capture, SideL, SideR, LSOuter, RSOuter, TouchStarted, TouchEnded };
-    public enum X360Controls : byte { None, LXNeg, LXPos, LYNeg, LYPos, RXNeg, RXPos, RYNeg, RYPos, LB, LT, LS, RB, RT, RS, X, Y, B, A, DpadUp, DpadRight, DpadDown, DpadLeft, Guide, Back, Start, TouchpadClick, LeftMouse, RightMouse, MiddleMouse, FourthMouse, FifthMouse, WUP, WDOWN, MouseUp, MouseDown, MouseLeft, MouseRight, AbsMouseUp, AbsMouseDown, AbsMouseLeft, AbsMouseRight, Unbound };
+    // Profile XML serializes these member names and several mapping tables index
+    // them by their byte value. New source controls must therefore be appended;
+    // never insert or reorder members in this enum.
+    public enum DS4Controls : byte { None, LXNeg, LXPos, LYNeg, LYPos, RXNeg, RXPos, RYNeg, RYPos, L1, L2, L3, R1, R2, R3, Square, Triangle, Circle, Cross, DpadUp, DpadRight, DpadDown, DpadLeft, PS, TouchLeft, TouchUpper, TouchMulti, TouchRight, Share, Options, Mute, FnL, FnR, BLP, BRP, GyroXPos, GyroXNeg, GyroZPos, GyroZNeg, SwipeLeft, SwipeRight, SwipeUp, SwipeDown, L2FullPull, R2FullPull, GyroSwipeLeft, GyroSwipeRight, GyroSwipeUp, GyroSwipeDown, Capture, SideL, SideR, LSOuter, RSOuter, TouchStarted, TouchEnded, Switch2C, Switch2JoyConLeftPaddle1, Switch2JoyConLeftPaddle2, Switch2JoyConRightPaddle1, Switch2JoyConRightPaddle2, Switch2JoyConLeftIrSensor, Switch2JoyConRightIrSensor, Switch2JoyConLeftSL, Switch2JoyConLeftSR, Switch2JoyConRightSL, Switch2JoyConRightSR };
+    // Append new output actions after Unbound. Existing profile XML normally
+    // uses names, but byte values also escape through mapping aliases.
+    public enum X360Controls : byte { None, LXNeg, LXPos, LYNeg, LYPos, RXNeg, RXPos, RYNeg, RYPos, LB, LT, LS, RB, RT, RS, X, Y, B, A, DpadUp, DpadRight, DpadDown, DpadLeft, Guide, Back, Start, TouchpadClick, LeftMouse, RightMouse, MiddleMouse, FourthMouse, FifthMouse, WUP, WDOWN, MouseUp, MouseDown, MouseLeft, MouseRight, AbsMouseUp, AbsMouseDown, AbsMouseLeft, AbsMouseRight, Unbound, WLEFT, WRIGHT };
 
     public enum SASteeringWheelEmulationAxisType : byte { None = 0, LX, LY, RX, RY, L2R2, VJoy1X, VJoy1Y, VJoy1Z, VJoy2X, VJoy2Y, VJoy2Z };
     public enum OutContType : uint
@@ -70,6 +78,7 @@ namespace DS4Windows
         ViiperDualSense,
         ViiperDualSenseEdge,
         ViiperSwitch2Pro,
+        ViiperXboxOne,
     }
 
     public static class OutContTypeCompatibility
@@ -93,6 +102,7 @@ namespace DS4Windows
                 OutContType.ViiperDualSense => "DualSense",
                 OutContType.ViiperDualSenseEdge => "DualSense Edge",
                 OutContType.ViiperSwitch2Pro => "Switch 2 Pro",
+                OutContType.ViiperXboxOne => "Xbox One / Series",
                 _ => "None",
             };
         }
@@ -165,7 +175,8 @@ namespace DS4Windows
     public class DS4ControlSettings
     {
         public const int MAX_MACRO_VALUE = 288;
-        public const byte LAST_DS4_ACTION = (byte)DS4Controls.TouchEnded;
+        public const byte LAST_DS4_ACTION =
+            (byte)DS4Controls.Switch2JoyConRightSR;
 
 
         public DS4Controls control;
@@ -201,6 +212,11 @@ namespace DS4Windows
         public string shiftExtras = null;
         public DS4KeyType shiftKeyType = DS4KeyType.None;
 
+        private readonly Switch2ModeShiftAction[] switch2ModeShiftActions =
+        {
+            new(), new(), new(),
+        };
+
         public bool IsDefault { get => actionType == ActionType.Default; }
         public bool IsShiftDefault { get => shiftActionType == ActionType.Default; }
 
@@ -225,7 +241,35 @@ namespace DS4Windows
             shiftTrigger = 0;
             shiftExtras = null;
             shiftKeyType = DS4KeyType.None;
+            foreach (Switch2ModeShiftAction modeShiftAction in
+                switch2ModeShiftActions)
+            {
+                modeShiftAction.Reset();
+            }
         }
+
+        internal Switch2ModeShiftAction GetSwitch2ModeShiftAction(
+            Switch2ModeShiftScope scope) =>
+            switch2ModeShiftActions[(int)scope];
+
+        internal bool HasSwitch2ModeShiftAction(
+            Switch2ModeShiftScope scope) =>
+            !GetSwitch2ModeShiftAction(scope).IsDefault;
+
+        internal bool HasAnySwitch2ModeShiftAction =>
+            !switch2ModeShiftActions[0].IsDefault ||
+            !switch2ModeShiftActions[1].IsDefault ||
+            !switch2ModeShiftActions[2].IsDefault;
+
+        internal bool HasAnySwitch2ModeShiftMappingAction =>
+            switch2ModeShiftActions[0].ActionType != ActionType.Default ||
+            switch2ModeShiftActions[1].ActionType != ActionType.Default ||
+            switch2ModeShiftActions[2].ActionType != ActionType.Default;
+
+        internal bool HasAnySwitch2ModeShiftExtras =>
+            switch2ModeShiftActions[0].Extras != null ||
+            switch2ModeShiftActions[1].Extras != null ||
+            switch2ModeShiftActions[2].Extras != null;
 
         public bool IsExtrasEmpty(string extraStr)
         {
@@ -304,6 +348,42 @@ namespace DS4Windows
         }
     }
 
+    internal sealed class Switch2ModeShiftAction
+    {
+        internal DS4ControlSettings.ActionType ActionType =
+            DS4ControlSettings.ActionType.Default;
+        internal ControlActionData Action = new();
+        internal string Extras;
+        internal DS4KeyType KeyType = DS4KeyType.None;
+
+        internal bool IsDefault =>
+            ActionType == DS4ControlSettings.ActionType.Default &&
+            string.IsNullOrEmpty(Extras);
+
+        internal void Reset()
+        {
+            ActionType = DS4ControlSettings.ActionType.Default;
+            Action = new ControlActionData();
+            Extras = null;
+            KeyType = DS4KeyType.None;
+        }
+
+        internal void CopyFromLegacy(DS4ControlSettings source)
+        {
+            ActionType = source.shiftActionType;
+            Action = new ControlActionData
+            {
+                actionAlias = source.shiftAction.actionAlias,
+                actionBtn = source.shiftAction.actionBtn,
+                actionKey = source.shiftAction.actionKey,
+                actionMacro = source.shiftAction.actionMacro == null ? null :
+                    (int[])source.shiftAction.actionMacro.Clone(),
+            };
+            Extras = source.shiftExtras;
+            KeyType = source.shiftKeyType;
+        }
+    }
+
     public class ControlSettingsGroup
     {
         public List<DS4ControlSettings> LS = new List<DS4ControlSettings>();
@@ -366,6 +446,15 @@ namespace DS4Windows
             // Populate basic buttons used for mapping after DualSense Edge extra
             // buttons in DS4Controls enum
             for (int i = (int)DS4Controls.GyroXPos; i <= (int)DS4Controls.SwipeDown; i++)
+            {
+                ControlButtons.Add(settingsList[i - 1]);
+            }
+
+            // Source-only Switch 2 controls have no default virtual output,
+            // but custom profile actions must travel through the same standard
+            // button loop as every other remappable source.
+            for (int i = (int)DS4Controls.Switch2C;
+                i <= (int)DS4Controls.Switch2JoyConRightSR; i++)
             {
                 ControlButtons.Add(settingsList[i - 1]);
             }
@@ -741,6 +830,17 @@ namespace DS4Windows
             X360Controls.None, // DS4Controls.RSOuter
             X360Controls.None, // DS4Controls.TouchStarted
             X360Controls.None, // DS4Controls.TouchEnded
+            X360Controls.None, // DS4Controls.Switch2C
+            X360Controls.None, // DS4Controls.Switch2JoyConLeftPaddle1
+            X360Controls.None, // DS4Controls.Switch2JoyConLeftPaddle2
+            X360Controls.None, // DS4Controls.Switch2JoyConRightPaddle1
+            X360Controls.None, // DS4Controls.Switch2JoyConRightPaddle2
+            X360Controls.None, // DS4Controls.Switch2JoyConLeftIrSensor
+            X360Controls.None, // DS4Controls.Switch2JoyConRightIrSensor
+            X360Controls.None, // DS4Controls.Switch2JoyConLeftSL
+            X360Controls.None, // DS4Controls.Switch2JoyConLeftSR
+            X360Controls.None, // DS4Controls.Switch2JoyConRightSL
+            X360Controls.None, // DS4Controls.Switch2JoyConRightSR
         };
 
         // Create mapping array at runtime
@@ -794,6 +894,8 @@ namespace DS4Windows
             [X360Controls.FifthMouse] = "5th Mouse Button",
             [X360Controls.WUP] = "Mouse Wheel Up",
             [X360Controls.WDOWN] = "Mouse Wheel Down",
+            [X360Controls.WLEFT] = "Mouse Wheel Left",
+            [X360Controls.WRIGHT] = "Mouse Wheel Right",
             [X360Controls.MouseUp] = "Mouse Up",
             [X360Controls.MouseDown] = "Mouse Down",
             [X360Controls.MouseLeft] = "Mouse Left",
@@ -841,6 +943,8 @@ namespace DS4Windows
             [X360Controls.FifthMouse] = "5th Mouse Button",
             [X360Controls.WUP] = "Mouse Wheel Up",
             [X360Controls.WDOWN] = "Mouse Wheel Down",
+            [X360Controls.WLEFT] = "Mouse Wheel Left",
+            [X360Controls.WRIGHT] = "Mouse Wheel Right",
             [X360Controls.MouseUp] = "Mouse Up",
             [X360Controls.MouseDown] = "Mouse Down",
             [X360Controls.MouseLeft] = "Mouse Left",
@@ -887,6 +991,8 @@ namespace DS4Windows
             [X360Controls.FifthMouse] = "5th Mouse Button",
             [X360Controls.WUP] = "Mouse Wheel Up",
             [X360Controls.WDOWN] = "Mouse Wheel Down",
+            [X360Controls.WLEFT] = "Mouse Wheel Left",
+            [X360Controls.WRIGHT] = "Mouse Wheel Right",
             [X360Controls.MouseUp] = "Mouse Up",
             [X360Controls.MouseDown] = "Mouse Down",
             [X360Controls.MouseLeft] = "Mouse Left",
@@ -904,7 +1010,8 @@ namespace DS4Windows
             conType = conType.Normalize();
             string result = string.Empty;
             if (conType == DS4Windows.OutContType.X360 ||
-                conType == DS4Windows.OutContType.ViiperX360)
+                conType == DS4Windows.OutContType.ViiperX360 ||
+                conType == DS4Windows.OutContType.ViiperXboxOne)
             {
                 xboxDefaultNames.TryGetValue(key, out result);
             }
@@ -982,6 +1089,23 @@ namespace DS4Windows
 
             [DS4Controls.TouchStarted] = "Touch Started",
             [DS4Controls.TouchEnded] = "Touch Ended",
+            [DS4Controls.Switch2C] = "Switch 2 C",
+            [DS4Controls.Switch2JoyConLeftPaddle1] =
+                "Switch 2 Joy-Con Left Paddle 1",
+            [DS4Controls.Switch2JoyConLeftPaddle2] =
+                "Switch 2 Joy-Con Left Paddle 2",
+            [DS4Controls.Switch2JoyConRightPaddle1] =
+                "Switch 2 Joy-Con Right Paddle 1",
+            [DS4Controls.Switch2JoyConRightPaddle2] =
+                "Switch 2 Joy-Con Right Paddle 2",
+            [DS4Controls.Switch2JoyConLeftIrSensor] =
+                "Switch 2 Joy-Con Left IR Sensor",
+            [DS4Controls.Switch2JoyConRightIrSensor] =
+                "Switch 2 Joy-Con Right IR Sensor",
+            [DS4Controls.Switch2JoyConLeftSL] = "Switch 2 Joy-Con Left SL",
+            [DS4Controls.Switch2JoyConLeftSR] = "Switch 2 Joy-Con Left SR",
+            [DS4Controls.Switch2JoyConRightSL] = "Switch 2 Joy-Con Right SL",
+            [DS4Controls.Switch2JoyConRightSR] = "Switch 2 Joy-Con Right SR",
         };
 
         public static Dictionary<DS4Controls, int> macroDS4Values = new Dictionary<DS4Controls, int>()
@@ -1030,6 +1154,7 @@ namespace DS4Windows
 
         public static void SaveWhere(string path)
         {
+            PortableLabContext.Current?.RequireDataPath(path);
             appdatapath = path;
             m_Config.m_Profile = appdatapath + "\\Profiles.xml";
             m_Config.m_Actions = appdatapath + "\\Actions.xml";
@@ -1438,6 +1563,13 @@ namespace DS4Windows
 
         public static void FindConfigLocation()
         {
+            if (PortableLabContext.Current is { } lab)
+            {
+                SaveWhere(lab.DataPath);
+                firstRun = !File.Exists(Path.Combine(lab.DataPath, "Auto Profiles.xml"));
+                multisavespots = false;
+                return;
+            }
             bool programFolderAutoProfilesExists = File.Exists(Path.Combine(exedirpath, "Auto Profiles.xml"));
             bool appDataAutoProfilesExists = File.Exists(Path.Combine(appDataPpath, "Auto Profiles.xml"));
             //bool localAppDataAutoProfilesExists = File.Exists(Path.Combine(localAppDataPpath, "Auto Profiles.xml"));
@@ -1619,12 +1751,12 @@ namespace DS4Windows
         public static bool UseExclusiveMode
         {
             set { m_Config.useExclusiveMode = value; }
-            get { return m_Config.useExclusiveMode; }
+            get { return !PortableLabContext.IsActive && m_Config.useExclusiveMode; }
         } // -- Re-Enable Ex Mode Ends here
 
         public static bool getUseExclusiveMode()
         {
-            return m_Config.useExclusiveMode;
+            return UseExclusiveMode;
         }
 
         public static bool ReclaimSteamInput
@@ -1943,14 +2075,29 @@ namespace DS4Windows
         public static TrayIconChoice UseIconChoice
         {
             get => m_Config.useIconChoice;
-            set => m_Config.useIconChoice = value;
+            set
+            {
+                if (m_Config.useIconChoice == value) return;
+                m_Config.useIconChoice = value;
+                Interlocked.Increment(ref trayIconPolicyRevision);
+            }
         }
+
+        private static long trayIconPolicyRevision;
+        internal static long TrayIconPolicyRevision => Interlocked.Read(ref trayIconPolicyRevision);
 
         public static event EventHandler<byte> BatteryChanged;
 
         public static void InvokeBatteryChanged(byte percentage)
         {
             BatteryChanged?.Invoke(typeof(Global), percentage);
+        }
+
+        internal static void InvokeBatteryChanged(byte percentage,
+            ReportDiagnosticsWorker.Source source)
+        {
+            if (source?.IsCurrent == true)
+                BatteryChanged?.Invoke(source, percentage);
         }
 
         public static AppThemeChoice UseCurrentTheme
@@ -2011,6 +2158,178 @@ namespace DS4Windows
         public static sbyte[] LeftStickDriftYAxis => m_Config.leftStickDriftYAxis;
 
         public static bool[] InverseRumbleMotors => m_Config.inverseRumbleMotors;
+
+        public static bool[] Switch2MapXboxImpulseTriggersToHdRumble =>
+            m_Config.switch2MapXboxImpulseTriggersToHdRumble;
+
+        public static bool[] Switch2XboxImpulseDynamicFrequency =>
+            m_Config.switch2XboxImpulseDynamicFrequency;
+
+        public static int[] Switch2XboxImpulseFrequency =>
+            m_Config.switch2XboxImpulseFrequency;
+
+        public static int[] Switch2XboxImpulseStrength =>
+            m_Config.switch2XboxImpulseStrength;
+
+        public static bool[] Switch2XboxBodyRumbleMode =>
+            m_Config.switch2XboxBodyRumbleMode;
+
+        public static int[] Switch2XboxBodyRumbleFrequency =>
+            m_Config.switch2XboxBodyRumbleFrequency;
+
+        public static int[] Switch2RumbleDelayMilliseconds =>
+            m_Config.switch2RumbleDelayMilliseconds;
+
+        public static bool[] Switch2DualSenseAudioHapticsEnabled =>
+            m_Config.switch2DualSenseAudioHapticsEnabled;
+
+        public static bool[] Switch2DualSenseAdaptiveTriggersEnabled =>
+            m_Config.switch2DualSenseAdaptiveTriggersEnabled;
+
+        public static Switch2FaceButtonLayout[] Switch2FaceButtonLayout =>
+            m_Config.switch2FaceButtonLayout;
+
+        public static bool[] Switch2MagnetometerYawAssistEnabled =>
+            m_Config.switch2MagnetometerYawAssistEnabled;
+
+        public static double[] Switch2VirtualGyroSoftDeadzone =>
+            m_Config.switch2VirtualGyroSoftDeadzone;
+
+        public static double[] Switch2GyroMouseStickAssistSensitivity =>
+            m_Config.switch2GyroMouseStickAssistSensitivity;
+
+        public static double[] Switch2LeftStickMouseSensitivity =>
+            m_Config.switch2LeftStickMouseSensitivity;
+
+        public static double[] Switch2RightStickMouseSensitivity =>
+            m_Config.switch2RightStickMouseSensitivity;
+
+        public static bool[] Switch2HighRateMousePresentation =>
+            m_Config.switch2HighRateMousePresentation;
+
+        public static bool[] Switch2ConnectionHapticEnabled =>
+            m_Config.switch2ConnectionHapticEnabled;
+
+        public static Switch2AutoDisconnectMode[] Switch2AutoDisconnectMode =>
+            m_Config.switch2AutoDisconnectMode;
+
+        public static long[] Switch2AutoDisconnectTimeoutSeconds =>
+            m_Config.switch2AutoDisconnectTimeoutSeconds;
+
+        public static int[] Switch2CemuhookYawSensitivity =>
+            m_Config.switch2CemuhookYawSensitivity;
+
+        public static bool[] Switch2HorizonStabilizationEnabled =>
+            m_Config.switch2HorizonStabilizationEnabled;
+
+        public static bool[] Switch2DualJoyConGyroFusionEnabled =>
+            m_Config.switch2DualJoyConGyroFusionEnabled;
+
+        public static Switch2DualGyroDominantSide[]
+            Switch2DualJoyConGyroDominantSide =>
+                m_Config.switch2DualJoyConGyroDominantSide;
+
+        public static Switch2DualGyroMode[] Switch2DualJoyConGyroMode =>
+            m_Config.switch2DualJoyConGyroMode;
+
+        public static Switch2DualGyroActivationMode[]
+            Switch2DualJoyConGyroActivationMode =>
+                m_Config.switch2DualJoyConGyroActivationMode;
+
+        public static Switch2JoyConProfileButton[]
+            Switch2DualJoyConGyroLeftActivationButton =>
+                m_Config.switch2DualJoyConGyroLeftActivationButton;
+
+        public static Switch2JoyConProfileButton[]
+            Switch2DualJoyConGyroRightActivationButton =>
+                m_Config.switch2DualJoyConGyroRightActivationButton;
+
+        public static Switch2JoyConHoldMode[]
+            Switch2JoyConStandaloneHoldMode =>
+                m_Config.switch2JoyConStandaloneHoldMode;
+
+        public static bool[] Switch2JoyConIrMouseEnabled =>
+            m_Config.switch2JoyConIrMouseEnabled;
+
+        public static Switch2IrMouseSource[] Switch2JoyConIrMouseSource =>
+            m_Config.switch2JoyConIrMouseSource;
+
+        public static Switch2IrMouseScrollMode[]
+            Switch2JoyConIrMouseScrollMode =>
+                m_Config.switch2JoyConIrMouseScrollMode;
+
+        public static Switch2StickScrollActivationMode[]
+            Switch2LeftStickScrollActivationMode =>
+                m_Config.switch2LeftStickScrollActivationMode;
+
+        public static Switch2StickScrollActivationMode[]
+            Switch2RightStickScrollActivationMode =>
+                m_Config.switch2RightStickScrollActivationMode;
+
+        public static Switch2StickDirectionActivationMode[]
+            Switch2LeftStickUpActivationMode =>
+                m_Config.switch2LeftStickUpActivationMode;
+
+        public static Switch2StickDirectionActivationMode[]
+            Switch2LeftStickDownActivationMode =>
+                m_Config.switch2LeftStickDownActivationMode;
+
+        public static Switch2StickDirectionActivationMode[]
+            Switch2LeftStickLeftActivationMode =>
+                m_Config.switch2LeftStickLeftActivationMode;
+
+        public static Switch2StickDirectionActivationMode[]
+            Switch2LeftStickRightActivationMode =>
+                m_Config.switch2LeftStickRightActivationMode;
+
+        public static Switch2StickDirectionActivationMode[]
+            Switch2RightStickUpActivationMode =>
+                m_Config.switch2RightStickUpActivationMode;
+
+        public static Switch2StickDirectionActivationMode[]
+            Switch2RightStickDownActivationMode =>
+                m_Config.switch2RightStickDownActivationMode;
+
+        public static Switch2StickDirectionActivationMode[]
+            Switch2RightStickLeftActivationMode =>
+                m_Config.switch2RightStickLeftActivationMode;
+
+        public static Switch2StickDirectionActivationMode[]
+            Switch2RightStickRightActivationMode =>
+                m_Config.switch2RightStickRightActivationMode;
+
+        public static Switch2IrActivationThreshold[]
+            Switch2JoyConLeftIrMouseActivationThreshold =>
+                m_Config.switch2JoyConLeftIrMouseActivationThreshold;
+
+        public static double[] Switch2JoyConLeftIrMouseSensitivity =>
+            m_Config.switch2JoyConLeftIrMouseSensitivity;
+
+        public static Switch2IrActivationThreshold[]
+            Switch2JoyConRightIrMouseActivationThreshold =>
+                m_Config.switch2JoyConRightIrMouseActivationThreshold;
+
+        public static double[] Switch2JoyConRightIrMouseSensitivity =>
+            m_Config.switch2JoyConRightIrMouseSensitivity;
+
+        internal static Switch2IrGyroTuning[]
+            Switch2JoyConLeftIrGyroTuning =>
+                m_Config.switch2JoyConLeftIrGyroTuning;
+
+        internal static Switch2IrGyroTuning[]
+            Switch2JoyConRightIrGyroTuning =>
+                m_Config.switch2JoyConRightIrGyroTuning;
+
+        internal static Switch2GyroTriggerTuningTable[]
+            Switch2GyroTriggerTunings =>
+                m_Config.switch2GyroTriggerTunings;
+
+        internal static Switch2GyroLockBindingTable[]
+            Switch2GyroLockBindings =>
+                m_Config.switch2GyroLockBindings;
+
+        internal static Switch2ModeShiftSettings[] Switch2ModeShiftSettings =>
+            m_Config.switch2ModeShiftSettings;
 
         public static int[] DebouncingMs => m_Config.debouncingMs;
 
@@ -3044,6 +3363,25 @@ namespace DS4Windows
                 Interlocked.Read(ref profileSwitchRevisions[device]) == revision;
         }
 
+        internal static bool TryBeginProfileSwitchRevision(int device,
+            long expectedRevision, out long revision)
+        {
+            revision = 0;
+            if ((uint)device >= MAX_DS4_CONTROLLER_COUNT ||
+                expectedRevision < 0 || expectedRevision == long.MaxValue)
+                return false;
+            long next = expectedRevision + 1;
+            if (Interlocked.CompareExchange(ref profileSwitchRevisions[device],
+                    next, expectedRevision) != expectedRevision)
+                return false;
+            revision = next;
+            return true;
+        }
+
+        internal static long ReadProfileSwitchRevision(int device) =>
+            device >= 0 && device < MAX_DS4_CONTROLLER_COUNT ?
+                Interlocked.Read(ref profileSwitchRevisions[device]) : -1;
+
         internal static long ReadDualSenseMuteButtonModeEpoch(int device)
         {
             return device >= 0 && device < MAX_DS4_CONTROLLER_COUNT ?
@@ -3067,18 +3405,30 @@ namespace DS4Windows
 
         public static bool LoadProfile(int device, bool launchprogram, ControlService control,
             bool xinputChange = true, bool postLoad = true,
-            long transitionRevision = 0)
+            long transitionRevision = 0, string profileName = null)
         {
             if (transitionRevision <= 0)
             {
                 transitionRevision = BeginProfileSwitchRevision(device);
             }
+            using var profileMutation = ProfileMutationGate.Enter(device);
+            if (device < MAX_DS4_CONTROLLER_COUNT &&
+                !IsCurrentProfileSwitchRevision(device, transitionRevision))
+                return false;
             bool result = m_Config.LoadProfileNew(device, launchprogram,
-                control, "", xinputChange, postLoad, transitionRevision);
+                control, out bool profileStateChanged,
+                profileName == null ? "" : Path.Combine(appdatapath, "Profiles", $"{profileName}.xml"),
+                xinputChange, postLoad, transitionRevision);
             //bool result = m_Config.LoadProfile(device, launchprogram, control, "", xinputChange, postLoad);
-            tempprofilename[device] = string.Empty;
-            useTempProfile[device] = false;
-            tempprofileDistance[device] = false;
+            if (profileStateChanged && (device >= MAX_DS4_CONTROLLER_COUNT ||
+                IsCurrentProfileSwitchRevision(device, transitionRevision)))
+            {
+                if (profileName != null)
+                    ProfilePath[device] = profileName;
+                tempprofilename[device] = string.Empty;
+                useTempProfile[device] = false;
+                tempprofileDistance[device] = false;
+            }
 
             return result;
         }
@@ -3091,6 +3441,10 @@ namespace DS4Windows
             {
                 transitionRevision = BeginProfileSwitchRevision(device);
             }
+            using var profileMutation = ProfileMutationGate.Enter(device);
+            if (device < MAX_DS4_CONTROLLER_COUNT &&
+                !IsCurrentProfileSwitchRevision(device, transitionRevision))
+                return false;
             bool result = m_Config.LoadProfileNew(device, launchprogram,
                 control, Path.Combine(appdatapath, "Profiles", $"{name}.xml"),
                 transitionRevision: transitionRevision);
@@ -3103,6 +3457,62 @@ namespace DS4Windows
             }
 
             return result;
+        }
+
+        // Auto-profile preparation and writer contention must not hold reports
+        // paused. Unlike startup, a missing auto-profile preserves the old state.
+        internal static bool TryLoadAutoProfile(int device, DS4Device source,
+            string temporaryName, bool launchprogram, ControlService control)
+        {
+            if ((uint)device >= MAX_DS4_CONTROLLER_COUNT || source == null ||
+                control?.DS4Controllers == null || source.IsRemoving)
+                return false;
+            if (!control.TryCaptureProfileActionTarget(device, source, out var target))
+                return false;
+
+            long revision = BeginProfileSwitchRevision(device);
+            string name = temporaryName ?? ProfilePath[device];
+            string path = Path.Combine(appdatapath, "Profiles", $"{name}.xml");
+            if (!PreparedProfileLoad.TryPrepare(path, device, out var prepared,
+                    out _, out string error))
+            {
+                AppLogger.LogToGui($"Failed to prepare auto-profile {path}. {error}", false);
+                return false;
+            }
+
+            using var profileMutation = ProfileMutationGate.Enter(device);
+            bool IsCurrent() => IsCurrentProfileSwitchRevision(device, revision) &&
+                ReferenceEquals(control.DS4Controllers[device], source) && !source.IsRemoving &&
+                (temporaryName != null || string.Equals(ProfilePath[device], name, StringComparison.Ordinal));
+            if (!IsCurrent())
+                return false;
+
+            bool loaded = false;
+            bool executed = source.TryHaltReportingRunAction(() =>
+            {
+                if (!target.TryAcquire(out var actionLease))
+                    return;
+                // Dispose before TryHalt returns: its finally may publish a
+                // pending terminal neutral, which requires a drained table.
+                using (actionLease)
+                {
+                    if (!IsCurrent())
+                        return;
+                    loaded = m_Config.ApplyPreparedProfileNew(prepared, launchprogram, control,
+                        out _, transitionRevision: revision, completeColdSideEffects: false,
+                        actionTarget: target);
+                    if (loaded)
+                    {
+                        tempprofilename[device] = temporaryName ?? string.Empty;
+                        useTempProfile[device] = temporaryName != null;
+                        tempprofileDistance[device] = temporaryName?.Contains("distance",
+                            StringComparison.OrdinalIgnoreCase) == true;
+                    }
+                }
+            });
+            if (executed && loaded)
+                m_Config.CompletePreparedProfileLoad(prepared, launchprogram);
+            return executed && loaded;
         }
 
         public static void LoadBlankDevProfile(int device, bool launchprogram, ControlService control,
@@ -3407,6 +3817,21 @@ namespace DS4Windows
                 {
                     setting.shiftAction.actionAlias = outputKBMMapping.GetRealEventKey(Convert.ToUInt32(setting.shiftAction.actionKey));
                 }
+            }
+        }
+
+        internal static void RefreshSwitch2ModeShiftActionAlias(
+            Switch2ModeShiftAction action)
+        {
+            if (action == null)
+            {
+                return;
+            }
+            action.Action.actionAlias = 0;
+            if (action.ActionType == DS4ControlSettings.ActionType.Key)
+            {
+                action.Action.actionAlias = outputKBMMapping.GetRealEventKey(
+                    Convert.ToUInt32(action.Action.actionKey));
             }
         }
 
@@ -4010,6 +4435,308 @@ namespace DS4Windows
             0,0,0,0,0,0,0,0,0
         };
         public bool[] useGenericRumbleRescaleForDualSenses = new bool[Global.TEST_PROFILE_ITEM_COUNT] { false, false, false, false, false, false, false, false, false };
+        public bool[] switch2MapXboxImpulseTriggersToHdRumble =
+        {
+            true, true, true, true, true, true, true, true, true,
+        };
+        public bool[] switch2XboxImpulseDynamicFrequency =
+        {
+            true, true, true, true, true, true, true, true, true,
+        };
+        public int[] switch2XboxImpulseFrequency =
+        {
+            Switch2HdRumbleImpulseTuning.DefaultFixedFrequencyLevel,
+            Switch2HdRumbleImpulseTuning.DefaultFixedFrequencyLevel,
+            Switch2HdRumbleImpulseTuning.DefaultFixedFrequencyLevel,
+            Switch2HdRumbleImpulseTuning.DefaultFixedFrequencyLevel,
+            Switch2HdRumbleImpulseTuning.DefaultFixedFrequencyLevel,
+            Switch2HdRumbleImpulseTuning.DefaultFixedFrequencyLevel,
+            Switch2HdRumbleImpulseTuning.DefaultFixedFrequencyLevel,
+            Switch2HdRumbleImpulseTuning.DefaultFixedFrequencyLevel,
+            Switch2HdRumbleImpulseTuning.DefaultFixedFrequencyLevel,
+        };
+        public int[] switch2XboxImpulseStrength =
+        {
+            Switch2HdRumbleImpulseTuning.DefaultStrengthLevel,
+            Switch2HdRumbleImpulseTuning.DefaultStrengthLevel,
+            Switch2HdRumbleImpulseTuning.DefaultStrengthLevel,
+            Switch2HdRumbleImpulseTuning.DefaultStrengthLevel,
+            Switch2HdRumbleImpulseTuning.DefaultStrengthLevel,
+            Switch2HdRumbleImpulseTuning.DefaultStrengthLevel,
+            Switch2HdRumbleImpulseTuning.DefaultStrengthLevel,
+            Switch2HdRumbleImpulseTuning.DefaultStrengthLevel,
+            Switch2HdRumbleImpulseTuning.DefaultStrengthLevel,
+        };
+        public bool[] switch2XboxBodyRumbleMode =
+            new bool[Global.TEST_PROFILE_ITEM_COUNT];
+        public int[] switch2XboxBodyRumbleFrequency =
+        {
+            Switch2HdRumbleBodyTuning.DefaultXboxFrequencyLevel,
+            Switch2HdRumbleBodyTuning.DefaultXboxFrequencyLevel,
+            Switch2HdRumbleBodyTuning.DefaultXboxFrequencyLevel,
+            Switch2HdRumbleBodyTuning.DefaultXboxFrequencyLevel,
+            Switch2HdRumbleBodyTuning.DefaultXboxFrequencyLevel,
+            Switch2HdRumbleBodyTuning.DefaultXboxFrequencyLevel,
+            Switch2HdRumbleBodyTuning.DefaultXboxFrequencyLevel,
+            Switch2HdRumbleBodyTuning.DefaultXboxFrequencyLevel,
+            Switch2HdRumbleBodyTuning.DefaultXboxFrequencyLevel,
+        };
+        public int[] switch2RumbleDelayMilliseconds =
+            new int[Global.TEST_PROFILE_ITEM_COUNT];
+        public bool[] switch2DualSenseAudioHapticsEnabled =
+        {
+            true, true, true, true, true, true, true, true, true,
+        };
+        public bool[] switch2DualSenseAdaptiveTriggersEnabled =
+        {
+            true, true, true, true, true, true, true, true, true,
+        };
+        public bool[] switch2MagnetometerYawAssistEnabled =
+            new bool[Global.TEST_PROFILE_ITEM_COUNT];
+        public double[] switch2VirtualGyroSoftDeadzone =
+            new double[Global.TEST_PROFILE_ITEM_COUNT];
+        public double[] switch2GyroMouseStickAssistSensitivity =
+            new double[Global.TEST_PROFILE_ITEM_COUNT];
+        public double[] switch2LeftStickMouseSensitivity =
+        {
+            Switch2MappedStickMouseSensitivity.Default,
+            Switch2MappedStickMouseSensitivity.Default,
+            Switch2MappedStickMouseSensitivity.Default,
+            Switch2MappedStickMouseSensitivity.Default,
+            Switch2MappedStickMouseSensitivity.Default,
+            Switch2MappedStickMouseSensitivity.Default,
+            Switch2MappedStickMouseSensitivity.Default,
+            Switch2MappedStickMouseSensitivity.Default,
+            Switch2MappedStickMouseSensitivity.Default,
+        };
+        public double[] switch2RightStickMouseSensitivity =
+        {
+            Switch2MappedStickMouseSensitivity.Default,
+            Switch2MappedStickMouseSensitivity.Default,
+            Switch2MappedStickMouseSensitivity.Default,
+            Switch2MappedStickMouseSensitivity.Default,
+            Switch2MappedStickMouseSensitivity.Default,
+            Switch2MappedStickMouseSensitivity.Default,
+            Switch2MappedStickMouseSensitivity.Default,
+            Switch2MappedStickMouseSensitivity.Default,
+            Switch2MappedStickMouseSensitivity.Default,
+        };
+        public bool[] switch2HighRateMousePresentation =
+        {
+            true, true, true, true, true, true, true, true, true,
+        };
+        public bool[] switch2ConnectionHapticEnabled =
+        {
+            true, true, true, true, true, true, true, true, true,
+        };
+        // Zero is LegacyProfile, preserving the pre-existing Idle Disconnect
+        // contract until the Switch 2-specific three-way control is authored.
+        public Switch2AutoDisconnectMode[] switch2AutoDisconnectMode =
+            new Switch2AutoDisconnectMode[Global.TEST_PROFILE_ITEM_COUNT];
+        public long[] switch2AutoDisconnectTimeoutSeconds =
+            new long[Global.TEST_PROFILE_ITEM_COUNT];
+        public int[] switch2CemuhookYawSensitivity =
+        {
+            Switch2CemuhookYawPolicy.DefaultLevel,
+            Switch2CemuhookYawPolicy.DefaultLevel,
+            Switch2CemuhookYawPolicy.DefaultLevel,
+            Switch2CemuhookYawPolicy.DefaultLevel,
+            Switch2CemuhookYawPolicy.DefaultLevel,
+            Switch2CemuhookYawPolicy.DefaultLevel,
+            Switch2CemuhookYawPolicy.DefaultLevel,
+            Switch2CemuhookYawPolicy.DefaultLevel,
+            Switch2CemuhookYawPolicy.DefaultLevel,
+        };
+        public bool[] switch2HorizonStabilizationEnabled =
+            new bool[Global.TEST_PROFILE_ITEM_COUNT];
+        public bool[] switch2DualJoyConGyroFusionEnabled =
+            new bool[Global.TEST_PROFILE_ITEM_COUNT];
+        public Switch2DualGyroDominantSide[]
+            switch2DualJoyConGyroDominantSide =
+        {
+            Switch2DualGyroDominantSide.Right,
+            Switch2DualGyroDominantSide.Right,
+            Switch2DualGyroDominantSide.Right,
+            Switch2DualGyroDominantSide.Right,
+            Switch2DualGyroDominantSide.Right,
+            Switch2DualGyroDominantSide.Right,
+            Switch2DualGyroDominantSide.Right,
+            Switch2DualGyroDominantSide.Right,
+            Switch2DualGyroDominantSide.Right,
+        };
+        public Switch2DualGyroMode[] switch2DualJoyConGyroMode =
+        {
+            Switch2DualGyroMode.SwitchDominantSide,
+            Switch2DualGyroMode.SwitchDominantSide,
+            Switch2DualGyroMode.SwitchDominantSide,
+            Switch2DualGyroMode.SwitchDominantSide,
+            Switch2DualGyroMode.SwitchDominantSide,
+            Switch2DualGyroMode.SwitchDominantSide,
+            Switch2DualGyroMode.SwitchDominantSide,
+            Switch2DualGyroMode.SwitchDominantSide,
+            Switch2DualGyroMode.SwitchDominantSide,
+        };
+        public Switch2DualGyroActivationMode[]
+            switch2DualJoyConGyroActivationMode =
+        {
+            Switch2DualGyroActivationMode.Hold,
+            Switch2DualGyroActivationMode.Hold,
+            Switch2DualGyroActivationMode.Hold,
+            Switch2DualGyroActivationMode.Hold,
+            Switch2DualGyroActivationMode.Hold,
+            Switch2DualGyroActivationMode.Hold,
+            Switch2DualGyroActivationMode.Hold,
+            Switch2DualGyroActivationMode.Hold,
+            Switch2DualGyroActivationMode.Hold,
+        };
+        public Switch2JoyConProfileButton[]
+            switch2DualJoyConGyroLeftActivationButton =
+            new Switch2JoyConProfileButton[Global.TEST_PROFILE_ITEM_COUNT];
+        public Switch2JoyConProfileButton[]
+            switch2DualJoyConGyroRightActivationButton =
+            new Switch2JoyConProfileButton[Global.TEST_PROFILE_ITEM_COUNT];
+        // Preserve the established physical-position/Xbox presentation for
+        // existing profiles. Nintendo-label presentation is profile opt-in.
+        public Switch2FaceButtonLayout[] switch2FaceButtonLayout =
+            new Switch2FaceButtonLayout[Global.TEST_PROFILE_ITEM_COUNT];
+        // Upright is the Switch2Connect/SDL vertical-mode default. The
+        // setting is presentation-only and never changes Bluetooth ownership.
+        public Switch2JoyConHoldMode[] switch2JoyConStandaloneHoldMode =
+            new Switch2JoyConHoldMode[Global.TEST_PROFILE_ITEM_COUNT];
+        public bool[] switch2JoyConIrMouseEnabled =
+            new bool[Global.TEST_PROFILE_ITEM_COUNT];
+        public Switch2IrMouseSource[] switch2JoyConIrMouseSource =
+            new Switch2IrMouseSource[Global.TEST_PROFILE_ITEM_COUNT];
+        // Preserve the established vertical-only optical-stick scroll for
+        // existing profiles. Four-way scrolling is explicitly profile-owned.
+        public Switch2IrMouseScrollMode[] switch2JoyConIrMouseScrollMode =
+            new Switch2IrMouseScrollMode[Global.TEST_PROFILE_ITEM_COUNT];
+        public Switch2StickScrollActivationMode[]
+            switch2LeftStickScrollActivationMode =
+                new Switch2StickScrollActivationMode[
+                    Global.TEST_PROFILE_ITEM_COUNT];
+        public Switch2StickScrollActivationMode[]
+            switch2RightStickScrollActivationMode =
+                new Switch2StickScrollActivationMode[
+                    Global.TEST_PROFILE_ITEM_COUNT];
+        public Switch2StickDirectionActivationMode[]
+            switch2LeftStickUpActivationMode =
+                new Switch2StickDirectionActivationMode[
+                    Global.TEST_PROFILE_ITEM_COUNT];
+        public Switch2StickDirectionActivationMode[]
+            switch2LeftStickDownActivationMode =
+                new Switch2StickDirectionActivationMode[
+                    Global.TEST_PROFILE_ITEM_COUNT];
+        public Switch2StickDirectionActivationMode[]
+            switch2LeftStickLeftActivationMode =
+                new Switch2StickDirectionActivationMode[
+                    Global.TEST_PROFILE_ITEM_COUNT];
+        public Switch2StickDirectionActivationMode[]
+            switch2LeftStickRightActivationMode =
+                new Switch2StickDirectionActivationMode[
+                    Global.TEST_PROFILE_ITEM_COUNT];
+        public Switch2StickDirectionActivationMode[]
+            switch2RightStickUpActivationMode =
+                new Switch2StickDirectionActivationMode[
+                    Global.TEST_PROFILE_ITEM_COUNT];
+        public Switch2StickDirectionActivationMode[]
+            switch2RightStickDownActivationMode =
+                new Switch2StickDirectionActivationMode[
+                    Global.TEST_PROFILE_ITEM_COUNT];
+        public Switch2StickDirectionActivationMode[]
+            switch2RightStickLeftActivationMode =
+                new Switch2StickDirectionActivationMode[
+                    Global.TEST_PROFILE_ITEM_COUNT];
+        public Switch2StickDirectionActivationMode[]
+            switch2RightStickRightActivationMode =
+                new Switch2StickDirectionActivationMode[
+                    Global.TEST_PROFILE_ITEM_COUNT];
+        public Switch2IrActivationThreshold[]
+            switch2JoyConLeftIrMouseActivationThreshold =
+        {
+            Switch2IrActivationThreshold.Strict,
+            Switch2IrActivationThreshold.Strict,
+            Switch2IrActivationThreshold.Strict,
+            Switch2IrActivationThreshold.Strict,
+            Switch2IrActivationThreshold.Strict,
+            Switch2IrActivationThreshold.Strict,
+            Switch2IrActivationThreshold.Strict,
+            Switch2IrActivationThreshold.Strict,
+            Switch2IrActivationThreshold.Strict,
+        };
+        public double[] switch2JoyConLeftIrMouseSensitivity =
+        {
+            Switch2IrMouseProjection.DefaultSensitivity,
+            Switch2IrMouseProjection.DefaultSensitivity,
+            Switch2IrMouseProjection.DefaultSensitivity,
+            Switch2IrMouseProjection.DefaultSensitivity,
+            Switch2IrMouseProjection.DefaultSensitivity,
+            Switch2IrMouseProjection.DefaultSensitivity,
+            Switch2IrMouseProjection.DefaultSensitivity,
+            Switch2IrMouseProjection.DefaultSensitivity,
+            Switch2IrMouseProjection.DefaultSensitivity,
+        };
+        public Switch2IrActivationThreshold[]
+            switch2JoyConRightIrMouseActivationThreshold =
+        {
+            Switch2IrActivationThreshold.Strict,
+            Switch2IrActivationThreshold.Strict,
+            Switch2IrActivationThreshold.Strict,
+            Switch2IrActivationThreshold.Strict,
+            Switch2IrActivationThreshold.Strict,
+            Switch2IrActivationThreshold.Strict,
+            Switch2IrActivationThreshold.Strict,
+            Switch2IrActivationThreshold.Strict,
+            Switch2IrActivationThreshold.Strict,
+        };
+        public double[] switch2JoyConRightIrMouseSensitivity =
+        {
+            Switch2IrMouseProjection.DefaultSensitivity,
+            Switch2IrMouseProjection.DefaultSensitivity,
+            Switch2IrMouseProjection.DefaultSensitivity,
+            Switch2IrMouseProjection.DefaultSensitivity,
+            Switch2IrMouseProjection.DefaultSensitivity,
+            Switch2IrMouseProjection.DefaultSensitivity,
+            Switch2IrMouseProjection.DefaultSensitivity,
+            Switch2IrMouseProjection.DefaultSensitivity,
+            Switch2IrMouseProjection.DefaultSensitivity,
+        };
+        internal Switch2IrGyroTuning[] switch2JoyConLeftIrGyroTuning =
+        {
+            Switch2IrGyroTuning.Default, Switch2IrGyroTuning.Default,
+            Switch2IrGyroTuning.Default, Switch2IrGyroTuning.Default,
+            Switch2IrGyroTuning.Default, Switch2IrGyroTuning.Default,
+            Switch2IrGyroTuning.Default, Switch2IrGyroTuning.Default,
+            Switch2IrGyroTuning.Default,
+        };
+        internal Switch2IrGyroTuning[] switch2JoyConRightIrGyroTuning =
+        {
+            Switch2IrGyroTuning.Default, Switch2IrGyroTuning.Default,
+            Switch2IrGyroTuning.Default, Switch2IrGyroTuning.Default,
+            Switch2IrGyroTuning.Default, Switch2IrGyroTuning.Default,
+            Switch2IrGyroTuning.Default, Switch2IrGyroTuning.Default,
+            Switch2IrGyroTuning.Default,
+        };
+        internal Switch2GyroTriggerTuningTable[] switch2GyroTriggerTunings =
+        {
+            new(), new(), new(), new(), new(), new(), new(), new(), new(),
+        };
+        internal Switch2GyroLockBindingTable[] switch2GyroLockBindings =
+        {
+            new(), new(), new(), new(), new(), new(), new(), new(), new(),
+        };
+        internal Switch2ModeShiftSettings[] switch2ModeShiftSettings =
+        {
+            Switch2ModeShiftSettings.Default,
+            Switch2ModeShiftSettings.Default,
+            Switch2ModeShiftSettings.Default,
+            Switch2ModeShiftSettings.Default,
+            Switch2ModeShiftSettings.Default,
+            Switch2ModeShiftSettings.Default,
+            Switch2ModeShiftSettings.Default,
+            Switch2ModeShiftSettings.Default,
+            Switch2ModeShiftSettings.Default,
+        };
         public byte[] dualSenseHapticPowerLevel = new byte[Global.TEST_PROFILE_ITEM_COUNT]
         {
             0,0,0,0,0,0,0,0,0
@@ -4420,6 +5147,14 @@ namespace DS4Windows
 
         bool tempBool = false;
 
+        private bool refreshActionAliases = true;
+
+        // A cold validation store parses canonical actions but must not consult
+        // the running keyboard backend, which can be changing independently.
+        // Live stores retain normal alias generation during actual application.
+        internal static BackingStore CreateProfileValidationStore() =>
+            new BackingStore { refreshActionAliases = false };
+
         public BackingStore()
         {
             ds4controlSettings = new ControlSettingsGroup[Global.TEST_PROFILE_ITEM_COUNT];
@@ -4640,6 +5375,7 @@ namespace DS4Windows
                 case OutContType.ViiperDualSense: result = "ViiperDualSense"; break;
                 case OutContType.ViiperDualSenseEdge: result = "ViiperDualSenseEdge"; break;
                 case OutContType.ViiperSwitch2Pro: result = "ViiperSwitch2Pro"; break;
+                case OutContType.ViiperXboxOne: result = "ViiperXboxOne"; break;
                 default: break;
             }
 
@@ -4660,6 +5396,9 @@ namespace DS4Windows
                 case "ViiperDualSense": id = OutContType.ViiperDualSense; break;
                 case "ViiperDualSenseEdge": id = OutContType.ViiperDualSenseEdge; break;
                 case "ViiperSwitch2Pro": id = OutContType.ViiperSwitch2Pro; break;
+                case "XboxOne":
+                case "Xbox One":
+                case "ViiperXboxOne": id = OutContType.ViiperXboxOne; break;
                 default: break;
             }
 
@@ -5608,6 +6347,8 @@ namespace DS4Windows
                 case "5th Mouse Button": return X360Controls.FifthMouse;
                 case "Mouse Wheel Up": return X360Controls.WUP;
                 case "Mouse Wheel Down": return X360Controls.WDOWN;
+                case "Mouse Wheel Left": return X360Controls.WLEFT;
+                case "Mouse Wheel Right": return X360Controls.WRIGHT;
                 case "Mouse Up": return X360Controls.MouseUp;
                 case "Mouse Down": return X360Controls.MouseDown;
                 case "Mouse Left": return X360Controls.MouseLeft;
@@ -5663,6 +6404,8 @@ namespace DS4Windows
                 case X360Controls.FifthMouse: return "5th Mouse Button";
                 case X360Controls.WUP: return "Mouse Wheel Up";
                 case X360Controls.WDOWN: return "Mouse Wheel Down";
+                case X360Controls.WLEFT: return "Mouse Wheel Left";
+                case X360Controls.WRIGHT: return "Mouse Wheel Right";
                 case X360Controls.MouseUp: return "Mouse Up";
                 case X360Controls.MouseDown: return "Mouse Down";
                 case X360Controls.MouseLeft: return "Mouse Left";
@@ -5680,10 +6423,19 @@ namespace DS4Windows
         public bool LoadProfileNew(int device, bool launchprogram, ControlService control,
             string propath = "", bool xinputChange = true, bool postLoad = true,
             long transitionRevision = 0)
+            => LoadProfileNew(device, launchprogram, control, out _, propath,
+                xinputChange, postLoad, transitionRevision);
+
+        internal bool LoadProfileNew(int device, bool launchprogram, ControlService control,
+            out bool profileStateChanged, string propath = "", bool xinputChange = true,
+            bool postLoad = true, long transitionRevision = 0)
         {
             bool loaded = true;
+            profileStateChanged = false;
+            if (transitionRevision > 0 &&
+                !Global.IsCurrentProfileSwitchRevision(device, transitionRevision))
+                return false;
 
-            bool migratePerformed = false;
             string profilepath;
             if (propath == "")
                 profilepath = Path.Combine(Global.appdatapath, "Profiles",
@@ -5691,189 +6443,31 @@ namespace DS4Windows
             else
                 profilepath = propath;
 
-            if (File.Exists(profilepath))
+            // File.Exists also returns false on some access/path failures; only
+            // an actual missing-file result may enter the legacy reset fallback.
+            bool preparedSuccessfully = PreparedProfileLoad.TryPrepare(profilepath, device,
+                out PreparedProfileLoad prepared, out ProfilePreparationFailure failure,
+                out string error);
+            // A newer request can arrive during cold migration/parsing. Neither
+            // applying this candidate nor its missing-file fallback is current.
+            if (transitionRevision > 0 &&
+                !Global.IsCurrentProfileSwitchRevision(device, transitionRevision))
+                return false;
+            if (!preparedSuccessfully && failure != ProfilePreparationFailure.Missing)
             {
-                string profileXml = string.Empty;
+                AppLogger.LogToGui($"Failed to load {profilepath}. {error}", false);
+                return false;
+            }
 
-                // Run migrations
-                {
-                    XmlDocument migrationDoc = new XmlDocument();
-
-                    using FileStream fileStream = new FileStream(profilepath, FileMode.Open, FileAccess.Read);
-                    ProfileMigration tmpMigration = new ProfileMigration(fileStream);
-                    if (tmpMigration.RequiresMigration())
-                    {
-                        tmpMigration.Migrate();
-                        //migrationDoc.Load(tmpMigration.ProfileReader);
-                        profileXml = tmpMigration.CurrentMigrationText;
-                        migratePerformed = true;
-                    }
-                    else if (tmpMigration.ProfileReader != null)
-                    {
-                        profileXml = tmpMigration.CurrentMigrationText;
-                        //migrationDoc.Load(tmpMigration.ProfileReader);
-                        //migrationDoc.Load(profilepath);
-                    }
-                    else
-                    {
-                        loaded = false;
-                    }
-
-                    tmpMigration.Close();
-                }
-
-                if (device < Global.MAX_DS4_CONTROLLER_COUNT)
-                {
-                    DS4LightBar.forcelight[device] = false;
-                    DS4LightBar.forcedFlash[device] = 0;
-                }
-
-                OutContType oldContType = Global.activeOutDevType[device];
-                LightbarSettingInfo lightbarSettings = lightbarSettingInfo[device];
-                LightbarDS4WinInfo lightInfo = lightbarSettings.ds4winSettings;
-
-                bool xinputPlug = false;
-                bool xinputStatus = false;
-
-                // Make sure to reset currently set profile values before parsing
-                ResetProfile(device);
-                ResetMouseProperties(device, control);
-                // Reset some Mapping properties before attempting to load different
-                // profile
-                control.PreLoadReset(device);
-
-                profileActions[device].Clear();
-                foreach (DS4ControlSettings dcs in ds4settings[device])
-                    dcs.Reset();
-
-                //XmlReader xmlReader = XmlReader.Create()
-                XmlSerializer serializer = new XmlSerializer(typeof(ProfileDTO),
-                    ProfileDTO.GetAttributeOverrides());
-                using StringReader sr = new StringReader(profileXml);
-                try
-                {
-                    ProfileDTO dto = serializer.Deserialize(sr) as ProfileDTO;
-                    dto.DeviceIndex = device;
-                    dto.MapTo(this);
-                }
-                catch (InvalidOperationException e)
-                {
-                    AppLogger.LogToGui($"Failed to load {profilepath}. {e.InnerException?.Message ?? e.Message}", false);
-                    loaded = false;
-                }
-                catch (XmlException e)
-                {
-                    AppLogger.LogToGui($"Failed to load {profilepath}. Invalid XML. {e.InnerException?.Message ?? e.Message}", false);
-                    loaded = false;
-                }
-
-                if (!loaded)
-                {
-                    return loaded;
-                }
-
-                containsCustomAction[device] = false;
-                containsCustomExtras[device] = false;
-                profileActionCount[device] = profileActions[device].Count;
-                profileActionDict[device].Clear();
-                profileActionIndexDict[device].Clear();
-                foreach (string actionname in profileActions[device])
-                {
-                    profileActionDict[device][actionname] = Global.GetAction(actionname);
-                    profileActionIndexDict[device][actionname] = Global.GetActionIndexOf(actionname);
-                }
-
-                // Only change xinput devices under certain conditions. Avoid
-                // performing this upon program startup before loading devices.
-                if (xinputChange && device < ControlService.CURRENT_DS4_CONTROLLER_LIMIT)
-                {
-                    CheckOldDevicestatus(device, control, oldContType,
-                        out xinputPlug, out xinputStatus);
-                }
-
-                CacheProfileCustomsFlags(device);
-                buttonMouseInfos[device].activeButtonSensitivity =
-                    buttonMouseInfos[device].buttonSensitivity;
-
-                // Check if profile sets a program to launch on loading
-                if (launchprogram && launchProgram[device] != string.Empty)
-                {
-                    string programPath = launchProgram[device];
-                    Process[] localAll = Process.GetProcesses();
-                    bool procFound = false;
-                    for (int procInd = 0, procsLen = localAll.Length; !procFound && procInd < procsLen; procInd++)
-                    {
-                        try
-                        {
-                            string temp = localAll[procInd].MainModule.FileName;
-                            if (temp == programPath)
-                            {
-                                procFound = true;
-                            }
-                        }
-                        // Ignore any process for which this information
-                        // is not exposed
-                        catch { }
-                    }
-
-                    if (!procFound)
-                    {
-                        Task processTask = new Task(() =>
-                        {
-                            Thread.Sleep(5000);
-                            using Process tempProcess = new Process();
-                            tempProcess.StartInfo.FileName = programPath;
-                            tempProcess.StartInfo.WorkingDirectory = new FileInfo(programPath).Directory.ToString();
-                            //tempProcess.StartInfo.UseShellExecute = false;
-                            try { tempProcess.Start(); }
-                            catch { }
-                        });
-
-                        processTask.Start();
-                    }
-                }
-
-                // Reset the runtime touchpad movement toggle from the loaded profile.
-                control.SetTouchpadMovementActive(device, !startTouchpadOff[device]);
-
-                {
-                    bool tempToggle = gyroControlsInf[device].triggerToggle;
-                    SetGyroControlsToggle(device, tempToggle, control);
-                }
-
-                {
-                    bool tempToggle = gyroMouseToggle[device];
-                    SetGyroMouseToggle(device, tempToggle, control);
-                }
-
-                {
-                    bool tempToggle = gyroMouseStickToggle[device];
-                    SetGyroMouseStickToggle(device, tempToggle, control);
-                }
-
-                {
-                    int tempDZ = gyroMouseDZ[device];
-                    SetGyroMouseDZ(device, tempDZ, control);
-                }
-
-                // If a device exists, make sure to transfer relevant profile device
-                // options to device instance
-                if (postLoad && device < Global.MAX_DS4_CONTROLLER_COUNT)
-                {
-                    PostLoadSnippet(device, control, xinputStatus, xinputPlug,
-                        transitionRevision);
-                }
-
-                // Migration was performed. Save new XML schema in file
-                if (migratePerformed)
-                {
-                    string proName = Path.GetFileName(profilepath);
-                    SaveProfileNew(device, proName);
-                }
+            if (preparedSuccessfully)
+            {
+                return ApplyPreparedProfileNew(prepared, launchprogram, control,
+                    out profileStateChanged, xinputChange, postLoad, transitionRevision);
             }
             else
             {
                 loaded = false;
+                profileStateChanged = true;
                 ResetProfile(device);
                 ResetMouseProperties(device, control);
 
@@ -5910,6 +6504,163 @@ namespace DS4Windows
 
             return loaded;
         }
+
+        internal bool ApplyPreparedProfileNew(PreparedProfileLoad prepared,
+            bool launchprogram, ControlService control, out bool profileStateChanged,
+            bool xinputChange = true, bool postLoad = true, long transitionRevision = 0,
+            bool completeColdSideEffects = true, ControllerProfileActionTarget? actionTarget = null)
+        {
+            ArgumentNullException.ThrowIfNull(prepared);
+            profileStateChanged = false;
+            int device = prepared.Device;
+            if (transitionRevision > 0 &&
+                !Global.IsCurrentProfileSwitchRevision(device, transitionRevision))
+                return false;
+            ProfileDTO profile = prepared.Claim();
+            profileStateChanged = true;
+            if (device < Global.MAX_DS4_CONTROLLER_COUNT)
+            {
+                DS4LightBar.forcelight[device] = false;
+                DS4LightBar.forcedFlash[device] = 0;
+            }
+
+            OutContType oldContType = Global.activeOutDevType[device];
+            LightbarSettingInfo lightbarSettings = lightbarSettingInfo[device];
+            LightbarDS4WinInfo lightInfo = lightbarSettings.ds4winSettings;
+
+            bool xinputPlug = false;
+            bool xinputStatus = false;
+
+            // The candidate is fully parsed and mapped in isolation. Reset
+            // the old profile only now, immediately before applying it.
+            ResetProfile(device);
+            ResetMouseProperties(device, control);
+            // Reset some Mapping properties before attempting to load different
+            // profile
+            control.PreLoadReset(device);
+
+            profileActions[device].Clear();
+            foreach (DS4ControlSettings dcs in ds4settings[device])
+                dcs.Reset();
+
+            profile.MapTo(this);
+
+            containsCustomAction[device] = false;
+            containsCustomExtras[device] = false;
+            profileActionCount[device] = profileActions[device].Count;
+            profileActionDict[device].Clear();
+            profileActionIndexDict[device].Clear();
+            foreach (string actionname in profileActions[device])
+            {
+                profileActionDict[device][actionname] = Global.GetAction(actionname);
+                profileActionIndexDict[device][actionname] = Global.GetActionIndexOf(actionname);
+            }
+
+            // Only change xinput devices under certain conditions. Avoid
+            // performing this upon program startup before loading devices.
+            if (xinputChange && device < ControlService.CURRENT_DS4_CONTROLLER_LIMIT)
+            {
+                CheckOldDevicestatus(device, control, oldContType,
+                    out xinputPlug, out xinputStatus);
+            }
+
+            CacheProfileCustomsFlags(device);
+            buttonMouseInfos[device].activeButtonSensitivity =
+                buttonMouseInfos[device].buttonSensitivity;
+
+            // Reset the runtime touchpad movement toggle from the loaded profile.
+            control.SetTouchpadMovementActive(device, !startTouchpadOff[device]);
+
+            {
+                bool tempToggle = gyroControlsInf[device].triggerToggle;
+                SetGyroControlsToggle(device, tempToggle, control);
+            }
+
+            {
+                bool tempToggle = gyroMouseToggle[device];
+                SetGyroMouseToggle(device, tempToggle, control);
+            }
+
+            {
+                bool tempToggle = gyroMouseStickToggle[device];
+                SetGyroMouseStickToggle(device, tempToggle, control);
+            }
+
+            {
+                int tempDZ = gyroMouseDZ[device];
+                SetGyroMouseDZ(device, tempDZ, control);
+            }
+
+            // If a device exists, make sure to transfer relevant profile device
+            // options to device instance
+            if (postLoad && device < Global.MAX_DS4_CONTROLLER_COUNT)
+            {
+                PostLoadSnippet(device, control, xinputStatus, xinputPlug,
+                    transitionRevision, actionTarget,
+                    completeColdSideEffects ? null : prepared.StagePostLoad);
+            }
+
+
+            if (completeColdSideEffects)
+                CompletePreparedProfileLoad(prepared, launchprogram);
+            return true;
+        }
+
+        // Call only after reports resume when applying under a bounded pause.
+        // The caller retains the profile writer boundary until this completes.
+        internal bool CompletePreparedProfileLoad(PreparedProfileLoad prepared,
+            bool launchprogram)
+        {
+            prepared.QueuePostLoadAfterResume();
+            int device = prepared.Device;
+            string profilepath = prepared.Path;
+            // Check if profile sets a program to launch on loading
+            if (launchprogram && launchProgram[device] != string.Empty)
+            {
+                string programPath = launchProgram[device];
+                Process[] localAll = Process.GetProcesses();
+                bool procFound = false;
+                for (int procInd = 0, procsLen = localAll.Length; !procFound && procInd < procsLen; procInd++)
+                {
+                    try
+                    {
+                        string temp = localAll[procInd].MainModule.FileName;
+                        if (temp == programPath)
+                        {
+                            procFound = true;
+                        }
+                    }
+                    // Ignore any process for which this information
+                    // is not exposed
+                    catch { }
+                }
+
+                if (!procFound)
+                {
+                    Task processTask = new Task(() =>
+                    {
+                        Thread.Sleep(5000);
+                        using Process tempProcess = new Process();
+                        tempProcess.StartInfo.FileName = programPath;
+                        tempProcess.StartInfo.WorkingDirectory = new FileInfo(programPath).Directory.ToString();
+                        //tempProcess.StartInfo.UseShellExecute = false;
+                        try { tempProcess.Start(); }
+                        catch { }
+                    });
+
+                    processTask.Start();
+                }
+            }
+
+            // Migration was performed. Save new XML schema in file
+            if (prepared.Migrated)
+            {
+                string proName = Path.GetFileName(profilepath);
+                return SaveProfileNew(device, proName);
+            }
+            return true;
+        }
+
 
         public bool LoadProfile(int device, bool launchprogram, ControlService control,
             string propath = "", bool xinputChange = true, bool postLoad = true)
@@ -8888,6 +9639,25 @@ namespace DS4Windows
 
                             try
                             {
+                                XmlNode item = xmlJoyConSupport.SelectSingleNode(
+                                    "AutomaticPairing");
+                                if (bool.TryParse(item?.InnerText ?? "",
+                                        out bool temp))
+                                {
+                                    deviceOptions.JoyConDeviceOpts.
+                                        AutomaticPairing = temp;
+                                }
+                            }
+                            catch
+                            {
+                                deviceOptions.JoyConDeviceOpts.
+                                    AutomaticPairing =
+                                    JoyConDeviceOptions.
+                                        DEFAULT_AUTOMATIC_PAIRING;
+                            }
+
+                            try
+                            {
                                 XmlNode item = xmlJoyConSupport.SelectSingleNode("LinkMode");
                                 if (Enum.TryParse(item?.InnerText ?? "", out JoyConDeviceOptions.LinkMode temp))
                                 {
@@ -9120,6 +9890,11 @@ namespace DS4Windows
             XmlElement xmlJoyconEnabled = m_Xdoc.CreateElement("Enabled", null);
             xmlJoyconEnabled.InnerText = deviceOptions.JoyConDeviceOpts.Enabled.ToString();
             xmlJoyConSupport.AppendChild(xmlJoyconEnabled);
+            XmlElement xmlJoyconAutomaticPairing = m_Xdoc.CreateElement(
+                "AutomaticPairing", null);
+            xmlJoyconAutomaticPairing.InnerText = deviceOptions.
+                JoyConDeviceOpts.AutomaticPairing.ToString();
+            xmlJoyConSupport.AppendChild(xmlJoyconAutomaticPairing);
             XmlElement xmlJoyconLinkMode = m_Xdoc.CreateElement("LinkMode", null);
             xmlJoyconLinkMode.InnerText = deviceOptions.JoyConDeviceOpts.LinkedMode.ToString();
             xmlJoyConSupport.AppendChild(xmlJoyconLinkMode);
@@ -10015,7 +10790,8 @@ namespace DS4Windows
                 int index = temp - 1;
                 DS4ControlSettings dcs = ds4settings[deviceNum][index];
                 dcs.UpdateSettings(shift, action, exts, kt, trigger);
-                Global.RefreshActionAlias(dcs, shift);
+                if (refreshActionAliases)
+                    Global.RefreshActionAlias(dcs, shift);
             }
         }
 
@@ -10236,7 +11012,10 @@ namespace DS4Windows
             for (int i = 0, settingsLen = ds4settingsList.Count; i < settingsLen; i++)
             {
                 DS4ControlSettings dcs = ds4settingsList[i];
-                if (dcs.actionType != DS4ControlSettings.ActionType.Default || dcs.shiftActionType != DS4ControlSettings.ActionType.Default)
+                if (dcs.actionType != DS4ControlSettings.ActionType.Default ||
+                    dcs.shiftActionType !=
+                        DS4ControlSettings.ActionType.Default ||
+                    dcs.HasAnySwitch2ModeShiftMappingAction)
                     return true;
             }
 
@@ -10249,7 +11028,8 @@ namespace DS4Windows
             for (int i = 0, settingsLen = ds4settingsList.Count; i < settingsLen; i++)
             {
                 DS4ControlSettings dcs = ds4settingsList[i];
-                if (dcs.extras != null || dcs.shiftExtras != null)
+                if (dcs.extras != null || dcs.shiftExtras != null ||
+                    dcs.HasAnySwitch2ModeShiftExtras)
                     return true;
             }
 
@@ -10295,6 +11075,19 @@ namespace DS4Windows
 
             rumble[device] = DEFAULT_RUMBLE;
             rumbleAutostopTime[device] = 0;
+            switch2XboxBodyRumbleMode[device] = false;
+            switch2DualSenseAudioHapticsEnabled[device] = true;
+            switch2DualSenseAdaptiveTriggersEnabled[device] = true;
+            switch2XboxBodyRumbleFrequency[device] =
+                Switch2HdRumbleBodyTuning.DefaultXboxFrequencyLevel;
+            switch2AutoDisconnectMode[device] =
+                Switch2AutoDisconnectMode.LegacyProfile;
+            switch2AutoDisconnectTimeoutSeconds[device] = 0;
+            switch2ModeShiftSettings[device] =
+                Switch2ModeShiftSettings.Default;
+            Mapping.ResetSwitch2ModeShiftState(device);
+            Mapping.ResetStickFilters(device);
+            Mapping.RequestPostMapStickReset(device);
             touchSensitivity[device] = DEFAULT_TOUCHPAD_SENS;
 
             lsModInfo[device].Reset();
@@ -11012,7 +11805,8 @@ namespace DS4Windows
         }
 
         private void PostLoadSnippet(int device, ControlService control,
-            bool xinputStatus, bool xinputPlug, long transitionRevision = 0)
+            bool xinputStatus, bool xinputPlug, long transitionRevision = 0,
+            ControllerProfileActionTarget? actionTarget = null, Action<Action> deferEnqueue = null)
         {
             if (transitionRevision > 0 &&
                 !Global.IsCurrentProfileSwitchRevision(device,
@@ -11028,8 +11822,28 @@ namespace DS4Windows
             OutContType requestedContType = outputDevType[device].Normalize();
             if (tempDev != null && tempDev.isSynced())
             {
-                tempDev.queueEvent(() =>
+                Action transition = () =>
                 {
+                    InputControllerActionLease actionLease = default;
+                    if (actionTarget.HasValue && !actionTarget.Value.TryAcquire(out actionLease))
+                        return;
+                    using (actionLease)
+                    {
+                        if (tempDev is Switch2.Switch2RuntimeInputDevice switch2Runtime)
+                            switch2Runtime.RunVirtualOutputTransition(ApplyOutputTransition);
+                        else
+                            ApplyOutputTransition();
+                    }
+                };
+                if (deferEnqueue != null)
+                    deferEnqueue(() => tempDev.queueEvent(transition));
+                else
+                    tempDev.queueEvent(transition);
+
+                void ApplyOutputTransition()
+                {
+                    if (!ReferenceEquals(control.DS4Controllers[device], tempDev) || tempDev.IsRemoving)
+                        return;
                     if (transitionRevision > 0 &&
                         !Global.IsCurrentProfileSwitchRevision(device,
                             transitionRevision))
@@ -11136,7 +11950,7 @@ namespace DS4Windows
                     {
                         control.CheckProfileOptions(device, tempDev, true);
                     }
-                });
+                }
 
                 //Program.rootHub.touchPad[device]?.ResetTrackAccel(trackballFriction[device]);
             }
@@ -11386,6 +12200,23 @@ namespace DS4Windows
 
                 case "Touch Started": return DS4Controls.TouchStarted;
                 case "Touch Ended": return DS4Controls.TouchEnded;
+                case "Switch 2 C": return DS4Controls.Switch2C;
+                case "Switch 2 Joy-Con Left Paddle 1":
+                    return DS4Controls.Switch2JoyConLeftPaddle1;
+                case "Switch 2 Joy-Con Left Paddle 2":
+                    return DS4Controls.Switch2JoyConLeftPaddle2;
+                case "Switch 2 Joy-Con Right Paddle 1":
+                    return DS4Controls.Switch2JoyConRightPaddle1;
+                case "Switch 2 Joy-Con Right Paddle 2":
+                    return DS4Controls.Switch2JoyConRightPaddle2;
+                case "Switch 2 Joy-Con Left IR Sensor":
+                    return DS4Controls.Switch2JoyConLeftIrSensor;
+                case "Switch 2 Joy-Con Right IR Sensor":
+                    return DS4Controls.Switch2JoyConRightIrSensor;
+                case "Switch 2 Joy-Con Left SL": return DS4Controls.Switch2JoyConLeftSL;
+                case "Switch 2 Joy-Con Left SR": return DS4Controls.Switch2JoyConLeftSR;
+                case "Switch 2 Joy-Con Right SL": return DS4Controls.Switch2JoyConRightSL;
+                case "Switch 2 Joy-Con Right SR": return DS4Controls.Switch2JoyConRightSR;
 
             }
 

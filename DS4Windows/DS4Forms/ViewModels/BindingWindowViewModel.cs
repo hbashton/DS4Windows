@@ -25,6 +25,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Media;
 using DS4Windows;
+using DS4Windows.Switch2;
 
 namespace DS4WinWPF.DS4Forms.ViewModels
 {
@@ -38,6 +39,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         private OutBinding shiftOutBind;
         private bool showShift;
         private bool rumbleActive;
+        private readonly Switch2ModeShiftScope modeShiftScope;
 
         public bool Using360Mode
         {
@@ -52,16 +54,22 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public bool ShowShift { get => showShift; set => showShift = value; }
         public bool RumbleActive { get => rumbleActive; set => rumbleActive = value; }
         public DS4ControlSettings Settings { get => settings; }
+        public Switch2ModeShiftScope ModeShiftScope => modeShiftScope;
 
         public BindingWindowViewModel(int deviceNum, DS4ControlSettings settings)
         {
             this.deviceNum = deviceNum;
             outputControllerType = Global.outDevTypeTemp[deviceNum].Normalize();
-            use360Mode = outputControllerType.Normalize() == OutContType.ViiperX360;
+            use360Mode = outputControllerType.Normalize() ==
+                    OutContType.ViiperX360 ||
+                outputControllerType.Normalize() ==
+                    OutContType.ViiperXboxOne;
             this.settings = settings;
+            modeShiftScope = Switch2ModeShift.ResolveEditingScope(deviceNum);
             currentOutBind = new OutBinding();
             shiftOutBind = new OutBinding();
             shiftOutBind.shiftBind = true;
+            shiftOutBind.modeShiftScope = modeShiftScope;
             PopulateCurrentBinds();
         }
 
@@ -107,38 +115,58 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 currentOutBind.ParseExtras(setting.extras);
             }
 
-            if (setting.shiftActionType != DS4ControlSettings.ActionType.Default)
+            DS4ControlSettings.ActionType selectedShiftActionType =
+                setting.shiftActionType;
+            ControlActionData selectedShiftAction = setting.shiftAction;
+            DS4KeyType selectedShiftKeyType = setting.shiftKeyType;
+            string selectedShiftExtras = setting.shiftExtras;
+            if (setting.shiftTrigger == Mapping.SWITCH2_MODE_SHIFT_TRIGGER)
             {
-                sc = setting.shiftKeyType.HasFlag(DS4KeyType.ScanCode);
-                toggle = setting.shiftKeyType.HasFlag(DS4KeyType.Toggle);
+                Switch2ModeShiftAction lane =
+                    setting.GetSwitch2ModeShiftAction(modeShiftScope);
+                selectedShiftActionType = lane.ActionType;
+                selectedShiftAction = lane.Action;
+                selectedShiftKeyType = lane.KeyType;
+                selectedShiftExtras = lane.Extras;
+                shiftOutBind.shiftTrigger =
+                    Mapping.SWITCH2_MODE_SHIFT_TRIGGER;
+            }
+
+            if (selectedShiftActionType !=
+                DS4ControlSettings.ActionType.Default)
+            {
+                sc = selectedShiftKeyType.HasFlag(DS4KeyType.ScanCode);
+                toggle = selectedShiftKeyType.HasFlag(DS4KeyType.Toggle);
                 shiftOutBind.shiftTrigger = setting.shiftTrigger;
-                switch (setting.shiftActionType)
+                switch (selectedShiftActionType)
                 {
                     case DS4ControlSettings.ActionType.Button:
                         shiftOutBind.outputType = OutBinding.OutType.Button;
-                        shiftOutBind.control = (X360Controls)setting.shiftAction.actionBtn;
+                        shiftOutBind.control = (X360Controls)
+                            selectedShiftAction.actionBtn;
                         break;
                     case DS4ControlSettings.ActionType.Default:
                         shiftOutBind.outputType = OutBinding.OutType.Default;
                         break;
                     case DS4ControlSettings.ActionType.Key:
                         shiftOutBind.outputType = OutBinding.OutType.Key;
-                        shiftOutBind.outkey = setting.shiftAction.actionKey;
+                        shiftOutBind.outkey = selectedShiftAction.actionKey;
                         shiftOutBind.hasScanCode = sc;
                         shiftOutBind.toggle = toggle;
                         break;
                     case DS4ControlSettings.ActionType.Macro:
                         shiftOutBind.outputType = OutBinding.OutType.Macro;
-                        shiftOutBind.macro = (int[])setting.shiftAction.actionMacro;
-                        shiftOutBind.macroType = setting.shiftKeyType;
+                        shiftOutBind.macro = (int[])
+                            selectedShiftAction.actionMacro;
+                        shiftOutBind.macroType = selectedShiftKeyType;
                         shiftOutBind.hasScanCode = sc;
                         break;
                 }
             }
 
-            if (!string.IsNullOrEmpty(setting.shiftExtras))
+            if (!string.IsNullOrEmpty(selectedShiftExtras))
             {
-                shiftOutBind.ParseExtras(setting.shiftExtras);
+                shiftOutBind.ParseExtras(selectedShiftExtras);
             }
 
             if (settings.LightbarMacro is not null) currentOutBind.LightbarMacro = settings.LightbarMacro;
@@ -157,8 +185,19 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             else
             {
                 bind.outputType = OutBinding.OutType.Macro;
-                bind.macro = (int[])setting.shiftAction.actionMacro;
-                bind.macroType = setting.shiftKeyType;
+                if (bind.shiftTrigger ==
+                    Mapping.SWITCH2_MODE_SHIFT_TRIGGER)
+                {
+                    Switch2ModeShiftAction lane =
+                        setting.GetSwitch2ModeShiftAction(modeShiftScope);
+                    bind.macro = (int[])lane.Action.actionMacro;
+                    bind.macroType = lane.KeyType;
+                }
+                else
+                {
+                    bind.macro = (int[])setting.shiftAction.actionMacro;
+                    bind.macroType = setting.shiftKeyType;
+                }
             }
         }
 
@@ -217,12 +256,14 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public bool IsMouse()
         {
-            return outputType == OutType.Button && (control >= X360Controls.LeftMouse && control < X360Controls.Unbound);
+            return outputType == OutType.Button && IsMouseRange(control);
         }
 
         public static bool IsMouseRange(X360Controls control)
         {
-            return control >= X360Controls.LeftMouse && control < X360Controls.Unbound;
+            return (control >= X360Controls.LeftMouse &&
+                control < X360Controls.Unbound) ||
+                control is X360Controls.WLEFT or X360Controls.WRIGHT;
         }
     }
 
@@ -246,6 +287,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public X360Controls control;
         public bool shiftBind;
         public int shiftTrigger;
+        internal Switch2ModeShiftScope modeShiftScope;
         private int heavyRumble = 0;
         private int lightRumble = 0;
         private int flashRate;
@@ -541,12 +583,14 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public bool IsMouse()
         {
-            return outputType == OutType.Button && (control >= X360Controls.LeftMouse && control < X360Controls.Unbound);
+            return outputType == OutType.Button && IsMouseRange(control);
         }
 
         public static bool IsMouseRange(X360Controls control)
         {
-            return control >= X360Controls.LeftMouse && control < X360Controls.Unbound;
+            return (control >= X360Controls.LeftMouse &&
+                control < X360Controls.Unbound) ||
+                control is X360Controls.WLEFT or X360Controls.WRIGHT;
         }
 
         public void ParseExtras(string extras)
@@ -695,6 +739,11 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             }
             else
             {
+                if (shiftTrigger == Mapping.SWITCH2_MODE_SHIFT_TRIGGER)
+                {
+                    WriteModeShiftBind(settings);
+                    return;
+                }
                 settings.shiftKeyType = DS4KeyType.None;
                 settings.shiftTrigger = shiftTrigger;
 
@@ -757,6 +806,58 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
                 Global.RefreshActionAlias(settings, shiftBind);
             }
+        }
+
+        private void WriteModeShiftBind(DS4ControlSettings settings)
+        {
+            Switch2ModeShiftAction lane =
+                settings.GetSwitch2ModeShiftAction(modeShiftScope);
+            lane.Reset();
+            settings.shiftTrigger = Mapping.SWITCH2_MODE_SHIFT_TRIGGER;
+            // Scoped mappings are authoritative. Clear the short-lived shared
+            // representation so profiles do not serialize both forms.
+            settings.shiftActionType =
+                DS4ControlSettings.ActionType.Default;
+            settings.shiftAction = new ControlActionData();
+            settings.shiftKeyType = DS4KeyType.None;
+            settings.shiftExtras = string.Empty;
+
+            if (outputType == OutType.Button)
+            {
+                lane.Action.actionBtn = control;
+                lane.ActionType = DS4ControlSettings.ActionType.Button;
+                if (control == X360Controls.Unbound)
+                {
+                    lane.KeyType |= DS4KeyType.Unbound;
+                }
+            }
+            else if (outputType == OutType.Key)
+            {
+                lane.Action.actionKey = outkey;
+                lane.ActionType = DS4ControlSettings.ActionType.Key;
+                if (hasScanCode)
+                {
+                    lane.KeyType |= DS4KeyType.ScanCode;
+                }
+                if (toggle)
+                {
+                    lane.KeyType |= DS4KeyType.Toggle;
+                }
+            }
+            else if (outputType == OutType.Macro)
+            {
+                lane.Action.actionMacro = macro;
+                lane.ActionType = DS4ControlSettings.ActionType.Macro;
+                lane.KeyType |= macroType.HasFlag(DS4KeyType.HoldMacro) ?
+                    DS4KeyType.HoldMacro : DS4KeyType.Macro;
+                if (hasScanCode)
+                {
+                    lane.KeyType |= DS4KeyType.ScanCode;
+                }
+            }
+
+            lane.Extras = IsUsingExtras() ? CompileExtras() : string.Empty;
+            Global.RefreshSwitch2ModeShiftActionAlias(lane);
         }
 
         public void UpdateExtrasColor(Color color)

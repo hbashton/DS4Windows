@@ -215,6 +215,15 @@ namespace DS4Windows
         public const byte SERIAL_FEATURE_ID = 18;
         protected HidDevice hDevice;
         protected string Mac;
+        private readonly bool hasHidInterface;
+        private readonly bool allowsPersistentIdentity;
+        private readonly bool supportsPhysicalOutput;
+        // Even revisions enable DS4 effects; odd revisions require one final
+        // rumble-only stop. Profile publishers never take a transport lock.
+        private long dualShock4ProfileOutputRevision;
+        // Only sendOutputReport, under outputReportStateLock, acknowledges this.
+        private long dualShock4ProfileStopAdmitted;
+        private volatile bool dualShock4RumbleMayBeActive;
         protected DS4State cState = new DS4State();
         protected DS4State pState = new DS4State();
         protected ConnectionType conType;
@@ -247,6 +256,10 @@ namespace DS4Windows
         protected readonly DS4Touchpad touchpad = null;
         protected readonly DS4SixAxis sixAxis = null;
         protected Thread ds4Input, ds4Output;
+        private readonly DS4DeviceWorkerLifecycleBoundary workerLifecycle =
+            new DS4DeviceWorkerLifecycleBoundary();
+        private int inputWorkerStartCommitted;
+        private int outputWorkerStartCommitted;
         // Retained for device subclasses which still use the legacy watchdog.
         // The native DS4 path now relies on a bounded overlapped HID read so a
         // radio loss cancels the actual pending IRP instead of racing a second
@@ -329,6 +342,29 @@ namespace DS4Windows
         public ReportHandler<EventArgs> MotionEvent = null;
 
         public HidDevice HidDevice => hDevice;
+
+        /// <summary>
+        /// True only when this device lifetime owns a legacy HID interface.
+        /// Runtime transports use an explicit no-HID construction path and
+        /// must never be sent through DS4Devices or HidHide operations.
+        /// </summary>
+        public bool HasHidInterface => hasHidInterface;
+
+        /// <summary>
+        /// Immutable permission for a device class to expose a persistent
+        /// controller identity. A concrete connection must still prove that it
+        /// has a valid identity before a registration sets its persistence
+        /// flag.
+        /// </summary>
+        public bool AllowsPersistentIdentity => allowsPersistentIdentity;
+
+        /// <summary>
+        /// Immutable physical-output capability. This is distinct from the
+        /// virtual output device that consumes the ordinary DS4State mapping
+        /// stream.
+        /// </summary>
+        public bool SupportsPhysicalOutput => supportsPhysicalOutput &&
+            (featureSet & VidPidFeatureSet.NoOutputData) == 0;
         public long DualShock4BluetoothMicrophoneFramesReceived { get; private set; }
         public long BluetoothAudioReportsWritten { get; private set; }
         public long BluetoothAudioWriteFailures { get; private set; }
@@ -436,10 +472,10 @@ namespace DS4Windows
             return useDefaultAudioInterval ? (byte)0 :
                 (byte)Math.Clamp(profilePollRate, 0, 16);
         }
-        public bool IsHidExclusive => HidDevice.IsExclusive;
+        public bool IsHidExclusive => HasHidInterface && HidDevice.IsExclusive;
         public bool isHidExclusive()
         {
-            return HidDevice.IsExclusive;
+            return HasHidInterface && HidDevice.IsExclusive;
         }
 
         public bool IsExclusive
@@ -537,17 +573,41 @@ namespace DS4Windows
 
         // Feature set of gamepad (some non-official DS4 gamepads require a bit different logic than a genuine Sony DS4). 0=Default DS4 gamepad feature set.
         protected VidPidFeatureSet featureSet;
-        public VidPidFeatureSet FeatureSet
+        public virtual VidPidFeatureSet FeatureSet
         {
             get { return featureSet;  }
             set { featureSet = value; }
         }
-        public VidPidFeatureSet ModifyFeatureSetFlag(VidPidFeatureSet featureBitFlag, bool flagSet)
+        public virtual VidPidFeatureSet ModifyFeatureSetFlag(VidPidFeatureSet featureBitFlag, bool flagSet)
         {
             if (flagSet) featureSet |= featureBitFlag;
             else featureSet &= ~featureBitFlag;
             return featureSet;
         }
+
+        /// <summary>
+        /// Profile policy for the legacy DS4 effect writer, separate from a
+        /// hardware NoOutputData limitation. Other device classes own different
+        /// output pipelines and do not use this DS4 report policy.
+        /// </summary>
+        internal void ConfigureDualShock4ProfileOutput(bool enabled)
+        {
+            if (!HasHidInterface || DeviceType != InputDevices.InputDeviceType.DS4)
+                return;
+
+            lock (rumbleStateLock)
+            {
+                if (DualShock4ProfileOutputDisabled == !enabled)
+                    return;
+                Interlocked.Increment(ref dualShock4ProfileOutputRevision);
+                // A disable or re-enable cannot revive a retained preview or
+                // game frame. New enabled feedback must be published afresh.
+                ClearRumblePreviewNoLock();
+            }
+        }
+
+        private bool DualShock4ProfileOutputDisabled =>
+            (Volatile.Read(ref dualShock4ProfileOutputRevision) & 1) != 0;
 
         private const byte DEFAULT_BT_REPORT_TYPE = 0x11;
         private byte knownGoodBTOutputReportType = DEFAULT_BT_REPORT_TYPE;
@@ -676,6 +736,12 @@ namespace DS4Windows
         public DS4Touchpad Touchpad { get { return touchpad; } }
         public DS4SixAxis SixAxis { get { return sixAxis; } }
 
+        public virtual long ContinuousGyroCalibrationElapsedMilliseconds =>
+            sixAxis.CntCalibrating;
+
+        public virtual void ResetContinuousGyroCalibration() =>
+            sixAxis.ResetContinuousCalibration();
+
         public static ConnectionType HidConnectionType(HidDevice hidDevice)
         {
             ConnectionType result = ConnectionType.USB;
@@ -786,6 +852,10 @@ namespace DS4Windows
             hDevice = hidDevice;
             displayName = disName;
             this.featureSet = featureSet;
+            hasHidInterface = true;
+            allowsPersistentIdentity = true;
+            supportsPhysicalOutput =
+                (featureSet & VidPidFeatureSet.NoOutputData) == 0;
 
             exclusiveStatus = ExclusiveStatus.Shared;
             if (hidDevice.IsExclusive)
@@ -798,6 +868,46 @@ namespace DS4Windows
 
             runCalib = (this.featureSet & VidPidFeatureSet.NoGyroCalib) == 0;
 
+            touchpad = new DS4Touchpad();
+            sixAxis = new DS4SixAxis();
+        }
+
+        /// <summary>
+        /// Constructs an input-only logical device whose transport lifetime is
+        /// owned outside the legacy HID registry. It deliberately performs no
+        /// HID access, serial read, calibration, output initialization,
+        /// persistence lookup, thread creation, or registration.
+        /// </summary>
+        /// <remarks>
+        /// The derived type must provide its own serialized StartUpdate and
+        /// StopUpdate implementation. A no-HID device cannot claim persistent
+        /// identity or physical output through this foundation.
+        /// </remarks>
+        protected DS4Device(string disName,
+            InputDevices.InputDeviceType inputDeviceType,
+            ConnectionType connectionType)
+        {
+            if (string.IsNullOrWhiteSpace(disName))
+            {
+                throw new ArgumentException("A display name is required.",
+                    nameof(disName));
+            }
+
+            hDevice = null;
+            Mac = BLANK_SERIAL;
+            displayName = disName;
+            deviceType = inputDeviceType;
+            conType = connectionType;
+            featureSet = VidPidFeatureSet.NoOutputData |
+                VidPidFeatureSet.NoBatteryReading |
+                VidPidFeatureSet.NoGyroCalib;
+            hasHidInterface = false;
+            allowsPersistentIdentity = false;
+            supportsPhysicalOutput = false;
+            runCalib = false;
+            synced = true;
+            exclusiveStatus = ExclusiveStatus.Shared;
+            gyroMouseSensSettings = new GyroMouseSens();
             touchpad = new DS4Touchpad();
             sixAxis = new DS4SixAxis();
         }
@@ -970,6 +1080,7 @@ namespace DS4Windows
 
             if (ds4Input == null)
             {
+                ResetWorkerStartCommitWitnesses();
                 if (conType != ConnectionType.BT)
                 {
                     ds4Output = new Thread(OutReportCopy);
@@ -977,6 +1088,7 @@ namespace DS4Windows
                     ds4Output.Name = "DS4 Arr Copy thread: " + Mac;
                     ds4Output.IsBackground = true;
                     ds4Output.Start();
+                    MarkOutputWorkerStartCommitted();
                 }
 
                 ds4Input = new Thread(performDs4Input);
@@ -984,6 +1096,7 @@ namespace DS4Windows
                 ds4Input.Name = "DS4 Input thread: " + Mac;
                 ds4Input.IsBackground = true;
                 ds4Input.Start();
+                MarkInputWorkerStartCommitted();
             }
             else
             {
@@ -1068,7 +1181,7 @@ namespace DS4Windows
             }
         }
 
-        protected bool writeOutput()
+        protected virtual bool writeOutput()
         {
             lock (bluetoothOutputWriteLock)
             {
@@ -1314,9 +1427,212 @@ namespace DS4Windows
             }
         }
 
+        /// <summary>
+        /// Dormant typed boundary for a future exact-generation legacy owner.
+        /// Current callers continue to use the unchanged public void methods.
+        /// </summary>
+        internal bool TryStartWorkerLifecycle(
+            out DS4DeviceWorkerLifecycleLease lease,
+            out DS4DeviceWorkerLifecycleResult result) =>
+            workerLifecycle.TryStart(this, GetWorkerLifecycleSupport(),
+                StartUpdate, out lease, out result);
+
+        internal bool TryStopWorkerLifecycle(
+            in DS4DeviceWorkerLifecycleLease lease, int timeoutMilliseconds,
+            out DS4DeviceWorkerLifecycleResult result) =>
+            workerLifecycle.TryStop(this, GetWorkerLifecycleSupport(), lease,
+                timeoutMilliseconds, TryStopUpdateBoundedCore, out result);
+
+        internal DS4DeviceWorkerLifecycleSupport WorkerLifecycleSupport =>
+            GetWorkerLifecycleSupport();
+
+        internal DS4DeviceWorkerLifecycleState WorkerLifecycleState =>
+            workerLifecycle.State;
+
+        internal DS4DeviceWorkerLifecycleLease CurrentWorkerLifecycleLease =>
+            workerLifecycle.CurrentLease;
+
+        /// <summary>Test-visible identity of the dormant boundary gate.</summary>
+        internal object WorkerLifecycleGate => workerLifecycle.Gate;
+
+        internal DS4DeviceWorkerLifecycleSupport
+            GetWorkerLifecycleSupport() =>
+                DS4DeviceWorkerLifecycleSupportPolicy.Classify(GetType(),
+                    HasHidInterface);
+
+        protected void ResetWorkerStartCommitWitnesses()
+        {
+            Volatile.Write(ref inputWorkerStartCommitted, 0);
+            Volatile.Write(ref outputWorkerStartCommitted, 0);
+        }
+
+        protected void MarkInputWorkerStartCommitted()
+        {
+            Volatile.Write(ref inputWorkerStartCommitted, 1);
+            workerLifecycle.WitnessWorkerStartCommit(this,
+                inputWorker: true);
+        }
+
+        protected void MarkOutputWorkerStartCommitted()
+        {
+            Volatile.Write(ref outputWorkerStartCommitted, 1);
+            workerLifecycle.WitnessWorkerStartCommit(this,
+                inputWorker: false);
+        }
+
+        private bool HasCommittedInputWorker() =>
+            Volatile.Read(ref inputWorkerStartCommitted) != 0;
+
+        internal virtual DS4DeviceWorkerLifecycleResult
+            TryStopUpdateBoundedCore(int timeoutMilliseconds)
+        {
+            long startedAt = Stopwatch.GetTimestamp();
+            Thread input = ds4Input;
+            bool inputCommitted = HasCommittedInputWorker();
+            if (inputCommitted && input == null)
+            {
+                return DS4DeviceWorkerLifecycleResult.Uncertain(
+                    DS4DeviceWorkerLifecycleOperation.Stop,
+                    DS4DeviceWorkerLifecycleFailureKind.StopDependencyThrew);
+            }
+
+            if (inputCommitted)
+            {
+                if (ReferenceEquals(input, Thread.CurrentThread))
+                {
+                    return DS4DeviceWorkerLifecycleResult.Uncertain(
+                        DS4DeviceWorkerLifecycleOperation.Stop,
+                        DS4DeviceWorkerLifecycleFailureKind.ReentrantCall);
+                }
+                try
+                {
+                    exitInputThread = true;
+                    // Do not call the legacy CancelIO path here: it acquires
+                    // HidDevice.handleLock without a timeout. The typed path
+                    // waits only on the already-bounded legacy HID read and
+                    // reports uncertainty if the caller's deadline expires.
+                    int remaining = GetWorkerLifecycleRemainingMilliseconds(
+                        startedAt, timeoutMilliseconds);
+                    if (!input.Join(remaining))
+                    {
+                        return DS4DeviceWorkerLifecycleResult.Uncertain(
+                            DS4DeviceWorkerLifecycleOperation.Stop,
+                            DS4DeviceWorkerLifecycleFailureKind.StopTimedOut);
+                    }
+                }
+                catch
+                {
+                    return DS4DeviceWorkerLifecycleResult.Uncertain(
+                        DS4DeviceWorkerLifecycleOperation.Stop,
+                        DS4DeviceWorkerLifecycleFailureKind.
+                            StopDependencyThrew);
+                }
+            }
+
+            try
+            {
+                ResetBluetoothControllerClock();
+                int remaining = GetWorkerLifecycleRemainingMilliseconds(
+                    startedAt, timeoutMilliseconds);
+                DS4DeviceWorkerLifecycleResult outputResult =
+                    TryStopOutputUpdateBounded(remaining);
+                return outputResult.IsValid && outputResult.Operation ==
+                        DS4DeviceWorkerLifecycleOperation.Stop ? outputResult :
+                    DS4DeviceWorkerLifecycleResult.Uncertain(
+                        DS4DeviceWorkerLifecycleOperation.Stop,
+                        DS4DeviceWorkerLifecycleFailureKind.
+                            StopDependencyThrew);
+            }
+            catch
+            {
+                return DS4DeviceWorkerLifecycleResult.Uncertain(
+                    DS4DeviceWorkerLifecycleOperation.Stop,
+                    DS4DeviceWorkerLifecycleFailureKind.StopDependencyThrew);
+            }
+        }
+
+        internal virtual DS4DeviceWorkerLifecycleResult
+            TryStopOutputUpdateBounded(int timeoutMilliseconds)
+        {
+            long startedAt = Stopwatch.GetTimestamp();
+            Thread output = ds4Output;
+            if (Volatile.Read(ref outputWorkerStartCommitted) == 0)
+            {
+                return DS4DeviceWorkerLifecycleResult.Success(
+                    DS4DeviceWorkerLifecycleOperation.Stop);
+            }
+            if (output == null)
+            {
+                return DS4DeviceWorkerLifecycleResult.Uncertain(
+                    DS4DeviceWorkerLifecycleOperation.Stop,
+                    DS4DeviceWorkerLifecycleFailureKind.StopDependencyThrew);
+            }
+            if (ReferenceEquals(output, Thread.CurrentThread))
+            {
+                return DS4DeviceWorkerLifecycleResult.Uncertain(
+                    DS4DeviceWorkerLifecycleOperation.Stop,
+                    DS4DeviceWorkerLifecycleFailureKind.ReentrantCall);
+            }
+
+            bool lockTaken = false;
+            try
+            {
+                Monitor.TryEnter(exitLocker, timeoutMilliseconds,
+                    ref lockTaken);
+                if (!lockTaken)
+                {
+                    return DS4DeviceWorkerLifecycleResult.Uncertain(
+                        DS4DeviceWorkerLifecycleOperation.Stop,
+                        DS4DeviceWorkerLifecycleFailureKind.StopTimedOut);
+                }
+                if (output.Join(0))
+                {
+                    return DS4DeviceWorkerLifecycleResult.Success(
+                        DS4DeviceWorkerLifecycleOperation.Stop);
+                }
+
+                exitOutputThread = true;
+                output.Interrupt();
+                int remaining = GetWorkerLifecycleRemainingMilliseconds(
+                    startedAt, timeoutMilliseconds);
+                return output.Join(remaining) ?
+                    DS4DeviceWorkerLifecycleResult.Success(
+                        DS4DeviceWorkerLifecycleOperation.Stop) :
+                    DS4DeviceWorkerLifecycleResult.Uncertain(
+                        DS4DeviceWorkerLifecycleOperation.Stop,
+                        DS4DeviceWorkerLifecycleFailureKind.StopTimedOut);
+            }
+            catch
+            {
+                return DS4DeviceWorkerLifecycleResult.Uncertain(
+                    DS4DeviceWorkerLifecycleOperation.Stop,
+                    DS4DeviceWorkerLifecycleFailureKind.StopDependencyThrew);
+            }
+            finally
+            {
+                if (lockTaken)
+                {
+                    Monitor.Exit(exitLocker);
+                }
+            }
+        }
+
+        private static int GetWorkerLifecycleRemainingMilliseconds(
+            long startedAt, int timeoutMilliseconds)
+        {
+            if (timeoutMilliseconds == 0)
+            {
+                return 0;
+            }
+            long elapsed = Stopwatch.GetElapsedTime(startedAt).Ticks /
+                TimeSpan.TicksPerMillisecond;
+            return elapsed >= timeoutMilliseconds ? 0 :
+                timeoutMilliseconds - (int)elapsed;
+        }
+
         private byte[] CreateDualShock4BluetoothAudioControlReport(
             DualShock4BluetoothAudioState.Snapshot state,
-            byte[] destination = null)
+            byte[] destination = null, bool stopRumbleOnly = false)
         {
             destination ??= bluetoothAudioStateControlReport;
             DualShock4BluetoothAudioProtocol.WriteAudioControlReport(
@@ -1331,12 +1647,21 @@ namespace DS4Windows
                 currentHap.lightbarState.LightBarColor.blue,
                 currentHap.lightbarState.LightBarFlashDurationOn,
                 currentHap.lightbarState.LightBarFlashDurationOff,
-                bluetoothPollRate: (byte)Math.Clamp(btPollRate, 0, 16));
+                bluetoothPollRate: (byte)Math.Clamp(btPollRate, 0, 16),
+                stopRumbleOnly: stopRumbleOnly || DualShock4ProfileOutputDisabled);
+            // Mode-changing audio control also carries motors and can precede
+            // the next ordinary effect pass. Its existing audio-state transition
+            // excludes that pass; conservatively retain any nonzero publication
+            // even if the following writer rejects or throws.
+            if ((destination[3] & 1) != 0 &&
+                (destination[6] != 0 || destination[7] != 0))
+                dualShock4RumbleMayBeActive = true;
             return destination;
         }
 
         private bool WriteDualShock4BluetoothEffectThroughAudioLane(
-            DualShock4BluetoothAudioState.Snapshot state)
+            DualShock4BluetoothAudioState.Snapshot state,
+            bool stopRumbleOnly = false)
         {
             Func<byte[], bool> effectPublisher;
             lock (bluetoothAudioControlLaneLock)
@@ -1359,7 +1684,7 @@ namespace DS4Windows
             // for an OVERLAPPED HID completion.
             return effectPublisher(
                 CreateDualShock4BluetoothAudioControlReport(state,
-                    bluetoothAudioEffectReport));
+                    bluetoothAudioEffectReport, stopRumbleOnly));
         }
 
         public bool WriteBluetoothAudioOutputReport(byte[] report)
@@ -2213,7 +2538,7 @@ namespace DS4Windows
 
             // Some gamepads don't support lightbar and rumble, so no need to write out anything (writeOut always fails, so DS4Windows would accidentally force quit the gamepad connection).
             // If noOutputData featureSet flag is set then don't try to write out anything to the gamepad device.
-            if ((this.featureSet & VidPidFeatureSet.NoOutputData) != 0)
+            if (!SupportsPhysicalOutput)
             {
                 if (exitOutputThread == false && (IsRemoving || IsRemoved))
                 {
@@ -2223,6 +2548,22 @@ namespace DS4Windows
                 }
 
                 return true;
+            }
+
+            long profileOutputRevision = Volatile.Read(ref dualShock4ProfileOutputRevision);
+            bool profileStopRequired = (profileOutputRevision & 1) != 0;
+            bool profileStopAccepted = false;
+            if (profileStopRequired)
+            {
+                if (dualShock4ProfileStopAdmitted == profileOutputRevision ||
+                    !dualShock4RumbleMayBeActive)
+                    return true;
+                // Recheck after MergeStates: a profile may have disabled output
+                // while that earlier snapshot was being consumed. Bypass effect
+                // coalescing for the stop, but keep the existing sole writer.
+                currentHap.rumbleState = default;
+                currentHap.rumbleState.RumbleMotorsExplicitlyOff = true;
+                force = true;
             }
 
             //bool output = outputPendCount > 0, change = force;
@@ -2240,6 +2581,14 @@ namespace DS4Windows
 
             PrepareOutputReportInner(ref change, ref haptime,
                 bluetoothAudio);
+
+            if (profileStopRequired)
+            {
+                // Do not change lightbar/flash when disabling profile output.
+                int flagsOffset = usingBT &&
+                    (featureSet & VidPidFeatureSet.OnlyOutputData0x05) == 0 ? 3 : 1;
+                outReportBuffer[flagsOffset] = 0x01;
+            }
 
             if (haptime && usingBT && bluetoothAudio.SpeakerEnabled && !force)
             {
@@ -2306,12 +2655,22 @@ namespace DS4Windows
 
                     try
                     {
+                        // A failed/throwing nonzero write can be uncertain.
+                        // Retain the possible active state until a later zero
+                        // is accepted. Disabled-at-startup profiles never create
+                        // a new HID probe just to send an unnecessary stop.
+                        int motorOffset = usingBT &&
+                            (featureSet & VidPidFeatureSet.OnlyOutputData0x05) == 0 ? 6 : 4;
+                        bool reportHasRumble = outReportBuffer[motorOffset] != 0 ||
+                            outReportBuffer[motorOffset + 1] != 0;
+                        if (reportHasRumble)
+                            dualShock4RumbleMayBeActive = true;
                         bool outputWritten;
                         if (audioEffectPath)
                         {
                             outputWritten =
                                 WriteDualShock4BluetoothEffectThroughAudioLane(
-                                    bluetoothAudio);
+                                    bluetoothAudio, profileStopRequired);
                             if (outputWritten)
                             {
                                 // The mailbox now owns this latest physical
@@ -2329,6 +2688,17 @@ namespace DS4Windows
                         else
                         {
                             outputWritten = writeOutput();
+                        }
+                        if (outputWritten && !reportHasRumble)
+                            dualShock4RumbleMayBeActive = false;
+                        if (outputWritten && profileStopRequired)
+                        {
+                            // An audio mailbox now owns completion/retry; a
+                            // direct lane has completed its existing HID write.
+                            // Never acknowledge a newer disable published while
+                            // this older report was in flight.
+                            dualShock4ProfileStopAdmitted = profileOutputRevision;
+                            profileStopAccepted = true;
                         }
                         if (outputWritten && usingBT &&
                             (bluetoothAudio.SpeakerEnabled ||
@@ -2397,11 +2767,11 @@ namespace DS4Windows
                 exitOutputThread = true;
             }
 
-            if (!audioEffectDeferred)
+            if (!audioEffectDeferred && (!profileStopRequired || profileStopAccepted))
             {
                 currentHap.dirty = false;
             }
-            return !audioEffectDeferred;
+            return !audioEffectDeferred && (!profileStopRequired || profileStopAccepted);
                 }
             }
         }
@@ -2588,6 +2958,8 @@ namespace DS4Windows
         {
             lock (rumbleStateLock)
             {
+                if (DualShock4ProfileOutputDisabled)
+                    rightLightFastMotor = leftHeavySlowMotor = 0;
                 testRumble.rumbleState.RumbleMotorStrengthRightLightFast = rightLightFastMotor;
                 testRumble.rumbleState.RumbleMotorStrengthLeftHeavySlow = leftHeavySlowMotor;
                 testRumble.rumbleState.RumbleMotorsExplicitlyOff = rightLightFastMotor == 0 && leftHeavySlowMotor == 0;
@@ -2619,6 +2991,11 @@ namespace DS4Windows
         {
             lock (rumbleStateLock)
             {
+                if (DualShock4ProfileOutputDisabled)
+                {
+                    lightMotorActive = heavyMotorActive = false;
+                    lightMotorStrength = heavyMotorStrength = 0;
+                }
                 if (previewLightRumbleActive == lightMotorActive &&
                     previewHeavyRumbleActive == heavyMotorActive &&
                     previewLightRumbleStrength == lightMotorStrength &&
@@ -2654,24 +3031,29 @@ namespace DS4Windows
         {
             lock (rumbleStateLock)
             {
-                previewLightRumbleActive = false;
-                previewHeavyRumbleActive = false;
-                previewLightRumbleStrength = 0;
-                previewHeavyRumbleStrength = 0;
-                previewRumbleDirty = true;
-                Interlocked.Increment(ref rumbleCommandGeneration);
-
-                // Clearing a preview is also an explicit physical stop. A
-                // later game frame may immediately replace it, but an idle
-                // virtual output must not leave the last preview strength in
-                // currentHap indefinitely.
-                testRumble.rumbleState.
-                    RumbleMotorStrengthRightLightFast = 0;
-                testRumble.rumbleState.
-                    RumbleMotorStrengthLeftHeavySlow = 0;
-                testRumble.rumbleState.RumbleMotorsExplicitlyOff = true;
-                testRumble.dirty = true;
+                ClearRumblePreviewNoLock();
             }
+        }
+
+        private void ClearRumblePreviewNoLock()
+        {
+            previewLightRumbleActive = false;
+            previewHeavyRumbleActive = false;
+            previewLightRumbleStrength = 0;
+            previewHeavyRumbleStrength = 0;
+            previewRumbleDirty = true;
+            Interlocked.Increment(ref rumbleCommandGeneration);
+
+            // Clearing a preview is also an explicit physical stop. A
+            // later game frame may immediately replace it, but an idle
+            // virtual output must not leave the last preview strength in
+            // currentHap indefinitely.
+            testRumble.rumbleState.
+                RumbleMotorStrengthRightLightFast = 0;
+            testRumble.rumbleState.
+                RumbleMotorStrengthLeftHeavySlow = 0;
+            testRumble.rumbleState.RumbleMotorsExplicitlyOff = true;
+            testRumble.dirty = true;
         }
 
         protected void MergeStates()
@@ -2726,6 +3108,11 @@ namespace DS4Windows
 
                 currentHap.dirty |= previewRumbleDirty;
                 previewRumbleDirty = false;
+                if (DualShock4ProfileOutputDisabled)
+                {
+                    currentHap.rumbleState = default;
+                    currentHap.rumbleState.RumbleMotorsExplicitlyOff = true;
+                }
                 return Interlocked.Read(ref rumbleCommandGeneration);
             }
         }
@@ -2835,12 +3222,12 @@ namespace DS4Windows
             Removal?.Invoke(this, EventArgs.Empty);
         }
 
-        public void removeReportHandlers()
+        public virtual void removeReportHandlers()
         {
             this.Report = null;
         }
 
-        public void queueEvent(Action act)
+        public virtual void queueEvent(Action act)
         {
             lock (eventQueueLock)
             {
@@ -2856,26 +3243,41 @@ namespace DS4Windows
         /// Report event to resume being invoked after
         /// </summary>
         /// <param name="act">Action to execute in current thread</param>
-        public void HaltReportingRunAction(Action act)
+        public virtual void HaltReportingRunAction(Action act)
+            => TryHaltReportingRunAction(act);
+
+        /// <summary>
+        /// Attempts a synchronous report pause. Failure never queues the action
+        /// onto a report thread; callers retain responsibility for retrying.
+        /// </summary>
+        public virtual bool TryHaltReportingRunAction(Action act)
         {
+            if (IsRemoving)
+                return false;
             // Wait for controller to be in a wait period
             bool result = readWaitEv.Wait(millisecondsTimeout: 500);
-            if (result)
+            if (result && !IsRemoving)
             {
                 readWaitEv.Reset();
 
                 // Tell device to no longer fire reports
+                bool previousFireReport = fireReport;
                 fireReport = false;
 
                 // Flag is set. Allow input thread to resume
                 readWaitEv.Set();
 
-                // Invoke main desired action
-                act?.Invoke();
-
-                // Start firing reports again
-                fireReport = true;
+                try
+                {
+                    act?.Invoke();
+                    return true;
+                }
+                finally
+                {
+                    fireReport = previousFireReport;
+                }
             }
+            return false;
         }
 
         public void updateSerial()

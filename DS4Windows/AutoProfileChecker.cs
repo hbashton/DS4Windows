@@ -155,18 +155,13 @@ namespace DS4WinWPF
                                 DS4Device device = Program.rootHub.DS4Controllers[j];
                                 if (device != null)
                                 {
-                                    // Wait for controller to be in a wait period
-                                    int tempInd = j;
-                                    device.HaltReportingRunAction(() =>
+                                    if (!Global.TryLoadAutoProfile(j, device, tempname,
+                                            true, Program.rootHub))
                                     {
-                                        if (!Global.LoadTempProfile(tempInd, tempname, true,
-                                                Program.rootHub))
-                                        {
-                                            AppLogger.LogToGui(
-                                                $"Auto-Profile could not load '{tempname}' for controller {tempInd + 1}.",
-                                                false, true);
-                                        }
-                                    });
+                                        AppLogger.LogToGui(
+                                            $"Auto-Profile could not load '{tempname}' for controller {j + 1}.",
+                                            false, true);
+                                    }
                                 }
                             }
                             else
@@ -205,6 +200,7 @@ namespace DS4WinWPF
                         }
                     }
 
+                    AutoProfileEntity revertingProfile = tempAutoProfile;
                     tempAutoProfile = null;
                     for (int j = 0; j < ControlService.CURRENT_DS4_CONTROLLER_LIMIT; j++)
                     {
@@ -224,16 +220,21 @@ namespace DS4WinWPF
                                 DS4Device device = Program.rootHub.DS4Controllers[j];
                                 if (device != null)
                                 {
-                                    // Wait for controller to be in a wait period
-                                    int tempInd = j;
-                                    device.HaltReportingRunAction(() =>
+                                    if (!Global.TryLoadAutoProfile(j, device, null,
+                                            false, Program.rootHub))
                                     {
-                                        Global.LoadProfile(tempInd, false, Program.rootHub);
-                                    });
+                                        // A busy/retiring source must not make a
+                                        // failed revert look complete next tick.
+                                        tempAutoProfile = revertingProfile;
+                                    }
                                 }
                                 else
                                 {
-                                    Global.LoadProfile(j, false, Program.rootHub);
+                                    if (!Global.LoadProfile(j, false, Program.rootHub) &&
+                                        Global.useTempProfile[j])
+                                    {
+                                        tempAutoProfile = revertingProfile;
+                                    }
                                 }
                             }
                             else

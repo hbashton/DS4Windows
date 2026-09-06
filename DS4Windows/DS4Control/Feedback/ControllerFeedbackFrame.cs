@@ -33,6 +33,7 @@ namespace DS4Windows
         DualSenseVirtualDevice = 4,
         DualSenseEdgeVirtualDevice = 5,
         DualShock4VirtualDevice = 6,
+        Switch2VirtualDevice = 7,
     }
 
     /// <summary>
@@ -86,13 +87,23 @@ namespace DS4Windows
     }
 
     /// <summary>
-    /// Independently remembers frame application and expiry-release delivery.
-    /// The zero value is ready for use.
+    /// Independently remembers completed frame application and expiry-release
+    /// delivery. Exactly one claim may be in flight for a cursor. Claim and
+    /// Complete are a serialized single-consumer contract. A cursor binds to
+    /// its first mailbox and must not be reused for another mailbox. Reference
+    /// identity prevents an in-flight token from being duplicated by a value
+    /// copy. A newly constructed cursor is ready for use; null fails closed.
     /// </summary>
-    internal struct ControllerFeedbackClaimCursor
+    internal sealed class ControllerFeedbackClaimCursor
     {
-        internal ulong Revision;
-        internal ulong ReleaseRevision;
+        internal ulong AppliedRevision;
+        internal ulong ReleasedRevision;
+        internal ulong NextToken;
+        internal ulong InFlightToken;
+        internal ulong InFlightRevision;
+        internal ControllerFeedbackClaimDisposition InFlightDisposition;
+        internal bool InFlightCompletesRelease;
+        internal ControllerFeedbackMailbox OwnerMailbox;
     }
 
     /// <summary>
@@ -238,7 +249,7 @@ namespace DS4Windows
         {
             if (Version != CurrentVersion ||
                 Source < ControllerFeedbackSource.XboxOneVirtualDevice ||
-                Source > ControllerFeedbackSource.DualShock4VirtualDevice ||
+                Source > ControllerFeedbackSource.Switch2VirtualDevice ||
                 Command < ControllerFeedbackCommand.Apply ||
                 Command > ControllerFeedbackCommand.Stop ||
                 Actuators != ControllerFeedbackActuators.All ||
@@ -433,7 +444,11 @@ namespace DS4Windows
 
                 latest = frame;
                 hasValue = true;
-                revision++;
+                revision = unchecked(revision + 1);
+                if (revision == 0)
+                {
+                    revision = 1;
+                }
                 return true;
             }
         }
@@ -467,47 +482,167 @@ namespace DS4Windows
         }
 
         /// <summary>
-        /// Returns each fresh revision once as Frame. Once that revision
-        /// expires or is implausibly future-dated, returns Release exactly
-        /// once—even if Frame was already returned while it was fresh.
-        /// Physical translation and release I/O happen after this lock.
+        /// Claims each fresh revision as Frame. Once that revision expires or
+        /// is implausibly future-dated, claims Release—even if Frame was
+        /// already completed while it was fresh. A claim does not advance the
+        /// completion watermarks. Physical translation and release I/O happen
+        /// after this lock and the consumer then calls Complete with the exact
+        /// non-zero token. One cursor is for one serialized consumer.
         /// </summary>
         internal ControllerFeedbackClaimDisposition Claim(
-            ulong nowMicroseconds, ref ControllerFeedbackClaimCursor cursor,
-            out ControllerFeedbackFrame frame)
+            ulong nowMicroseconds, ControllerFeedbackClaimCursor cursor,
+            out ControllerFeedbackFrame frame, out ulong claimToken)
         {
+            if (cursor == null)
+            {
+                frame = default;
+                claimToken = 0;
+                return ControllerFeedbackClaimDisposition.None;
+            }
+
+            if (cursor.OwnerMailbox == null)
+            {
+                cursor.OwnerMailbox = this;
+            }
+            else if (!ReferenceEquals(cursor.OwnerMailbox, this))
+            {
+                frame = default;
+                claimToken = 0;
+                return ControllerFeedbackClaimDisposition.None;
+            }
+
             lock (syncRoot)
             {
-                if (!hasValue)
+                if (!hasValue || cursor.InFlightToken != 0)
                 {
                     frame = default;
+                    claimToken = 0;
                     return ControllerFeedbackClaimDisposition.None;
                 }
 
                 if (latest.IsFreshAt(nowMicroseconds))
                 {
-                    if (cursor.Revision == revision)
+                    if (cursor.AppliedRevision == revision)
                     {
                         frame = default;
+                        claimToken = 0;
                         return ControllerFeedbackClaimDisposition.None;
                     }
 
-                    cursor.Revision = revision;
                     frame = latest;
+                    claimToken = BeginClaim(cursor, revision,
+                        ControllerFeedbackClaimDisposition.Frame,
+                        latest.IsStop);
                     return ControllerFeedbackClaimDisposition.Frame;
                 }
 
-                if (cursor.ReleaseRevision == revision)
+                if (cursor.ReleasedRevision == revision)
                 {
                     frame = default;
+                    claimToken = 0;
                     return ControllerFeedbackClaimDisposition.None;
                 }
 
-                cursor.Revision = revision;
-                cursor.ReleaseRevision = revision;
                 frame = default;
+                claimToken = BeginClaim(cursor, revision,
+                    ControllerFeedbackClaimDisposition.Release, true);
                 return ControllerFeedbackClaimDisposition.Release;
             }
+        }
+
+        /// <summary>
+        /// Revalidates the exact claim immediately before a bounded,
+        /// nonblocking physical-output admission. A newer publication, an
+        /// expired Frame, or a Release whose revision became fresh makes the
+        /// old claim ineligible. The caller must still Complete(false) in a
+        /// finally block and retry. This precheck cannot make blocking I/O
+        /// safe past the frame deadline; admission must use deadline-derived
+        /// cancellation and one serialized transport writer.
+        /// </summary>
+        internal bool CanDeliver(ControllerFeedbackClaimCursor cursor,
+            ulong claimToken, ulong nowMicroseconds)
+        {
+            if (cursor == null || claimToken == 0 ||
+                cursor.InFlightToken != claimToken ||
+                !ReferenceEquals(cursor.OwnerMailbox, this) ||
+                (cursor.InFlightDisposition !=
+                    ControllerFeedbackClaimDisposition.Frame &&
+                 cursor.InFlightDisposition !=
+                    ControllerFeedbackClaimDisposition.Release))
+            {
+                return false;
+            }
+
+            lock (syncRoot)
+            {
+                if (!hasValue || revision != cursor.InFlightRevision)
+                {
+                    return false;
+                }
+
+                return cursor.InFlightDisposition ==
+                    ControllerFeedbackClaimDisposition.Frame ?
+                    latest.IsFreshAt(nowMicroseconds) :
+                    latest.IsExpiredAt(nowMicroseconds);
+            }
+        }
+
+        /// <summary>
+        /// Resolves the exact in-flight claim. Failed delivery clears only the
+        /// claim so the unchanged frame or release is retryable. Successful
+        /// delivery advances the relevant completion watermarks. Invalid,
+        /// zero, stale, and duplicate tokens fail closed without disturbing a
+        /// valid in-flight claim.
+        /// </summary>
+        internal bool Complete(ControllerFeedbackClaimCursor cursor,
+            ulong claimToken, bool delivered)
+        {
+            if (cursor == null || claimToken == 0 ||
+                cursor.InFlightToken != claimToken ||
+                !ReferenceEquals(cursor.OwnerMailbox, this) ||
+                (cursor.InFlightDisposition !=
+                    ControllerFeedbackClaimDisposition.Frame &&
+                 cursor.InFlightDisposition !=
+                    ControllerFeedbackClaimDisposition.Release))
+            {
+                return false;
+            }
+
+            if (delivered)
+            {
+                cursor.AppliedRevision = cursor.InFlightRevision;
+                if (cursor.InFlightCompletesRelease)
+                {
+                    cursor.ReleasedRevision = cursor.InFlightRevision;
+                }
+            }
+
+            cursor.InFlightToken = 0;
+            cursor.InFlightRevision = 0;
+            cursor.InFlightDisposition =
+                ControllerFeedbackClaimDisposition.None;
+            cursor.InFlightCompletesRelease = false;
+            return true;
+        }
+
+        private ulong BeginClaim(
+            ControllerFeedbackClaimCursor cursor,
+            ulong claimedRevision,
+            ControllerFeedbackClaimDisposition disposition,
+            bool completesRelease)
+        {
+            ulong token = unchecked(cursor.NextToken + 1);
+            if (token == 0)
+            {
+                token = 1;
+            }
+
+            cursor.NextToken = token;
+            cursor.InFlightToken = token;
+            cursor.InFlightRevision = claimedRevision;
+            cursor.InFlightDisposition = disposition;
+            cursor.InFlightCompletesRelease = completesRelease;
+            return token;
         }
 
         private static bool IsNewer(in ControllerFeedbackFrame candidate,

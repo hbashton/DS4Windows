@@ -11,6 +11,7 @@ namespace DS4WindowsTests
         private static readonly ViiperVirtualDeviceType[] OutputTypes =
         {
             ViiperVirtualDeviceType.Xbox360,
+            ViiperVirtualDeviceType.XboxOne,
             ViiperVirtualDeviceType.DualShock4,
             ViiperVirtualDeviceType.DualSense,
             ViiperVirtualDeviceType.DualSenseEdge,
@@ -24,12 +25,13 @@ namespace DS4WindowsTests
         [DataRow(InputDeviceType.JoyConL)]
         [DataRow(InputDeviceType.JoyConR)]
         [DataRow(InputDeviceType.JoyConGrip)]
-        public void EverySupportedPhysicalFamilyCanFeedEveryViiperOutput(
+        public void FamilySeededCanonicalStateSerializesForEveryViiperOutput(
             InputDeviceType physicalType)
         {
-            // Every physical parser converges on DS4State before virtual output.
-            // Exercising the complete output matrix from a non-neutral canonical
-            // state catches packet-builder assumptions tied to one input family.
+            // Packet-builder smoke only. physicalType supplies a numerical seed;
+            // this does not instantiate that family's parser, device or mapper.
+            // Actual Switch 2 registered mapping is tested separately by
+            // Switch2ProductionInputMatrixTests; hardware/API routes remain separate.
             DS4State state = CreateCanonicalMappedState(physicalType);
 
             foreach (ViiperVirtualDeviceType outputType in OutputTypes)
@@ -43,8 +45,51 @@ namespace DS4WindowsTests
             }
         }
 
+        [TestMethod]
+        public void EveryFamilySeededCanonicalStateSerializesForXboxOne()
+        {
+            foreach (InputDeviceType physicalType in
+                Enum.GetValues<InputDeviceType>())
+            {
+                byte[] packet = Build(ViiperVirtualDeviceType.XboxOne,
+                    CreateCanonicalMappedState(physicalType));
+                Assert.AreEqual(24, packet.Length,
+                    $"{physicalType} -> XboxOne report length");
+                Assert.IsTrue(packet.Any(value => value != 0),
+                    $"{physicalType} -> XboxOne stayed neutral");
+            }
+        }
+
+        [TestMethod]
+        public void Switch2FamilySeededCanonicalStatesSerializeForEveryViiperOutput()
+        {
+            InputDeviceType[] switch2PhysicalTypes =
+            {
+                InputDeviceType.Switch2Pro,
+                InputDeviceType.Switch2JoyConLeft,
+                InputDeviceType.Switch2JoyConRight,
+                InputDeviceType.Switch2JoyConJoined,
+            };
+
+            foreach (InputDeviceType physicalType in switch2PhysicalTypes)
+            {
+                DS4State state = CreateCanonicalMappedState(physicalType);
+                foreach (ViiperVirtualDeviceType outputType in OutputTypes)
+                {
+                    byte[] packet = Build(outputType, state);
+                    Assert.IsNotNull(packet,
+                        $"{physicalType} -> {outputType}");
+                    Assert.IsTrue(packet.Length > 0,
+                        $"{physicalType} -> {outputType} produced no report");
+                    Assert.IsTrue(packet.Any(value => value != 0),
+                        $"{physicalType} -> {outputType} stayed neutral");
+                }
+            }
+        }
+
         [DataTestMethod]
         [DataRow(ViiperVirtualDeviceType.Xbox360, 20)]
+        [DataRow(ViiperVirtualDeviceType.XboxOne, 24)]
         [DataRow(ViiperVirtualDeviceType.DualShock4, 31)]
         [DataRow(ViiperVirtualDeviceType.DualSense, 33)]
         [DataRow(ViiperVirtualDeviceType.DualSenseEdge, 33)]
@@ -55,6 +100,27 @@ namespace DS4WindowsTests
             Assert.AreEqual(expectedLength,
                 Build(outputType, CreateCanonicalMappedState(
                     InputDeviceType.DS4)).Length);
+        }
+
+        [TestMethod]
+        public void LegacyPlayStationFeedbackDecodesForSwitch2HdRumble()
+        {
+            byte[] ds4 = { 12, 34, 0, 0, 0, 0, 0 };
+            Assert.IsTrue(ViiperOutDevice.
+                TryDecodeCanonicalFeedbackForSwitch2(
+                    ViiperVirtualDeviceType.DualShock4, ds4, ds4.Length,
+                    out ControllerFeedbackActuatorState ds4State));
+            Assert.AreEqual((ushort)(34 * 257), ds4State.BodyLow);
+            Assert.AreEqual((ushort)(12 * 257), ds4State.BodyHigh);
+
+            byte[] dualSense = { 56, 78, 0, 0, 0, 0 };
+            Assert.IsTrue(ViiperOutDevice.
+                TryDecodeCanonicalFeedbackForSwitch2(
+                    ViiperVirtualDeviceType.DualSense, dualSense,
+                    dualSense.Length,
+                    out ControllerFeedbackActuatorState dualSenseState));
+            Assert.AreEqual((ushort)(56 * 257), dualSenseState.BodyLow);
+            Assert.AreEqual((ushort)(78 * 257), dualSenseState.BodyHigh);
         }
 
         private static DS4State CreateCanonicalMappedState(

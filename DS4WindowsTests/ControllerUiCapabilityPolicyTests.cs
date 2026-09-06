@@ -1,3 +1,4 @@
+using System;
 using DS4Windows;
 using DS4Windows.InputDevices;
 using DS4WinWPF.DS4Forms.ViewModels;
@@ -52,6 +53,134 @@ namespace DS4WindowsTests
             Assert.IsTrue(capabilities.ShowDualSenseHardwareControls);
             Assert.IsTrue(capabilities.SupportsAdaptiveTriggers);
             Assert.IsTrue(capabilities.SupportsMuteButton);
+            Assert.IsTrue(capabilities.ShowSwitch2Controls);
+        }
+
+        [TestMethod]
+        public void ExactSwitch2RuntimeShowsControllerControlsAndSourceButtons()
+        {
+            ControllerUiCapabilities capabilities =
+                ControllerUiCapabilities.For(
+                    InputDeviceType.Switch2JoyConJoined);
+
+            Assert.IsTrue(capabilities.IsSwitch2);
+            Assert.IsTrue(capabilities.ShowSwitch2Controls);
+            Assert.AreEqual("Joy-Con 2 (Joined)",
+                capabilities.ControllerName);
+            Assert.IsTrue(capabilities.IsMappingControlAvailable(
+                DS4Controls.Switch2C, isDualSenseEdge: false));
+            Assert.IsTrue(capabilities.IsMappingControlAvailable(
+                DS4Controls.Switch2JoyConLeftPaddle1,
+                isDualSenseEdge: false));
+            Assert.IsTrue(capabilities.IsMappingControlAvailable(
+                DS4Controls.Switch2JoyConLeftIrSensor,
+                isDualSenseEdge: false));
+            Assert.IsTrue(capabilities.IsMappingControlAvailable(
+                DS4Controls.Switch2JoyConRightIrSensor,
+                isDualSenseEdge: false));
+        }
+
+        [TestMethod]
+        public void StandaloneHoldControlAppearsOnlyForApplicableJoyCons()
+        {
+            Assert.IsTrue(ControllerUiCapabilities.For(null).
+                ShowSwitch2StandaloneJoyConControls);
+            Assert.IsTrue(ControllerUiCapabilities.For(
+                InputDeviceType.Switch2JoyConLeft).
+                ShowSwitch2StandaloneJoyConControls);
+            Assert.IsTrue(ControllerUiCapabilities.For(
+                InputDeviceType.Switch2JoyConRight).
+                ShowSwitch2StandaloneJoyConControls);
+            Assert.IsFalse(ControllerUiCapabilities.For(
+                InputDeviceType.Switch2JoyConJoined).
+                ShowSwitch2StandaloneJoyConControls);
+            Assert.IsFalse(ControllerUiCapabilities.For(
+                InputDeviceType.Switch2Pro).
+                ShowSwitch2StandaloneJoyConControls);
+            Assert.IsFalse(ControllerUiCapabilities.For(
+                InputDeviceType.DualSense).
+                ShowSwitch2StandaloneJoyConControls);
+        }
+
+        [TestMethod]
+        public void Switch2SourceControlsFollowExactPhysicalModelAndSide()
+        {
+            ControllerUiCapabilities pro = ControllerUiCapabilities.For(
+                InputDeviceType.Switch2Pro);
+            Assert.IsTrue(pro.IsMappingControlAvailable(
+                DS4Controls.Switch2C, false));
+            Assert.IsFalse(pro.IsMappingControlAvailable(
+                DS4Controls.Switch2JoyConLeftPaddle1, false));
+            Assert.IsFalse(pro.IsMappingControlAvailable(
+                DS4Controls.Switch2JoyConRightIrSensor, false));
+
+            ControllerUiCapabilities left = ControllerUiCapabilities.For(
+                InputDeviceType.Switch2JoyConLeft);
+            Assert.IsFalse(left.IsMappingControlAvailable(
+                DS4Controls.Switch2C, false));
+            Assert.IsTrue(left.IsMappingControlAvailable(
+                DS4Controls.Switch2JoyConLeftPaddle2, false));
+            Assert.IsTrue(left.IsMappingControlAvailable(
+                DS4Controls.Switch2JoyConLeftIrSensor, false));
+            Assert.IsFalse(left.IsMappingControlAvailable(
+                DS4Controls.Switch2JoyConRightPaddle1, false));
+
+            ControllerUiCapabilities right = ControllerUiCapabilities.For(
+                InputDeviceType.Switch2JoyConRight);
+            Assert.IsTrue(right.IsMappingControlAvailable(
+                DS4Controls.Switch2C, false));
+            Assert.IsTrue(right.IsMappingControlAvailable(
+                DS4Controls.Switch2JoyConRightPaddle2, false));
+            Assert.IsTrue(right.IsMappingControlAvailable(
+                DS4Controls.Switch2JoyConRightIrSensor, false));
+            Assert.IsFalse(right.IsMappingControlAvailable(
+                DS4Controls.Switch2JoyConLeftPaddle1, false));
+
+            ControllerUiCapabilities joined = ControllerUiCapabilities.For(
+                InputDeviceType.Switch2JoyConJoined);
+            foreach (DS4Controls control in new[]
+            {
+                DS4Controls.Switch2C,
+                DS4Controls.Switch2JoyConLeftPaddle1,
+                DS4Controls.Switch2JoyConLeftPaddle2,
+                DS4Controls.Switch2JoyConRightPaddle1,
+                DS4Controls.Switch2JoyConRightPaddle2,
+                DS4Controls.Switch2JoyConLeftIrSensor,
+                DS4Controls.Switch2JoyConRightIrSensor,
+            })
+            {
+                Assert.IsTrue(joined.IsMappingControlAvailable(control,
+                    false), control.ToString());
+            }
+        }
+
+        [TestMethod]
+        public void EveryPhysicalFamilyRetainsEveryVirtualPadChoice()
+        {
+            // Physical capabilities may filter hardware-only profile panels,
+            // but they never filter the shared virtual-output selection.
+            OutContType[] expected =
+            {
+                OutContType.ViiperDS4,
+                OutContType.ViiperX360,
+                OutContType.ViiperDualSense,
+                OutContType.ViiperDualSenseEdge,
+                OutContType.ViiperSwitch2Pro,
+                OutContType.ViiperXboxOne,
+            };
+
+            foreach (InputDeviceType physicalDeviceType in
+                Enum.GetValues<InputDeviceType>())
+            {
+                _ = ControllerUiCapabilities.For(physicalDeviceType);
+                for (int index = 0; index < expected.Length; index++)
+                {
+                    Assert.AreEqual(expected[index],
+                        ProfileSettingsViewModel.GetOutputControllerType(index),
+                        $"Physical type {physicalDeviceType} lost virtual " +
+                        $"output {expected[index]}.");
+                }
+            }
         }
 
         [TestMethod]
@@ -121,6 +250,26 @@ namespace DS4WindowsTests
             Assert.IsTrue(bottomRightPaddle.IsAvailableOnPhysicalController);
             Assert.IsTrue(bottomRightPaddle.IsControllerMapListOnly);
             Assert.IsFalse(cross.IsControllerMapListOnly);
+        }
+
+        [DataTestMethod]
+        [DataRow((int)OutContType.ViiperXboxOne)]
+        [DataRow((int)OutContType.ViiperDualSense)]
+        public void ProRearLabelsKeepCanonicalKeysAcrossVirtualOutputs(int output)
+        {
+            var pro = new MappingListViewModel(Global.TEST_PROFILE_INDEX,
+                (OutContType)output, InputDeviceType.Switch2Pro);
+            Assert.AreEqual("GL (Rear Left)", pro.ControlMap[DS4Controls.BLP].ControlName);
+            Assert.AreEqual("GR (Rear Right)", pro.ControlMap[DS4Controls.BRP].ControlName);
+            Assert.AreEqual(DS4Controls.BLP, pro.ControlMap[DS4Controls.BLP].Setting.control);
+            Assert.AreEqual(DS4Controls.BRP, pro.ControlMap[DS4Controls.BRP].Setting.control);
+            Assert.IsTrue(pro.ControlMap[DS4Controls.BLP].IsAvailableOnPhysicalController);
+            Assert.IsTrue(pro.ControlMap[DS4Controls.BRP].IsAvailableOnPhysicalController);
+
+            var edge = new MappingListViewModel(Global.TEST_PROFILE_INDEX,
+                (OutContType)output, InputDeviceType.DualSense, true);
+            Assert.AreEqual("Bottom Left Paddle", edge.ControlMap[DS4Controls.BLP].ControlName);
+            Assert.AreEqual("Bottom Right Paddle", edge.ControlMap[DS4Controls.BRP].ControlName);
         }
 
         [DataTestMethod]

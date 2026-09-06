@@ -21,17 +21,59 @@ namespace DS4Windows
     public class DS4StateFieldMapping
     {
         public enum ControlType : int { Unknown = 0, Button, AxisDir, Trigger, Touch, GyroDir, SwipeDir }
-        public const byte LAST_DS4_ACTION = (byte)DS4Controls.TouchEnded;
+        public const byte LAST_DS4_ACTION =
+            (byte)DS4Controls.Switch2JoyConRightSR;
         public const byte TRIGGER_FULL_PULL_THRESHOLD = 250;
+        private const ushort SWITCH2_PRO_SOURCE_CONTRACT_VERSION =
+            Switch2.Switch2ProProfileInputFrame.CurrentVersion;
+        private const ushort SWITCH2_JOYCON_SOURCE_CONTRACT_VERSION =
+            Switch2.Switch2JoyConProfileInputFrame.CurrentVersion;
 
         public bool[] buttons = new bool[(int)LAST_DS4_ACTION + 1];
-        public byte[] axisdirs = new byte[(int)LAST_DS4_ACTION + 1];
+        public readonly AxisDirectionStore axisdirs = new((int)LAST_DS4_ACTION + 1);
         public byte[] triggers = new byte[(int)LAST_DS4_ACTION + 1];
         public int[] gryodirs = new int[(int)LAST_DS4_ACTION + 1];
         public byte[] swipedirs = new byte[(int)LAST_DS4_ACTION + 1];
         public bool[] swipedirbools = new bool[(int)LAST_DS4_ACTION + 1];
         public bool touchButton = false;
         public bool outputTouchButton = false;
+
+        /// <summary>
+        /// One authoritative mapped-axis store with the historical indexed
+        /// byte surface. A byte write is an explicit replacement, including
+        /// writing the byte already displayed by a precise value. Typed
+        /// mapping stages use value copies rather than a raw-input sidecar.
+        /// </summary>
+        public sealed class AxisDirectionStore
+        {
+            private readonly DS4MappedStickAxis[] axes;
+
+            internal AxisDirectionStore(int length)
+            {
+                axes = new DS4MappedStickAxis[length];
+                // Preserve the former byte array's zero-initialized cells.
+                // A populated DS4State supplies its own neutral (128) axes.
+                for (int index = 0; index < axes.Length; index++)
+                {
+                    axes[index] = DS4MappedStickAxis.FromLegacy(0);
+                }
+            }
+
+            public int Length => axes.Length;
+
+            public byte this[int index]
+            {
+                get => axes[index].LegacyValue;
+                set => axes[index] = DS4MappedStickAxis.FromLegacy(value);
+            }
+
+            internal DS4MappedStickAxis GetMappedAxis(int index) => axes[index];
+
+            internal void SetMappedAxis(int index, in DS4MappedStickAxis axis)
+            {
+                axes[index] = axis;
+            }
+        }
 
         public static ControlType[] mappedType = new ControlType[LAST_DS4_ACTION + 1]
         {
@@ -91,6 +133,17 @@ namespace DS4Windows
             ControlType.Trigger, // DS4Controls.RSOuter
             ControlType.Button,  // DS4Controls.TouchStarted
             ControlType.Button, // DS4Controls.TouchEnded
+            ControlType.Button, // DS4Controls.Switch2C
+            ControlType.Button, // DS4Controls.Switch2JoyConLeftPaddle1
+            ControlType.Button, // DS4Controls.Switch2JoyConLeftPaddle2
+            ControlType.Button, // DS4Controls.Switch2JoyConRightPaddle1
+            ControlType.Button, // DS4Controls.Switch2JoyConRightPaddle2
+            ControlType.Button, // DS4Controls.Switch2JoyConLeftIrSensor
+            ControlType.Button, // DS4Controls.Switch2JoyConRightIrSensor
+            ControlType.Button, // DS4Controls.Switch2JoyConLeftSL
+            ControlType.Button, // DS4Controls.Switch2JoyConLeftSR
+            ControlType.Button, // DS4Controls.Switch2JoyConRightSL
+            ControlType.Button, // DS4Controls.Switch2JoyConRightSR
         };
 
         public DS4StateFieldMapping()
@@ -102,20 +155,25 @@ namespace DS4Windows
             PopulateFieldMapping(cState, exposeState, tp, priorMouse);
         }
 
-        public void PopulateFieldMapping(DS4State cState, DS4StateExposed exposeState, Mouse tp, bool priorMouse = false)
+        public void PopulateFieldMapping(DS4State cState,
+            DS4StateExposed exposeState, Mouse tp, bool priorMouse = false,
+            Switch2.Switch2IrActivationThreshold leftIrThreshold =
+                Switch2.Switch2IrActivationThreshold.Strict,
+            Switch2.Switch2IrActivationThreshold rightIrThreshold =
+                Switch2.Switch2IrActivationThreshold.Strict)
         {
             unchecked
             {
-                axisdirs[(int)DS4Controls.LXNeg] = cState.LX;
-                axisdirs[(int)DS4Controls.LXPos] = cState.LX;
-                axisdirs[(int)DS4Controls.LYNeg] = cState.LY;
-                axisdirs[(int)DS4Controls.LYPos] = cState.LY;
+                axisdirs.SetMappedAxis((int)DS4Controls.LXNeg, cState.LXAxis);
+                axisdirs.SetMappedAxis((int)DS4Controls.LXPos, cState.LXAxis);
+                axisdirs.SetMappedAxis((int)DS4Controls.LYNeg, cState.LYAxis);
+                axisdirs.SetMappedAxis((int)DS4Controls.LYPos, cState.LYAxis);
                 triggers[(int)DS4Controls.LSOuter] = cState.OutputLSOuter;
 
-                axisdirs[(int)DS4Controls.RXNeg] = cState.RX;
-                axisdirs[(int)DS4Controls.RXPos] = cState.RX;
-                axisdirs[(int)DS4Controls.RYNeg] = cState.RY;
-                axisdirs[(int)DS4Controls.RYPos] = cState.RY;
+                axisdirs.SetMappedAxis((int)DS4Controls.RXNeg, cState.RXAxis);
+                axisdirs.SetMappedAxis((int)DS4Controls.RXPos, cState.RXAxis);
+                axisdirs.SetMappedAxis((int)DS4Controls.RYNeg, cState.RYAxis);
+                axisdirs.SetMappedAxis((int)DS4Controls.RYPos, cState.RYAxis);
                 triggers[(int)DS4Controls.RSOuter] = cState.OutputRSOuter;
 
                 triggers[(int)DS4Controls.L2] = cState.L2;
@@ -179,7 +237,39 @@ namespace DS4Windows
                 buttons[(int)DS4Controls.TouchStarted] = tp != null ? tp.TouchStarted : false;
                 buttons[(int)DS4Controls.TouchEnded] = tp != null ? tp.TouchEnded : false;
 
+                buttons[(int)DS4Controls.Switch2C] =
+                    GetValidatedSwitch2SourceButton(cState,
+                        DS4Controls.Switch2C);
+                buttons[(int)DS4Controls.Switch2JoyConLeftPaddle1] =
+                    GetValidatedSwitch2SourceButton(cState,
+                        DS4Controls.Switch2JoyConLeftPaddle1);
+                buttons[(int)DS4Controls.Switch2JoyConLeftPaddle2] =
+                    GetValidatedSwitch2SourceButton(cState,
+                        DS4Controls.Switch2JoyConLeftPaddle2);
+                buttons[(int)DS4Controls.Switch2JoyConRightPaddle1] =
+                    GetValidatedSwitch2SourceButton(cState,
+                        DS4Controls.Switch2JoyConRightPaddle1);
+                buttons[(int)DS4Controls.Switch2JoyConRightPaddle2] =
+                    GetValidatedSwitch2SourceButton(cState,
+                        DS4Controls.Switch2JoyConRightPaddle2);
+                buttons[(int)DS4Controls.Switch2JoyConLeftIrSensor] =
+                    GetValidatedSwitch2SourceButton(cState,
+                        DS4Controls.Switch2JoyConLeftIrSensor,
+                        leftIrThreshold, rightIrThreshold);
+                buttons[(int)DS4Controls.Switch2JoyConRightIrSensor] =
+                    GetValidatedSwitch2SourceButton(cState,
+                        DS4Controls.Switch2JoyConRightIrSensor,
+                        leftIrThreshold, rightIrThreshold);
+
                 touchButton = cState.TouchButton;
+                buttons[(int)DS4Controls.Switch2JoyConLeftSL] =
+                    GetValidatedSwitch2SourceButton(cState, DS4Controls.Switch2JoyConLeftSL);
+                buttons[(int)DS4Controls.Switch2JoyConLeftSR] =
+                    GetValidatedSwitch2SourceButton(cState, DS4Controls.Switch2JoyConLeftSR);
+                buttons[(int)DS4Controls.Switch2JoyConRightSL] =
+                    GetValidatedSwitch2SourceButton(cState, DS4Controls.Switch2JoyConRightSL);
+                buttons[(int)DS4Controls.Switch2JoyConRightSR] =
+                    GetValidatedSwitch2SourceButton(cState, DS4Controls.Switch2JoyConRightSR);
                 outputTouchButton = cState.OutputTouchButton;
             }
         }
@@ -189,20 +279,81 @@ namespace DS4Windows
             return rawTriggerValue >= TRIGGER_FULL_PULL_THRESHOLD;
         }
 
+        /// <summary>
+        /// Reads the append-only Switch 2 profile sources without projecting
+        /// them onto an unrelated legacy DS4State button. The two sidecars are
+        /// mutually exclusive at their validated profile boundaries; a state
+        /// claiming both sources is ambiguous and therefore maps to released.
+        /// </summary>
+        internal static bool GetValidatedSwitch2SourceButton(DS4State state,
+            DS4Controls control,
+            Switch2.Switch2IrActivationThreshold leftIrThreshold =
+                Switch2.Switch2IrActivationThreshold.Strict,
+            Switch2.Switch2IrActivationThreshold rightIrThreshold =
+                Switch2.Switch2IrActivationThreshold.Strict)
+        {
+            if (state == null)
+            {
+                return false;
+            }
+
+            Switch2RawInputStatus pro = state.Switch2RawInputStatus;
+            Switch2JoyConRawInputStatus joyCon =
+                state.Switch2JoyConRawInputStatus;
+            bool proValid = pro.IsValid &&
+                pro.ContractVersion == SWITCH2_PRO_SOURCE_CONTRACT_VERSION;
+            bool joyConValid = joyCon.IsValid &&
+                joyCon.ContractVersion == SWITCH2_JOYCON_SOURCE_CONTRACT_VERSION;
+
+            if (proValid == joyConValid)
+            {
+                return false;
+            }
+
+            return control switch
+            {
+                DS4Controls.Switch2C => proValid ? pro.CButton :
+                    joyCon.CButton,
+                DS4Controls.Switch2JoyConLeftSL => joyConValid && joyCon.LeftPresent && joyCon.LeftRailSL,
+                DS4Controls.Switch2JoyConLeftSR => joyConValid && joyCon.LeftPresent && joyCon.LeftRailSR,
+                DS4Controls.Switch2JoyConRightSL => joyConValid && joyCon.RightPresent && joyCon.RightRailSL,
+                DS4Controls.Switch2JoyConRightSR => joyConValid && joyCon.RightPresent && joyCon.RightRailSR,
+                DS4Controls.Switch2JoyConLeftPaddle1 =>
+                    joyConValid && joyCon.LeftPaddle1,
+                DS4Controls.Switch2JoyConLeftPaddle2 =>
+                    joyConValid && joyCon.LeftPaddle2,
+                DS4Controls.Switch2JoyConRightPaddle1 =>
+                    joyConValid && joyCon.RightPaddle1,
+                DS4Controls.Switch2JoyConRightPaddle2 =>
+                    joyConValid && joyCon.RightPaddle2,
+                DS4Controls.Switch2JoyConLeftIrSensor => joyConValid &&
+                    joyCon.LeftPresent &&
+                    Switch2.Switch2IrMouseProjection.IsThresholdActive(
+                        leftIrThreshold, joyCon.LeftIrRoughness,
+                        joyCon.LeftIrDistance),
+                DS4Controls.Switch2JoyConRightIrSensor => joyConValid &&
+                    joyCon.RightPresent &&
+                    Switch2.Switch2IrMouseProjection.IsThresholdActive(
+                        rightIrThreshold, joyCon.RightIrRoughness,
+                        joyCon.RightIrDistance),
+                _ => false,
+            };
+        }
+
         public void PopulateState(DS4State state)
         {
             unchecked
             {
-                state.LX = axisdirs[(int)DS4Controls.LXNeg];
-                state.LX = axisdirs[(int)DS4Controls.LXPos];
-                state.LY = axisdirs[(int)DS4Controls.LYNeg];
-                state.LY = axisdirs[(int)DS4Controls.LYPos];
+                state.LXAxis = axisdirs.GetMappedAxis((int)DS4Controls.LXNeg);
+                state.LXAxis = axisdirs.GetMappedAxis((int)DS4Controls.LXPos);
+                state.LYAxis = axisdirs.GetMappedAxis((int)DS4Controls.LYNeg);
+                state.LYAxis = axisdirs.GetMappedAxis((int)DS4Controls.LYPos);
                 state.OutputLSOuter = triggers[(int)DS4Controls.LSOuter];
 
-                state.RX = axisdirs[(int)DS4Controls.RXNeg];
-                state.RX = axisdirs[(int)DS4Controls.RXPos];
-                state.RY = axisdirs[(int)DS4Controls.RYNeg];
-                state.RY = axisdirs[(int)DS4Controls.RYPos];
+                state.RXAxis = axisdirs.GetMappedAxis((int)DS4Controls.RXNeg);
+                state.RXAxis = axisdirs.GetMappedAxis((int)DS4Controls.RXPos);
+                state.RYAxis = axisdirs.GetMappedAxis((int)DS4Controls.RYNeg);
+                state.RYAxis = axisdirs.GetMappedAxis((int)DS4Controls.RYPos);
                 state.OutputRSOuter = triggers[(int)DS4Controls.RSOuter];
 
                 state.L2 = triggers[(int)DS4Controls.L2];

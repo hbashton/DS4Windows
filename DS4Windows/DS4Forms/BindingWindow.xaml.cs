@@ -420,6 +420,12 @@ namespace DS4WinWPF.DS4Forms
             associatedBindings.Add(mouseWheelDBtn,
                 new BindAssociation() { outputType = BindAssociation.OutType.Button, control = DS4Windows.X360Controls.WDOWN });
             mouseWheelDBtn.Click += OutputButtonBtn_Click;
+            associatedBindings.Add(mouseWheelLBtn,
+                new BindAssociation() { outputType = BindAssociation.OutType.Button, control = DS4Windows.X360Controls.WLEFT });
+            mouseWheelLBtn.Click += OutputButtonBtn_Click;
+            associatedBindings.Add(mouseWheelRBtn,
+                new BindAssociation() { outputType = BindAssociation.OutType.Button, control = DS4Windows.X360Controls.WRIGHT });
+            mouseWheelRBtn.Click += OutputButtonBtn_Click;
 
 
             associatedBindings.Add(absMouseUpBindBtn,
@@ -1527,7 +1533,11 @@ namespace DS4WinWPF.DS4Forms
         private void RecordMacroBtn_Click(object sender, RoutedEventArgs e)
         {
             RecordBox box = new RecordBox(bindingVM.DeviceNum, bindingVM.Settings,
-                bindingVM.ActionBinding.IsShift());
+                bindingVM.ActionBinding.IsShift(), modeShiftScope:
+                    bindingVM.ActionBinding.IsShift() &&
+                    bindingVM.ActionBinding.shiftTrigger ==
+                        Mapping.SWITCH2_MODE_SHIFT_TRIGGER ?
+                        bindingVM.ModeShiftScope : null);
             box.Visibility = Visibility.Visible;
             mapBindingPanel.Visibility = Visibility.Collapsed;
             extrasSidePanel.Visibility = Visibility.Collapsed;

@@ -88,11 +88,13 @@ namespace DS4Windows.InputDevices
 
             if (ds4Input == null)
             {
+                ResetWorkerStartCommitWitnesses();
                 ds4Input = new Thread(ReadInput);
                 ds4Input.Priority = ThreadPriority.AboveNormal;
                 ds4Input.Name = "DS3 Input thread: " + Mac;
                 ds4Input.IsBackground = true;
                 ds4Input.Start();
+                MarkInputWorkerStartCommitted();
             }
             else
                 Console.WriteLine("Thread already running for DS4: " + Mac);
@@ -448,7 +450,29 @@ namespace DS4Windows.InputDevices
             SendEmptyOutputReport();
         }
 
-        private void SendEmptyOutputReport()
+        internal override DS4DeviceWorkerLifecycleResult
+            TryStopOutputUpdateBounded(int timeoutMilliseconds)
+        {
+            try
+            {
+                return SendEmptyOutputReport(timeoutMilliseconds) ?
+                    DS4DeviceWorkerLifecycleResult.Success(
+                        DS4DeviceWorkerLifecycleOperation.Stop) :
+                    DS4DeviceWorkerLifecycleResult.Uncertain(
+                        DS4DeviceWorkerLifecycleOperation.Stop,
+                        DS4DeviceWorkerLifecycleFailureKind.
+                            OutputFinalizationUncertain);
+            }
+            catch
+            {
+                return DS4DeviceWorkerLifecycleResult.Uncertain(
+                    DS4DeviceWorkerLifecycleOperation.Stop,
+                    DS4DeviceWorkerLifecycleFailureKind.StopDependencyThrew);
+            }
+        }
+
+        private bool SendEmptyOutputReport(
+            int timeoutMilliseconds = READ_STREAM_TIMEOUT)
         {
             Array.Clear(outputReport, 0, outputReport.Length);
 
@@ -507,7 +531,7 @@ namespace DS4Windows.InputDevices
             outputReport[32] = 0x00;
             outputReport[33] = 0xFF;
 
-            WriteReport();
+            return WriteReport(timeoutMilliseconds);
         }
 
         private unsafe void PrepareOutReport()
@@ -636,9 +660,10 @@ namespace DS4Windows.InputDevices
 
         }
 
-        private bool WriteReport()
+        private bool WriteReport(int timeoutMilliseconds = READ_STREAM_TIMEOUT)
         {
-            var result = hDevice.WriteOutputReportViaInterrupt(outputReport, READ_STREAM_TIMEOUT);
+            var result = hDevice.WriteOutputReportViaInterrupt(outputReport,
+                timeoutMilliseconds);
 
             //Console.WriteLine("STAUTS: {0}", result);
             return result;

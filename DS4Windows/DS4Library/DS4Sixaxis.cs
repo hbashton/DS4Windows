@@ -27,9 +27,20 @@ namespace DS4Windows
 
     public class SixAxisEventArgs : EventArgs
     {
-        public readonly SixAxis sixAxis;
-        public readonly DateTime timeStamp;
+        public SixAxis sixAxis;
+        public DateTime timeStamp;
         public SixAxisEventArgs(DateTime utcTimestamp, SixAxis sa)
+        {
+            sixAxis = sa;
+            timeStamp = utcTimestamp;
+        }
+
+        /// <summary>
+        /// Refreshes the borrowed event envelope used by serialized runtime
+        /// devices. Event consumers must finish reading the envelope before
+        /// returning from the callback, just as they must for DS4State.
+        /// </summary>
+        internal void Reset(DateTime utcTimestamp, SixAxis sa)
         {
             sixAxis = sa;
             timeStamp = utcTimestamp;
@@ -186,6 +197,8 @@ namespace DS4Windows
     {
         //public event EventHandler<SixAxisEventArgs> SixAccelMoved = null;
         public event SixAxisHandler<SixAxisEventArgs> SixAccelMoved = null;
+        private readonly SixAxisEventArgs projectedEventArgs =
+            new(DateTime.MinValue, null);
         private SixAxis sPrev = null, now = null;
         private CalibData[] calibrationData = new CalibData[6] { new CalibData(), new CalibData(),
             new CalibData(), new CalibData(), new CalibData(), new CalibData()
@@ -541,6 +554,26 @@ namespace DS4Windows
         public void FireSixAxisEvent(SixAxisEventArgs args)
         {
             SixAccelMoved?.Invoke(this, args);
+        }
+
+        /// <summary>
+        /// Publishes motion that has already been decoded, oriented, scaled,
+        /// and calibrated by a family-specific runtime. This deliberately
+        /// bypasses the legacy raw-report calibration path and reuses one
+        /// envelope so high-rate input does not allocate per sample.
+        /// </summary>
+        internal void FireProjectedSixAxisEvent(DS4State state)
+        {
+            SixAxisHandler<SixAxisEventArgs> subscribers = SixAccelMoved;
+            if (state?.Motion == null || subscribers == null)
+            {
+                return;
+            }
+
+            projectedEventArgs.Reset(state.ReportTimeStamp, state.Motion);
+            // Subscription retirement can clear the event concurrently. Use
+            // the captured list; exact callback owners fence late invocations.
+            subscribers(this, projectedEventArgs);
         }
 
         public void StartContinuousCalibration()

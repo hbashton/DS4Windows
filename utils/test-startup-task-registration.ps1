@@ -29,6 +29,25 @@ function Get-BackendFunctionDefinition([string]$name) {
     return $definition.Extent.Text
 }
 
+# Import the literal needed by the extracted startup functions without running
+# the installer's top-level code (which would touch real machine state).
+$argumentAssignments = @($ast.FindAll({
+    param($node)
+    $node -is [Management.Automation.Language.AssignmentStatementAst] -and
+        $node.Left -is [Management.Automation.Language.VariableExpressionAst] -and
+        $node.Left.VariablePath.UserPath -eq 'script:ViiperServerArguments'
+}, $true))
+if ($argumentAssignments.Count -ne 1 -or
+        $argumentAssignments[0].Right -isnot [Management.Automation.Language.CommandExpressionAst] -or
+        $argumentAssignments[0].Right.Expression -isnot [Management.Automation.Language.StringConstantExpressionAst]) {
+    throw 'Backend startup arguments must have one literal definition.'
+}
+$script:ViiperServerArguments = $argumentAssignments[0].Right.Expression.Value
+if ($script:ViiperServerArguments -ne
+        'server --usb.retained-import-authority-id=4923336367393615921') {
+    throw 'Backend startup arguments lost the required retained-import authority.'
+}
+
 foreach ($functionName in @(
         "Assert-ManagedStartupTaskName",
         "Get-RootScheduledTask",
@@ -506,18 +525,61 @@ if (-not $legacyNearMissForContainment.Settings.Enabled) {
 
 # Legacy VIIPER ownership is narrower still: both the requested and observed
 # executable must be the canonical managed path and recognized product.
+foreach ($legacyArguments in @("server", $script:ViiperServerArguments)) {
+    Reset-FakeTaskState
+    $script:RecognizedProductPaths = @($viiperPath)
+    $legacyViiper = New-FakeScheduledTask "\" "RunVIIPER" `
+        (New-HighestLogonTaskXml $viiperPath $legacyArguments $workingDirectory)
+    $legacyViiper.Description = ""
+    $script:FakeTasks = @($legacyViiper)
+    if (-not (Register-HighestLogonTask "RunVIIPER" $viiperPath `
+            $script:ViiperServerArguments $workingDirectory)) {
+        throw "Canonical recognized legacy VIIPER task was not migrated."
+    }
+    Assert-Equal $script:RegisterForceNames.Count 1 `
+        "Canonical legacy VIIPER migration did not use owned replacement."
+    Assert-Equal $script:FakeTasks[0].Actions[0].Arguments `
+        $script:ViiperServerArguments `
+        "Migrated VIIPER task did not use the current authority contract."
+}
+
+# Recognition is an exact finite compatibility set, not a "server" prefix.
+foreach ($unexpectedArguments in @(
+        "server --api.addr=0.0.0.0:3242",
+        ($script:ViiperServerArguments + " --other"),
+        "server --usb.retained-import-authority-id=1")) {
+    Reset-FakeTaskState
+    $script:RecognizedProductPaths = @($viiperPath)
+    $legacyArgumentNearMiss = New-FakeScheduledTask "\" "RunVIIPER" `
+        (New-HighestLogonTaskXml $viiperPath $unexpectedArguments $workingDirectory)
+    $legacyArgumentNearMiss.Description = ""
+    $script:FakeTasks = @($legacyArgumentNearMiss)
+    $argumentNearMissRejected = $false
+    try {
+        [void](Register-HighestLogonTask "RunVIIPER" $viiperPath `
+            $script:ViiperServerArguments $workingDirectory)
+    }
+    catch { $argumentNearMissRejected = $_.Exception.Message -match "foreign root task" }
+    if (-not $argumentNearMissRejected) { throw "Legacy VIIPER extra arguments were accepted." }
+    Assert-Equal $script:RegisterCalls 0 "Legacy argument near-miss reached registration."
+    Assert-Equal $script:DisableCalls 0 "Legacy argument near-miss was disabled."
+    Assert-Equal $script:UnregisterCalls 0 "Legacy argument near-miss was removed."
+}
+
+# Historical observation is allowed only for migration to the current request.
 Reset-FakeTaskState
 $script:RecognizedProductPaths = @($viiperPath)
-$legacyViiper = New-FakeScheduledTask "\" "RunVIIPER" `
+$legacyDowngrade = New-FakeScheduledTask "\" "RunVIIPER" `
     (New-HighestLogonTaskXml $viiperPath "server" $workingDirectory)
-$legacyViiper.Description = ""
-$script:FakeTasks = @($legacyViiper)
-if (-not (Register-HighestLogonTask "RunVIIPER" $viiperPath "server" `
-        $workingDirectory)) {
-    throw "Canonical recognized legacy VIIPER task was not migrated."
-}
-Assert-Equal $script:RegisterForceNames.Count 1 `
-    "Canonical legacy VIIPER migration did not use owned replacement."
+$legacyDowngrade.Description = ""
+$script:FakeTasks = @($legacyDowngrade)
+$downgradeRejected = $false
+try { [void](Register-HighestLogonTask "RunVIIPER" $viiperPath "server" $workingDirectory) }
+catch { $downgradeRejected = $_.Exception.Message -match "foreign root task" }
+if (-not $downgradeRejected) { throw "Legacy VIIPER replacement omitted the required authority." }
+Assert-Equal $script:RegisterCalls 0 "Legacy downgrade reached registration."
+Assert-Equal $script:DisableCalls 0 "Legacy downgrade was disabled."
+Assert-Equal $script:UnregisterCalls 0 "Legacy downgrade was removed."
 
 Reset-FakeTaskState
 $foreignViiperPath = "C:\Other Portable Backend\viiper.exe"
@@ -529,8 +591,8 @@ $noncanonicalViiper.Description = ""
 $script:FakeTasks = @($noncanonicalViiper)
 $noncanonicalRejected = $false
 try {
-    [void](Register-HighestLogonTask "RunVIIPER" $viiperPath "server" `
-        $workingDirectory)
+    [void](Register-HighestLogonTask "RunVIIPER" $viiperPath `
+        $script:ViiperServerArguments $workingDirectory)
 }
 catch { $noncanonicalRejected = $_.Exception.Message -match "foreign root task" }
 if (-not $noncanonicalRejected) {

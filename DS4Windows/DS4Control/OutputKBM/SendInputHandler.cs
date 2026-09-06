@@ -61,6 +61,22 @@ namespace DS4Windows.DS4Control
             }
         }
 
+        public override void MoveRelativeMouseImmediate(int x, int y)
+        {
+            if (x == 0 && y == 0)
+            {
+                return;
+            }
+
+            INPUT input = default;
+            input.Type = INPUT_MOUSE;
+            input.Data.Mouse.ExtraInfo = IntPtr.Zero;
+            input.Data.Mouse.Flags = MOUSEEVENTF_MOVE;
+            input.Data.Mouse.X = x;
+            input.Data.Mouse.Y = y;
+            SendInput(1, ref input, Marshal.SizeOf<INPUT>());
+        }
+
         /// <summary>
         /// Move the mouse cursor to an absolute position on the virtual desktop
         /// </summary>
@@ -395,6 +411,9 @@ namespace DS4Windows.DS4Control
 
         [DllImport("user32.dll", SetLastError = true)]
         private static extern uint SendInput(uint numberOfInputs, INPUT[] inputs, int sizeOfInputs);
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern uint SendInput(uint numberOfInputs,
+            ref INPUT inputs, int sizeOfInputs);
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
         private static extern ushort MapVirtualKey(uint uCode, uint uMapType);
     }

@@ -121,6 +121,42 @@ namespace DS4Windows.Tests
                 "An older same-version VIIPER binary must not survive a DS4Windows update.");
         }
 
+        [DataTestMethod]
+        [DataRow(true)]
+        [DataRow(false)]
+        public void FailedRunningBrokerProbeIsNotReportedAsMissingServerOrTaskRepair(
+            bool startupTaskReady)
+        {
+            const string failure = "VIIPER is running, but its authenticated " +
+                "connection check failed (Authenticate: IOException)";
+            ViiperPrerequisiteStatus status = new ViiperPrerequisiteStatus
+            {
+                ViiperInstalled = true,
+                ViiperPackageCurrent = true,
+                ViiperStartupTaskReady = startupTaskReady,
+                UsbipInstalled = true,
+                UsbipExecutableSafe = true,
+                UsbipDriverFilesSafe = true,
+                UsbipRuntimeReady = true,
+                ServerRunning = false,
+                ServerProbeMessage = failure,
+            };
+
+            Assert.IsFalse(status.Ready);
+            Assert.AreEqual(failure, status.DisplayText);
+
+            status.UsbipRuntimeReady = false;
+            Assert.AreEqual("usbip-win2 reboot or repair required", status.DisplayText,
+                "A connection diagnostic must not mask an independent prerequisite failure.");
+
+            status.UsbipRuntimeReady = true;
+            status.ServerRunning = true;
+            Assert.IsTrue(status.Ready);
+            Assert.AreEqual(startupTaskReady ? "VIIPER ready" :
+                "VIIPER ready; startup task needs repair", status.DisplayText,
+                "A stale diagnostic must not override current readiness.");
+        }
+
         [TestMethod]
         public void VerifiedPortableRuntimeIsSelectedByExactPath()
         {

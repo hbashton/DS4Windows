@@ -218,11 +218,11 @@
 		<PackageReference Include="WpfScreenHelper" Version="2.1.0" />
 
 		<Reference Include="FakerInputWrapper">
-			<HintPath>..\libs\$(Platform)\FakerInputWrapper\FakerInputWrapper.dll</HintPath>
+			<HintPath>libs\$(Platform)\FakerInputWrapper\FakerInputWrapper.dll</HintPath>
 		</Reference>
 
 		<Reference Include="SharpOSC">
-			<HintPath>..\libs\$(Platform)\SharpOSC\SharpOSC.dll</HintPath>
+			<HintPath>libs\$(Platform)\SharpOSC\SharpOSC.dll</HintPath>
 		</Reference>
 
 	</ItemGroup>

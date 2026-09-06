@@ -89,6 +89,7 @@ namespace DS4WindowsTests
                     Assert.AreEqual("Preparing verified package...",
                         ((TextBlock)setupProgress.FindName(
                             "phaseText")).Text);
+                    Switch2StickCalibrationEditorTests.ValidateStickCalibrationWindow(application);
                 }
                 catch (Exception ex)
                 {
@@ -97,7 +98,7 @@ namespace DS4WindowsTests
             });
             thread.SetApartmentState(ApartmentState.STA);
             thread.Start();
-            Assert.IsTrue(thread.Join(TimeSpan.FromSeconds(15)),
+            Assert.IsTrue(thread.Join(TimeSpan.FromSeconds(30)),
                 "Theme resource loading did not finish.");
             if (failure != null)
             {

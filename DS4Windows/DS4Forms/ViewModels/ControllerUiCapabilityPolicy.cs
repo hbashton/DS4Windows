@@ -69,6 +69,11 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         internal bool IsPlayStationController { get; }
         internal bool IsDualShock4 => DeviceType == InputDeviceType.DS4;
         internal bool IsDualSense => DeviceType == InputDeviceType.DualSense;
+        internal bool IsSwitch2 => DeviceType is
+                InputDeviceType.Switch2Pro or
+                InputDeviceType.Switch2JoyConLeft or
+                InputDeviceType.Switch2JoyConRight or
+                InputDeviceType.Switch2JoyConJoined;
         internal ConnectionType? ConnectionType { get; private set; }
         internal int? VendorId { get; private set; }
         internal int? ProductId { get; private set; }
@@ -77,6 +82,12 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         internal bool ShowDualSenseHardwareControls { get; }
         internal bool ShowPlayStationControllerSettings =>
             ShowControllerAudioSettings || ShowDualSenseHardwareControls;
+        internal bool ShowSwitch2Controls => DeviceType == null || IsSwitch2 ||
+            DeviceType == InputDeviceType.SwitchPro && ProductId == 0x2069;
+        internal bool ShowSwitch2StandaloneJoyConControls =>
+            DeviceType == null || DeviceType is
+                InputDeviceType.Switch2JoyConLeft or
+                InputDeviceType.Switch2JoyConRight;
         // With no physical controller selected, keep the complete profile
         // surface available so offline profile editing never loses features.
         internal bool SupportsAdaptiveTriggers => DeviceType == null || IsDualSense;
@@ -89,8 +100,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         internal string MicrophoneDescription { get; }
 
         internal bool IsGenuineSonyController => PhysicalIdentityKnown &&
-            VendorId == DS4Devices.SONY_VID && ProductId.HasValue &&
-            IsSupportedSonyProduct(DeviceType, ProductId.Value);
+            ControllerAudioCapabilityPolicy.IsSupportedSonyController(
+                DeviceType, VendorId, ProductId);
 
         internal bool SupportsControllerAudio
         {
@@ -101,15 +112,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                     return DeviceType == InputDeviceType.DS4 || IsDualSense;
                 }
 
-                if (!IsGenuineSonyController)
-                {
-                    return false;
-                }
-
-                return IsDualSense ?
-                    ConnectionType == DS4Windows.ConnectionType.BT ||
-                        ConnectionType == DS4Windows.ConnectionType.USB :
-                    IsDualShock4 && ConnectionType == DS4Windows.ConnectionType.BT;
+                return ControllerAudioCapabilityPolicy.SupportsControllerAudio(
+                    DeviceType, ConnectionType, VendorId, ProductId);
             }
         }
 
@@ -184,6 +188,14 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         internal bool IsMappingControlAvailable(DS4Controls control,
             bool isDualSenseEdge)
         {
+            if (IsSwitch2SourceControl(control))
+            {
+                // Offline profiles retain the complete mapping surface. Live
+                // runtimes expose only controls that their exact physical
+                // model/side can produce; this never filters virtual targets.
+                return IsSwitch2SourceControlAvailable(control);
+            }
+
             if (DeviceType == null)
             {
                 return true;
@@ -226,6 +238,12 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         internal bool IsControllerMapListOnlyControl(DS4Controls control,
             bool isDualSenseEdge)
         {
+            if (IsSwitch2SourceControl(control))
+            {
+                // The current Nintendo artwork has no accurate C/rail target.
+                return IsMappingControlAvailable(control, isDualSenseEdge);
+            }
+
             if (!IsDualSense || !isDualSenseEdge)
             {
                 return false;
@@ -238,6 +256,41 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 control == DS4Controls.FnR ||
                 control == DS4Controls.BLP ||
                 control == DS4Controls.BRP;
+        }
+
+        private static bool IsSwitch2SourceControl(DS4Controls control) =>
+            control >= DS4Controls.Switch2C &&
+            control <= DS4Controls.Switch2JoyConRightSR;
+
+        private bool IsSwitch2SourceControlAvailable(DS4Controls control)
+        {
+            if (DeviceType == null)
+            {
+                return true;
+            }
+
+            return control switch
+            {
+                DS4Controls.Switch2C => DeviceType is
+                    InputDeviceType.Switch2Pro or
+                    InputDeviceType.Switch2JoyConRight or
+                    InputDeviceType.Switch2JoyConJoined,
+                DS4Controls.Switch2JoyConLeftPaddle1 or
+                DS4Controls.Switch2JoyConLeftPaddle2 or
+                DS4Controls.Switch2JoyConLeftSL or
+                DS4Controls.Switch2JoyConLeftSR or
+                DS4Controls.Switch2JoyConLeftIrSensor => DeviceType is
+                    InputDeviceType.Switch2JoyConLeft or
+                    InputDeviceType.Switch2JoyConJoined,
+                DS4Controls.Switch2JoyConRightPaddle1 or
+                DS4Controls.Switch2JoyConRightPaddle2 or
+                DS4Controls.Switch2JoyConRightSL or
+                DS4Controls.Switch2JoyConRightSR or
+                DS4Controls.Switch2JoyConRightIrSensor => DeviceType is
+                    InputDeviceType.Switch2JoyConRight or
+                    InputDeviceType.Switch2JoyConJoined,
+                _ => false,
+            };
         }
 
         internal static ControllerUiCapabilities ForDevice(DS4Device device)
@@ -314,6 +367,30 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                     audioDescription: "Controller audio is not available on this device.",
                     microphoneToggleLabel: "Enable controller microphone input",
                     microphoneDescription: "Controller microphone input is not available on this device."),
+                InputDeviceType.Switch2Pro or
+                InputDeviceType.Switch2JoyConLeft or
+                InputDeviceType.Switch2JoyConRight or
+                InputDeviceType.Switch2JoyConJoined =>
+                    new ControllerUiCapabilities(
+                        deviceType,
+                        deviceType == InputDeviceType.Switch2Pro ?
+                            "Switch 2 Pro" :
+                        deviceType == InputDeviceType.Switch2JoyConLeft ?
+                            "Joy-Con 2 (L)" :
+                        deviceType == InputDeviceType.Switch2JoyConRight ?
+                            "Joy-Con 2 (R)" : "Joy-Con 2 (Joined)",
+                        "Switch 2 Pro Controller.png",
+                        isPlayStationController: false,
+                        showControllerAudioSettings: false,
+                        showDualSenseHardwareControls: false,
+                        feedbackLabel: "HD rumble strength",
+                        audioHeader: "Controller audio",
+                        audioDescription:
+                            "Controller audio is not available on this device.",
+                        microphoneToggleLabel:
+                            "Enable controller microphone input",
+                        microphoneDescription:
+                            "Controller microphone input is not available on this device."),
                 InputDeviceType.JoyConL or
                 InputDeviceType.JoyConR or
                 InputDeviceType.JoyConGrip => new ControllerUiCapabilities(
@@ -379,17 +456,5 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             return capabilities;
         }
 
-        private static bool IsSupportedSonyProduct(InputDeviceType? deviceType,
-            int productId)
-        {
-            return deviceType switch
-            {
-                InputDeviceType.DS4 => productId == 0x05C4 ||
-                    productId == 0x09CC,
-                InputDeviceType.DualSense => productId == 0x0CE6 ||
-                    productId == 0x0DF2,
-                _ => false,
-            };
-        }
     }
 }

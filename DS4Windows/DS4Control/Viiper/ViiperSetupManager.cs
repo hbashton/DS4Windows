@@ -37,6 +37,7 @@ namespace DS4Windows
         public bool ViiperInstalled { get; set; }
         public bool ViiperPackageCurrent { get; set; }
         public bool ServerRunning { get; set; }
+        public string ServerProbeMessage { get; set; }
         public bool UsbipInstalled { get; set; }
         public bool UsbipExecutableSafe { get; set; }
         public bool UsbipDriverFilesSafe { get; set; }
@@ -132,11 +133,15 @@ namespace DS4Windows
                     return "packaged VIIPER update required";
                 }
 
+                if (!ServerRunning && !string.IsNullOrEmpty(ServerProbeMessage))
+                {
+                    return ServerProbeMessage;
+                }
+
                 if (!ViiperStartupTaskReady)
                 {
                     return "VIIPER elevated startup task needs repair";
                 }
-
                 return ServerRunning ? "VIIPER status unknown" : "VIIPER server not running";
             }
         }
@@ -170,6 +175,14 @@ namespace DS4Windows
         private const string RemoveViiperTaskArgument =
             "--remove-viiper-startup-task";
         private const string ViiperStartupTaskName = "RunVIIPER";
+        // ASCII "DS4WXB01" as a stable non-secret construction capability.
+        // The authenticated Xbox factory never accepts this value from its
+        // request payload; it reads the exact server opt-in instead.
+        internal const ulong ViiperRetainedImportAuthorityId =
+            0x4453345758423031UL;
+        internal const string ViiperServerArguments =
+            "server --usb.retained-import-authority-id=" +
+            "4923336367393615921";
         private const int ForeignViiperHelperTimeoutMilliseconds = 15000;
         private const string UsbipRelativePath = @"USBip\usbip.exe";
         private const int UsbipProbeTimeoutMilliseconds = 3000;
@@ -229,7 +242,8 @@ namespace DS4Windows
             // bundled VIIPER executable anywhere; the preferred/running/task
             // candidate still has to pass the same SHA-256 package check as
             // the protected Program Files copy before it can be selected.
-            string viiperPath = ResolveRuntimeViiperPath(
+            PortableLabContext lab = PortableLabContext.Current;
+            string viiperPath = lab?.ViiperPath ?? ResolveRuntimeViiperPath(
                 canonicalViiperPath, Global.PreferredViiperPath,
                 FindAlternativeViiperPath(canonicalViiperPath));
             string bundledViiperPath = GetBundledViiperPath();
@@ -272,8 +286,9 @@ namespace DS4Windows
             }
 
             // Verify both the protected location and exact package identity.
-            bool viiperPackageCurrent = IsBundledViiperAuthentic() &&
-                FilesHaveSameSha256(viiperPath, bundledViiperPath);
+            bool viiperPackageCurrent = lab != null
+                ? lab.IsVerifiedBackend(viiperPath)
+                : IsBundledViiperAuthentic() && FilesHaveSameSha256(viiperPath, bundledViiperPath);
             bool startupEnabled = DS4WinWPF.StartupMethods.
                 IsRunAtStartupEnabled();
             bool viiperStartupTaskReady = !startupEnabled ||
@@ -284,7 +299,7 @@ namespace DS4Windows
                 viiperPath, out canonicalViiperRunning,
                 out viiperProcessConflictMessage);
 
-            if (tryStartServer && File.Exists(viiperPath) &&
+            if (lab == null && tryStartServer && File.Exists(viiperPath) &&
                 viiperPackageCurrent && usbipRuntimeReady &&
                 !citrixUsbMonitorConflict)
             {
@@ -299,8 +314,10 @@ namespace DS4Windows
                 }
             }
 
+            string serverProbeFailure = null;
             bool viiperServerRunning = viiperProcessOwnershipReady &&
-                canonicalViiperRunning && CanPingServer();
+                canonicalViiperRunning && ProbeServer(ApiHost, ApiPort,
+                    authenticated: lab != null, out serverProbeFailure);
 
             ViiperPrerequisiteStatus status = new ViiperPrerequisiteStatus
             {
@@ -325,6 +342,9 @@ namespace DS4Windows
                 UsbipVersion = usbipVersion?.ToString(),
                 UsbipProbeMessage = usbipProbeMessage,
                 ServerRunning = viiperServerRunning,
+                ServerProbeMessage = serverProbeFailure == null ? null :
+                    "VIIPER is running, but its " + (lab != null ? "authenticated " : "") +
+                    $"connection check failed ({serverProbeFailure})",
                 CitrixUsbMonitorConflict = citrixUsbMonitorConflict,
                 CitrixUsbMonitorConflictMessage =
                     citrixUsbMonitorConflictMessage,
@@ -336,6 +356,13 @@ namespace DS4Windows
         public static bool EnsureReadyWithPrompt(Window owner, bool forcePrompt = false)
         {
             ViiperPrerequisiteStatus status = GetStatus(tryStartServer: true);
+            if (PortableLabContext.IsActive)
+            {
+                if (!status.Ready || forcePrompt)
+                    MessageBox.Show(status.DisplayText + "\n\nPortable lab never installs, repairs, replaces, or starts a backend. Start its exact verified viiper.exe with the lab-local key first. Installed drivers must already pass the normal checks.",
+                        "Portable controller lab", MessageBoxButton.OK, status.Ready ? MessageBoxImage.Information : MessageBoxImage.Warning);
+                return status.Ready;
+            }
             bool verifiedUpdateRequired = RequiresVerifiedViiperUpdate(status);
             bool usbipReplacementRequired =
                 RequiresUsbipReplacement(status);
@@ -467,6 +494,7 @@ namespace DS4Windows
 
         public static void RefreshSelectedStartupTaskOnLaunch()
         {
+            if (PortableLabContext.IsActive) return;
             string canonicalPath = GetCanonicalViiperExePath();
             string selectedPath = ResolveRuntimeViiperPath(canonicalPath,
                 Global.PreferredViiperPath,
@@ -505,6 +533,7 @@ namespace DS4Windows
         public static bool LaunchInstaller(ViiperPrerequisiteStatus status = null,
             Window owner = null, bool portableInstallation = false)
         {
+            if (PortableLabContext.IsActive) return false;
             status ??= GetStatus();
             if (!status.SetupScriptFound)
             {
@@ -1562,7 +1591,8 @@ namespace DS4Windows
                     string currentSid = WindowsIdentity.GetCurrent().User?.Value;
                     bool valid = IsExactViiperExecutablePath(action.Path,
                             viiperPath) &&
-                        string.Equals(action.Arguments?.Trim(), "server",
+                        string.Equals(action.Arguments?.Trim(),
+                            ViiperServerArguments,
                             StringComparison.Ordinal) &&
                         IsExactViiperExecutablePath(
                             Path.Combine(action.WorkingDirectory ?? string.Empty,
@@ -1753,7 +1783,8 @@ namespace DS4Windows
             // avoids Task Scheduler's ambiguous UserId lookup when a local
             // account and its computer have the same name.
             definition.Triggers.Add(new LogonTrigger());
-            definition.Actions.Add(new ExecAction(fullPath, "server",
+            definition.Actions.Add(new ExecAction(fullPath,
+                ViiperServerArguments,
                 workingDirectory));
             definition.Principal.UserId = currentUserSid;
             definition.Principal.LogonType =
@@ -2655,6 +2686,7 @@ namespace DS4Windows
 
         private static bool TryStartServer(string viiperPath)
         {
+            if (PortableLabContext.IsActive) return false;
             try
             {
                 // When startup is enabled, use its verified elevated task.
@@ -2686,7 +2718,7 @@ namespace DS4Windows
                     startInfo = new ProcessStartInfo
                     {
                         FileName = Path.GetFullPath(viiperPath),
-                        Arguments = "server",
+                        Arguments = ViiperServerArguments,
                         WorkingDirectory = Path.GetDirectoryName(
                             Path.GetFullPath(viiperPath)),
                         UseShellExecute = true,
@@ -2718,8 +2750,17 @@ namespace DS4Windows
             }
         }
 
-        private static bool CanPingServer()
+        private static bool CanPingServer(bool authenticated = false)
+            => ProbeServer(ApiHost, ApiPort, authenticated);
+
+        internal static bool ProbeServer(string host, int port, bool authenticated)
+            => ProbeServer(host, port, authenticated, out _);
+
+        internal static bool ProbeServer(string host, int port, bool authenticated,
+            out string failure)
         {
+            failure = null;
+            string phase = "Connect";
             try
             {
                 using TcpClient tcp = new TcpClient
@@ -2729,28 +2770,35 @@ namespace DS4Windows
                     ReceiveTimeout = 1000,
                 };
 
-                IAsyncResult result = tcp.BeginConnect(ApiHost, ApiPort, null, null);
+                IAsyncResult result = tcp.BeginConnect(host, port, null, null);
                 using (result.AsyncWaitHandle)
                 {
                     if (!result.AsyncWaitHandle.WaitOne(
                             TimeSpan.FromMilliseconds(750)))
                     {
+                        failure = "Connect: timeout";
                         return false;
                     }
                 }
 
+                phase = "CompleteConnect";
                 tcp.EndConnect(result);
-                NetworkStream stream = tcp.GetStream();
+                NetworkStream transport = tcp.GetStream();
+                phase = authenticated ? "Authenticate" : "OpenStream";
+                using Stream stream = authenticated
+                    ? ViiperAuthentication.Authenticate(transport) : transport;
+                phase = "WritePing";
                 byte[] request = Encoding.UTF8.GetBytes("ping\0");
                 stream.Write(request, 0, request.Length);
 
                 byte[] buffer = new byte[256];
                 int total = 0;
                 Stopwatch deadline = Stopwatch.StartNew();
+                phase = "ReadPing";
                 while (total < buffer.Length &&
                        deadline.ElapsedMilliseconds < 1000)
                 {
-                    stream.ReadTimeout = Math.Max(1,
+                    transport.ReadTimeout = Math.Max(1,
                         1000 - (int)deadline.ElapsedMilliseconds);
                     int read = stream.Read(buffer, total,
                         buffer.Length - total);
@@ -2767,10 +2815,14 @@ namespace DS4Windows
                         return true;
                     }
                 }
+                failure = "ReadPing: no valid VIIPER response";
                 return false;
             }
-            catch
+            catch (Exception exception)
             {
+                // This is cold-path diagnostic state, not a per-report log.
+                // Never include exception messages, key paths, or peer bytes.
+                failure = $"{phase}: {exception.GetType().Name}";
                 return false;
             }
         }

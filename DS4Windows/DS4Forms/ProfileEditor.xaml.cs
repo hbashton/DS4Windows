@@ -26,6 +26,7 @@ using MouseEventArgs = System.Windows.Input.MouseEventArgs;
 using OpenFileDialog = Microsoft.Win32.OpenFileDialog;
 using UserControl = System.Windows.Controls.UserControl;
 using DS4Windows.InputDevices;
+using DS4Windows.Switch2;
 
 namespace DS4WinWPF.DS4Forms
 {
@@ -126,7 +127,12 @@ namespace DS4WinWPF.DS4Forms
                     InputDeviceType.SwitchPro or
                     InputDeviceType.JoyConL or
                     InputDeviceType.JoyConR or
-                    InputDeviceType.JoyConGrip => ControllerDiagramKind.Switch2Pro,
+                    InputDeviceType.JoyConGrip or
+                    InputDeviceType.Switch2Pro or
+                    InputDeviceType.Switch2JoyConLeft or
+                    InputDeviceType.Switch2JoyConRight or
+                    InputDeviceType.Switch2JoyConJoined =>
+                        ControllerDiagramKind.Switch2Pro,
                     _ => ControllerDiagramKind.DualShock4,
                 };
             ConfigureControllerDiagram(defaultDiagram, true);
@@ -134,6 +140,8 @@ namespace DS4WinWPF.DS4Forms
             mappingListVM = new MappingListViewModel(deviceNum,
                 profileSettingsVM.ContType, physicalController?.DeviceType,
                 physicalControllerIsDualSenseEdge);
+            profileSettingsVM.Switch2ModeShiftEditor.MappingScopeChanged +=
+                (_, _) => mappingListVM.UpdateMappings();
             specialActionsVM = new SpecialActionsListViewModel(device);
 
             touchButtonUC = new TouchButtonUserControl(device);
@@ -1706,7 +1714,11 @@ namespace DS4WinWPF.DS4Forms
 
         public void SelectWorkspaceSection(int sectionIndex)
         {
-            int nextSection = Math.Clamp(sectionIndex, 0, 9);
+            // Three mapping/readings pages precede the settings tabs. Derive
+            // the last page from the actual tabs so additions cannot clamp
+            // Advanced back onto a different controller-settings section.
+            int nextSection = Math.Clamp(sectionIndex, 0,
+                2 + profileSettingsTabCon.Items.Count);
             if (nextSection <= 2)
             {
                 profileSettingsTabCon.Visibility = Visibility.Collapsed;
@@ -2566,6 +2578,8 @@ namespace DS4WinWPF.DS4Forms
                     "DualShock 4 output provides DS4 buttons, touch, gyro, rumble, lightbar, and flash feedback.",
                 OutContType.ViiperX360 =>
                     "Xbox 360 output provides standard XInput-style buttons, sticks, triggers, and rumble.",
+                OutContType.ViiperXboxOne =>
+                    "Xbox One / Series output preserves Guide, Share, ten-bit triggers, and four independent feedback channels through VIIPER. Windows compatibility still requires an explicitly authorized USB identity.",
                 _ => string.Empty,
             };
 
@@ -2921,13 +2935,126 @@ namespace DS4WinWPF.DS4Forms
             if (deviceNum < ControlService.CURRENT_DS4_CONTROLLER_LIMIT)
             {
                 DS4Device d = App.rootHub.DS4Controllers[deviceNum];
-                d.SixAxis.ResetContinuousCalibration();
+                if (d == null)
+                {
+                    return;
+                }
+                d.ResetContinuousGyroCalibration();
                 if (d.JointDeviceSlotNumber != DS4Device.DEFAULT_JOINT_SLOT_NUMBER)
                 {
                     DS4Device tempDev = App.rootHub.DS4Controllers[d.JointDeviceSlotNumber];
-                    tempDev?.SixAxis.ResetContinuousCalibration();
+                    tempDev?.ResetContinuousGyroCalibration();
                 }
             }
+        }
+
+        private void Switch2StickCalibration_Click(object sender, RoutedEventArgs e)
+        {
+            var runtime = ResolveControllerContext(deviceNum, profileSettingsVM.FuncDevNum) as Switch2RuntimeInputDevice;
+            if (runtime == null || runtime.RuntimeState != Switch2RuntimeInputDeviceState.Active)
+            {
+                MessageBox.Show("Connect and select an active Switch 2 Pro or Joy-Con 2 controller before calibrating its sticks.",
+                    "Switch 2 stick calibration", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            var window = new Switch2StickCalibrationWindow(runtime);
+            var owner = Window.GetWindow(this);
+            if (owner != null) window.Owner = owner;
+            window.ShowDialog();
+        }
+
+        private void Switch2MagnetometerCalibration_Click(object sender,
+            RoutedEventArgs e)
+        {
+            Switch2RuntimeInputDevice runtime = ResolveControllerContext(
+                deviceNum, profileSettingsVM.FuncDevNum) as
+                    Switch2RuntimeInputDevice;
+            if (runtime == null)
+            {
+                MessageBox.Show("Connect and select a Switch 2 Pro or Joy-Con 2 controller before calibrating its magnetometer.",
+                    "Switch 2 magnetometer calibration", MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
+
+            if (!runtime.IsMagnetometerCalibrationActive)
+            {
+                if (!runtime.StartMagnetometerCalibration())
+                {
+                    MessageBox.Show("Calibration could not start while the controller was changing lifecycle or publishing another profile action. Try again once it is active.",
+                        "Switch 2 magnetometer calibration",
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+                Switch2MagnetometerCalibrationButton.Content =
+                    "Complete magnetometer calibration";
+                Switch2MagnetometerCalibrationCancelButton.Visibility =
+                    Visibility.Visible;
+                Switch2MagnetometerCalibrationStatus.Text =
+                    "Collecting: rotate the controller through a broad figure-eight in every orientation, then click Complete.";
+                return;
+            }
+
+            int leftSamples = runtime.LeftMagnetometerCalibrationSampleCount;
+            int rightSamples = runtime.RightMagnetometerCalibrationSampleCount;
+            bool succeeded = runtime.TryCompleteMagnetometerCalibration(
+                out Switch2MagnetometerCalibrationQuality leftQuality,
+                out Switch2MagnetometerCalibrationQuality rightQuality,
+                out bool persisted);
+            Switch2MagnetometerCalibrationButton.Content =
+                "Start magnetometer calibration";
+            Switch2MagnetometerCalibrationCancelButton.Visibility =
+                Visibility.Collapsed;
+            if (succeeded)
+            {
+                string left = FormatMagnetometerCalibrationQuality(
+                    leftQuality, "controller");
+                string right = rightSamples > 0 ? " " +
+                    FormatMagnetometerCalibrationQuality(rightQuality,
+                        "right Joy-Con") : string.Empty;
+                Switch2MagnetometerCalibrationStatus.Text = left + right;
+                if (!persisted)
+                {
+                    Switch2MagnetometerCalibrationStatus.Text +=
+                        " The fit is active for this connection, but its persistent controller identity was unavailable; reconnect persistence is not yet guaranteed.";
+                }
+                return;
+            }
+
+            string failure = rightSamples > 0 ?
+                $"Left: {leftQuality.FullFitFailure}; right: " +
+                    $"{rightQuality.FullFitFailure}." :
+                $"Fit rejected: {leftQuality.FullFitFailure}.";
+            Switch2MagnetometerCalibrationStatus.Text =
+                $"{failure} The previous calibration remains active. Collected {leftSamples}" +
+                (rightSamples > 0 ? $"/{rightSamples}" : string.Empty) +
+                " samples; rotate through more orientations and try again.";
+        }
+
+        private void Switch2MagnetometerCalibrationCancel_Click(object sender,
+            RoutedEventArgs e)
+        {
+            Switch2RuntimeInputDevice runtime = ResolveControllerContext(
+                deviceNum, profileSettingsVM.FuncDevNum) as
+                    Switch2RuntimeInputDevice;
+            runtime?.CancelMagnetometerCalibration();
+            Switch2MagnetometerCalibrationButton.Content =
+                "Start magnetometer calibration";
+            Switch2MagnetometerCalibrationCancelButton.Visibility =
+                Visibility.Collapsed;
+            Switch2MagnetometerCalibrationStatus.Text =
+                "Calibration cancelled; ordinary controller output is active and the previous calibration was preserved.";
+        }
+
+        private static string FormatMagnetometerCalibrationQuality(
+            in Switch2MagnetometerCalibrationQuality quality, string label)
+        {
+            string model = quality.AdoptedModel ==
+                    Switch2MagnetometerCalibrationModel.FullEllipsoidV1 ?
+                "full ellipsoid" : "diagonal min/max fallback";
+            return $"Adopted {model} for {label}: {quality.SampleCount} samples, " +
+                $"{quality.OctantCount}/8 octants, RMS {quality.RmsRelativeResidual:P1}, " +
+                $"P95 {quality.P95RelativeResidual:P1}.";
         }
 
         private void GyroSwipeTrigBtn_Click(object sender, RoutedEventArgs e)

@@ -28,6 +28,7 @@ using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using DS4Windows;
+using DS4Windows.Switch2;
 
 namespace DS4WinWPF.DS4Forms.ViewModels
 {
@@ -39,6 +40,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         private DS4ControlSettings settings;
         public DS4ControlSettings Settings { get => settings; }
+        private readonly Switch2ModeShiftScope? modeShiftScope;
 
         private bool shift;
         public bool Shift { get => shift; }
@@ -109,7 +111,10 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         private TouchpadOutMode oldTouchpadMode = TouchpadOutMode.None;
 
 
-        public RecordBoxViewModel(int deviceNum, DS4ControlSettings controlSettings, bool shift, bool repeatable = true)
+        public RecordBoxViewModel(int deviceNum,
+            DS4ControlSettings controlSettings, bool shift,
+            bool repeatable = true,
+            Switch2ModeShiftScope? modeShiftScope = null)
         {
             if (keydownOverrides == null)
             {
@@ -119,11 +124,16 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             this.deviceNum = deviceNum;
             settings = controlSettings;
             this.shift = shift;
+            this.modeShiftScope = modeShiftScope;
+            Switch2ModeShiftAction modeShiftAction = modeShiftScope.HasValue ?
+                settings.GetSwitch2ModeShiftAction(modeShiftScope.Value) :
+                null;
             if (!shift && settings.keyType.HasFlag(DS4KeyType.HoldMacro))
             {
                 macroModeIndex = 1;
             }
-            else if (shift && settings.shiftKeyType.HasFlag(DS4KeyType.HoldMacro))
+            else if (shift && (modeShiftAction?.KeyType ??
+                settings.shiftKeyType).HasFlag(DS4KeyType.HoldMacro))
             {
                 macroModeIndex = 1;
             }
@@ -132,7 +142,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             {
                 useScanCode = true;
             }
-            else if (shift && settings.shiftKeyType.HasFlag(DS4KeyType.ScanCode))
+            else if (shift && (modeShiftAction?.KeyType ??
+                settings.shiftKeyType).HasFlag(DS4KeyType.ScanCode))
             {
                 useScanCode = true;
             }
@@ -141,7 +152,9 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             {
                 LoadMacro();
             }
-            else if (shift && settings.shiftActionType == DS4ControlSettings.ActionType.Macro)
+            else if (shift && (modeShiftAction?.ActionType ??
+                settings.shiftActionType) ==
+                DS4ControlSettings.ActionType.Macro)
             {
                 LoadMacro();
             }
@@ -178,7 +191,10 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             }
             else
             {
-                macro = (int[])settings.shiftAction.actionMacro;
+                macro = modeShiftScope.HasValue ?
+                    (int[])settings.GetSwitch2ModeShiftAction(
+                        modeShiftScope.Value).Action.actionMacro :
+                    (int[])settings.shiftAction.actionMacro;
             }
 
             MacroParser macroParser = new MacroParser(macro);
@@ -216,16 +232,36 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             }
             else
             {
-                settings.shiftAction.actionMacro = outmac;
-                settings.shiftActionType = DS4ControlSettings.ActionType.Macro;
-                settings.shiftKeyType = DS4KeyType.Macro;
+                Switch2ModeShiftAction lane = modeShiftScope.HasValue ?
+                    settings.GetSwitch2ModeShiftAction(
+                        modeShiftScope.Value) : null;
+                ControlActionData targetAction = lane?.Action ??
+                    settings.shiftAction;
+                targetAction.actionMacro = outmac;
+                if (lane != null)
+                {
+                    lane.ActionType = DS4ControlSettings.ActionType.Macro;
+                    lane.KeyType = DS4KeyType.Macro;
+                }
+                else
+                {
+                    settings.shiftActionType =
+                        DS4ControlSettings.ActionType.Macro;
+                    settings.shiftKeyType = DS4KeyType.Macro;
+                }
                 if (macroModeIndex == 1)
                 {
-                    settings.shiftKeyType |= DS4KeyType.HoldMacro;
+                    if (lane != null)
+                        lane.KeyType |= DS4KeyType.HoldMacro;
+                    else
+                        settings.shiftKeyType |= DS4KeyType.HoldMacro;
                 }
                 if (useScanCode)
                 {
-                    settings.shiftKeyType |= DS4KeyType.ScanCode;
+                    if (lane != null)
+                        lane.KeyType |= DS4KeyType.ScanCode;
+                    else
+                        settings.shiftKeyType |= DS4KeyType.ScanCode;
                 }
             }
         }

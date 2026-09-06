@@ -19,7 +19,7 @@ enforces the rules; it is not a general promise about legacy output devices.
 | Report-boundary device configuration commands | Existing ordered action queue | Device-command worker | Input callback signals after completing the report; owner claims under the collection lock and invokes after releasing it |
 | Battery and charging notifications | Coalesced atomic status bits | Device-command worker | Update mapped battery fields, then signal only after virtual publication |
 | OSC monitoring | One replaceable snapshot per controller | OSC monitoring worker | Fixed-state copy after virtual publication, signal |
-| UI/report diagnostics on the DualSense-to-VIIPER path | One coalescing snapshot per controller | Report diagnostics worker | Store primitives/references after virtual publication, signal |
+| Direct UI/report diagnostics on every canonical source/output path | Exact-source, revisioned three-buffer mailbox | Report diagnostics worker | Capture scalars/immutable references after publication; never wait for the consumer |
 | Physical HID input | Exactly one read ahead, two fixed pinned buffers | DualSense input thread | Rearm the alternate buffer before parsing or publishing the completed report |
 
 Input transition entries always contain the complete final state. The same

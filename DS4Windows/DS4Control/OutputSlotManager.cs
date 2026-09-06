@@ -66,6 +66,7 @@ namespace DS4Windows
         private ReaderWriterLockSlim queueLocker;
         private readonly Action<IReadOnlyCollection<string>>
             virtualSonyRegisteredCallback;
+        private readonly Func<OutContType, OutputDevice> outputFactory;
 
         public bool RunningQueue { get => queuedTasks > 0; }
         public OutSlotDevice[] OutputSlots { get => outputSlots; }
@@ -80,8 +81,16 @@ namespace DS4Windows
 
         public OutputSlotManager(
             Action<IReadOnlyCollection<string>> virtualSonyRegisteredCallback = null)
+            : this(virtualSonyRegisteredCallback, null)
+        {
+        }
+
+        internal OutputSlotManager(
+            Action<IReadOnlyCollection<string>> virtualSonyRegisteredCallback,
+            Func<OutContType, OutputDevice> outputFactory)
         {
             this.virtualSonyRegisteredCallback = virtualSonyRegisteredCallback;
+            this.outputFactory = outputFactory;
             outputSlots = new OutSlotDevice[ControlService.CURRENT_DS4_CONTROLLER_LIMIT];
             for (int i = 0; i < ControlService.CURRENT_DS4_CONTROLLER_LIMIT; i++)
             {
@@ -118,6 +127,7 @@ namespace DS4Windows
         public OutputDevice AllocateController(OutContType contType)
         {
             contType = contType.Normalize();
+            if (outputFactory != null) return outputFactory(contType);
             OutputDevice outputDevice = null;
             switch (contType)
             {
@@ -138,6 +148,10 @@ namespace DS4Windows
                     break;
                 case OutContType.ViiperSwitch2Pro:
                     outputDevice = new ViiperOutDevice(contType, ViiperVirtualDeviceType.Switch2Pro);
+                    break;
+                case OutContType.ViiperXboxOne:
+                    outputDevice = new ViiperOutDevice(contType,
+                        ViiperVirtualDeviceType.XboxOne);
                     break;
                 case OutContType.None:
                 default:
@@ -190,6 +204,16 @@ namespace DS4Windows
 
                     try
                     {
+                        if (inIdx >= 0 && outputDevice is
+                                ViiperOutDevice viiperOutput)
+                        {
+                            // Xbox CFBK target generations are immutable API
+                            // creation fields. Publish the exact physical slot
+                            // before Connect opens the VIIPER stream so a
+                            // Switch 2 runtime can bind that request without a
+                            // later mutable routing guess.
+                            viiperOutput.BindPhysicalController(inIdx);
+                        }
                         ControlService.StartupDiag($"OutputSlotManager.Connect begin slot={slot + 1} type={contType} output={outputDevice.GetType().Name}");
                         outputDevice.Connect();
                         ControlService.StartupDiag($"OutputSlotManager.Connect end slot={slot + 1} type={contType}");
@@ -374,6 +398,99 @@ namespace DS4Windows
             }
 
             return temp;
+        }
+
+        /// <summary>
+        /// Cold-path reservation of an already attached, unbound output. The
+        /// candidate is only a hint until it is revalidated under the manager's
+        /// write lock; two input lifetimes cannot both adopt the same output.
+        /// This does not recreate or change an output's immutable feedback target.
+        /// </summary>
+        internal bool TryBindExistingUnboundOutput(OutSlotDevice candidate,
+            OutputDevice[] boundOutputs, int inputIndex, string inputDisplayString,
+            OutContType expectedType, out OutputDevice produced)
+        {
+            produced = null;
+            if (candidate == null || boundOutputs == null ||
+                (uint)inputIndex >= boundOutputs.Length)
+                return false;
+            expectedType = expectedType.Normalize();
+            using WriteLocker locker = new WriteLocker(queueLocker);
+            OutputDevice output = candidate.OutputDevice;
+            if (!IsExactAttachedSlotNoLock(candidate, output) ||
+                candidate.CurrentInputBound != OutSlotDevice.InputBound.Unbound ||
+                candidate.CurrentType.Normalize() != expectedType ||
+                output.GetDeviceType() != expectedType.ToString() ||
+                boundOutputs[inputIndex] != null)
+                return false;
+
+            candidate.InputIndex = inputIndex;
+            candidate.InputDisplayString = inputDisplayString ?? string.Empty;
+            boundOutputs[inputIndex] = output;
+            produced = output;
+            // This setter publishes an event. All binding fields and the exact
+            // produced object must be visible even if an observer throws.
+            candidate.CurrentInputBound = OutSlotDevice.InputBound.Bound;
+            return true;
+        }
+
+        internal bool IsExactBoundOutput(OutputDevice current, int inputIndex)
+        {
+            if (current == null || inputIndex < 0)
+                return false;
+            using ReadLocker locker = new ReadLocker(queueLocker);
+            if (!revDeviceDict.TryGetValue(current, out int slot) ||
+                (uint)slot >= outputSlots.Length)
+                return false;
+            OutSlotDevice candidate = outputSlots[slot];
+            return IsExactAttachedSlotNoLock(candidate, current) &&
+                candidate.CurrentInputBound == OutSlotDevice.InputBound.Bound &&
+                candidate.InputIndex == inputIndex;
+        }
+
+        /// <summary>
+        /// Withdraws one permanent input binding without retiring its output.
+        /// Neutral/reset and feedback removal precede publication as reusable;
+        /// failed cleanup retains the old binding instead of exposing it early.
+        /// </summary>
+        internal bool TryReleaseBoundOutput(OutputDevice current,
+            OutputDevice[] boundOutputs, int inputIndex)
+        {
+            if (current == null || boundOutputs == null ||
+                (uint)inputIndex >= boundOutputs.Length)
+                return false;
+            using WriteLocker locker = new WriteLocker(queueLocker);
+            if (!revDeviceDict.TryGetValue(current, out int slot) ||
+                (uint)slot >= outputSlots.Length)
+                return false;
+            OutSlotDevice candidate = outputSlots[slot];
+            if (!IsExactAttachedSlotNoLock(candidate, current) ||
+                candidate.CurrentInputBound != OutSlotDevice.InputBound.Bound ||
+                candidate.InputIndex != inputIndex ||
+                !ReferenceEquals(boundOutputs[inputIndex], current))
+                return false;
+
+            current.ResetState();
+            current.RemoveFeedbacks();
+            boundOutputs[inputIndex] = null;
+            candidate.InputIndex = OutSlotDevice.INPUT_INDEX_DEFAULT;
+            candidate.InputDisplayString = string.Empty;
+            candidate.CurrentInputBound = OutSlotDevice.InputBound.Unbound;
+            return true;
+        }
+
+        private bool IsExactAttachedSlotNoLock(OutSlotDevice candidate, OutputDevice output)
+        {
+            int slot = candidate.Index;
+            return output != null && (uint)slot < outputSlots.Length &&
+                ReferenceEquals(outputSlots[slot], candidate) &&
+                candidate.CurrentAttachedStatus == OutSlotDevice.AttachedStatus.Attached &&
+                ReferenceEquals(candidate.OutputDevice, output) &&
+                ReferenceEquals(outputDevices[slot], output) &&
+                deviceDict.TryGetValue(slot, out OutputDevice registered) &&
+                ReferenceEquals(registered, output) &&
+                revDeviceDict.TryGetValue(output, out int registeredSlot) &&
+                registeredSlot == slot;
         }
 
         public void UnplugRemainingControllers(bool immediate=false)

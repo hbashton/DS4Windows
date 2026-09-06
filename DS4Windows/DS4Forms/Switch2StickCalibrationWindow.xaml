@@ -1,0 +1,79 @@
+<Window x:Class="DS4WinWPF.DS4Forms.Switch2StickCalibrationWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Switch 2 stick calibration" Width="620" Height="660"
+        MinWidth="460" MinHeight="430" WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False" Style="{DynamicResource WindowStyle}"
+        Background="{DynamicResource SurfaceBackgroundColor}"
+        Foreground="{DynamicResource ForegroundColor}">
+    <Window.Resources>
+        <Style x:Key="CalibrationSaveButtonStyle" TargetType="Button"
+               BasedOn="{StaticResource BridgePrimaryButtonStyle}">
+            <Style.Triggers>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Background" Value="{DynamicResource RaisedBackgroundColor}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource BorderColor}" />
+                    <Setter Property="Foreground" Value="{DynamicResource MutedForegroundColor}" />
+                    <Setter Property="Opacity" Value="0.55" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
+    <DockPanel Margin="22" Background="{DynamicResource SurfaceBackgroundColor}">
+        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,16">
+            <TextBlock Text="Calibrate your sticks" FontSize="22" FontWeight="SemiBold" />
+            <TextBlock Text="{Binding ControllerLabel}" Margin="0,4,0,0"
+                       Foreground="{DynamicResource MutedForegroundColor}" />
+        </StackPanel>
+        <StackPanel DockPanel.Dock="Bottom" Margin="0,14,0,0">
+            <TextBlock TextWrapping="Wrap" FontSize="11" Margin="0,0,0,10"
+                       Foreground="{DynamicResource MutedForegroundColor}"
+                       Text="Closing cancels capture and live activation. A save already writing to disk may still finish; closing does not undo that write." />
+            <Button Content="_Close" IsCancel="True" Click="Close_Click"
+                    HorizontalAlignment="Right" MinWidth="90"
+                    Style="{DynamicResource BridgeSecondaryButtonStyle}" />
+        </StackPanel>
+        <ScrollViewer x:Name="CalibrationScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel Margin="0,0,4,0">
+                <TextBlock Text="PHYSICAL STICK" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,5"
+                           Foreground="{DynamicResource MutedForegroundColor}" />
+                <ComboBox x:Name="SideChoice" ItemsSource="{Binding SideLabels}"
+                          SelectedIndex="{Binding SelectedSideIndex, Mode=TwoWay}"
+                          IsEnabled="{Binding CanChooseSide}" MinWidth="175"
+                          HorizontalAlignment="Left" AutomationProperties.Name="Physical stick to calibrate" />
+                <TextBlock Text="{Binding CalibrationStatus}" TextWrapping="Wrap" Margin="0,6,0,16"
+                           Foreground="{DynamicResource MutedForegroundColor}" />
+                <Border Style="{DynamicResource BridgeCardStyle}" Padding="16" Margin="0,0,0,12">
+                    <StackPanel>
+                        <TextBlock x:Name="StageHeading" Text="{Binding Heading}" FontSize="18"
+                                   FontWeight="SemiBold" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding Instructions}" TextWrapping="Wrap" Margin="0,7,0,14" />
+                        <ProgressBar x:Name="StageProgress" Value="{Binding Progress, Mode=OneWay}" Minimum="0" Maximum="100"
+                                     Height="8" IsIndeterminate="{Binding IsBusy}"
+                                     AutomationProperties.Name="Calibration stage progress" />
+                        <TextBlock Text="{Binding ProgressLabel}" Margin="0,7,0,0" FontSize="12"
+                                   Foreground="{DynamicResource MutedForegroundColor}" />
+                        <TextBlock x:Name="OperationResult" Text="{Binding ResultText}" TextWrapping="Wrap"
+                                   Margin="0,10,0,0" AutomationProperties.LiveSetting="Polite" />
+                    </StackPanel>
+                </Border>
+                <WrapPanel Margin="0,0,0,10">
+                    <Button x:Name="StartButton" Content="_Start calibration" Click="Start_Click"
+                            IsEnabled="{Binding CanStart}" Margin="0,0,8,6"
+                            Style="{DynamicResource BridgeSecondaryButtonStyle}" />
+                    <Button x:Name="SaveButton" Content="Sa_ve calibration" Click="Save_Click"
+                            IsEnabled="{Binding CanSave}" Margin="0,0,8,6"
+                            Style="{StaticResource CalibrationSaveButtonStyle}" />
+                    <Button x:Name="CancelButton" Content="_Cancel capture" Click="Cancel_Click"
+                            IsEnabled="{Binding CanCancel}" Margin="0,0,0,6"
+                            Style="{DynamicResource BridgeSecondaryButtonStyle}" />
+                </WrapPanel>
+                <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource MutedForegroundColor}"
+                           Text="Calibration is saved on this PC for this physical stick, not in a profile or the controller's memory. USB and Bluetooth records may be separate. Mapped controller input is released while calibration is active." />
+                <Button x:Name="ResetButton" Content="_Reset this stick's PC calibration…" Click="Reset_Click"
+                        IsEnabled="{Binding CanStart}" HorizontalAlignment="Left" Margin="0,12,0,0"
+                        Style="{DynamicResource BridgeSecondaryButtonStyle}" />
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

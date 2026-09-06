@@ -25,6 +25,7 @@ using System.Net.Sockets;
 using System.ComponentModel;
 using System.Threading;
 using System.Runtime.InteropServices;
+using System.Buffers.Binary;
 
 namespace DS4Windows
 {
@@ -199,47 +200,113 @@ namespace DS4Windows
         public float angVelRoll;
     }
 
+    /// <summary>
+    /// Cold lifecycle facade. A port change creates a new session so late
+    /// receive/send completions can never borrow the successor's socket,
+    /// client registrations, packet identity, or send buffers.
+    /// </summary>
     class UdpServer
     {
         public const int NUMBER_SLOTS = 4;
-        private Socket udpSock;
-        private uint serverId;
-        private bool running;
-        private byte[] recvBuffer = new byte[1024];
-        private byte[][] dataBuffers;
-        private int listInd = 0;
-        private ReaderWriterLockSlim poolLock = new ReaderWriterLockSlim();
-        private SemaphoreSlim _pool;
-        private const int ARG_BUFFER_LEN = 80;
-
+        public const int DATA_RSP_PACKET_LEN = 100;
         public delegate void GetPadDetail(int padIdx, ref DualShockPadMeta meta);
 
-        private GetPadDetail portInfoGet;
+        private readonly object lifecycleGate = new();
+        private readonly GetPadDetail portInfoGet;
+        private readonly Func<GetPadDetail, UdpServerSession> createSession;
+        private UdpServerSession session;
+        private long lifecycleVersion;
 
-        public UdpServer(GetPadDetail getPadDetailDel)
+        public UdpServer(GetPadDetail getPadDetailDel) :
+            this(getPadDetailDel, static getDetail => new UdpServerSession(getDetail))
         {
-            portInfoGet = getPadDetailDel;
-            _pool = new SemaphoreSlim(ARG_BUFFER_LEN);
-            dataBuffers = new byte[ARG_BUFFER_LEN][];
-            for (int num = 0; num < ARG_BUFFER_LEN; num++)
+        }
+
+        internal UdpServer(GetPadDetail getPadDetailDel,
+            Func<GetPadDetail, UdpServerSession> createSession)
+        {
+            portInfoGet = getPadDetailDel ?? throw new ArgumentNullException(nameof(getPadDetailDel));
+            this.createSession = createSession ?? throw new ArgumentNullException(nameof(createSession));
+        }
+
+        internal UdpServerSession CurrentSession => Volatile.Read(ref session);
+        internal long LifecycleVersion => Volatile.Read(ref lifecycleVersion);
+
+        public void Start(int port, string listenAddress = "")
+        {
+            long request = Interlocked.Increment(ref lifecycleVersion);
+            lock (lifecycleGate)
             {
-                SocketAsyncEventArgs args = new SocketAsyncEventArgs();
-                args.Completed += SocketEvent_AsyncCompleted;
-                dataBuffers[num] = new byte[100];
+                if (request != Volatile.Read(ref lifecycleVersion))
+                    return;
+                Interlocked.Exchange(ref session, null)?.Stop();
+                var next = createSession(portInfoGet);
+                try
+                {
+                    next.Start(port, listenAddress);
+                    if (!next.IsRunning)
+                        throw new SocketException((int)SocketError.OperationAborted);
+                    // DNS/bind may be slow. A newer Stop/Start request owns
+                    // the decision, even while it waits for this cold gate.
+                    if (request == Volatile.Read(ref lifecycleVersion))
+                        Volatile.Write(ref session, next);
+                    else
+                        next.Stop();
+                }
+                catch
+                {
+                    next.Stop();
+                    throw;
+                }
             }
         }
 
-        private void SocketEvent_AsyncCompleted(object sender, SocketAsyncEventArgs e)
+        public void Stop()
         {
-            _pool.Release();
-            e.Dispose();
+            long request = Interlocked.Increment(ref lifecycleVersion);
+            lock (lifecycleGate)
+            {
+                if (request != Volatile.Read(ref lifecycleVersion))
+                    return;
+                Interlocked.Exchange(ref session, null)?.Stop();
+            }
         }
 
-        private void CompletedSynchronousSocketEvent(SocketAsyncEventArgs args)
+        public void NewReportIncoming(ref DualShockPadMeta padMeta,
+            DS4State hidReport, byte[] outputData)
         {
-            _pool.Release();
-            args.Dispose();
+            // No cold lifecycle gate on the controller-report path. A retired
+            // session rejects new sends, even if this read raced Stop/Start.
+            Volatile.Read(ref session)?.NewReportIncoming(ref padMeta,
+                hidReport, outputData);
         }
+    }
+
+    internal sealed class UdpServerSession
+    {
+        private const int NUMBER_SLOTS = UdpServer.NUMBER_SLOTS;
+        private const int DATA_RSP_PACKET_LEN = UdpServer.DATA_RSP_PACKET_LEN;
+        private Socket udpSock;
+        private uint serverId;
+        private volatile bool running;
+        private int stopped;
+        private int started;
+        private readonly object retirementGate = new();
+        private readonly byte[] recvBuffer = new byte[1024];
+        private UdpDatagramSendPool sendPool;
+        private const int ARG_BUFFER_LEN = 80;
+
+        private readonly UdpServer.GetPadDetail portInfoGet;
+
+        internal UdpServerSession(UdpServer.GetPadDetail getPadDetailDel)
+        {
+            portInfoGet = getPadDetailDel ?? throw new ArgumentNullException(nameof(getPadDetailDel));
+        }
+
+        internal IPEndPoint LocalEndPoint => (IPEndPoint)udpSock?.LocalEndPoint;
+        internal bool IsRunning => running;
+        internal long CapacityDropCount => sendPool?.CapacityDropCount ?? 0;
+        internal long SendFailureCount => sendPool?.FailureCount ?? 0;
 
         enum MessageType
         {
@@ -252,7 +319,6 @@ namespace DS4Windows
         };
 
         private const ushort MaxProtocolVersion = 1001;
-        public const int DATA_RSP_PACKET_LEN = 100;
 
         class ClientRequestTimes
         {
@@ -338,22 +404,19 @@ namespace DS4Windows
         private void FinishPacket(byte[] packetBuf)
         {
             Array.Clear(packetBuf, 8, 4);
-
-            //uint crcCalc = Crc32Algorithm.Compute(packetBuf);
-            uint seed = Crc32Algorithm.DefaultSeed;
-            uint crcCalc = ~Crc32Algorithm.CalculateBasicHash(ref seed, ref packetBuf, 0, packetBuf.Length);
-            Array.Copy(BitConverter.GetBytes((uint)crcCalc), 0, packetBuf, 8, 4);
+            // The ordinary CRC table is initialized by the type itself. DSU
+            // must not rely on ControlService having warmed the separate
+            // optional slicing table before this session is constructed.
+            BinaryPrimitives.WriteUInt32LittleEndian(packetBuf.AsSpan(8, 4),
+                Crc32Algorithm.Compute(packetBuf));
         }
 
         private unsafe void FinishDataRspPacket(ref PadDataRspPacket currentRsp, byte[] packetBuf)
         {
             currentRsp.crc = 0;
-            CopyBytes(ref currentRsp, packetBuf, DATA_RSP_PACKET_LEN);
-
-            //uint crcCalc = Crc32Algorithm.Compute(packetBuf);
-            uint seed = Crc32Algorithm.DefaultSeed;
-            uint crcCalc = ~Crc32Algorithm.CalculateBasicHash(ref seed, ref packetBuf, 0, packetBuf.Length);
-            Array.Copy(BitConverter.GetBytes((uint)crcCalc), 0, packetBuf, 8, 4);
+            MemoryMarshal.Write(packetBuf.AsSpan(0, DATA_RSP_PACKET_LEN), in currentRsp);
+            BinaryPrimitives.WriteUInt32LittleEndian(packetBuf.AsSpan(8, 4),
+                Crc32Algorithm.Compute(packetBuf));
         }
 
         private void SendPacket(IPEndPoint clientEP, byte[] usefulData, ushort reqProtocolVersion = MaxProtocolVersion)
@@ -363,32 +426,10 @@ namespace DS4Windows
             Array.Copy(usefulData, 0, packetData, currIdx, usefulData.Length);
             FinishPacket(packetData);
 
-            //try { udpSock.SendTo(packetData, clientEP); }
-            int temp = 0;
-            poolLock.EnterWriteLock();
-            temp = listInd;
-            listInd = ++listInd % ARG_BUFFER_LEN;
-            SocketAsyncEventArgs args = new SocketAsyncEventArgs()
-            {
-                RemoteEndPoint = clientEP,
-            };
-            args.SetBuffer(dataBuffers[temp], 0, 100);
-            args.Completed += SocketEvent_AsyncCompleted;
-            poolLock.ExitWriteLock();
-
-            _pool.Wait();
-            Array.Copy(packetData, args.Buffer, packetData.Length);
-            //args.SetBuffer(packetData, 0, packetData.Length);
-            bool sentAsync = false;
-            try {
-                sentAsync = udpSock.SendToAsync(args);
-                //if (!sentAsync) CompletedSynchronousSocketEvent();
-            }
-            catch (Exception /*e*/) { }
-            finally
-            {
-                if (!sentAsync) CompletedSynchronousSocketEvent(args);
-            }
+            // Control replies have their own logical length (24/32 bytes),
+            // not the 100-byte state-response length. The pool owns exactly
+            // this payload until the matching send completes.
+            sendPool.TrySend(packetData, clientEP);
         }
 
         private void ProcessIncoming(byte[] localMsg, IPEndPoint clientEP)
@@ -564,14 +605,17 @@ namespace DS4Windows
             }
             catch (Exception /*e*/) { }
 
-            //Start another receive as soon as we copied the data
+            // This callback owns only this session's socket and receive
+            // buffer. A callback completing after retirement may clean up,
+            // but cannot rearm or register clients on a later session.
+            if (!running)
+                return;
             StartReceive();
 
-            //Process the data if its valid
-            if (localMsg != null)
+            if (running && localMsg != null)
                 ProcessIncoming(localMsg, (IPEndPoint)clientEP);
         }
-        private void StartReceive()
+        private void StartReceive(bool initial = false)
         {
             try
             {
@@ -582,13 +626,16 @@ namespace DS4Windows
                     udpSock.BeginReceiveFrom(recvBuffer, 0, recvBuffer.Length, SocketFlags.None, ref newClientEP, ReceiveCallback, udpSock);
                 }
             }
-            catch (SocketException /*ex*/)
+            catch (SocketException) when (!initial)
             {
-                if (running)
-                {
-                    ResetUDPConn();
-                    StartReceive();
-                }
+                // A closed/faulted endpoint is not repaired by recursive
+                // re-entry. In particular, Stop may have closed this socket
+                // between the running check and BeginReceiveFrom.
+                Stop();
+            }
+            catch (ObjectDisposedException) when (!initial)
+            {
+                Stop();
             }
         }
 
@@ -602,20 +649,22 @@ namespace DS4Windows
             uint IOC_IN = 0x80000000;
             uint IOC_VENDOR = 0x18000000;
             uint SIO_UDP_CONNRESET = IOC_IN | IOC_VENDOR | 12;
-            udpSock.IOControl((int)SIO_UDP_CONNRESET, new byte[] { Convert.ToByte(false) }, null);
+            try
+            {
+                if (running)
+                    udpSock.IOControl((int)SIO_UDP_CONNRESET, new byte[] { Convert.ToByte(false) }, null);
+            }
+            catch (SocketException) { }
+            catch (ObjectDisposedException) { }
         }
 
         public void Start(int port, string listenAddress = "")
         {
-            if (running)
-            {
-                if (udpSock != null)
-                {
-                    udpSock.Close();
-                    udpSock = null;
-                }
-                running = false;
-            }
+            // Start is called once by the cold facade before publishing this
+            // session. Never revive a retired instance or change its socket.
+            if (Interlocked.Exchange(ref started, 1) != 0 ||
+                Volatile.Read(ref stopped) != 0)
+                throw new InvalidOperationException("A UDP session cannot be restarted.");
 
             udpSock = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
             try
@@ -647,29 +696,42 @@ namespace DS4Windows
                 }
                 udpSock.Bind(new IPEndPoint(udpListenIPAddress, port));
             }
-            catch (SocketException ex)
+            catch
             {
                 udpSock.Close();
-                udpSock = null;
-
-                throw ex;
+                throw;
             }
 
             byte[] randomBuf = new byte[4];
             new Random().NextBytes(randomBuf);
             serverId = BitConverter.ToUInt32(randomBuf, 0);
 
+            sendPool = new UdpDatagramSendPool(ARG_BUFFER_LEN,
+                DATA_RSP_PACKET_LEN, udpSock.SendToAsync);
             running = true;
-            StartReceive();
+            // An initial arm failure must reach the caller, not publish an
+            // apparently listening session with no receiver.
+            StartReceive(initial: true);
         }
 
         public void Stop()
         {
-            running = false;
-            if (udpSock != null)
+            // Cold/receive-error path only, never the report publisher. All
+            // callers must observe completed socket close, not merely another
+            // caller's retirement request, before rebinding the same port.
+            lock (retirementGate)
             {
-                udpSock.Close();
-                udpSock = null;
+                if (stopped != 0)
+                    return;
+                Volatile.Write(ref stopped, 1);
+                running = false;
+                try { sendPool?.Dispose(); }
+                finally
+                {
+                    // Late completions retain their own pool. Neither socket
+                    // nor pool is reassigned to a successor session.
+                    udpSock?.Close();
+                }
             }
         }
 
@@ -925,8 +987,9 @@ namespace DS4Windows
                     else if ((padMeta.PadId < cl.Value.PadIdsTime.Length) &&
                              (now - cl.Value.PadIdsTime[(byte)padMeta.PadId]).TotalSeconds < TimeoutLimit)
                         clientsList.Add(cl.Key);
-                    else if (cl.Value.PadMacsTime.ContainsKey(padMeta.PadMacAddress) &&
-                             (now - cl.Value.PadMacsTime[padMeta.PadMacAddress]).TotalSeconds < TimeoutLimit)
+                    else if (padMeta.PadMacAddress != null &&
+                             cl.Value.PadMacsTime.TryGetValue(padMeta.PadMacAddress, out DateTime macRequestTime) &&
+                             (now - macRequestTime).TotalSeconds < TimeoutLimit)
                         clientsList.Add(cl.Key);
                     else //check if this client is totally dead, and remove it if so
                     {
@@ -982,13 +1045,19 @@ namespace DS4Windows
                 currentRsp.model = (byte)padMeta.Model;
                 currentRsp.connectionType = (byte)padMeta.ConnectionType;
                 {
-                    byte[] padMac = padMeta.PadMacAddress.GetAddressBytes();
-                    currentRsp.address[0] = padMac[0];
-                    currentRsp.address[1] = padMac[1];
-                    currentRsp.address[2] = padMac[2];
-                    currentRsp.address[3] = padMac[3];
-                    currentRsp.address[4] = padMac[4];
-                    currentRsp.address[5] = padMac[5];
+                    byte[] padMac = padMeta.PadMacAddress?.GetAddressBytes();
+                    // A disconnected/identity-less observation can have no
+                    // MAC. Match the port-info encoder's zero-address policy;
+                    // never let an optional metadata field fault input.
+                    if (padMac?.Length == 6)
+                    {
+                        currentRsp.address[0] = padMac[0];
+                        currentRsp.address[1] = padMac[1];
+                        currentRsp.address[2] = padMac[2];
+                        currentRsp.address[3] = padMac[3];
+                        currentRsp.address[4] = padMac[4];
+                        currentRsp.address[5] = padMac[5];
+                    }
                 }
                 currentRsp.batteryStatus = (byte)padMeta.BatteryStatus;
                 currentRsp.isActive = padMeta.IsActive ? (byte)1 : (byte)0;
@@ -1002,37 +1071,9 @@ namespace DS4Windows
 
                 foreach (var cl in clientsList)
                 {
-                    // try
-                    // {
-                    //     udpSock.SendTo(outputData, cl);
-                    // }
-                    // catch (Exception)
-                    // {
-                    // }
-
-                    int temp = 0;
-                    poolLock.EnterWriteLock();
-                    temp = listInd;
-                    listInd = ++listInd % ARG_BUFFER_LEN;
-                    SocketAsyncEventArgs args = new SocketAsyncEventArgs()
-                    {
-                        RemoteEndPoint = cl,
-                    };
-                    args.SetBuffer(dataBuffers[temp], 0, 100);
-                    args.Completed += SocketEvent_AsyncCompleted;
-                    poolLock.ExitWriteLock();
-
-                    _pool.Wait();
-                    Array.Copy(outputData, args.Buffer, outputData.Length);
-                    bool sentAsync = false;
-                    try {
-                        sentAsync = udpSock.SendToAsync(args);
-                    }
-                    catch (SocketException /*ex*/) { }
-                    finally
-                    {
-                        if (!sentAsync) CompletedSynchronousSocketEvent(args);
-                    }
+                    // Capacity pressure is an explicit counted DSU datagram
+                    // drop, never a wait on the physical report publisher.
+                    sendPool.TrySend(outputData.AsSpan(0, DATA_RSP_PACKET_LEN), cl);
                 }
             }
 
@@ -1040,11 +1081,5 @@ namespace DS4Windows
             clientsList = null;
         }
     
-        private void CopyBytes(ref PadDataRspPacket outReport, byte[] outBuffer, int bufferLen)
-        {
-            GCHandle h = GCHandle.Alloc(outReport, GCHandleType.Pinned);
-            Marshal.Copy(h.AddrOfPinnedObject(), outBuffer, 0, bufferLen);
-            h.Free();
-        }
     }
 }

@@ -5,10 +5,11 @@ Nintendo Switch 2 Pro Controller (`057E:2069`). It does not issue feature,
 output, WinUSB, initialization, calibration-memory, association, firmware, or
 rumble requests.
 
-The JSON Lines metadata omits the serial number and replaces the local HID
-device path with a SHA-256 value. Review captured input bytes before sharing
-them; although controller input is normally non-identifying, new firmware can
-add fields.
+The JSON Lines metadata omits the serial number and does not serialize or hash
+the local HID device path. Short/error reads serialize only bytes actually
+returned by Windows, with no uninitialized or stale buffer tail. Review
+captured input bytes before sharing them; input includes sensors, power state,
+and unknown fields that can fingerprint a session or device.
 
 ```powershell
 dotnet run --project .\utils\Switch2UsbReadProbe\Switch2UsbReadProbe.csproj `

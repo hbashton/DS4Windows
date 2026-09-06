@@ -55,8 +55,12 @@
 
             <TabItem x:Name="controllersTab" Header="{lex:Loc Controllers}" Tag="&#xE7FC;" IsEnabled="{Binding FullTabsEnabled,Mode=OneWay}">
                 <Grid>
-                    <Label x:Name="noContLb" Visibility="Hidden" Content="{lex:Loc NoControllersConnected}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" />
-                    <ListView x:Name="controllerLV" ItemsSource="{Binding ControllerCol}" SelectionMode="Single"
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Label x:Name="noContLb" Grid.Row="0" Visibility="Hidden" Content="{lex:Loc NoControllersConnected}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" />
+                    <ListView x:Name="controllerLV" Grid.Row="0" ItemsSource="{Binding ControllerCol}" SelectionMode="Single"
                               SelectedIndex="{Binding CurrentIndex, Mode=OneWayToSource}" Margin="0"
                               SelectedItem="{Binding DataContext.SelectedController, RelativeSource={RelativeSource AncestorType={x:Type Window}}, Mode=TwoWay}"
                               ItemContainerStyle="{StaticResource BridgeControllerCardItemStyle}"
@@ -126,6 +130,8 @@
                                             <ColumnDefinition Width="Auto" />
                                             <ColumnDefinition Width="Auto" />
                                             <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
                                         <StackPanel>
                                             <TextBlock Text="ACTIVE PROFILE" FontSize="10" FontWeight="Bold"
@@ -156,7 +162,25 @@
                                                         Tag="{Binding DevIndex, Mode=OneTime}" Click="NewProfBtn_Click" />
                                             </xctk:SplitButton.DropDownContent>
                                         </xctk:SplitButton>
-                                        <StackPanel Grid.Column="3" HorizontalAlignment="Right">
+                                        <StackPanel Grid.Column="3" Margin="0,0,10,0"
+                                                    Visibility="{Binding SupportsSwitch2StandaloneHoldMode, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <TextBlock Text="JOY-CON HOLD" FontSize="10" FontWeight="Bold"
+                                                       Foreground="{DynamicResource MutedForegroundColor}" Margin="0,0,0,5" />
+                                            <Button Width="116" Height="34"
+                                                    Content="{Binding Switch2StandaloneHoldModeText, Mode=OneWay}"
+                                                    Click="Switch2JoyConHoldModeBtn_Click"
+                                                    ToolTip="{Binding Switch2StandaloneHoldModeToolTip}" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="4" Margin="0,0,10,0"
+                                                    Visibility="{Binding SupportsSwitch2Identification, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <TextBlock Text="IDENTIFY" FontSize="10" FontWeight="Bold"
+                                                       Foreground="{DynamicResource MutedForegroundColor}" Margin="0,0,0,5" />
+                                            <Button Width="92" Height="34"
+                                                    Content="Ping"
+                                                    Click="Switch2IdentifyBtn_Click"
+                                                    ToolTip="Play two short HD-rumble pulses on this exact Switch 2 controller or joined Joy-Con pair." />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="5" HorizontalAlignment="Right">
                                             <TextBlock Text="LIGHTBAR" FontSize="10" FontWeight="Bold"
                                                        Foreground="{DynamicResource MutedForegroundColor}" Margin="0,0,0,5" />
                                             <Button x:Name="LightColorBtn" Width="116" Height="34"
@@ -169,6 +193,84 @@
                             </DataTemplate>
                         </ListView.ItemTemplate>
                     </ListView>
+                    <Border x:Name="switch2JoyConManualPanel" Grid.Row="1"
+                            Visibility="Collapsed" Margin="0,12,0,0"
+                            Padding="14,12" CornerRadius="5"
+                            Background="{DynamicResource CardBackgroundColor}"
+                            BorderBrush="{DynamicResource BorderColor}"
+                            BorderThickness="1">
+                        <StackPanel>
+                            <TextBlock Text="UNMATCHED JOY-CON 2" FontSize="10"
+                                       FontWeight="Bold"
+                                       Foreground="{DynamicResource MutedForegroundColor}" />
+                            <TextBlock x:Name="switch2JoyConManualStatusText"
+                                       Text="Click the link button on one Joy-Con, then on an opposite-side Joy-Con."
+                                       Margin="0,4,0,10" TextWrapping="Wrap" />
+                            <ItemsControl x:Name="switch2JoyConManualRows">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <WrapPanel />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border x:Name="candidateCard" MinWidth="230"
+                                                Margin="0,0,10,6" Padding="10,8"
+                                                CornerRadius="4"
+                                                Background="{DynamicResource RaisedBackgroundColor}">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding Label}"
+                                                               FontWeight="SemiBold" />
+                                                    <TextBlock Text="Waiting to join"
+                                                               Margin="0,2,8,0"
+                                                               FontSize="11"
+                                                               Foreground="{DynamicResource MutedForegroundColor}" />
+                                                </StackPanel>
+                                                <Button Grid.Column="1" Width="64" Height="36"
+                                                        Padding="5" Click="Switch2JoyConManualPairBtn_Click"
+                                                        ToolTip="{Binding PairButtonToolTip}">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="Auto" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <Border Width="13" Height="25" CornerRadius="6,2,2,6"
+                                                                BorderBrush="{DynamicResource ForegroundColor}"
+                                                                BorderThickness="1.5" />
+                                                        <TextBlock Grid.Column="1" Text="ϟ" FontSize="18"
+                                                                   Margin="3,0" VerticalAlignment="Center"
+                                                                   Foreground="{DynamicResource AccentColor}" />
+                                                        <Border Grid.Column="2" Width="13" Height="25"
+                                                                CornerRadius="2,6,6,2"
+                                                                BorderBrush="{DynamicResource ForegroundColor}"
+                                                                BorderThickness="1.5" />
+                                                    </Grid>
+                                                </Button>
+                                            </Grid>
+                                            <Border.Style>
+                                                <Style TargetType="Border">
+                                                    <Setter Property="BorderBrush" Value="{DynamicResource BorderColor}" />
+                                                    <Setter Property="BorderThickness" Value="1" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsArmed}" Value="True">
+                                                            <Setter Property="BorderBrush" Value="{DynamicResource AccentColor}" />
+                                                            <Setter Property="BorderThickness" Value="2" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Border.Style>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
                 </Grid>
             </TabItem>
 
@@ -462,11 +564,13 @@
                                 <TextBlock Text="Startup, notifications, charging, appearance, and update behavior used by most players."
                                            Style="{StaticResource BridgeSectionDescriptionStyle}" />
                         <CheckBox x:Name="hideDS4ContCk" Content="{lex:Loc HideDS4Controller}" x:Uid="hideDS4Checkbox"
+                              IsEnabled="{Binding SystemIntegrationEnabled}"
                               Margin="{StaticResource spaceMargin}" IsChecked="{Binding HideDS4Controller}" Click="HideDS4ContCk_Click"
                               ToolTip="Prevents games from seeing both the physical controller and its virtual output. HidHide is recommended on current Windows versions."
                               Style="{StaticResource BridgeDescribedCheckBoxStyle}">
                         </CheckBox>
                         <CheckBox x:Name="reclaimSteamInputCk" Content="Reclaim controller from Steam Input automatically"
+                              IsEnabled="{Binding SystemIntegrationEnabled}"
                               Margin="{StaticResource spaceMargin}" IsChecked="{Binding ReclaimSteamInput}"
                               Click="ReclaimSteamInputCk_Click"
                               ToolTip="Cloaks the physical controller with HidHide, then safely restarts only its HID collection so Steam releases any handle it opened first. The virtual controller remains available to games."
@@ -481,10 +585,12 @@
                                   ToolTip="Choose which profiles the two-finger swipe is allowed to switch between" />
                         </StackPanel>
                         <CheckBox x:Name="runAtStartCk" Content="{lex:Loc RunAtStartup}" Margin="{StaticResource spaceMargin}"
+                              IsEnabled="{Binding SystemIntegrationEnabled}"
                               IsChecked="{Binding RunAtStartup}"
                               ToolTip="{lex:Loc Resources:RunAtStartup}" Click="RunAtStartCk_Click"
                               Style="{StaticResource BridgeDescribedCheckBoxStyle}" />
                         <GroupBox x:Name="runAsGroupBox" Header="{lex:Loc RunAs}" BorderThickness="2" Visibility="{Binding ShowRunStartPanel}"
+                              IsEnabled="{Binding SystemIntegrationEnabled}"
                               Margin="{StaticResource spaceMargin}">
                             <StackPanel Orientation="Horizontal">
                                 <StackPanel>
@@ -559,6 +665,7 @@
                         </StackPanel>
 
                         <CheckBox Content="{lex:Loc CheckUpdateStartup}" Margin="{StaticResource spaceMargin}"
+                              IsEnabled="{Binding SystemIntegrationEnabled}"
                               IsChecked="{Binding CheckForUpdates}" ToolTip="Periodically check GitHub for a newer DS4Windows release."
                               Style="{StaticResource BridgeDescribedCheckBoxStyle}" />
                         <StackPanel x:Name="checkEveryOptionsStack" Orientation="Horizontal" Margin="{StaticResource spaceMargin}"
@@ -590,7 +697,7 @@
                                             Margin="8,0,0,0"
                                             Click="ViiperRefreshBtn_Click" />
                                 </StackPanel>
-                                <TextBlock Text="Required for VIIPER outputs: DualSense, DualSense Edge, Switch 2 Pro, DS4, and Xbox 360 over USB/IP."
+                                <TextBlock Text="Required for VIIPER outputs: DualSense, DualSense Edge, Switch 2 Pro, DS4, Xbox 360, and Xbox One / Series over USB/IP."
                                            TextWrapping="Wrap"
                                            MaxWidth="420"
                                            Opacity="0.75"
@@ -600,6 +707,111 @@
                                           ToolTip="Turn this off to suppress automatic VIIPER setup prompts. Install / Repair and Refresh remain available here."
                                           Style="{StaticResource BridgeDescribedCheckBoxStyle}"
                                           Margin="0,8,0,0" />
+                            </StackPanel>
+                        </GroupBox>
+                        <GroupBox Header="Switch 2 wireless controllers" Padding="8" Margin="{StaticResource spaceMargin}" HorizontalAlignment="Left">
+                            <StackPanel>
+                                <TextBlock Text="Put a new Switch 2 Pro Controller or Joy-Con 2 in sync mode to associate it with DS4Windows. Already-associated controllers reconnect when you wake them. After a failed connection, a safely released controller appears below for Reconnect when it advertises again; its association is kept."
+                                           TextWrapping="Wrap"
+                                           MaxWidth="520"
+                                           Opacity="0.8"
+                                           Margin="0,0,0,8" />
+                                <CheckBox x:Name="switch2AutomaticJoyConPairingCheck"
+                                          Content="Joy-Cons are automatically paired"
+                                          IsChecked="{Binding AutomaticJoyConPairing}"
+                                          Click="Switch2AutomaticJoyConPairingCheck_Click"
+                                          ToolTip="Pairs the oldest available left and right halves. When one pair breaks, surviving halves rejoin like magnets after their transports are safely released and re-admitted."
+                                          Style="{StaticResource BridgeDescribedCheckBoxStyle}"
+                                          Margin="0,0,0,10" />
+                                <TextBlock x:Name="switch2DiscoveryStatusText"
+                                           Text="Refresh to check Bluetooth discovery status."
+                                           TextWrapping="Wrap"
+                                           MaxWidth="520"
+                                           Margin="0,0,0,8" />
+                                <ListBox x:Name="switch2AssociationCandidatesList"
+                                         MinWidth="420"
+                                         MaxWidth="520"
+                                         Height="88"
+                                         DisplayMemberPath="Label"
+                                         SelectionChanged="Switch2AssociationCandidatesList_SelectionChanged" />
+                                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                    <Button x:Name="switch2AssociationRefreshBtn"
+                                            Content="Refresh available controllers"
+                                            Padding="8,2"
+                                            Click="Switch2AssociationRefreshBtn_Click" />
+                                    <Button x:Name="switch2AssociateBtn"
+                                            Content="Associate selected"
+                                            IsEnabled="False"
+                                            Padding="8,2"
+                                            Margin="8,0,0,0"
+                                            Click="Switch2AssociateBtn_Click" />
+                                </StackPanel>
+                                <TextBlock x:Name="switch2AssociationStatusText"
+                                           TextWrapping="Wrap"
+                                           MaxWidth="520"
+                                           Margin="0,8,0,0" />
+                                <Separator Margin="0,12,0,10" />
+                                <TextBlock Text="Join an associated left and right Joy-Con 2"
+                                           FontWeight="SemiBold"
+                                           Margin="0,0,0,6" />
+                                <TextBlock Text="With automatic pairing off, DS4Windows holds unmatched Joy-Con 2 connections until you select an exact left/right pair here or with the link buttons on the Controllers tab. Manual pairs are remembered for later connections."
+                                           TextWrapping="Wrap"
+                                           MaxWidth="520"
+                                           Opacity="0.8"
+                                           Margin="0,0,0,8" />
+                                <TextBlock x:Name="switch2JoyConCandidateStatusText"
+                                           Text="No unmatched Joy-Con 2 connections have been observed yet."
+                                           TextWrapping="Wrap"
+                                           MaxWidth="520"
+                                           Margin="0,0,0,8" />
+                                <Grid MaxWidth="520" HorizontalAlignment="Left">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="250" />
+                                        <ColumnDefinition Width="20" />
+                                        <ColumnDefinition Width="250" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="Left Joy-Con 2" Margin="0,0,0,3" />
+                                        <ComboBox x:Name="switch2JoyConLeftCandidates"
+                                                  MinWidth="250"
+                                                  IsEnabled="False"
+                                                  DisplayMemberPath="Label"
+                                                  SelectionChanged="Switch2JoyConCandidates_SelectionChanged" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="Right Joy-Con 2" Margin="0,0,0,3" />
+                                        <ComboBox x:Name="switch2JoyConRightCandidates"
+                                                  MinWidth="250"
+                                                  IsEnabled="False"
+                                                  DisplayMemberPath="Label"
+                                                  SelectionChanged="Switch2JoyConCandidates_SelectionChanged" />
+                                    </StackPanel>
+                                </Grid>
+                                <Button x:Name="switch2CreateJoyConPairBtn"
+                                        Content="Join selected Joy-Con 2 pair"
+                                        IsEnabled="False"
+                                        Padding="8,2"
+                                        HorizontalAlignment="Left"
+                                        Margin="0,8,0,0"
+                                        Click="Switch2CreateJoyConPairBtn_Click" />
+                                <StackPanel Orientation="Horizontal"
+                                            Margin="0,6,0,0">
+                                    <Button x:Name="switch2UseLeftJoyConSeparatelyBtn"
+                                            Content="Use selected left separately"
+                                            IsEnabled="False"
+                                            Padding="8,2"
+                                            Click="Switch2UseLeftJoyConSeparatelyBtn_Click" />
+                                    <Button x:Name="switch2UseRightJoyConSeparatelyBtn"
+                                            Content="Use selected right separately"
+                                            IsEnabled="False"
+                                            Padding="8,2"
+                                            Margin="8,0,0,0"
+                                            Click="Switch2UseRightJoyConSeparatelyBtn_Click" />
+                                </StackPanel>
+                                <TextBlock x:Name="switch2JoyConPairStatusText"
+                                           TextWrapping="Wrap"
+                                           MaxWidth="520"
+                                           Margin="0,8,0,0" />
                             </StackPanel>
                         </GroupBox>
                             </StackPanel>
@@ -680,7 +892,7 @@
                                 <Image Source="{Binding QuestionMarkSource, Mode=OneTime}"
                                    Width="20" Height="20" Stretch="UniformToFill" />
                             </Button>
-                            <TextBox x:Name="fakeExeNameTxt" Text="{Binding FakeExeName, UpdateSourceTrigger=LostFocus}" MinWidth="200" />
+                            <TextBox x:Name="fakeExeNameTxt" Text="{Binding FakeExeName, UpdateSourceTrigger=LostFocus}" MinWidth="200" IsEnabled="{Binding SystemIntegrationEnabled}" />
                         </DockPanel>
 
                         <StackPanel Orientation="Horizontal" Margin="{StaticResource spaceMargin}">
@@ -715,15 +927,16 @@
                                     <TextBlock Text="{lex:Loc XInputChecker}" TextDecorations="Underline" Foreground="{DynamicResource AccentColor}" Cursor="Hand" />
                                 </Button>
                                 <Button x:Name="hidHideBtn" BorderThickness="0" Margin="0,0,4,4" Background="{x:Null}" BorderBrush="{x:Null}"
+                                    IsEnabled="{Binding SystemIntegrationEnabled}"
                                     Style="{StaticResource NoBGHoverBtn}" Click="HidHideBtn_Click" Visibility="{Binding HidHideClientFound, Converter={StaticResource BooleanToVisibilityConverter}, Mode=OneWay}" >
                                     <TextBlock Text="{lex:Loc HidHideConfigClient}" TextDecorations="Underline" Foreground="{DynamicResource AccentColor}" Cursor="Hand" />
                                 </Button>
                                 <Button x:Name="driverSetupBtn" BorderThickness="0" Margin="0,0,4,4" Background="{x:Null}" BorderBrush="{x:Null}"
-                                   Style="{StaticResource NoBGHoverBtn}"  Click="DriverSetupBtn_Click">
+                                   Style="{StaticResource NoBGHoverBtn}" IsEnabled="{Binding SystemIntegrationEnabled}" Click="DriverSetupBtn_Click">
                                     <TextBlock Text="{lex:Loc DriverSetup}" TextDecorations="Underline" Foreground="{DynamicResource AccentColor}" Cursor="Hand" />
                                 </Button>
                                 <Button x:Name="checkUpdatesBtn" BorderThickness="0" Margin="0,0,4,4" Background="{x:Null}" BorderBrush="{x:Null}"
-                                    Style="{StaticResource NoBGHoverBtn}" Click="CheckUpdatesBtn_Click">
+                                    Style="{StaticResource NoBGHoverBtn}" IsEnabled="{Binding SystemIntegrationEnabled}" Click="CheckUpdatesBtn_Click">
                                     <!--="CheckUpdatesBtn_Click">-->
                                     <TextBlock Text="{lex:Loc CheckUpdateNow}" TextDecorations="Underline" Foreground="{DynamicResource AccentColor}" Cursor="Hand" />
                                 </Button>

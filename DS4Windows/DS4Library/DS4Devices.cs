@@ -474,7 +474,7 @@ namespace DS4Windows
                     if (!hDevice.IsOpen)
                     {
                         hDevice.OpenDevice(isExclusiveMode);
-                        if (!hDevice.IsOpen && isExclusiveMode)
+                        if (!hDevice.IsOpen && isExclusiveMode && !PortableLabContext.IsActive)
                         {
                             try
                             {
@@ -733,6 +733,8 @@ namespace DS4Windows
 
         public static void reEnableDevice(string deviceInstanceId)
         {
+            if (PortableLabContext.IsActive)
+                throw new InvalidOperationException("Portable lab does not disable/re-enable Windows HID devices.");
             Guid hidGuid = new Guid();
             NativeMethods.HidD_GetHidGuid(ref hidGuid);
             IntPtr deviceInfoSet = NativeMethods.SetupDiGetClassDevs(ref hidGuid, deviceInstanceId, 0, NativeMethods.DIGCF_PRESENT | NativeMethods.DIGCF_DEVICEINTERFACE);

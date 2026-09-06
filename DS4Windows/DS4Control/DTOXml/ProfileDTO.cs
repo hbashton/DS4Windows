@@ -26,11 +26,334 @@ using System.Xml.Serialization;
 using DS4Windows;
 using DS4Windows.InputDevices;
 using DS4Windows.StickModifiers;
+using DS4Windows.Switch2;
 using DS4WinWPF.DS4Forms.ViewModels;
 using static DS4Windows.Mouse;
+using Switch2CemuhookYawPolicy =
+    DS4Windows.Switch2.Switch2CemuhookYawSensitivity;
 
 namespace DS4WinWPF.DS4Control.DTOXml
 {
+    public sealed class Switch2IrGyroTuningDTO
+    {
+        [XmlElement("DeadzoneButtons")]
+        public Switch2JoyConProfileButton DeadzoneButtons { get; set; }
+
+        [XmlElement("DeadzoneAmount")]
+        public double DeadzoneAmount { get; set; } =
+            Switch2IrGyroMotionModifier.DefaultDeadzoneAmount;
+
+        [XmlElement("PauseAfterPressedMilliseconds")]
+        public int PauseAfterPressedMilliseconds { get; set; } =
+            Switch2IrGyroMotionModifier.
+                DefaultPauseAfterPressedMilliseconds;
+
+        [XmlElement("PauseAfterReleasedMilliseconds")]
+        public int PauseAfterReleasedMilliseconds { get; set; } =
+            Switch2IrGyroMotionModifier.
+                DefaultPauseAfterReleasedMilliseconds;
+
+        [XmlElement("DeadzoneEffectAfterReleasedMilliseconds")]
+        public int DeadzoneEffectAfterReleasedMilliseconds { get; set; } =
+            Switch2IrGyroMotionModifier.
+                DefaultDeadzoneEffectAfterReleasedMilliseconds;
+
+        [XmlElement("DampeningButtons")]
+        public Switch2JoyConProfileButton DampeningButtons { get; set; }
+
+        [XmlElement("DampeningAmountPercent")]
+        public double DampeningAmountPercent { get; set; } =
+            Switch2IrGyroMotionModifier.DefaultDampeningAmountPercent;
+
+        [XmlElement("DampeningEffectAfterReleasedMilliseconds")]
+        public int DampeningEffectAfterReleasedMilliseconds { get; set; } =
+            Switch2IrGyroMotionModifier.
+                DefaultDampeningEffectAfterReleasedMilliseconds;
+
+        internal Switch2IrGyroTuning ToTuning() =>
+            Switch2IrGyroTuning.Normalize(new Switch2IrGyroTuning(
+                DeadzoneButtons, DeadzoneAmount,
+                PauseAfterPressedMilliseconds,
+                PauseAfterReleasedMilliseconds,
+                DeadzoneEffectAfterReleasedMilliseconds,
+                DampeningButtons, DampeningAmountPercent,
+                DampeningEffectAfterReleasedMilliseconds));
+
+        internal static Switch2IrGyroTuningDTO From(
+            in Switch2IrGyroTuning tuning) => new()
+        {
+            DeadzoneButtons = tuning.DeadzoneButtons,
+            DeadzoneAmount = tuning.DeadzoneAmount,
+            PauseAfterPressedMilliseconds =
+                tuning.PauseAfterPressedMilliseconds,
+            PauseAfterReleasedMilliseconds =
+                tuning.PauseAfterReleasedMilliseconds,
+            DeadzoneEffectAfterReleasedMilliseconds =
+                tuning.DeadzoneEffectAfterReleasedMilliseconds,
+            DampeningButtons = tuning.DampeningButtons,
+            DampeningAmountPercent = tuning.DampeningAmountPercent,
+            DampeningEffectAfterReleasedMilliseconds =
+                tuning.DampeningEffectAfterReleasedMilliseconds,
+        };
+    }
+
+    public sealed class Switch2GyroTriggerTuningEntryDTO
+    {
+        [XmlAttribute("Mode")]
+        public GyroOutMode Mode { get; set; }
+
+        [XmlAttribute("TriggerIndex")]
+        public int TriggerIndex { get; set; }
+
+        [XmlElement("Tuning")]
+        public Switch2IrGyroTuningDTO Tuning { get; set; } = new();
+
+        internal static List<Switch2GyroTriggerTuningEntryDTO> From(
+            Switch2GyroTriggerTuningTable table)
+        {
+            var result = new List<Switch2GyroTriggerTuningEntryDTO>();
+            if (table == null)
+            {
+                return result;
+            }
+            GyroOutMode[] modes =
+            {
+                GyroOutMode.Mouse,
+                GyroOutMode.MouseJoystick,
+            };
+            foreach (GyroOutMode mode in modes)
+            {
+                for (int trigger = 0;
+                    trigger < Switch2GyroTriggerTuningTable.TriggerCount;
+                    trigger++)
+                {
+                    Switch2IrGyroTuning tuning = table.Get(mode, trigger);
+                    if (!tuning.Equals(Switch2IrGyroTuning.Default))
+                    {
+                        result.Add(new Switch2GyroTriggerTuningEntryDTO
+                        {
+                            Mode = mode,
+                            TriggerIndex = trigger,
+                            Tuning = Switch2IrGyroTuningDTO.From(tuning),
+                        });
+                    }
+                }
+            }
+            return result;
+        }
+
+        internal static Switch2GyroTriggerTuningTable ToTable(
+            IEnumerable<Switch2GyroTriggerTuningEntryDTO> entries)
+        {
+            var result = new Switch2GyroTriggerTuningTable();
+            if (entries == null)
+            {
+                return result;
+            }
+            foreach (Switch2GyroTriggerTuningEntryDTO entry in entries)
+            {
+                if (entry != null)
+                {
+                    result.TrySet(entry.Mode, entry.TriggerIndex,
+                        (entry.Tuning ?? new()).ToTuning());
+                }
+            }
+            return result;
+        }
+    }
+
+    public sealed class Switch2GyroLockBindingDTO
+    {
+        [XmlElement("HoldButtons")]
+        public Switch2JoyConProfileButton HoldButtons { get; set; }
+
+        [XmlElement("ToggleButtons")]
+        public Switch2JoyConProfileButton ToggleButtons { get; set; }
+
+        internal Switch2GyroLockBinding ToBinding() =>
+            Switch2GyroLockBinding.Normalize(new(HoldButtons, ToggleButtons));
+
+        internal static Switch2GyroLockBindingDTO From(
+            in Switch2GyroLockBinding binding) => new()
+        {
+            HoldButtons = binding.HoldButtons,
+            ToggleButtons = binding.ToggleButtons,
+        };
+    }
+
+    public sealed class Switch2ModeShiftSettingsDTO
+    {
+        [XmlElement("HoldButtons")]
+        public Switch2JoyConProfileButton HoldButtons { get; set; }
+
+        [XmlElement("ToggleButtons")]
+        public Switch2JoyConProfileButton ToggleButtons { get; set; }
+
+        [XmlElement("AutoApplyGyroMouse")]
+        public bool AutoApplyGyroMouse { get; set; } = true;
+
+        [XmlElement("AutoApplyGyroMouseJoystick")]
+        public bool AutoApplyGyroMouseJoystick { get; set; }
+
+        [XmlElement("AutoApplySteering")]
+        public bool AutoApplySteering { get; set; }
+
+        internal Switch2ModeShiftSettings ToSettings() =>
+            Switch2ModeShiftSettings.Normalize(new(HoldButtons,
+                ToggleButtons, AutoApplyGyroMouse,
+                AutoApplyGyroMouseJoystick, AutoApplySteering));
+
+        internal static Switch2ModeShiftSettingsDTO From(
+            in Switch2ModeShiftSettings settings) => new()
+        {
+            HoldButtons = settings.HoldButtons,
+            ToggleButtons = settings.ToggleButtons,
+            AutoApplyGyroMouse = settings.AutoApplyGyroMouse,
+            AutoApplyGyroMouseJoystick =
+                settings.AutoApplyGyroMouseJoystick,
+            AutoApplySteering = settings.AutoApplySteering,
+        };
+    }
+
+    public sealed class Switch2ModeShiftMappingDTO
+    {
+        [XmlAttribute("Control")]
+        public DS4Controls Control { get; set; }
+
+        [XmlAttribute("Scope")]
+        public Switch2ModeShiftScope Scope { get; set; }
+
+        [XmlElement("ActionType")]
+        public DS4ControlSettings.ActionType ActionType { get; set; }
+
+        [XmlElement("Button")]
+        public X360Controls Button { get; set; }
+
+        [XmlElement("Key")]
+        public int Key { get; set; }
+
+        [XmlArray("Macro")]
+        [XmlArrayItem("Step")]
+        public int[] Macro { get; set; }
+
+        [XmlElement("KeyType")]
+        public DS4KeyType KeyType { get; set; }
+
+        [XmlElement("Extras")]
+        public string Extras { get; set; }
+
+        internal static List<Switch2ModeShiftMappingDTO> From(
+            IEnumerable<DS4ControlSettings> settings)
+        {
+            var result = new List<Switch2ModeShiftMappingDTO>();
+            if (settings == null)
+            {
+                return result;
+            }
+            foreach (DS4ControlSettings setting in settings)
+            {
+                foreach (Switch2ModeShiftScope scope in Enum.GetValues<
+                    Switch2ModeShiftScope>())
+                {
+                    Switch2ModeShiftAction lane =
+                        setting.GetSwitch2ModeShiftAction(scope);
+                    if (lane.IsDefault)
+                    {
+                        continue;
+                    }
+                    result.Add(new Switch2ModeShiftMappingDTO
+                    {
+                        Control = setting.control,
+                        Scope = scope,
+                        ActionType = lane.ActionType,
+                        Button = lane.Action.actionBtn,
+                        Key = lane.Action.actionKey,
+                        Macro = lane.Action.actionMacro == null ? null :
+                            (int[])lane.Action.actionMacro.Clone(),
+                        KeyType = lane.KeyType,
+                        Extras = lane.Extras,
+                    });
+                }
+            }
+            return result;
+        }
+
+        internal static void Apply(IEnumerable<Switch2ModeShiftMappingDTO>
+            entries, IList<DS4ControlSettings> settings)
+        {
+            if (settings == null)
+            {
+                return;
+            }
+
+            // Migrate the initial shared trigger-37 representation into all
+            // three source-defined stores before applying scoped entries.
+            foreach (DS4ControlSettings setting in settings)
+            {
+                if (setting.shiftTrigger !=
+                        Mapping.SWITCH2_MODE_SHIFT_TRIGGER ||
+                    setting.shiftActionType ==
+                        DS4ControlSettings.ActionType.Default &&
+                    setting.IsExtrasEmpty(setting.shiftExtras))
+                {
+                    continue;
+                }
+                foreach (Switch2ModeShiftScope scope in Enum.GetValues<
+                    Switch2ModeShiftScope>())
+                {
+                    setting.GetSwitch2ModeShiftAction(scope).
+                        CopyFromLegacy(setting);
+                }
+                // Scoped stores are authoritative after migration. Keeping
+                // the shared representation would make the next save emit
+                // both formats and allow stale legacy data to reappear if a
+                // scoped lane is later cleared.
+                setting.shiftActionType =
+                    DS4ControlSettings.ActionType.Default;
+                setting.shiftAction = new ControlActionData();
+                setting.shiftKeyType = DS4KeyType.None;
+                setting.shiftExtras = null;
+            }
+
+            if (entries == null)
+            {
+                return;
+            }
+            foreach (Switch2ModeShiftMappingDTO entry in entries)
+            {
+                if (entry == null || entry.Control <= DS4Controls.None ||
+                    entry.Control >
+                        DS4Controls.Switch2JoyConRightSR ||
+                    entry.Scope is not Switch2ModeShiftScope.Mouse and not
+                        Switch2ModeShiftScope.MouseJoystick and not
+                        Switch2ModeShiftScope.Steering ||
+                    entry.ActionType is <
+                        DS4ControlSettings.ActionType.Default or >
+                        DS4ControlSettings.ActionType.Macro)
+                {
+                    continue;
+                }
+                int settingIndex = (int)entry.Control - 1;
+                if ((uint)settingIndex >= settings.Count)
+                {
+                    continue;
+                }
+                DS4ControlSettings setting = settings[settingIndex];
+                Switch2ModeShiftAction lane =
+                    setting.GetSwitch2ModeShiftAction(entry.Scope);
+                lane.Reset();
+                lane.ActionType = entry.ActionType;
+                lane.Action.actionBtn = entry.Button;
+                lane.Action.actionKey = entry.Key;
+                lane.Action.actionMacro = entry.Macro == null ? null :
+                    (int[])entry.Macro.Clone();
+                lane.KeyType = entry.KeyType;
+                lane.Extras = entry.Extras;
+                setting.shiftTrigger = Mapping.SWITCH2_MODE_SHIFT_TRIGGER;
+            }
+        }
+    }
+
     [XmlRoot("DS4Windows")]
     public class ProfileDTO : IDTO<BackingStore>
     {
@@ -165,6 +488,363 @@ namespace DS4WinWPF.DS4Control.DTOXml
             get;
             set;
         }
+
+        [XmlElement("Switch2MapXboxImpulseTriggersToHdRumble")]
+        public bool Switch2MapXboxImpulseTriggersToHdRumble
+        {
+            get;
+            set;
+        } = true;
+
+        [XmlElement("Switch2XboxImpulseDynamicFrequency")]
+        public bool Switch2XboxImpulseDynamicFrequency
+        {
+            get;
+            set;
+        } = true;
+
+        [XmlElement("Switch2XboxImpulseFrequency")]
+        public int Switch2XboxImpulseFrequency
+        {
+            get;
+            set;
+        } = Switch2HdRumbleImpulseTuning.DefaultFixedFrequencyLevel;
+
+        [XmlElement("Switch2XboxImpulseStrength")]
+        public int Switch2XboxImpulseStrength
+        {
+            get;
+            set;
+        } = Switch2HdRumbleImpulseTuning.DefaultStrengthLevel;
+
+        [XmlElement("Switch2XboxBodyRumbleMode")]
+        public bool Switch2XboxBodyRumbleMode
+        {
+            get;
+            set;
+        }
+
+        [XmlElement("Switch2XboxBodyRumbleFrequency")]
+        public int Switch2XboxBodyRumbleFrequency
+        {
+            get;
+            set;
+        } = Switch2HdRumbleBodyTuning.DefaultXboxFrequencyLevel;
+
+        [XmlElement("Switch2RumbleDelayMilliseconds")]
+        public int Switch2RumbleDelayMilliseconds
+        {
+            get;
+            set;
+        } = Switch2RumbleDelay.DefaultMilliseconds;
+
+        [XmlElement("Switch2DualSenseAudioHapticsEnabled")]
+        public bool Switch2DualSenseAudioHapticsEnabled { get; set; } = true;
+
+        [XmlElement("Switch2DualSenseAdaptiveTriggersEnabled")]
+        public bool Switch2DualSenseAdaptiveTriggersEnabled { get; set; } = true;
+
+        [XmlElement("Switch2MagnetometerYawAssistEnabled")]
+        public bool Switch2MagnetometerYawAssistEnabled
+        {
+            get;
+            set;
+        }
+
+        [XmlElement("Switch2VirtualGyroSoftDeadzone")]
+        public double Switch2VirtualGyroSoftDeadzone
+        {
+            get;
+            set;
+        } = Switch2MotionSoftDeadzone.Default;
+
+        [XmlElement("Switch2GyroMouseStickAssistSensitivity")]
+        public double Switch2GyroMouseStickAssistSensitivity
+        {
+            get;
+            set;
+        } = Switch2StickAssistProfileLane.DefaultSensitivity;
+
+        [XmlElement("Switch2LeftStickMouseSensitivity")]
+        public double Switch2LeftStickMouseSensitivity
+        {
+            get;
+            set;
+        } = Switch2MappedStickMouseSensitivity.Default;
+
+        [XmlElement("Switch2RightStickMouseSensitivity")]
+        public double Switch2RightStickMouseSensitivity
+        {
+            get;
+            set;
+        } = Switch2MappedStickMouseSensitivity.Default;
+
+        [XmlElement("Switch2HighRateMousePresentation")]
+        public bool Switch2HighRateMousePresentation
+        {
+            get;
+            set;
+        } = true;
+
+        [XmlElement("Switch2ConnectionHapticEnabled")]
+        public bool Switch2ConnectionHapticEnabled
+        {
+            get;
+            set;
+        } = true;
+
+        [XmlElement("Switch2AutoDisconnectMode")]
+        public Switch2AutoDisconnectMode Switch2AutoDisconnectMode
+        {
+            get;
+            set;
+        } = Switch2AutoDisconnectMode.LegacyProfile;
+
+        [XmlElement("Switch2AutoDisconnectTimeoutSeconds")]
+        public long Switch2AutoDisconnectTimeoutSeconds
+        {
+            get;
+            set;
+        }
+
+        [XmlElement("Switch2CemuhookYawSensitivity")]
+        public int Switch2CemuhookYawSensitivity
+        {
+            get;
+            set;
+        } = Switch2CemuhookYawPolicy.DefaultLevel;
+
+        [XmlElement("Switch2HorizonStabilizationEnabled")]
+        public bool Switch2HorizonStabilizationEnabled
+        {
+            get;
+            set;
+        }
+
+        [XmlElement("Switch2DualJoyConGyroFusionEnabled")]
+        public bool Switch2DualJoyConGyroFusionEnabled
+        {
+            get;
+            set;
+        }
+
+        [XmlElement("Switch2DualJoyConGyroDominantSide")]
+        public Switch2DualGyroDominantSide Switch2DualJoyConGyroDominantSide
+        {
+            get;
+            set;
+        } = Switch2DualGyroDominantSide.Right;
+
+        [XmlElement("Switch2DualJoyConGyroMode")]
+        public Switch2DualGyroMode Switch2DualJoyConGyroMode
+        {
+            get => switch2DualJoyConGyroMode;
+            set
+            {
+                switch2DualJoyConGyroMode = value;
+                Switch2DualJoyConGyroModeSpecified = true;
+            }
+        }
+
+        private Switch2DualGyroMode switch2DualJoyConGyroMode =
+            Switch2DualGyroMode.SwitchDominantSide;
+
+        [XmlIgnore]
+        public bool Switch2DualJoyConGyroModeSpecified
+        {
+            get;
+            set;
+        }
+
+        [XmlElement("Switch2DualJoyConGyroActivationMode")]
+        public Switch2DualGyroActivationMode
+            Switch2DualJoyConGyroActivationMode
+        {
+            get;
+            set;
+        } = Switch2DualGyroActivationMode.Hold;
+
+        [XmlElement("Switch2DualJoyConGyroLeftActivationButton")]
+        public Switch2JoyConProfileButton
+            Switch2DualJoyConGyroLeftActivationButton
+        {
+            get;
+            set;
+        }
+
+        [XmlElement("Switch2DualJoyConGyroRightActivationButton")]
+        public Switch2JoyConProfileButton
+            Switch2DualJoyConGyroRightActivationButton
+        {
+            get;
+            set;
+        }
+
+        [XmlElement("Switch2JoyConStandaloneHoldMode")]
+        public Switch2JoyConHoldMode Switch2JoyConStandaloneHoldMode
+        {
+            get;
+            set;
+        } = Switch2JoyConHoldMode.Vertical;
+
+        [XmlElement("Switch2FaceButtonLayout")]
+        public Switch2FaceButtonLayout Switch2FaceButtonLayout
+        {
+            get;
+            set;
+        } = Switch2FaceButtonLayout.Xbox;
+
+        [XmlElement("Switch2JoyConIrMouseEnabled")]
+        public bool Switch2JoyConIrMouseEnabled
+        {
+            get;
+            set;
+        }
+
+        [XmlElement("Switch2JoyConIrMouseSource")]
+        public Switch2IrMouseSource Switch2JoyConIrMouseSource
+        {
+            get;
+            set;
+        } = Switch2IrMouseSource.Auto;
+
+        [XmlElement("Switch2JoyConIrMouseScrollMode")]
+        public Switch2IrMouseScrollMode Switch2JoyConIrMouseScrollMode
+        {
+            get;
+            set;
+        } = Switch2IrMouseScrollMode.Vertical;
+
+        [XmlElement("Switch2LeftStickScrollActivationMode")]
+        public Switch2StickScrollActivationMode
+            Switch2LeftStickScrollActivationMode { get; set; } =
+                Switch2StickScrollActivationMode.Hold;
+
+        [XmlElement("Switch2RightStickScrollActivationMode")]
+        public Switch2StickScrollActivationMode
+            Switch2RightStickScrollActivationMode { get; set; } =
+                Switch2StickScrollActivationMode.Hold;
+
+        [XmlElement("Switch2LeftStickUpActivationMode")]
+        public Switch2StickDirectionActivationMode
+            Switch2LeftStickUpActivationMode { get; set; } =
+                Switch2StickDirectionActivationMode.Hold;
+
+        [XmlElement("Switch2LeftStickDownActivationMode")]
+        public Switch2StickDirectionActivationMode
+            Switch2LeftStickDownActivationMode { get; set; } =
+                Switch2StickDirectionActivationMode.Hold;
+
+        [XmlElement("Switch2LeftStickLeftActivationMode")]
+        public Switch2StickDirectionActivationMode
+            Switch2LeftStickLeftActivationMode { get; set; } =
+                Switch2StickDirectionActivationMode.Hold;
+
+        [XmlElement("Switch2LeftStickRightActivationMode")]
+        public Switch2StickDirectionActivationMode
+            Switch2LeftStickRightActivationMode { get; set; } =
+                Switch2StickDirectionActivationMode.Hold;
+
+        [XmlElement("Switch2RightStickUpActivationMode")]
+        public Switch2StickDirectionActivationMode
+            Switch2RightStickUpActivationMode { get; set; } =
+                Switch2StickDirectionActivationMode.Hold;
+
+        [XmlElement("Switch2RightStickDownActivationMode")]
+        public Switch2StickDirectionActivationMode
+            Switch2RightStickDownActivationMode { get; set; } =
+                Switch2StickDirectionActivationMode.Hold;
+
+        [XmlElement("Switch2RightStickLeftActivationMode")]
+        public Switch2StickDirectionActivationMode
+            Switch2RightStickLeftActivationMode { get; set; } =
+                Switch2StickDirectionActivationMode.Hold;
+
+        [XmlElement("Switch2RightStickRightActivationMode")]
+        public Switch2StickDirectionActivationMode
+            Switch2RightStickRightActivationMode { get; set; } =
+                Switch2StickDirectionActivationMode.Hold;
+
+        [XmlElement("Switch2JoyConLeftIrMouseActivationThreshold")]
+        public Switch2IrActivationThreshold
+            Switch2JoyConLeftIrMouseActivationThreshold
+        {
+            get;
+            set;
+        } = Switch2IrActivationThreshold.Strict;
+
+        [XmlElement("Switch2JoyConLeftIrMouseSensitivity")]
+        public double Switch2JoyConLeftIrMouseSensitivity
+        {
+            get;
+            set;
+        } = Switch2IrMouseProjection.DefaultSensitivity;
+
+        [XmlElement("Switch2JoyConRightIrMouseActivationThreshold")]
+        public Switch2IrActivationThreshold
+            Switch2JoyConRightIrMouseActivationThreshold
+        {
+            get;
+            set;
+        } = Switch2IrActivationThreshold.Strict;
+
+        [XmlElement("Switch2JoyConRightIrMouseSensitivity")]
+        public double Switch2JoyConRightIrMouseSensitivity
+        {
+            get;
+            set;
+        } = Switch2IrMouseProjection.DefaultSensitivity;
+
+        [XmlElement("Switch2JoyConLeftIrGyroTuning")]
+        public Switch2IrGyroTuningDTO Switch2JoyConLeftIrGyroTuning
+        {
+            get;
+            set;
+        } = new();
+
+        [XmlElement("Switch2JoyConRightIrGyroTuning")]
+        public Switch2IrGyroTuningDTO Switch2JoyConRightIrGyroTuning
+        {
+            get;
+            set;
+        } = new();
+
+        [XmlArray("Switch2GyroTriggerTunings")]
+        [XmlArrayItem("Trigger")]
+        public List<Switch2GyroTriggerTuningEntryDTO>
+            Switch2GyroTriggerTunings { get; set; } = new();
+
+        [XmlElement("Switch2GyroMouseLock")]
+        public Switch2GyroLockBindingDTO Switch2GyroMouseLock
+        {
+            get;
+            set;
+        } = new();
+
+        [XmlElement("Switch2GyroMouseJoystickLock")]
+        public Switch2GyroLockBindingDTO Switch2GyroMouseJoystickLock
+        {
+            get;
+            set;
+        } = new();
+
+        [XmlElement("Switch2ModeShift")]
+        public Switch2ModeShiftSettingsDTO Switch2ModeShift
+        {
+            get;
+            set;
+        } = new();
+
+        [XmlArray("Switch2ModeShiftMappings")]
+        [XmlArrayItem("Mapping")]
+        public List<Switch2ModeShiftMappingDTO> Switch2ModeShiftMappings
+        {
+            get;
+            set;
+        } = new();
+
+        public bool ShouldSerializeSwitch2ModeShiftMappings() =>
+            Switch2ModeShiftMappings?.Count > 0;
 
         [XmlElement("UseDs3PitchRollSim")]
         public bool UseDs3PitchRollSim
@@ -1634,6 +2314,115 @@ namespace DS4WinWPF.DS4Control.DTOXml
             RightStickDriftYAxis = source.rightStickDriftYAxis[deviceIndex];
             DebouncingMs = source.debouncingMs[deviceIndex];
             InverseRumbleMotors = source.inverseRumbleMotors[deviceIndex];
+            Switch2MapXboxImpulseTriggersToHdRumble =
+                source.switch2MapXboxImpulseTriggersToHdRumble[deviceIndex];
+            Switch2XboxImpulseDynamicFrequency =
+                source.switch2XboxImpulseDynamicFrequency[deviceIndex];
+            Switch2XboxImpulseFrequency =
+                source.switch2XboxImpulseFrequency[deviceIndex];
+            Switch2XboxImpulseStrength =
+                source.switch2XboxImpulseStrength[deviceIndex];
+            Switch2XboxBodyRumbleMode =
+                source.switch2XboxBodyRumbleMode[deviceIndex];
+            Switch2XboxBodyRumbleFrequency =
+                source.switch2XboxBodyRumbleFrequency[deviceIndex];
+            Switch2RumbleDelayMilliseconds =
+                source.switch2RumbleDelayMilliseconds[deviceIndex];
+            Switch2DualSenseAudioHapticsEnabled =
+                source.switch2DualSenseAudioHapticsEnabled[deviceIndex];
+            Switch2DualSenseAdaptiveTriggersEnabled =
+                source.switch2DualSenseAdaptiveTriggersEnabled[deviceIndex];
+            Switch2MagnetometerYawAssistEnabled =
+                source.switch2MagnetometerYawAssistEnabled[deviceIndex];
+            Switch2VirtualGyroSoftDeadzone =
+                source.switch2VirtualGyroSoftDeadzone[deviceIndex];
+            Switch2GyroMouseStickAssistSensitivity =
+                source.switch2GyroMouseStickAssistSensitivity[deviceIndex];
+            Switch2LeftStickMouseSensitivity =
+                source.switch2LeftStickMouseSensitivity[deviceIndex];
+            Switch2RightStickMouseSensitivity =
+                source.switch2RightStickMouseSensitivity[deviceIndex];
+            Switch2HighRateMousePresentation =
+                source.switch2HighRateMousePresentation[deviceIndex];
+            Switch2ConnectionHapticEnabled =
+                source.switch2ConnectionHapticEnabled[deviceIndex];
+            Switch2AutoDisconnectMode =
+                source.switch2AutoDisconnectMode[deviceIndex];
+            Switch2AutoDisconnectTimeoutSeconds =
+                source.switch2AutoDisconnectTimeoutSeconds[deviceIndex];
+            Switch2CemuhookYawSensitivity =
+                source.switch2CemuhookYawSensitivity[deviceIndex];
+            Switch2HorizonStabilizationEnabled =
+                source.switch2HorizonStabilizationEnabled[deviceIndex];
+            Switch2DualJoyConGyroFusionEnabled =
+                source.switch2DualJoyConGyroFusionEnabled[deviceIndex];
+            Switch2DualJoyConGyroDominantSide =
+                source.switch2DualJoyConGyroDominantSide[deviceIndex];
+            Switch2DualJoyConGyroMode =
+                source.switch2DualJoyConGyroMode[deviceIndex];
+            Switch2DualJoyConGyroActivationMode =
+                source.switch2DualJoyConGyroActivationMode[deviceIndex];
+            Switch2DualJoyConGyroLeftActivationButton = source.
+                switch2DualJoyConGyroLeftActivationButton[deviceIndex];
+            Switch2DualJoyConGyroRightActivationButton = source.
+                switch2DualJoyConGyroRightActivationButton[deviceIndex];
+            Switch2JoyConStandaloneHoldMode =
+                source.switch2JoyConStandaloneHoldMode[deviceIndex];
+            Switch2FaceButtonLayout =
+                source.switch2FaceButtonLayout[deviceIndex];
+            Switch2JoyConIrMouseEnabled =
+                source.switch2JoyConIrMouseEnabled[deviceIndex];
+            Switch2JoyConIrMouseSource =
+                source.switch2JoyConIrMouseSource[deviceIndex];
+            Switch2JoyConIrMouseScrollMode =
+                source.switch2JoyConIrMouseScrollMode[deviceIndex];
+            Switch2LeftStickScrollActivationMode =
+                source.switch2LeftStickScrollActivationMode[deviceIndex];
+            Switch2RightStickScrollActivationMode =
+                source.switch2RightStickScrollActivationMode[deviceIndex];
+            Switch2LeftStickUpActivationMode =
+                source.switch2LeftStickUpActivationMode[deviceIndex];
+            Switch2LeftStickDownActivationMode =
+                source.switch2LeftStickDownActivationMode[deviceIndex];
+            Switch2LeftStickLeftActivationMode =
+                source.switch2LeftStickLeftActivationMode[deviceIndex];
+            Switch2LeftStickRightActivationMode =
+                source.switch2LeftStickRightActivationMode[deviceIndex];
+            Switch2RightStickUpActivationMode =
+                source.switch2RightStickUpActivationMode[deviceIndex];
+            Switch2RightStickDownActivationMode =
+                source.switch2RightStickDownActivationMode[deviceIndex];
+            Switch2RightStickLeftActivationMode =
+                source.switch2RightStickLeftActivationMode[deviceIndex];
+            Switch2RightStickRightActivationMode =
+                source.switch2RightStickRightActivationMode[deviceIndex];
+            Switch2JoyConLeftIrMouseActivationThreshold = source.
+                switch2JoyConLeftIrMouseActivationThreshold[deviceIndex];
+            Switch2JoyConLeftIrMouseSensitivity =
+                source.switch2JoyConLeftIrMouseSensitivity[deviceIndex];
+            Switch2JoyConRightIrMouseActivationThreshold = source.
+                switch2JoyConRightIrMouseActivationThreshold[deviceIndex];
+            Switch2JoyConRightIrMouseSensitivity =
+                source.switch2JoyConRightIrMouseSensitivity[deviceIndex];
+            Switch2JoyConLeftIrGyroTuning = Switch2IrGyroTuningDTO.From(
+                source.switch2JoyConLeftIrGyroTuning[deviceIndex]);
+            Switch2JoyConRightIrGyroTuning = Switch2IrGyroTuningDTO.From(
+                source.switch2JoyConRightIrGyroTuning[deviceIndex]);
+            Switch2GyroTriggerTunings =
+                Switch2GyroTriggerTuningEntryDTO.From(
+                    source.switch2GyroTriggerTunings[deviceIndex]);
+            Switch2GyroMouseLock = Switch2GyroLockBindingDTO.From(
+                source.switch2GyroLockBindings[deviceIndex].Get(
+                    GyroOutMode.Mouse));
+            Switch2GyroMouseJoystickLock =
+                Switch2GyroLockBindingDTO.From(
+                    source.switch2GyroLockBindings[deviceIndex].Get(
+                        GyroOutMode.MouseJoystick));
+            Switch2ModeShift = Switch2ModeShiftSettingsDTO.From(
+                source.switch2ModeShiftSettings[deviceIndex]);
+            Switch2ModeShiftMappings =
+                Switch2ModeShiftMappingDTO.From(
+                    source.ds4settings[deviceIndex]);
             RumbleBoost = source.rumble[deviceIndex];
             RumbleAutostopTime = source.rumbleAutostopTime[deviceIndex];
             LedAsBatteryIndicator = lightInfo.ledAsBattery;
@@ -2114,6 +2903,14 @@ namespace DS4WinWPF.DS4Control.DTOXml
                         }
                     }
                 }
+
+                if (hasExtrasValue && dcs.shiftTrigger > 0)
+                {
+                    shiftExtrasSerializer.CustomMapExtras.Add(dcs.control,
+                        dcs.shiftExtras);
+                    shiftExtrasSerializer.ShiftTriggers.TryAdd(dcs.control,
+                        dcs.shiftTrigger);
+                }
             }
 
             if (buttonSerializer.CustomMapButtons.Count > 0)
@@ -2173,6 +2970,37 @@ namespace DS4WinWPF.DS4Control.DTOXml
             }
         }
 
+        private static double NormalizeSwitch2IrMouseSensitivity(
+            double value) => double.IsFinite(value) && value >=
+                Switch2IrMouseProjection.MinimumProfileSensitivity &&
+            value <= Switch2IrMouseProjection.MaximumProfileSensitivity ?
+                value : Switch2IrMouseProjection.DefaultSensitivity;
+
+        private static Switch2StickScrollActivationMode
+            NormalizeSwitch2StickScrollActivationMode(
+                Switch2StickScrollActivationMode value) => value is
+                    Switch2StickScrollActivationMode.Hold or
+                    Switch2StickScrollActivationMode.Tap ? value :
+                    Switch2StickScrollActivationMode.Hold;
+
+        private static Switch2StickDirectionActivationMode
+            NormalizeSwitch2StickDirectionActivationMode(
+                Switch2StickDirectionActivationMode value) => value is
+                    Switch2StickDirectionActivationMode.Hold or
+                    Switch2StickDirectionActivationMode.Tap ? value :
+                    Switch2StickDirectionActivationMode.Hold;
+
+        private static int NormalizeSwitch2ImpulseLevel(int value,
+            int fallback) => value is >=
+                Switch2HdRumbleImpulseTuning.MinimumLevel and <=
+                Switch2HdRumbleImpulseTuning.MaximumLevel ? value : fallback;
+
+        private static int NormalizeSwitch2BodyFrequency(int value) =>
+            value is >= Switch2HdRumbleBodyTuning.MinimumXboxFrequencyLevel
+                and <= Switch2HdRumbleBodyTuning.MaximumXboxFrequencyLevel ?
+                value :
+                Switch2HdRumbleBodyTuning.DefaultXboxFrequencyLevel;
+
         public void MapTo(BackingStore destination)
         {
             if (deviceIndex == -1)
@@ -2194,6 +3022,196 @@ namespace DS4WinWPF.DS4Control.DTOXml
             destination.useDs3PitchRollSim = UseDs3PitchRollSim;
             destination.debouncingMs[deviceIndex] = DebouncingMs;
             destination.inverseRumbleMotors[deviceIndex] = InverseRumbleMotors;
+            destination.switch2MapXboxImpulseTriggersToHdRumble[deviceIndex] =
+                Switch2MapXboxImpulseTriggersToHdRumble;
+            destination.switch2XboxImpulseDynamicFrequency[deviceIndex] =
+                Switch2XboxImpulseDynamicFrequency;
+            destination.switch2XboxImpulseFrequency[deviceIndex] =
+                NormalizeSwitch2ImpulseLevel(Switch2XboxImpulseFrequency,
+                    Switch2HdRumbleImpulseTuning.
+                        DefaultFixedFrequencyLevel);
+            destination.switch2XboxImpulseStrength[deviceIndex] =
+                NormalizeSwitch2ImpulseLevel(Switch2XboxImpulseStrength,
+                    Switch2HdRumbleImpulseTuning.DefaultStrengthLevel);
+            destination.switch2XboxBodyRumbleMode[deviceIndex] =
+                Switch2XboxBodyRumbleMode;
+            destination.switch2XboxBodyRumbleFrequency[deviceIndex] =
+                NormalizeSwitch2BodyFrequency(
+                    Switch2XboxBodyRumbleFrequency);
+            destination.switch2RumbleDelayMilliseconds[deviceIndex] =
+                Switch2RumbleDelay.Normalize(
+                    Switch2RumbleDelayMilliseconds);
+            destination.switch2DualSenseAudioHapticsEnabled[deviceIndex] =
+                Switch2DualSenseAudioHapticsEnabled;
+            destination.switch2DualSenseAdaptiveTriggersEnabled[deviceIndex] =
+                Switch2DualSenseAdaptiveTriggersEnabled;
+            destination.switch2MagnetometerYawAssistEnabled[deviceIndex] =
+                Switch2MagnetometerYawAssistEnabled;
+            destination.switch2VirtualGyroSoftDeadzone[deviceIndex] =
+                Switch2MotionSoftDeadzone.Normalize(
+                    Switch2VirtualGyroSoftDeadzone);
+            destination.switch2GyroMouseStickAssistSensitivity[deviceIndex] =
+                Switch2StickAssistProfileLane.NormalizeSensitivity(
+                    Switch2GyroMouseStickAssistSensitivity);
+            destination.switch2LeftStickMouseSensitivity[deviceIndex] =
+                Switch2MappedStickMouseSensitivity.Normalize(
+                    Switch2LeftStickMouseSensitivity);
+            destination.switch2RightStickMouseSensitivity[deviceIndex] =
+                Switch2MappedStickMouseSensitivity.Normalize(
+                    Switch2RightStickMouseSensitivity);
+            destination.switch2HighRateMousePresentation[deviceIndex] =
+                Switch2HighRateMousePresentation;
+            destination.switch2ConnectionHapticEnabled[deviceIndex] =
+                Switch2ConnectionHapticEnabled;
+            destination.switch2AutoDisconnectMode[deviceIndex] =
+                Switch2AutoDisconnectPolicyResolver.NormalizeMode(
+                    Switch2AutoDisconnectMode);
+            destination.switch2AutoDisconnectTimeoutSeconds[deviceIndex] =
+                Switch2AutoDisconnectPolicyResolver.
+                    NormalizeTimeoutSeconds(
+                        Switch2AutoDisconnectTimeoutSeconds);
+            destination.switch2CemuhookYawSensitivity[deviceIndex] =
+                Switch2CemuhookYawPolicy.NormalizeLevel(
+                    Switch2CemuhookYawSensitivity);
+            destination.switch2HorizonStabilizationEnabled[deviceIndex] =
+                Switch2HorizonStabilizationEnabled;
+            destination.switch2DualJoyConGyroFusionEnabled[deviceIndex] =
+                Switch2DualJoyConGyroFusionEnabled;
+            destination.switch2DualJoyConGyroDominantSide[deviceIndex] =
+                Switch2DualJoyConGyroDominantSide is
+                    Switch2DualGyroDominantSide.Left or
+                    Switch2DualGyroDominantSide.Right or
+                    Switch2DualGyroDominantSide.None ?
+                    Switch2DualJoyConGyroDominantSide :
+                    Switch2DualGyroDominantSide.Right;
+            Switch2DualGyroMode normalizedDualGyroMode =
+                !Switch2DualJoyConGyroModeSpecified &&
+                    Switch2DualJoyConGyroDominantSide ==
+                        Switch2DualGyroDominantSide.None ?
+                Switch2DualGyroMode.SingleSideToggle :
+                Switch2DualJoyConGyroMode is
+                    Switch2DualGyroMode.SwitchDominantSide or
+                    Switch2DualGyroMode.SwitchGyroSide or
+                    Switch2DualGyroMode.SingleSideToggle ?
+                    Switch2DualJoyConGyroMode :
+                    Switch2DualGyroMode.SwitchDominantSide;
+            destination.switch2DualJoyConGyroMode[deviceIndex] =
+                normalizedDualGyroMode;
+            if (normalizedDualGyroMode !=
+                    Switch2DualGyroMode.SingleSideToggle &&
+                destination.switch2DualJoyConGyroDominantSide[deviceIndex] ==
+                    Switch2DualGyroDominantSide.None)
+            {
+                destination.switch2DualJoyConGyroDominantSide[deviceIndex] =
+                    Switch2DualGyroDominantSide.Right;
+            }
+            destination.switch2DualJoyConGyroActivationMode[deviceIndex] =
+                Switch2DualJoyConGyroActivationMode is
+                    Switch2DualGyroActivationMode.Hold or
+                    Switch2DualGyroActivationMode.Toggle ?
+                    Switch2DualJoyConGyroActivationMode :
+                    Switch2DualGyroActivationMode.Hold;
+            destination.switch2DualJoyConGyroLeftActivationButton[
+                deviceIndex] = Switch2DualGyroConfiguration.
+                    IsValidActivationButton(
+                        Switch2DualJoyConGyroLeftActivationButton) ?
+                    Switch2DualJoyConGyroLeftActivationButton :
+                    Switch2JoyConProfileButton.None;
+            destination.switch2DualJoyConGyroRightActivationButton[
+                deviceIndex] = Switch2DualGyroConfiguration.
+                    IsValidActivationButton(
+                        Switch2DualJoyConGyroRightActivationButton) ?
+                    Switch2DualJoyConGyroRightActivationButton :
+                    Switch2JoyConProfileButton.None;
+            destination.switch2JoyConStandaloneHoldMode[deviceIndex] =
+                Switch2JoyConStandaloneHoldMode is
+                    Switch2JoyConHoldMode.Vertical or
+                    Switch2JoyConHoldMode.Horizontal ?
+                    Switch2JoyConStandaloneHoldMode :
+                    Switch2JoyConHoldMode.Vertical;
+            destination.switch2FaceButtonLayout[deviceIndex] =
+                Switch2FaceButtonLayoutProjection.IsValid(
+                    Switch2FaceButtonLayout) ? Switch2FaceButtonLayout :
+                    Switch2FaceButtonLayout.Xbox;
+            destination.switch2JoyConIrMouseEnabled[deviceIndex] =
+                Switch2JoyConIrMouseEnabled;
+            destination.switch2JoyConIrMouseSource[deviceIndex] =
+                Switch2JoyConIrMouseSource is Switch2IrMouseSource.Auto or
+                    Switch2IrMouseSource.Left or Switch2IrMouseSource.Right or
+                    Switch2IrMouseSource.Both ?
+                    Switch2JoyConIrMouseSource : Switch2IrMouseSource.Auto;
+            destination.switch2JoyConIrMouseScrollMode[deviceIndex] =
+                Switch2JoyConIrMouseScrollMode is
+                    Switch2IrMouseScrollMode.Vertical or
+                    Switch2IrMouseScrollMode.FourWay ?
+                    Switch2JoyConIrMouseScrollMode :
+                    Switch2IrMouseScrollMode.Vertical;
+            destination.switch2LeftStickScrollActivationMode[deviceIndex] =
+                NormalizeSwitch2StickScrollActivationMode(
+                    Switch2LeftStickScrollActivationMode);
+            destination.switch2RightStickScrollActivationMode[deviceIndex] =
+                NormalizeSwitch2StickScrollActivationMode(
+                    Switch2RightStickScrollActivationMode);
+            destination.switch2LeftStickUpActivationMode[deviceIndex] =
+                NormalizeSwitch2StickDirectionActivationMode(
+                    Switch2LeftStickUpActivationMode);
+            destination.switch2LeftStickDownActivationMode[deviceIndex] =
+                NormalizeSwitch2StickDirectionActivationMode(
+                    Switch2LeftStickDownActivationMode);
+            destination.switch2LeftStickLeftActivationMode[deviceIndex] =
+                NormalizeSwitch2StickDirectionActivationMode(
+                    Switch2LeftStickLeftActivationMode);
+            destination.switch2LeftStickRightActivationMode[deviceIndex] =
+                NormalizeSwitch2StickDirectionActivationMode(
+                    Switch2LeftStickRightActivationMode);
+            destination.switch2RightStickUpActivationMode[deviceIndex] =
+                NormalizeSwitch2StickDirectionActivationMode(
+                    Switch2RightStickUpActivationMode);
+            destination.switch2RightStickDownActivationMode[deviceIndex] =
+                NormalizeSwitch2StickDirectionActivationMode(
+                    Switch2RightStickDownActivationMode);
+            destination.switch2RightStickLeftActivationMode[deviceIndex] =
+                NormalizeSwitch2StickDirectionActivationMode(
+                    Switch2RightStickLeftActivationMode);
+            destination.switch2RightStickRightActivationMode[deviceIndex] =
+                NormalizeSwitch2StickDirectionActivationMode(
+                    Switch2RightStickRightActivationMode);
+            destination.switch2JoyConLeftIrMouseActivationThreshold[
+                deviceIndex] = Switch2JoyConLeftIrMouseActivationThreshold is
+                    Switch2IrActivationThreshold.Strict or
+                    Switch2IrActivationThreshold.Balanced or
+                    Switch2IrActivationThreshold.Relaxed ?
+                    Switch2JoyConLeftIrMouseActivationThreshold :
+                    Switch2IrActivationThreshold.Strict;
+            destination.switch2JoyConLeftIrMouseSensitivity[deviceIndex] =
+                NormalizeSwitch2IrMouseSensitivity(
+                    Switch2JoyConLeftIrMouseSensitivity);
+            destination.switch2JoyConRightIrMouseActivationThreshold[
+                deviceIndex] = Switch2JoyConRightIrMouseActivationThreshold is
+                    Switch2IrActivationThreshold.Strict or
+                    Switch2IrActivationThreshold.Balanced or
+                    Switch2IrActivationThreshold.Relaxed ?
+                    Switch2JoyConRightIrMouseActivationThreshold :
+                    Switch2IrActivationThreshold.Strict;
+            destination.switch2JoyConRightIrMouseSensitivity[deviceIndex] =
+                NormalizeSwitch2IrMouseSensitivity(
+                    Switch2JoyConRightIrMouseSensitivity);
+            destination.switch2JoyConLeftIrGyroTuning[deviceIndex] =
+                (Switch2JoyConLeftIrGyroTuning ?? new()).ToTuning();
+            destination.switch2JoyConRightIrGyroTuning[deviceIndex] =
+                (Switch2JoyConRightIrGyroTuning ?? new()).ToTuning();
+            destination.switch2GyroTriggerTunings[deviceIndex] =
+                Switch2GyroTriggerTuningEntryDTO.ToTable(
+                    Switch2GyroTriggerTunings);
+            var gyroLockBindings = new Switch2GyroLockBindingTable();
+            gyroLockBindings.TrySet(GyroOutMode.Mouse,
+                (Switch2GyroMouseLock ?? new()).ToBinding());
+            gyroLockBindings.TrySet(GyroOutMode.MouseJoystick,
+                (Switch2GyroMouseJoystickLock ?? new()).ToBinding());
+            destination.switch2GyroLockBindings[deviceIndex] =
+                gyroLockBindings;
+            destination.switch2ModeShiftSettings[deviceIndex] =
+                (Switch2ModeShift ?? new()).ToSettings();
             destination.leftStickDriftXAxis[deviceIndex] = LeftStickDriftXAxis;
             destination.leftStickDriftYAxis[deviceIndex] = LeftStickDriftYAxis;
             destination.rightStickDriftXAxis[deviceIndex] = RightStickDriftXAxis;
@@ -2798,7 +3816,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
                     foreach (KeyValuePair<DS4Controls, string> pair in ShiftControl.Extras.CustomMapExtras)
                     {
                         destination.UpdateDS4CExtra(deviceIndex,
-                            pair.Key.ToString(), false, pair.Value);
+                            pair.Key.ToString(), true, pair.Value);
                     }
                 }
 
@@ -2810,6 +3828,9 @@ namespace DS4WinWPF.DS4Control.DTOXml
                     }
                 }
             }
+
+            Switch2ModeShiftMappingDTO.Apply(Switch2ModeShiftMappings,
+                destination.ds4settings[deviceIndex]);
         }
 
         public void PostProcessXml()

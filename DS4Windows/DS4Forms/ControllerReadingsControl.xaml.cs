@@ -321,7 +321,8 @@ namespace DS4WinWPF.DS4Forms
                 //DS4StateExposed tmpexposeState = Program.rootHub.ExposedState[deviceNum];
                 DS4State tmpbaseState = Program.rootHub.getDS4State(deviceNum);
                 DS4State tmpinterState = Program.rootHub.getDS4StateTemp(deviceNum);
-                long cntCalibrating = ds.SixAxis.CntCalibrating;
+                long cntCalibrating =
+                    ds.ContinuousGyroCalibrationElapsedMilliseconds;
 
                 // Wait for controller to be in a wait period
                 ds.ReadWaitEv.Wait();
@@ -332,7 +333,7 @@ namespace DS4WinWPF.DS4Forms
                 tmpinterState.CopyTo(interState);
 
                 if (deviceNum != profileDeviceNum)
-                    Mapping.SetCurveAndDeadzone(profileDeviceNum, baseState, interState);
+                    Mapping.SetCurveAndDeadzone(profileDeviceNum, baseState, interState, ds);
 
                 // Done with copying. Allow input thread to resume
                 ds.ReadWaitEv.Set();

@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Win32.SafeHandles;
@@ -35,10 +34,19 @@ for (int i = 0; i < args.Length; i++)
     }
 }
 
-List<HidInterface> devices = HidInterface.Enumerate()
-    .Where(candidate => candidate.Attributes.VendorId == NintendoVendorId &&
+var devices = new List<HidInterface>();
+foreach (HidInterface candidate in HidInterface.Enumerate())
+{
+    if (candidate.Attributes.VendorId == NintendoVendorId &&
         candidate.Attributes.ProductId == Switch2ProProductId)
-    .ToList();
+    {
+        devices.Add(candidate);
+    }
+    else
+    {
+        candidate.Dispose();
+    }
+}
 if (devices.Count != 1)
 {
     Console.Error.WriteLine(
@@ -57,8 +65,6 @@ TextWriter writer = outputPath is null ? Console.Out :
 
 try
 {
-    string pathHash = Convert.ToHexString(SHA256.HashData(
-        Encoding.UTF8.GetBytes(device.Path)));
     WriteJsonLine(writer, new
     {
         schemaVersion = 1,
@@ -67,7 +73,7 @@ try
         evidenceStatus = "hardware-observed",
         redactionManifest = new[]
         {
-            "HID device path replaced by SHA-256",
+            "HID device path not serialized or hashed",
             "serial number not queried",
             "no MAC, key, host, console, or account identifier collected",
         },
@@ -77,7 +83,6 @@ try
         productId = $"0x{device.Attributes.ProductId:X4}",
         deviceVersion = $"0x{device.Attributes.VersionNumber:X4}",
         inputReportBytes = HidReportBytes,
-        devicePathSha256 = pathHash,
         qpcFrequency = Stopwatch.Frequency,
         timingScope = "single-reader completion order; not a calibrated latency or USB interval measurement",
         requestedReports = count,
@@ -86,9 +91,10 @@ try
     });
 
     var stopwatch = Stopwatch.StartNew();
+    var report = new byte[HidReportBytes];
     for (int ordinal = 0; ordinal < count; ordinal++)
     {
-        byte[] report = GC.AllocateUninitializedArray<byte>(HidReportBytes);
+        Array.Clear(report);
         string status;
         int bytesRead = 0;
         using (var timeout = new CancellationTokenSource(timeoutMilliseconds))
@@ -119,10 +125,10 @@ try
             ordinal,
             deviceGeneration = 1,
             hostQpcDelta = stopwatch.ElapsedTicks,
-            reportId = $"0x{report[0]:X2}",
+            reportId = bytesRead > 0 ? $"0x{report[0]:X2}" : null,
             status,
             bytesRead,
-            exactBytes = Convert.ToHexString(report),
+            exactBytes = Convert.ToHexString(report.AsSpan(0, bytesRead)),
         });
         if (status != "Success")
         {
@@ -156,6 +162,8 @@ internal sealed class HidInterface : IDisposable
     private const uint FileShareWrite = 0x00000002;
     private const uint OpenExisting = 3;
     private const uint FileFlagOverlapped = 0x40000000;
+    private const int ErrorInsufficientBuffer = 122;
+    private const string Switch2ProHardwareId = "vid_057e&pid_2069";
     private static readonly IntPtr InvalidHandleValue = new(-1);
 
     private HidInterface(string path, SafeFileHandle handle,
@@ -205,13 +213,26 @@ internal sealed class HidInterface : IDisposable
                         $"SetupDiEnumDeviceInterfaces failed: {error}.");
                 }
 
-                _ = SetupDiGetDeviceInterfaceDetail(deviceSet,
+                bool sizeQuerySucceeded = SetupDiGetDeviceInterfaceDetail(deviceSet,
                     ref interfaceData, IntPtr.Zero, 0, out uint required,
                     IntPtr.Zero);
-                IntPtr detail = Marshal.AllocHGlobal((int)required);
+                int sizeQueryError = Marshal.GetLastWin32Error();
+                int detailHeaderBytes = IntPtr.Size == 8 ? 8 : 6;
+                if (sizeQuerySucceeded ||
+                    sizeQueryError != ErrorInsufficientBuffer ||
+                    required < detailHeaderBytes + sizeof(char) ||
+                    required > int.MaxValue)
+                {
+                    throw new InvalidOperationException(
+                        $"SetupDiGetDeviceInterfaceDetail size query returned " +
+                        $"success={sizeQuerySucceeded}, error={sizeQueryError}, " +
+                        $"required={required}.");
+                }
+
+                IntPtr detail = Marshal.AllocHGlobal(checked((int)required));
                 try
                 {
-                    Marshal.WriteInt32(detail, IntPtr.Size == 8 ? 8 : 6);
+                    Marshal.WriteInt32(detail, detailHeaderBytes);
                     if (!SetupDiGetDeviceInterfaceDetail(deviceSet,
                         ref interfaceData, detail, required, out _, IntPtr.Zero))
                     {
@@ -220,6 +241,15 @@ internal sealed class HidInterface : IDisposable
 
                     string? path = Marshal.PtrToStringUni(detail + 4);
                     if (string.IsNullOrEmpty(path))
+                    {
+                        continue;
+                    }
+
+                    // The path is emitted by SetupAPI from the kernel-owned HID
+                    // hardware ID. Scope the read-capable open before CreateFile;
+                    // unrelated HID interfaces are never opened with GENERIC_READ.
+                    if (!path.Contains(Switch2ProHardwareId,
+                        StringComparison.OrdinalIgnoreCase))
                     {
                         continue;
                     }

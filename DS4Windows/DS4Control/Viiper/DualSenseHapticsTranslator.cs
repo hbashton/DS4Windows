@@ -1,4 +1,5 @@
 using System;
+using DS4Windows.Switch2;
 
 namespace DS4Windows
 {
@@ -73,11 +74,81 @@ namespace DS4Windows
             lightFast = Math.Max(lightFast, translatedLight);
         }
 
+        /// <summary>
+        /// Preserves the audited stereo PCM window as independent left/right,
+        /// three-slice HD-rumble envelopes with packet-local band analysis.
+        /// One 64-byte interleaved window contains 32 samples per side; keeping
+        /// three chronological slices maps directly onto the three Switch 2
+        /// wire subframes instead of averaging the complete window into one
+        /// value. This is used only when the physical target is Switch 2;
+        /// conventional controllers keep the historical two-motor reduction
+        /// above.
+        /// </summary>
+        internal static bool TryTranslateToSwitch2Groups(byte[] feedback,
+            int feedbackLength, int reportOffset,
+            out Switch2HdRumbleGroup left,
+            out Switch2HdRumbleGroup right)
+        {
+            left = default;
+            right = default;
+            if (feedback == null || feedbackLength < 0 ||
+                feedbackLength > feedback.Length || reportOffset < 0 ||
+                reportOffset >= feedbackLength)
+            {
+                return false;
+            }
+
+            int sampleOffset = feedback[reportOffset] switch
+            {
+                0x32 => reportOffset + LegacyHapticsOffset,
+                0x36 => reportOffset + CombinedHapticsOffset,
+                _ => -1,
+            };
+            if (sampleOffset < 0 ||
+                sampleOffset + HapticsSampleLength > feedbackLength)
+            {
+                return false;
+            }
+
+            var samples = feedback.AsSpan(sampleOffset, HapticsSampleLength);
+            Span<Switch2PcmSlice> slices = stackalloc Switch2PcmSlice[3];
+            Switch2PcmBandAnalyzer.AnalyzeSlices(samples, 0, slices);
+            left = new Switch2HdRumbleGroup(
+                CreateSwitch2PcmSubframe(slices[0]),
+                CreateSwitch2PcmSubframe(slices[1]),
+                CreateSwitch2PcmSubframe(slices[2]));
+            Switch2PcmBandAnalyzer.AnalyzeSlices(samples, 1, slices);
+            right = new Switch2HdRumbleGroup(
+                CreateSwitch2PcmSubframe(slices[0]),
+                CreateSwitch2PcmSubframe(slices[1]),
+                CreateSwitch2PcmSubframe(slices[2]));
+            return true;
+        }
+
+        private static Switch2HdRumbleSubframe CreateSwitch2PcmSubframe(
+            in Switch2PcmSlice slice)
+        {
+            ushort low = ToCanonicalAmplitude(slice.LowAmplitude);
+            ushort high = ToCanonicalAmplitude(slice.HighAmplitude);
+            return new Switch2HdRumbleSubframe(slice.HighControl,
+                Switch2HdRumbleFeedbackTranslator.ScaleCanonicalAmplitude(high),
+                slice.LowControl, Switch2HdRumbleFeedbackTranslator.ScaleCanonicalAmplitude(low));
+        }
+
         private static byte ToMotorValue(double normalized)
         {
             int value = Math.Clamp((int)Math.Round(normalized * byte.MaxValue),
                 0, byte.MaxValue);
             return value < MinimumMotorValue ? (byte)0 : (byte)value;
+        }
+
+        private static ushort ToCanonicalAmplitude(double normalized)
+        {
+            int value = Math.Clamp((int)Math.Round(normalized *
+                ushort.MaxValue), 0, ushort.MaxValue);
+            // HD voice-coil synthesis must not inherit the conventional motor
+            // startup dead zone. The bounded wire quantizer decides the floor.
+            return (ushort)value;
         }
     }
 }

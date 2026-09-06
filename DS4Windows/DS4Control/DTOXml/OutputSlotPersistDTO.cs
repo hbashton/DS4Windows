@@ -122,6 +122,11 @@ namespace DS4WinWPF.DS4Control.DTOXml
                 case "Switch2Pro":
                 case "ViiperSwitch2Pro":
                     return OutContType.ViiperSwitch2Pro;
+                case "Xbox One (VIIPER)":
+                case "Xbox One / Series":
+                case "XboxOne":
+                case "ViiperXboxOne":
+                    return OutContType.ViiperXboxOne;
                 case "None":
                     return OutContType.None;
             }
@@ -145,6 +150,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
                 OutContType.ViiperDualSense => "ViiperDualSense",
                 OutContType.ViiperDualSenseEdge => "ViiperDualSenseEdge",
                 OutContType.ViiperSwitch2Pro => "ViiperSwitch2Pro",
+                OutContType.ViiperXboxOne => "ViiperXboxOne",
                 _ => "ViiperX360",
             };
         }

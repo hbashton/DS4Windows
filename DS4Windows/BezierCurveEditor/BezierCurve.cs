@@ -33,6 +33,7 @@
 */
 using System;
 using System.Globalization;
+using System.Threading;
 
 namespace DS4Windows
 {
@@ -51,6 +52,11 @@ namespace DS4Windows
         private static int    SUBDIVISION_MAX_ITERATIONS = 10;
 
         private double mX1 = 0, mY1 = 0, mX2 = 0, mY2 = 0;  // Bezier curve definition (0, 0, 0, 0 = Linear. 99, 99, 0, 0 = Pre-defined hard-coded EnhancedPrecision curve)
+
+        // Independent of the mutable legacy LUT/compiler scratch state.
+        // Compile and publish only on the cold profile-edit path. A mapper
+        // captures one immutable evaluator for both coupled stick axes.
+        private NormalizedEvaluator normalizedEvaluator = NormalizedEvaluator.Linear;
 
         // Set or Get string representation of the bezier curve definition value (Note! Set doesn't initialize the lookup table. InitBezierCurve needs to be called to actually initalize the calculation)
         public string AsString
@@ -141,11 +147,11 @@ namespace DS4Windows
 
                 switch (y1)
                 {
-                    case 91.0: return InitEnhancedPrecision_91();
-                    case 92.0: return InitQuadric_92();
-                    case 93.0: return InitCubic_93();
-                    case 94.0: return InitEaseoutQuad_94();
-                    case 95.0: return InitEaseoutCubic_95();
+                    case 91.0: return PublishNormalizedEvaluator(InitEnhancedPrecision_91(), x1, y1, x2, y2);
+                    case 92.0: return PublishNormalizedEvaluator(InitQuadric_92(), x1, y1, x2, y2);
+                    case 93.0: return PublishNormalizedEvaluator(InitCubic_93(), x1, y1, x2, y2);
+                    case 94.0: return PublishNormalizedEvaluator(InitEaseoutQuad_94(), x1, y1, x2, y2);
+                    case 95.0: return PublishNormalizedEvaluator(InitEaseoutCubic_95(), x1, y1, x2, y2);
                 }
             }
 
@@ -170,7 +176,7 @@ namespace DS4Windows
                 for (int idx = 0; idx <= 255; idx++)
                     arrayBezierLUT[idx] = (byte)idx;
 
-                return bRetValue;
+                return PublishNormalizedEvaluator(bRetValue, x1, y1, x2, y2);
             }
 
             try
@@ -197,7 +203,230 @@ namespace DS4Windows
                 arraySampleValues = null;
             }
 
-            return bRetValue;
+            return PublishNormalizedEvaluator(bRetValue, x1, y1, x2, y2);
+        }
+
+        private bool PublishNormalizedEvaluator(bool legacyResult,
+            double x1, double y1, double x2, double y2)
+        {
+            Volatile.Write(ref normalizedEvaluator,
+                NormalizedEvaluator.Compile(x1, y1, x2, y2));
+            return legacyResult;
+        }
+
+        /// <summary>
+        /// Evaluates a normalized magnitude without byte quantization. Invalid
+        /// input is rejected with zero output. An invalid compiled definition
+        /// is rejected with the valid input preserved as a linear fallback.
+        /// For coupled axes capture once with CaptureEvaluator instead, so a
+        /// concurrent cold edit cannot mix two different curves in one report.
+        /// </summary>
+        public bool TryEvaluateNormalized(double input, out double output) =>
+            CaptureEvaluator().TryEvaluateNormalized(input, out output);
+
+        internal NormalizedEvaluator CaptureEvaluator() =>
+            Volatile.Read(ref normalizedEvaluator);
+
+        /// <summary>
+        /// Continuous counterpart of the GRE/Mika-N easing semantics above.
+        /// The existing byte LUT, legacy solver, rounding and stick mirroring
+        /// remain unchanged. This snapshot uses cold coefficients/samples and
+        /// a bounded safeguarded inverse instead of interpolating that LUT.
+        /// </summary>
+        internal sealed class NormalizedEvaluator
+        {
+            private const int SampleCount = 11;
+            private const int NewtonSteps = 8;
+            private const int BisectionSteps = 32;
+            private const double SampleStep = 1.0 / (SampleCount - 1);
+            private readonly int mode;
+            private readonly int inverseMode;
+            private readonly bool valid;
+            private readonly double ax, bx, cx, ay, by, cy;
+            private readonly double midpointX, midpointSlopeX, midpointQuadraticX;
+            private readonly double midpointY, midpointSlopeY, midpointQuadraticY;
+            private readonly double reverseAx, reverseBx, reverseCx;
+            private readonly double[] samples;
+
+            internal static readonly NormalizedEvaluator Linear = new(0, true);
+            private static readonly NormalizedEvaluator Invalid = new(0, false);
+
+            private NormalizedEvaluator(int mode, bool valid)
+            {
+                this.mode = mode;
+                this.valid = valid;
+            }
+
+            private NormalizedEvaluator(double x1, double y1, double x2, double y2)
+            {
+                mode = -1;
+                valid = true;
+                inverseMode = x1 == 0 && x2 == 0 ? 1 :
+                    x1 == 1 && x2 == 1 ? 2 : x1 == 1 && x2 == 0 ? 3 : 0;
+                ax = 1.0 - 3.0 * x2 + 3.0 * x1;
+                bx = 3.0 * x2 - 6.0 * x1;
+                cx = 3.0 * x1;
+                ay = 1.0 - 3.0 * y2 + 3.0 * y1;
+                by = 3.0 * y2 - 6.0 * y1;
+                cy = 3.0 * y1;
+                midpointX = 0.125 + 0.375 * (x1 + x2);
+                midpointSlopeX = 0.75 * (1.0 + x2 - x1);
+                midpointQuadraticX = 1.5 * (1.0 - (x1 + x2));
+                midpointY = 0.125 + 0.375 * (y1 + y2);
+                midpointSlopeY = 0.75 * (1.0 + y2 - y1);
+                midpointQuadraticY = 1.5 * (1.0 - (y1 + y2));
+                double reverseX1 = 1.0 - x2;
+                double reverseX2 = 1.0 - x1;
+                reverseAx = 1.0 - 3.0 * reverseX2 + 3.0 * reverseX1;
+                reverseBx = 3.0 * reverseX2 - 6.0 * reverseX1;
+                reverseCx = 3.0 * reverseX1;
+                samples = new double[SampleCount];
+                for (int i = 0; i < SampleCount; i++)
+                    samples[i] = EvaluateX(i * SampleStep);
+            }
+
+            internal static NormalizedEvaluator Compile(double x1, double y1,
+                double x2, double y2)
+            {
+                if (!double.IsFinite(x1) || !double.IsFinite(y1) ||
+                    !double.IsFinite(x2) || !double.IsFinite(y2))
+                    return Invalid;
+
+                if (x1 == 99.0 && y1 >= 91.0 && y1 <= 95.0 && y1 == Math.Truncate(y1))
+                    return new NormalizedEvaluator((int)y1, true);
+
+                if (x1 < 0 || x1 > 1 || x2 < 0 || x2 > 1)
+                    return Invalid;
+
+                if (x1 == y1 && x2 == y2)
+                    return Linear;
+
+                // Finite controls may still overflow polynomial coefficients.
+                // Do not publish an evaluator that can expose NaN/infinity.
+                if (!double.IsFinite(1.0 - 3.0 * y2 + 3.0 * y1) ||
+                    !double.IsFinite(3.0 * y2 - 6.0 * y1) ||
+                    !double.IsFinite(3.0 * y1))
+                    return Invalid;
+
+                return new NormalizedEvaluator(x1, y1, x2, y2);
+            }
+
+            internal bool TryEvaluateNormalized(double input, out double output)
+            {
+                output = 0;
+                if (!double.IsFinite(input) || input < 0 || input > 1)
+                    return false;
+
+                output = input;
+                if (!valid)
+                    return false;
+                if (mode == 0 || input == 0 || input == 1)
+                    return true;
+
+                switch (mode)
+                {
+                    case 91:
+                        output = input <= 0.4 ? 0.55 * input :
+                            input <= 0.75 ? input - 0.18 : input * 1.72 - 0.72;
+                        return true;
+                    case 92:
+                        output = input * input;
+                        return true;
+                    case 93:
+                        output = input * input * input;
+                        return true;
+                    case 94:
+                        output = -input * (input - 2.0);
+                        return true;
+                    case 95:
+                        double inner = input - 1.0;
+                        output = inner * inner * inner + 1.0;
+                        return true;
+                }
+
+                double t = SolveParameter(input);
+                double u = t - 0.5;
+                double value = t >= 0.25 && t <= 0.75 ?
+                    ((ay * u + midpointQuadraticY) * u + midpointSlopeY) * u + midpointY :
+                    ((ay * t + by) * t + cy) * t;
+                if (!double.IsFinite(value))
+                    return false;
+                output = Math.Clamp(value, 0.0, 1.0);
+                return true;
+            }
+
+            private double EvaluateX(double t) => ((ax * t + bx) * t + cx) * t;
+
+            private double EvaluateResidual(double t, double input)
+            {
+                if (t < 0.25)
+                    return EvaluateX(t) - input;
+                if (t > 0.75)
+                {
+                    double reverseT = 1.0 - t;
+                    return (1.0 - input) -
+                        ((reverseAx * reverseT + reverseBx) * reverseT + reverseCx) * reverseT;
+                }
+                double u = t - 0.5;
+                // Do not round X near its flat interior to input before
+                // subtracting. For x1=1,x2=0 this is exactly
+                // 4*u^3 + (0.5-input), including adjacent doubles to 0.5.
+                return ((ax * u + midpointQuadraticX) * u + midpointSlopeX) * u +
+                    (midpointX - input);
+            }
+
+            private double SolveParameter(double input)
+            {
+                // Exact degenerate cubic forms avoid both ill-conditioned
+                // subtraction and unnecessary iterations at their flat point.
+                if (inverseMode == 1)
+                    return Math.Cbrt(input);
+                if (inverseMode == 2)
+                    return 1.0 - Math.Cbrt(1.0 - input);
+                if (inverseMode == 3)
+                    return 0.5 + Math.Cbrt((input - 0.5) / 4.0);
+                int sample = 0;
+                while (sample < SampleCount - 2 && samples[sample + 1] <= input)
+                    sample++;
+                double lower = sample * SampleStep;
+                double upper = (sample + 1) * SampleStep;
+                double span = samples[sample + 1] - samples[sample];
+                double t = span > 0 ? lower +
+                    (input - samples[sample]) / span * SampleStep :
+                    (lower + upper) * 0.5;
+
+                // Keep every Newton step inside the inverse's known bracket;
+                // a zero/near-zero derivative simply selects bisection. The
+                // fixed final bound is in parameter space, not X residual,
+                // which would lose precision around flat slopes.
+                for (int i = 0; i < NewtonSteps; i++)
+                {
+                    double residual = EvaluateResidual(t, input);
+                    if (residual == 0)
+                        return t;
+                    if (residual < 0)
+                        lower = t;
+                    else
+                        upper = t;
+                    double u = t - 0.5;
+                    double slope = (3.0 * ax * u + 2.0 * midpointQuadraticX) * u + midpointSlopeX;
+                    double next = slope > 0 ? t - residual / slope : double.NaN;
+                    t = double.IsFinite(next) && next > lower && next < upper ?
+                        next : (lower + upper) * 0.5;
+                }
+                for (int i = 0; i < BisectionSteps; i++)
+                {
+                    double residual = EvaluateResidual(t, input);
+                    if (residual == 0)
+                        return t;
+                    if (residual < 0)
+                        lower = t;
+                    else
+                        upper = t;
+                    t = (lower + upper) * 0.5;
+                }
+                return t;
+            }
         }
 
         // Initialize a special "hard-coded" and pre-defined EnhancedPrecision output curve as a lookup result table

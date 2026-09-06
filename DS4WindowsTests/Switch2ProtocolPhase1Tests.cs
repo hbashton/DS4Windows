@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Security.Cryptography;
 using System.Text.Json;
 using DS4Windows.Switch2;
 
@@ -33,8 +34,8 @@ public class Switch2ProtocolPhase1Tests
         WriteInt16(body, 0x1B, 0x1234);
         WriteInt16(body, 0x1D, -300);
         WriteUInt16(body, 0x1F, 4200);
-        body[0x21] = 0x34;
-        WriteUInt16(body, 0x22, 0x5678);
+        WriteUInt16(body, 0x21, 0x5634);
+        body[0x23] = 0x78;
         BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(0x2A, 4),
             0xA1B2C3D4);
         WriteInt16(body, 0x2E, -123);
@@ -62,13 +63,15 @@ public class Switch2ProtocolPhase1Tests
         Assert.AreEqual((ushort)1002, result.Common.MouseY);
         Assert.AreEqual((ushort)1003, result.Common.MouseUnknown0Raw);
         Assert.AreEqual((ushort)1004, result.Common.MouseUnknown1Raw);
+        Assert.AreEqual((ushort)1003, result.Common.MouseRoughness);
+        Assert.AreEqual((ushort)1004, result.Common.MouseDistance);
         Assert.AreEqual((short)-1, result.Common.Magnetometer.X);
         Assert.AreEqual((short)0x1234, result.Common.Magnetometer.Y);
         Assert.AreEqual((short)-300, result.Common.Magnetometer.Z);
         Assert.AreEqual((ushort)4200,
             result.Common.BatteryVoltageMillivolts);
-        Assert.AreEqual((byte)0x34, result.Common.ChargingState);
-        Assert.AreEqual((ushort)0x5678, result.Common.BatteryCurrentRaw);
+        Assert.AreEqual((ushort)0x5634, result.Common.BatteryCurrentRaw);
+        Assert.AreEqual((byte)0x78, result.Common.Opaque23Raw);
         Assert.AreEqual(0xA1B2C3D4u, result.Common.MotionTimestamp);
         Assert.AreEqual((ushort)0xFF85, result.Common.TemperatureRawBits);
         Assert.AreEqual(new Switch2Vector3Raw(1, -2, 3),
@@ -107,15 +110,19 @@ public class Switch2ProtocolPhase1Tests
     [TestMethod]
     public void Common05ApplicabilityRejectsPhantomJoyConControls()
     {
-        byte[] packet = BuildUsbCommon(Switch2ControllerModel.JoyCon2Left, 1);
-        Assert.IsTrue(Switch2InputCodec.TryDecodeUsb(packet,
-            Switch2ControllerModel.JoyCon2Left, out var left));
+        byte[] body = BuildCommonBody(1);
+        Assert.IsTrue(Switch2InputCodec.TryDecodeBluetoothLe(
+            Switch2InputCodec.ServiceUuid,
+            Switch2InputCodec.Common05CharacteristicUuid, InputProperties,
+            body, Switch2ControllerModel.JoyCon2Left, out var left));
         Assert.IsTrue(left.HasLeftStick);
         Assert.IsFalse(left.HasRightStick);
         Assert.IsTrue(left.HasMouseData);
 
-        Assert.IsTrue(Switch2InputCodec.TryDecodeUsb(packet,
-            Switch2ControllerModel.JoyCon2Right, out var right));
+        Assert.IsTrue(Switch2InputCodec.TryDecodeBluetoothLe(
+            Switch2InputCodec.ServiceUuid,
+            Switch2InputCodec.Common05CharacteristicUuid, InputProperties,
+            body, Switch2ControllerModel.JoyCon2Right, out var right));
         Assert.IsFalse(right.HasLeftStick);
         Assert.IsTrue(right.HasRightStick);
         Assert.IsTrue(right.HasMouseData);
@@ -383,24 +390,63 @@ public class Switch2ProtocolPhase1Tests
             Switch2ControllerModel.ProController2, Switch2StickSide.Left,
             out var left));
         Assert.AreEqual(0x0130A8u, left.Address);
+        Assert.AreEqual(Switch2FactoryCalibrationStorageSlot.Primary,
+            left.StorageSlot);
         Assert.AreEqual((byte)9, left.Length);
         Assert.IsTrue(Switch2CalibrationCodec.TryGetFactoryStickMetadata(
             Switch2ControllerModel.ProController2, Switch2StickSide.Right,
             out var right));
         Assert.AreEqual(0x0130E8u, right.Address);
+        Assert.AreEqual(Switch2FactoryCalibrationStorageSlot.Secondary,
+            right.StorageSlot);
         Assert.IsTrue(Switch2CalibrationCodec.TryGetFactoryStickMetadata(
-            Switch2ControllerModel.JoyCon2Left, Switch2StickSide.Left, out _));
+            Switch2ControllerModel.JoyCon2Left, Switch2StickSide.Left,
+            out var joyConLeft));
+        Assert.AreEqual(0x0130A8u, joyConLeft.Address);
+        Assert.AreEqual(Switch2FactoryCalibrationStorageSlot.Primary,
+            joyConLeft.StorageSlot);
         Assert.IsFalse(Switch2CalibrationCodec.TryGetFactoryStickMetadata(
             Switch2ControllerModel.JoyCon2Left, Switch2StickSide.Right, out _));
         Assert.IsFalse(Switch2CalibrationCodec.TryGetFactoryStickMetadata(
             Switch2ControllerModel.JoyCon2Right, Switch2StickSide.Left, out _));
         Assert.IsTrue(Switch2CalibrationCodec.TryGetFactoryStickMetadata(
-            Switch2ControllerModel.JoyCon2Right, Switch2StickSide.Right, out _));
-        Assert.IsFalse(Switch2CalibrationCodec.SupportsLiveUserCalibration);
-        Assert.IsFalse(Switch2CalibrationCodec.TryGetLiveUserStickAddress(
+            Switch2ControllerModel.JoyCon2Right, Switch2StickSide.Right,
+            out var joyConRight));
+        Assert.AreEqual(0x0130A8u, joyConRight.Address,
+            "A single right Joy-Con stores its logical-right stick in the " +
+            "controller's primary factory slot.");
+        Assert.AreEqual(Switch2FactoryCalibrationStorageSlot.Primary,
+            joyConRight.StorageSlot);
+        Assert.IsTrue(Switch2CalibrationCodec.SupportsLiveUserCalibration);
+        Assert.IsTrue(Switch2CalibrationCodec.TryGetLiveUserStickMetadata(
             Switch2ControllerModel.ProController2, Switch2StickSide.Left,
-            out uint userAddress));
-        Assert.AreEqual(0u, userAddress);
+            out Switch2UserCalibrationMetadata leftUser));
+        Assert.AreEqual(0x1FC040u, leftUser.Address);
+        Assert.AreEqual((byte)11, leftUser.Length);
+        Assert.IsTrue(Switch2CalibrationCodec.TryGetLiveUserStickMetadata(
+            Switch2ControllerModel.ProController2, Switch2StickSide.Right,
+            out Switch2UserCalibrationMetadata rightUser));
+        Assert.AreEqual(0x1FC080u, rightUser.Address,
+            "Current SDL and hid-nintendo2 independently corroborate 0x1FC080; the conflicting Switch2Connect 0x1FC060 address must not leak back in.");
+        Assert.IsTrue(Switch2CalibrationCodec.TryGetLiveUserStickMetadata(
+            Switch2ControllerModel.JoyCon2Right, Switch2StickSide.Right,
+            out Switch2UserCalibrationMetadata joyConRightUser));
+        Assert.AreEqual(0x1FC040u, joyConRightUser.Address,
+            "A single Joy-Con uses its primary user-calibration slot.");
+        Assert.IsFalse(Switch2CalibrationCodec.TryGetLiveUserStickMetadata(
+            Switch2ControllerModel.JoyCon2Right, Switch2StickSide.Left,
+            out _));
+
+        var userRecord = new byte[11];
+        userRecord[0] = 0xB2;
+        userRecord[1] = 0xA1;
+        bytes.CopyTo(userRecord, 2);
+        Assert.IsTrue(Switch2CalibrationCodec.TryDecodeUserStick(userRecord,
+            out Switch2StickCalibration decodedUser));
+        Assert.AreEqual(expected[0], decodedUser.NeutralX);
+        userRecord[0] = 0xFF;
+        Assert.IsFalse(Switch2CalibrationCodec.TryDecodeUserStick(userRecord,
+            out _), "An exact 0xA1B2 marker is required before user bytes may override factory calibration.");
 
         Assert.IsTrue(Switch2CalibrationCodec.TryDecodeStick(new byte[9],
             out var allZero));
@@ -468,10 +514,10 @@ public class Switch2ProtocolPhase1Tests
     }
 
     [TestMethod]
-    public void DerivedUsbBcd0201GoldenRetainsOnlyProtocolFields()
+    public void SyntheticUsbCommonGoldenContainsOnlyConstructedProtocolFacts()
     {
         string path = Path.Combine(AppContext.BaseDirectory, "TestData",
-            "Switch2", "pro-controller2-usb-bcd0201-common05.json");
+            "Switch2", "pro-controller2-usb-common05-synthetic.json");
         string json = File.ReadAllText(path);
         Assert.IsFalse(json.Contains("devicePathSha256",
             StringComparison.OrdinalIgnoreCase));
@@ -479,30 +525,56 @@ public class Switch2ProtocolPhase1Tests
             StringComparison.OrdinalIgnoreCase));
         Assert.IsFalse(json.Contains("exactBytes",
             StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(json.Contains("derivedGolden",
+            StringComparison.OrdinalIgnoreCase));
+        Assert.IsTrue(json.Contains("never captured from hardware",
+            StringComparison.Ordinal));
 
         using JsonDocument document = JsonDocument.Parse(json);
         JsonElement root = document.RootElement;
         Assert.AreEqual(Switch2FixtureEnvelope.CurrentSchemaVersion,
             root.GetProperty("schemaVersion").GetInt32());
-        Assert.AreEqual("derivedGolden",
+        Assert.AreEqual("synthetic",
             root.GetProperty("sourceKind").GetString());
-        string derivedSourceId = root.GetProperty(
-            "derivedSourceId").GetString();
-        Assert.AreEqual(2, root.GetProperty(
-            "derivationManifestVersion").GetInt32());
+        Assert.AreEqual("fact",
+            root.GetProperty("evidenceStatus").GetString());
+        Assert.AreEqual("independent-adversarial-review-2026-08-29",
+            root.GetProperty("reviewer").GetString());
+        Assert.IsTrue(root.GetProperty("constructionProcedure").GetString()
+            .Contains("set every other byte to zero", StringComparison.Ordinal));
+        JsonElement redactions = root.GetProperty("redactionManifest");
+        foreach (JsonProperty entry in redactions.EnumerateObject())
+        {
+            Assert.IsFalse(entry.Value.GetBoolean(),
+                $"Synthetic fixture redaction flag {entry.Name} must be false.");
+        }
+        JsonElement protocol = root.GetProperty("protocol");
+        Assert.AreEqual("Switch 2 Pro Controller",
+            protocol.GetProperty("controllerModel").GetString());
+        Assert.AreEqual("USB HID",
+            protocol.GetProperty("transport").GetString());
+        Assert.AreEqual("input",
+            protocol.GetProperty("direction").GetString());
+        Assert.AreEqual("0x05",
+            protocol.GetProperty("reportId").GetString());
+        string syntheticSourceId = root.GetProperty(
+            "syntheticSourceId").GetString();
         string clockDomain = root.GetProperty("hostClockDomain").GetString();
         long frequency = root.GetProperty(
             "hostTimestampFrequency").GetInt64();
-        var source = Switch2FixtureSource.DerivedGolden(derivedSourceId,
-            root.GetProperty("derivationManifestVersion").GetUInt16());
+        var source = Switch2FixtureSource.Synthetic(syntheticSourceId);
         var fixtures = new List<Switch2FixtureEnvelope>();
 
         foreach (JsonElement record in root.GetProperty("records")
                      .EnumerateArray())
         {
             byte[] packet = Convert.FromHexString(
-                record.GetProperty("derivedBytes").GetString());
-            AssertDerivedGoldenHasOnlyRetainedFields(packet);
+                record.GetProperty("syntheticBytes").GetString());
+            string payloadSha256 = Convert.ToHexString(
+                SHA256.HashData(packet)).ToLowerInvariant();
+            Assert.AreEqual(record.GetProperty("payloadSha256").GetString(),
+                payloadSha256);
+            AssertSyntheticGoldenHasOnlyProtocolFields(packet);
             fixtures.Add(Switch2FixtureEnvelope.CreateUsb(GoldenStreamId,
                 source, Switch2ControllerModel.ProController2, "unknown",
                 record.GetProperty("deviceGeneration").GetUInt64(), 0,
@@ -515,15 +587,15 @@ public class Switch2ProtocolPhase1Tests
         Assert.IsTrue(Switch2ReplayEngine.TryReplay(fixtures,
             collector.OnEvent, out var failure), failure.Kind.ToString());
         Assert.AreEqual(2, collector.Events.Count);
-        Assert.AreEqual(0x00052005u,
+        Assert.AreEqual(0x10203040u,
             collector.Events[0].Report.Common.Counter);
-        Assert.AreEqual((ushort)0x07E1,
+        Assert.AreEqual((ushort)0x0123,
             collector.Events[0].Report.Common.LeftStick.X);
-        Assert.AreEqual((ushort)0x0833,
+        Assert.AreEqual((ushort)0x0456,
             collector.Events[0].Report.Common.LeftStick.Y);
-        Assert.AreEqual((ushort)0x0854,
+        Assert.AreEqual((ushort)0x0789,
             collector.Events[0].Report.Common.RightStick.X);
-        Assert.AreEqual((ushort)0x0816,
+        Assert.AreEqual((ushort)0x0ABC,
             collector.Events[0].Report.Common.RightStick.Y);
         Assert.AreEqual(4u, collector.Events[1].CounterDelta);
         Assert.AreEqual(Switch2CounterSequenceKind.Forward,
@@ -531,7 +603,7 @@ public class Switch2ProtocolPhase1Tests
             "A live USB +4 is raw forward movement, not packet loss.");
     }
 
-    private static void AssertDerivedGoldenHasOnlyRetainedFields(
+    private static void AssertSyntheticGoldenHasOnlyProtocolFields(
         byte[] packet)
     {
         Assert.AreEqual(Switch2InputCodec.UsbPacketLength, packet.Length);
@@ -634,8 +706,8 @@ public class Switch2ProtocolPhase1Tests
         Assert.AreEqual(Switch2CounterSequenceKind.BackwardOrOutOfOrder,
             collector.Events[2].CounterSequence);
         Assert.AreEqual(uint.MaxValue, collector.Events[2].CounterDelta);
-        Assert.AreEqual(1u, collector.Events[3].CounterDelta,
-            "A reordered frame must not regress the sequence baseline.");
+        Assert.AreEqual(2u, collector.Events[3].CounterDelta,
+            "Pro USB diagnostics compare successive arrivals, including discontinuities.");
         Assert.AreEqual(Switch2CounterSequenceKind.Forward,
             collector.Events[3].CounterSequence);
     }

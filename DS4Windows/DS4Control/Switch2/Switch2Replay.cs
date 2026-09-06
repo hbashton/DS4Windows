@@ -398,14 +398,6 @@ public readonly struct Switch2ReplayEvent
     public Switch2CounterSequenceKind CounterSequence { get; }
 }
 
-public enum Switch2CounterSequenceKind : byte
-{
-    First = 0,
-    Forward,
-    Duplicate,
-    BackwardOrOutOfOrder,
-}
-
 public delegate void Switch2ReplayHandler(in Switch2ReplayEvent replayEvent);
 
 /// <summary>
@@ -506,19 +498,13 @@ public static class Switch2ReplayEngine
                 Switch2CounterSequenceKind.First;
             if (hasCounterDelta)
             {
-                counterDelta = report.CounterWidthBits == 8 ?
-                    (byte)(report.Counter - previousCounter) :
-                    unchecked(report.Counter - previousCounter);
-                uint forwardLimit = report.CounterWidthBits == 8 ?
-                    0x7Fu : 0x7FFFFFFFu;
-                counterSequence = counterDelta == 0 ?
-                    Switch2CounterSequenceKind.Duplicate :
-                    counterDelta <= forwardLimit ?
-                        Switch2CounterSequenceKind.Forward :
-                        Switch2CounterSequenceKind.BackwardOrOutOfOrder;
+                counterSequence = Switch2CounterSequence.Classify(
+                    report.Counter, previousCounter,
+                    report.CounterWidthBits, out counterDelta);
             }
 
-            if (counterSequence !=
+            if (Switch2CounterSequence.UsesArrivalOrdering(report.Model,
+                    fixture.Transport, report.Kind) || counterSequence !=
                 Switch2CounterSequenceKind.BackwardOrOutOfOrder)
             {
                 counters[key] = report.Counter;
@@ -703,13 +689,6 @@ public static class Switch2ReplayEngine
             HostClockDomain,
             HostTimestampFrequency, PairEpoch);
     }
-}
-
-public enum Switch2JoyConStaleSide : byte
-{
-    None = 0,
-    Left,
-    Right,
 }
 
 public readonly struct Switch2JoyConPairSkew

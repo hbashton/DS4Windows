@@ -131,6 +131,14 @@
                         <ComboBoxItem Content="Capture" />
                         <ComboBoxItem Content="Side L" />
                         <ComboBoxItem Content="Side R" />
+                        <ComboBoxItem Content="Switch 2 Joy-Con Left IR Sensor" />
+                        <ComboBoxItem Content="Switch 2 Joy-Con Right IR Sensor" />
+                        <ComboBoxItem Content="Switch 2 Mode Shift" />
+                        <ComboBoxItem Content="Switch 2 Joy-Con Left SL" />
+                        <ComboBoxItem Content="Switch 2 Joy-Con Left SR" />
+                        <ComboBoxItem Content="Switch 2 Joy-Con Right SL" />
+                        <ComboBoxItem Content="Switch 2 Joy-Con Right SR" />
+                        <ComboBoxItem Content="Switch 2 C / Chat" />
                     </ComboBox>
 
                     <Button x:Name="defaultBtn" Content="{Binding DefaultBtnString,FallbackValue={lex:Loc Default}}" Background="{Binding DefaultColor,FallbackValue={StaticResource SecondaryColor}}" Margin="0,50,0,0" Click="DefaultBtn_Click" />
@@ -593,6 +601,8 @@
 
                                     <Button x:Name="mouseWheelUBtn" Content="↑" Width="20" Height="20" Canvas.Left="50" Canvas.Top="28" />
                                     <Button x:Name="mouseWheelDBtn" Content="↓" Width="20" Height="20" Canvas.Left="50" Canvas.Top="76" />
+                                    <Button x:Name="mouseWheelLBtn" Content="←" Width="20" Height="20" Canvas.Left="26" Canvas.Top="76" />
+                                    <Button x:Name="mouseWheelRBtn" Content="→" Width="20" Height="20" Canvas.Left="74" Canvas.Top="76" />
                                 </Canvas>
                             </Grid>
                         </Grid>

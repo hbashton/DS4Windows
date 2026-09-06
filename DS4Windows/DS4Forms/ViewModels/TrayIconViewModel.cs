@@ -494,6 +494,10 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         private void UpdateTrayBattery(object sender, byte percentage)
         {
+            // Check both before enqueueing and when the dispatcher executes
+            // this method. A reconnect must not inherit an old source's icon.
+            if (sender is ReportDiagnosticsWorker.Source source &&
+                (!source.IsCurrent || Global.UseIconChoice != TrayIconChoice.Battery)) return;
             if (Application.Current?.Dispatcher != null &&
                 !Application.Current.Dispatcher.CheckAccess())
             {

@@ -34,6 +34,7 @@ using NonFormTimer = System.Timers.Timer;
 using Microsoft.Win32;
 using Xceed.Wpf.Toolkit;
 using DS4WinWPF.DS4Forms.ViewModels;
+using DS4Windows.Switch2;
 
 namespace DS4WinWPF.DS4Forms
 {
@@ -54,11 +55,15 @@ namespace DS4WinWPF.DS4Forms
         private ColorPickerWindow colorDialog;
         private NonFormTimer ds4 = new NonFormTimer();
 
-        public RecordBox(int deviceNum, DS4Windows.DS4ControlSettings controlSettings, bool shift, bool showscan = true, bool repeatable = true)
+        public RecordBox(int deviceNum,
+            DS4Windows.DS4ControlSettings controlSettings, bool shift,
+            bool showscan = true, bool repeatable = true,
+            Switch2ModeShiftScope? modeShiftScope = null)
         {
             InitializeComponent();
 
-            recordBoxVM = new RecordBoxViewModel(deviceNum, controlSettings, shift, repeatable);
+            recordBoxVM = new RecordBoxViewModel(deviceNum,
+                controlSettings, shift, repeatable, modeShiftScope);
             mouseButtonsPanel.Visibility = Visibility.Hidden;
             extraConPanel.Visibility = Visibility.Hidden;
             macroModeCombo.IsEnabled = repeatable;

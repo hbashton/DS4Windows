@@ -1,4 +1,5 @@
 using DS4Windows;
+using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
@@ -920,7 +921,8 @@ namespace DS4WindowsTests
             try
             {
                 Task<TcpClient> accept = listener.AcceptTcpClientAsync();
-                var client = new ViiperClient("127.0.0.1", port);
+                var client = new ViiperClient("127.0.0.1", port,
+                    stream => stream);
                 opened = client.OpenExistingDeviceStream(42, "9", 6,
                     lifetime);
                 using TcpClient accepted = await accept.WaitAsync(
@@ -954,6 +956,115 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public async Task XboxOneBrokerCommitsInputOnlyAfterExactAckAndCarriesFeedbackAck()
+        {
+            var listener = new TcpListener(IPAddress.Loopback, 0);
+            listener.Start();
+            int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            var cleanup = new CleanupCounters();
+            var lifetime = cleanup.CreateLifetime(43, "10", 7);
+            ViiperDeviceStream broker = null;
+            using var client = new TcpClient();
+            try
+            {
+                Task<TcpClient> accept = listener.AcceptTcpClientAsync();
+                await client.ConnectAsync(IPAddress.Loopback, port);
+                using TcpClient server = await accept.WaitAsync(
+                    TimeSpan.FromSeconds(2));
+                NetworkStream serverStream = server.GetStream();
+                broker = new ViiperDeviceStream(client.GetStream(), client,
+                    lifetime);
+
+                Task enable = Task.Run(broker.EnableXboxOneBroker);
+                byte[] ready = await ReadExactlyAsync(serverStream, 16);
+                AssertXboxBrokerHeader(ready, 0x01, 0, 0);
+                await serverStream.WriteAsync(BuildXboxBrokerFrame(
+                    0x81, 0, Array.Empty<byte>()));
+                await enable.WaitAsync(TimeSpan.FromSeconds(2));
+                Assert.IsTrue(broker.IsXboxOneBrokerEnabled);
+
+                byte[] semantic = Enumerable.Range(0,
+                        XboxOneEgressState.WireSize)
+                    .Select(index => (byte)(index * 11 + 3)).ToArray();
+                Task<ViiperFrameWriteTiming> input = Task.Run(() =>
+                    broker.WriteXboxOneInputAndWaitForAck(semantic,
+                        semantic.Length));
+                byte[] inputFrame = await ReadExactlyAsync(serverStream,
+                    16 + semantic.Length);
+                AssertXboxBrokerHeader(inputFrame, 0x02, 2,
+                    semantic.Length);
+                CollectionAssert.AreEqual(semantic,
+                    inputFrame.Skip(16).ToArray());
+                Assert.IsFalse(input.IsCompleted,
+                    "Socket acceptance must not commit semantic input.");
+
+                await serverStream.WriteAsync(BuildXboxBrokerFrame(
+                    ViiperDeviceStream.XboxOneBrokerSemanticInputAck, 2,
+                    new byte[] { 1 }));
+                byte[] inputAckPayload = new byte[1];
+                Assert.AreEqual(1, broker.ReadXboxOneBrokerFrame(
+                    out byte inputAckType, out ulong inputAckRevision,
+                    inputAckPayload));
+                Assert.AreEqual(ViiperDeviceStream.
+                    XboxOneBrokerSemanticInputAck, inputAckType);
+                broker.AcceptXboxOneInputAck(inputAckRevision,
+                    inputAckPayload[0]);
+                ViiperFrameWriteTiming inputTiming = await input.WaitAsync(
+                    TimeSpan.FromSeconds(2));
+                Assert.IsTrue(inputTiming.SocketWriteStartedTimestamp > 0);
+                Assert.IsTrue(inputTiming.SocketWriteCompletedTimestamp >=
+                    inputTiming.SocketWriteStartedTimestamp);
+                Assert.IsTrue(inputTiming.AcceptanceAcknowledgedTimestamp >=
+                    inputTiming.SocketWriteStartedTimestamp);
+                Assert.IsTrue(inputTiming.WaitCompletedTimestamp >=
+                    inputTiming.AcceptanceAcknowledgedTimestamp);
+
+                byte[] feedback = Enumerable.Range(0,
+                        ControllerFeedbackFrame.SerializedLength)
+                    .Select(index => (byte)(index * 7 + 5)).ToArray();
+                await serverStream.WriteAsync(BuildXboxBrokerFrame(
+                    ViiperDeviceStream.XboxOneBrokerCanonicalFeedback, 9,
+                    feedback));
+                byte[] feedbackPayload = new byte[feedback.Length];
+                Assert.AreEqual(feedback.Length,
+                    broker.ReadXboxOneBrokerFrame(out byte feedbackType,
+                        out ulong feedbackRevision, feedbackPayload));
+                Assert.AreEqual(ViiperDeviceStream.
+                    XboxOneBrokerCanonicalFeedback, feedbackType);
+                Assert.AreEqual(9ul, feedbackRevision);
+                CollectionAssert.AreEqual(feedback, feedbackPayload);
+
+                broker.AcknowledgeXboxOneFeedback(feedbackRevision, true);
+                byte[] feedbackAck = await ReadExactlyAsync(serverStream, 17);
+                AssertXboxBrokerHeader(feedbackAck, 0x03, 9, 1);
+                Assert.AreEqual(1, feedbackAck[16]);
+            }
+            finally
+            {
+                broker?.Dispose();
+                listener.Stop();
+            }
+            cleanup.AssertCleanedExactlyOnce(43, "10", 7);
+        }
+
+        [TestMethod]
+        public void XboxOneAcknowledgementReaderUsesRealtimePriority()
+        {
+            Assert.AreEqual(ThreadPriority.Highest,
+                ViiperOutDevice.GetFeedbackReaderThreadPriority(
+                    ViiperVirtualDeviceType.XboxOne,
+                    supportsDirectSpeaker: false));
+            Assert.AreEqual(ThreadPriority.Highest,
+                ViiperOutDevice.GetFeedbackReaderThreadPriority(
+                    ViiperVirtualDeviceType.DualSense,
+                    supportsDirectSpeaker: true));
+            Assert.AreEqual(ThreadPriority.AboveNormal,
+                ViiperOutDevice.GetFeedbackReaderThreadPriority(
+                    ViiperVirtualDeviceType.Xbox360,
+                    supportsDirectSpeaker: false));
+        }
+
+        [TestMethod]
         public void RecoveryBackoffIsImmediateExponentialAndBounded()
         {
             CollectionAssert.AreEqual(new[]
@@ -964,6 +1075,215 @@ namespace DS4WindowsTests
                 .ToArray());
             Assert.AreEqual(1000,
                 ViiperOutDevice.GetStreamRecoveryBackoffMilliseconds(100));
+        }
+
+        private static byte[] BuildXboxBrokerFrame(byte type,
+            ulong correlation, byte[] payload)
+        {
+            payload ??= Array.Empty<byte>();
+            byte[] frame = new byte[16 + payload.Length];
+            frame[0] = (byte)'X';
+            frame[1] = (byte)'1';
+            frame[2] = (byte)'B';
+            frame[3] = (byte)'R';
+            frame[4] = 1;
+            frame[5] = type;
+            BinaryPrimitives.WriteUInt16LittleEndian(frame.AsSpan(6, 2),
+                (ushort)payload.Length);
+            BinaryPrimitives.WriteUInt64LittleEndian(frame.AsSpan(8, 8),
+                correlation);
+            payload.CopyTo(frame, 16);
+            return frame;
+        }
+
+        private static void AssertXboxBrokerHeader(byte[] frame, byte type,
+            ulong correlation, int payloadLength)
+        {
+            Assert.IsTrue(frame.Length >= 16);
+            CollectionAssert.AreEqual(new byte[]
+            {
+                (byte)'X', (byte)'1', (byte)'B', (byte)'R',
+            }, frame.Take(4).ToArray());
+            Assert.AreEqual(1, frame[4]);
+            Assert.AreEqual(type, frame[5]);
+            Assert.AreEqual(payloadLength,
+                BinaryPrimitives.ReadUInt16LittleEndian(frame.AsSpan(6, 2)));
+            Assert.AreEqual(correlation,
+                BinaryPrimitives.ReadUInt64LittleEndian(frame.AsSpan(8, 8)));
+        }
+
+        private static async Task<byte[]> ReadExactlyAsync(Stream stream,
+            int length)
+        {
+            byte[] result = new byte[length];
+            int total = 0;
+            while (total < result.Length)
+            {
+                int read = await stream.ReadAsync(
+                    result.AsMemory(total, result.Length - total));
+                Assert.IsTrue(read > 0, "Broker stream closed early.");
+                total += read;
+            }
+            return result;
+        }
+
+        [TestMethod]
+        public void AuthorizedXboxOnePersonaCannotReopenInPlace()
+        {
+            Assert.IsFalse(ViiperOutDevice.SupportsInPlaceStreamRecovery(
+                ViiperVirtualDeviceType.XboxOne));
+            Assert.IsTrue(ViiperOutDevice.SupportsInPlaceStreamRecovery(
+                ViiperVirtualDeviceType.Xbox360));
+            Assert.IsTrue(ViiperOutDevice.SupportsInPlaceStreamRecovery(
+                ViiperVirtualDeviceType.Switch2Pro));
+        }
+
+        [TestMethod]
+        public void DormantXboxLifetimeBindsOnePortAndNeverDetachesPlaceholder()
+        {
+            var activatedCleanup = new CleanupCounters();
+            ViiperVirtualDeviceLifetime activated = activatedCleanup.
+                CreateLifetime(51, "4", -1);
+            Assert.AreEqual(-1, activated.UsbipPort);
+            activated.BindUsbipPort(12);
+            activated.BindUsbipPort(12);
+            Assert.AreEqual(12, activated.UsbipPort);
+            Assert.ThrowsException<InvalidOperationException>(() =>
+                activated.BindUsbipPort(13));
+            activated.Dispose();
+            activatedCleanup.AssertCleanedExactlyOnce(51, "4", 12);
+
+            var dormantCleanup = new CleanupCounters();
+            ViiperVirtualDeviceLifetime dormant = dormantCleanup.
+                CreateLifetime(52, "5", -1);
+            dormant.Dispose();
+            Assert.ThrowsException<ObjectDisposedException>(() =>
+                dormant.BindUsbipPort(14));
+            dormantCleanup.AssertRemovedWithoutOwnedPort(52, "5");
+        }
+
+        [TestMethod]
+        public void XboxOneProfileRebuildDisposesLifetimeWhileBrokerTransportIsOpen()
+        {
+            var payload = new CountingMemoryStream();
+            var transport = new CountingDisposable();
+            int detachCount = 0;
+            int removeCount = 0;
+            var lifetime = new ViiperVirtualDeviceLifetime(53, "6", 15,
+                (_, _) =>
+                {
+                    Assert.AreEqual(0, payload.DisposeCount,
+                        "Device removal must precede broker-stream disposal.");
+                    Assert.AreEqual(0, transport.DisposeCount,
+                        "Device removal must precede transport disposal.");
+                    Interlocked.Increment(ref removeCount);
+                },
+                (_, _) =>
+                {
+                    Assert.AreEqual(0, payload.DisposeCount,
+                        "usbip detach must retain the broker reader.");
+                    Assert.AreEqual(0, transport.DisposeCount,
+                        "usbip detach must retain the broker writer.");
+                    Interlocked.Increment(ref detachCount);
+                },
+                _ => { },
+                () => { });
+            var stream = new ViiperDeviceStream(payload, transport,
+                lifetime);
+
+            stream.DisposeDeviceLifetimeBeforeTransportClose();
+
+            Assert.AreEqual(1, Volatile.Read(ref detachCount));
+            Assert.AreEqual(1, Volatile.Read(ref removeCount));
+            Assert.AreEqual(0, payload.DisposeCount);
+            Assert.AreEqual(0, transport.DisposeCount);
+
+            stream.Dispose();
+            Assert.AreEqual(1, payload.DisposeCount);
+            Assert.AreEqual(1, transport.DisposeCount);
+            Assert.AreEqual(1, Volatile.Read(ref detachCount),
+                "Repeated stream cleanup must not detach twice.");
+            Assert.AreEqual(1, Volatile.Read(ref removeCount),
+                "Repeated stream cleanup must not remove twice.");
+        }
+
+        [TestMethod]
+        public void XboxOneProfileRebuildWaitsOnlyForAcknowledgedTerminalStop()
+        {
+            Assert.IsTrue(ControllerFeedbackClock.
+                TryGetTimestampMicroseconds(out ulong now));
+            Assert.IsTrue(ControllerFeedbackFrame.TryCreate(
+                ControllerFeedbackSource.XboxOneVirtualDevice,
+                ControllerFeedbackCommand.Stop,
+                ControllerFeedbackActuators.All,
+                0, 0, 0, 0, 1, 2, 3, 4, now, 250_000,
+                out ControllerFeedbackFrame stop));
+            byte[] payload = new byte[ControllerFeedbackFrame.SerializedLength];
+            Assert.IsTrue(stop.TryWriteTo(payload));
+
+            Assert.IsTrue(ViiperOutDevice.
+                IsAcknowledgedXboxOneTerminalFeedback(payload,
+                    payload.Length, 7, delivered: true,
+                    acknowledged: true));
+            Assert.IsFalse(ViiperOutDevice.
+                IsAcknowledgedXboxOneTerminalFeedback(payload,
+                    payload.Length, 7, delivered: true,
+                    acknowledged: false));
+            Assert.IsFalse(ViiperOutDevice.
+                IsAcknowledgedXboxOneTerminalFeedback(payload,
+                    payload.Length, 0, delivered: true,
+                    acknowledged: true));
+
+            payload[9] = (byte)ControllerFeedbackCommand.Neutral;
+            Assert.IsFalse(ViiperOutDevice.
+                IsAcknowledgedXboxOneTerminalFeedback(payload,
+                    payload.Length, 7, delivered: true,
+                    acknowledged: true));
+        }
+
+        [TestMethod]
+        public void XboxOneProfileRebuildAcceptsOnlyExactFreshStopAfterPhysicalRetirement()
+        {
+            Assert.IsTrue(ControllerFeedbackClock.
+                TryGetTimestampMicroseconds(out ulong now));
+            var binding = new XboxOneAuthorizedFeedbackBinding
+            {
+                Source = (byte)ControllerFeedbackSource.
+                    XboxOneVirtualDevice,
+                PersonaGeneration = 5,
+                DeviceGeneration = 11,
+                TransportGeneration = 12,
+                OwnershipEpoch = 13,
+                TimeToLiveMicroseconds = 250_000,
+            };
+            Assert.IsTrue(ControllerFeedbackFrame.TryCreate(
+                ControllerFeedbackSource.XboxOneVirtualDevice,
+                ControllerFeedbackCommand.Stop,
+                ControllerFeedbackActuators.All,
+                0, 0, 0, 0, 17, 11, 12, 13, now, 250_000,
+                out ControllerFeedbackFrame stop));
+
+            Assert.IsTrue(ViiperOutDevice.
+                IsAuthorizedXboxOneTerminalStopAfterPhysicalRetirement(
+                    stop, binding, 16));
+            Assert.IsFalse(ViiperOutDevice.
+                IsAuthorizedXboxOneTerminalStopAfterPhysicalRetirement(
+                    stop, binding, 17));
+
+            Assert.IsTrue(ControllerFeedbackFrame.TryCreate(
+                ControllerFeedbackSource.XboxOneVirtualDevice,
+                ControllerFeedbackCommand.Neutral,
+                ControllerFeedbackActuators.All,
+                0, 0, 0, 0, 18, 11, 12, 13, now, 250_000,
+                out ControllerFeedbackFrame neutral));
+            Assert.IsFalse(ViiperOutDevice.
+                IsAuthorizedXboxOneTerminalStopAfterPhysicalRetirement(
+                    neutral, binding, 17));
+
+            binding.TransportGeneration++;
+            Assert.IsFalse(ViiperOutDevice.
+                IsAuthorizedXboxOneTerminalStopAfterPhysicalRetirement(
+                    stop, binding, 16));
         }
 
         [DataTestMethod]
@@ -1189,6 +1509,17 @@ namespace DS4WindowsTests
                 Assert.AreEqual(1, Volatile.Read(ref staleCount));
                 Assert.AreEqual(usbipPort, detachedPort);
                 Assert.AreEqual(usbipPort, unregisteredPort);
+                Assert.AreEqual(busId, removedBus);
+                Assert.AreEqual(devId, removedDevice);
+            }
+
+            public void AssertRemovedWithoutOwnedPort(uint busId,
+                string devId)
+            {
+                Assert.AreEqual(0, Volatile.Read(ref detachCount));
+                Assert.AreEqual(0, Volatile.Read(ref unregisterCount));
+                Assert.AreEqual(1, Volatile.Read(ref removeCount));
+                Assert.AreEqual(1, Volatile.Read(ref staleCount));
                 Assert.AreEqual(busId, removedBus);
                 Assert.AreEqual(devId, removedDevice);
             }

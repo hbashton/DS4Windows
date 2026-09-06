@@ -19,8 +19,10 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
+using System.Threading.Tasks;
 using Concentus;
 using DS4Windows.InputDevices;
+using DS4Windows.Switch2;
 using SBC;
 
 namespace DS4Windows
@@ -68,12 +70,15 @@ namespace DS4Windows
             switch (deviceType)
             {
                 case ViiperVirtualDeviceType.Xbox360:
+                case ViiperVirtualDeviceType.XboxOne:
                 case ViiperVirtualDeviceType.DualShock4:
                 case ViiperVirtualDeviceType.Switch2Pro:
                     // Every virtual controller exposes a one-millisecond
                     // maximum input opportunity. This remains adaptive rather
                     // than becoming a polling loop: the writer wakes only for
-                    // fresh mapped physical reports and coalesces queued state.
+                    // fresh mapped physical reports. Xbox 360 journals
+                    // discrete boundaries and coalesces continuous state;
+                    // the other legacy paths retain latest-state behavior.
                     return DefaultControllerRateHz;
                 case ViiperVirtualDeviceType.DualSense:
                 case ViiperVirtualDeviceType.DualSenseEdge:
@@ -133,6 +138,7 @@ namespace DS4Windows
         DualSense,
         DualSenseEdge,
         Switch2Pro,
+        XboxOne,
     }
 
     public sealed class ViiperOutDevice : OutputDevice
@@ -266,6 +272,21 @@ namespace DS4Windows
         private readonly bool gamepadOnly;
         private readonly ViiperClient client;
         private readonly ViiperInputScheduler inputScheduler = new();
+        private readonly Xbox360EgressScheduler xbox360EgressScheduler;
+        private readonly XboxOneEgressScheduler xboxOneEgressScheduler;
+        private readonly Switch2EgressScheduler switch2EgressScheduler;
+        private readonly int xbox360MaximumOrderedAgeMilliseconds;
+        private readonly string xbox360PresentationPolicyError;
+        private readonly int xboxOneMaximumOrderedAgeMilliseconds;
+        private readonly string xboxOnePresentationPolicyError;
+        private readonly int switch2MaximumOrderedAgeMilliseconds;
+        private readonly string switch2PresentationPolicyError;
+        private readonly object orderedEgressLifecycleLock = new object();
+        private readonly OrderedEgressWriterAdmissionGate
+            orderedEgressWriterAdmissionGate = new();
+        private readonly object xbox360ResynchronizationLock = new object();
+        private readonly object xboxOneResynchronizationLock = new object();
+        private readonly object switch2ResynchronizationLock = new object();
         private readonly ViiperLatencyHistogram mappedReadyToPublishLatency =
             new();
         private readonly ViiperLatencyHistogram publishToWriterClaimLatency =
@@ -273,6 +294,9 @@ namespace DS4Windows
         private readonly ViiperLatencyHistogram claimToSocketStartLatency =
             new();
         private readonly ViiperLatencyHistogram socketWriteLatency = new();
+        private readonly ViiperLatencyHistogram xboxOneBrokerAcceptanceLatency =
+            new();
+        private readonly ViiperLatencyHistogram xboxOneAckWakeLatency = new();
         private readonly byte[] stateWriterPacket =
             new byte[53];
         private readonly ViiperHighResolutionWaiter stateRateWaiter = new();
@@ -282,6 +306,9 @@ namespace DS4Windows
         private readonly object microphoneProcessingLock = new object();
         private readonly object writerThreadLock = new object();
         private readonly object microphoneWriterThreadLock = new object();
+        private readonly object switch2RuntimeStatusLifecycleLock =
+            new object();
+        private readonly object switch2RuntimeStatusLock = new object();
         private readonly ViiperStreamRecoveryGate streamRecoveryGate = new();
         private readonly object feedbackThreadLock = new object();
         private readonly object feedbackDispatchThreadLock = new object();
@@ -289,6 +316,9 @@ namespace DS4Windows
         private readonly object feedbackCallbackAdmissionLock = new object();
         private readonly ManualResetEvent feedbackCallbacksIdle =
             new ManualResetEvent(true);
+        private readonly ManualResetEvent xboxOneTerminalFeedbackAcknowledged =
+            new ManualResetEvent(false);
+        private const int XboxOneTerminalFeedbackAckWaitMilliseconds = 500;
         internal Action NativeGameLedReleaseAdmissionTestHook;
         private int activeFeedbackCallbacks;
         private readonly object physicalDualSenseIdentityLock = new object();
@@ -306,6 +336,10 @@ namespace DS4Windows
             new AutoResetEvent(false);
         private readonly AutoResetEvent feedbackControlSignal =
             new AutoResetEvent(false);
+        private readonly AutoResetEvent switch2RuntimeStatusSignal =
+            new AutoResetEvent(false);
+        private readonly ManualResetEvent switch2RuntimeStatusStopSignal =
+            new ManualResetEvent(true);
         private readonly ManualResetEvent microphoneInterfaceStopSignal = new ManualResetEvent(false);
         private readonly AutoResetEvent microphoneInterfaceStateSignal =
             new AutoResetEvent(false);
@@ -363,8 +397,23 @@ namespace DS4Windows
         private Thread stateWriterThread;
         private Thread microphoneWriterThread;
         private Thread microphoneInterfaceThread;
+        private Thread switch2RuntimeStatusThread;
         private byte[] pendingStatePacket;
         private long pendingStatePacketQueuedTimestamp;
+        private long orderedEgressOwnedPresentationGeneration;
+        private long orderedEgressAdmissionGeneration;
+        private OrderedEgressPublicationLease xbox360PendingResynchronizationLease;
+        private Xbox360EgressState xbox360PendingResynchronizationState;
+        private long xbox360PendingResynchronizationTimestamp;
+        private bool xbox360PendingResynchronization;
+        private OrderedEgressPublicationLease xboxOnePendingResynchronizationLease;
+        private XboxOneEgressState xboxOnePendingResynchronizationState;
+        private long xboxOnePendingResynchronizationTimestamp;
+        private bool xboxOnePendingResynchronization;
+        private OrderedEgressPublicationLease switch2PendingResynchronizationLease;
+        private Switch2EgressState switch2PendingResynchronizationState;
+        private long switch2PendingResynchronizationTimestamp;
+        private bool switch2PendingResynchronization;
         private int preparedMicrophoneHead;
         private int preparedMicrophoneCount;
         private int pendingMicrophoneHead;
@@ -409,6 +458,7 @@ namespace DS4Windows
         private long lastMicrophoneSubmittedTimestamp;
         private long lastMicrophoneArmTimestamp;
         private long streamGeneration;
+        private long faultedRuntimeStreamGeneration = -1;
         private long feedbackDispatchGeneration;
         private long feedbackDispatchThreadGeneration;
         private long microphoneWorkerGeneration;
@@ -462,6 +512,10 @@ namespace DS4Windows
         private int virtualMicrophoneInterfaceRemoteGenerationKnown;
         private ViiperMicrophoneBufferSnapshot virtualMicrophoneBufferSnapshot =
             ViiperMicrophoneBufferSnapshot.Empty;
+        private Switch2RuntimeInputDevice switch2RuntimeStatusSource;
+        private ViiperSwitch2RuntimeStatusV1 pendingSwitch2RuntimeStatus;
+        private bool hasPendingSwitch2RuntimeStatus;
+        private int switch2RuntimeStatusFailureLogged;
         private int lastMicrophoneRecoveryStage;
         private int edgePhysicalMismatchLogged;
         private int feedbackSpeakerCallbackFailureLogged;
@@ -476,6 +530,22 @@ namespace DS4Windows
         private long feedbackControlDelivered;
         private long feedbackControlStale;
         private long feedbackControlCallbackFailures;
+        private long switch2FeedbackValidated;
+        private long switch2FeedbackRejected;
+        private long switch2RumbleFramesPreserved;
+        private long switch2LedOnlyFramesPreserved;
+        private Switch2VirtualFeedbackSession switch2FeedbackSession;
+        private readonly Switch2DualSenseFeedbackPolicyLane
+            switch2DualSenseFeedbackPolicyLane;
+        private int switch2DualSensePolicyRefreshRequested;
+        private Switch2XboxFeedbackPolicyRequest switch2XboxPolicyRefreshRequested;
+        private readonly Func<Switch2XboxFeedbackPolicy> readSwitch2XboxLivePolicy;
+        private readonly Predicate<Switch2XboxFeedbackPolicyRequest> isCurrentSwitch2XboxPolicyRequest;
+        private XboxOnePhysicalOutputSuppressionRequest xboxOnePhysicalOutputSuppressionRequested;
+        private XboxOnePhysicalFeedbackSession xboxOnePhysicalFeedbackSession;
+        private XboxOneAuthorizedFeedbackBinding xboxOneFeedbackBinding;
+        private ulong xboxOneLastFeedbackSequence;
+        private int xboxOneSwitch2FeedbackPreRetired;
         private int activeFeedbackLength;
         private string physicalDualSenseIdentityPath;
         private bool physicalDualSenseIdentityVerified;
@@ -507,6 +577,35 @@ namespace DS4Windows
             public bool HasSequence { get; }
         }
 
+        /// <summary>
+        /// Captures the exact active ordered-egress producer lifecycle before a
+        /// physical report is projected. The signed presentation field keeps
+        /// all shared 64-bit reads interlocked while preserving the scheduler's
+        /// complete unsigned generation bits.
+        /// </summary>
+        private readonly struct OrderedEgressPublicationLease
+        {
+            public OrderedEgressPublicationLease(long writerGeneration,
+                long presentationGeneration,
+                long admissionGeneration,
+                OrderedEgressProducerEpoch producerEpoch)
+            {
+                WriterGeneration = writerGeneration;
+                PresentationGenerationBits = presentationGeneration;
+                AdmissionGeneration = admissionGeneration;
+                ProducerEpoch = producerEpoch;
+            }
+
+            public long WriterGeneration { get; }
+            public long PresentationGenerationBits { get; }
+            public ulong PresentationGeneration => unchecked((ulong)
+                PresentationGenerationBits);
+            public long AdmissionGeneration { get; }
+            public OrderedEgressProducerEpoch ProducerEpoch { get; }
+            public bool IsValid => PresentationGenerationBits != 0 &&
+                AdmissionGeneration != 0 && ProducerEpoch.IsValid;
+        }
+
         public ViiperOutDevice(OutContType outputType,
             ViiperVirtualDeviceType viiperType, bool audioOnlySidecar = false,
             bool gamepadOnly = false)
@@ -515,6 +614,11 @@ namespace DS4Windows
             this.viiperType = viiperType;
             this.audioOnlySidecar = audioOnlySidecar;
             this.gamepadOnly = gamepadOnly;
+            readSwitch2XboxLivePolicy = ReadSwitch2XboxLivePolicy;
+            isCurrentSwitch2XboxPolicyRequest = IsCurrentSwitch2XboxPolicyRequest;
+            switch2DualSenseFeedbackPolicyLane = new(
+                ReadSwitch2DualSenseConversionPolicy,
+                readStreamGeneration: ReadFeedbackStreamGeneration);
             if (audioOnlySidecar && gamepadOnly)
             {
                 throw new ArgumentException(
@@ -533,6 +637,54 @@ namespace DS4Windows
                 IsDualSenseVirtualType(viiperType) ?
                     FeedbackOrderedControlMaximumAgeMilliseconds : 0);
             client = new ViiperClient(DefaultHost, DefaultPort);
+            if (viiperType == ViiperVirtualDeviceType.Xbox360)
+            {
+                string configuredAge = Environment.GetEnvironmentVariable(
+                    Xbox360PresentationPolicy.
+                        MaximumOrderedAgeEnvironmentVariable);
+                bool validPolicy = Xbox360PresentationPolicy.
+                    TryParseMaximumOrderedAgeMilliseconds(configuredAge,
+                        out int configuredAgeMilliseconds,
+                        out string policyError);
+                xbox360MaximumOrderedAgeMilliseconds = validPolicy ?
+                    configuredAgeMilliseconds : 0;
+                xbox360PresentationPolicyError = policyError;
+                xbox360EgressScheduler = new Xbox360EgressScheduler(
+                    Xbox360PresentationPolicy.ToStopwatchTicks(
+                        xbox360MaximumOrderedAgeMilliseconds));
+            }
+            else if (viiperType == ViiperVirtualDeviceType.XboxOne)
+            {
+                string configuredAge = Environment.GetEnvironmentVariable(
+                    XboxOnePresentationPolicy.
+                        MaximumOrderedAgeEnvironmentVariable);
+                bool validPolicy = XboxOnePresentationPolicy.
+                    TryParseMaximumOrderedAgeMilliseconds(configuredAge,
+                        out int configuredAgeMilliseconds,
+                        out string policyError);
+                xboxOneMaximumOrderedAgeMilliseconds = validPolicy ?
+                    configuredAgeMilliseconds : 0;
+                xboxOnePresentationPolicyError = policyError;
+                xboxOneEgressScheduler = new XboxOneEgressScheduler(
+                    XboxOnePresentationPolicy.ToStopwatchTicks(
+                        xboxOneMaximumOrderedAgeMilliseconds));
+            }
+            else if (viiperType == ViiperVirtualDeviceType.Switch2Pro)
+            {
+                string configuredAge = Environment.GetEnvironmentVariable(
+                    Switch2PresentationPolicy.
+                        MaximumOrderedAgeEnvironmentVariable);
+                bool validPolicy = Switch2PresentationPolicy.
+                    TryParseMaximumOrderedAgeMilliseconds(configuredAge,
+                        out int configuredAgeMilliseconds,
+                        out string policyError);
+                switch2MaximumOrderedAgeMilliseconds = validPolicy ?
+                    configuredAgeMilliseconds : 0;
+                switch2PresentationPolicyError = policyError;
+                switch2EgressScheduler = new Switch2EgressScheduler(
+                    Switch2PresentationPolicy.ToStopwatchTicks(
+                        switch2MaximumOrderedAgeMilliseconds));
+            }
         }
 
         private static byte[][] CreateFixedBuffers(int count, int length)
@@ -788,7 +940,27 @@ namespace DS4Windows
             connected && activeStreamSupportsDirectSpeaker;
 
         internal bool IsRuntimeConnected =>
-            connected && Volatile.Read(ref deviceStream) != null;
+            connected && Volatile.Read(ref deviceStream) != null && !HasRuntimeFault;
+
+        internal bool HasRuntimeFault => Interlocked.Read(ref faultedRuntimeStreamGeneration) ==
+            Interlocked.Read(ref streamGeneration);
+
+        private void MarkXboxOneRuntimeStreamFault(ViiperDeviceStream failedStream,
+            long failedGeneration)
+        {
+            lock (feedbackCallbackAdmissionLock)
+            {
+                if (viiperType != ViiperVirtualDeviceType.XboxOne || !connected ||
+                    writerStopRequested || failedStream == null ||
+                    failedGeneration != Interlocked.Read(ref streamGeneration) ||
+                    !ReferenceEquals(Volatile.Read(ref deviceStream), failedStream)) return;
+                // Readiness is separate from the ownership flag. Disconnect
+                // still needs connected and exact callback admission for its
+                // canonical terminal-Stop protocol; an old EOF cannot poison
+                // a successor stream or publish another Ready state.
+                Interlocked.Exchange(ref faultedRuntimeStreamGeneration, failedGeneration);
+            }
+        }
 
         internal bool SupportsAtomicAudioHaptics =>
             connected && activeStreamSupportsAtomicAudioHaptics;
@@ -806,10 +978,12 @@ namespace DS4Windows
             connected && activeStreamUsesV5AudioSource;
 
         internal void ApplyAtomicAudioHapticsFeedback(byte[] feedback,
-            int feedbackLength, int expectedDeviceIndex)
+            int feedbackLength, int expectedDeviceIndex,
+            long sourceStreamGeneration = 0)
         {
             ApplyFeedback(feedback, feedbackLength, expectedDeviceIndex,
-                freshNativeOutput: false);
+                freshNativeOutput: false,
+                nativeOutputStreamGeneration: sourceStreamGeneration);
         }
 
         internal bool CanProvideDirectSpeakerPcm =>
@@ -850,6 +1024,7 @@ namespace DS4Windows
             PublishPhysicalControllerBinding(deviceIndex);
             if (connected)
             {
+                RebindSwitch2RuntimeStatusBridge();
                 ResetState();
             }
         }
@@ -904,6 +1079,8 @@ namespace DS4Windows
 
         public override void Connect()
         {
+            int preparedPhysicalControllerIndex = Volatile.Read(
+                ref lastInputDeviceIndex);
             Disconnect();
             streamRecoveryGate.Reset();
             ClearNativeGameOutputProcessLease();
@@ -912,18 +1089,67 @@ namespace DS4Windows
             if (!status.Ready)
             {
                 throw new IOException(
-                    $"{status.DisplayText}. Use Settings > VIIPER Virtual Controller Support to install or repair VIIPER and usbip-win2.");
+                    status.ServerProbeMessage != null
+                        ? $"{status.DisplayText}. Check the running broker connection in Settings > VIIPER Virtual Controller Support."
+                        : $"{status.DisplayText}. Use Settings > VIIPER Virtual Controller Support to install or repair VIIPER and usbip-win2.");
             }
 
             deviceStream = CreateDeviceStreamWithServerFallback();
+            try
+            {
+                PrepareSwitch2VirtualFeedbackSession();
+            }
+            catch
+            {
+                Interlocked.Exchange(ref deviceStream, null)?.Dispose();
+                Interlocked.Exchange(ref switch2FeedbackSession, null)?
+                    .TryRetire();
+                throw;
+            }
             Interlocked.Increment(ref streamGeneration);
+            if (UsesOrderedEgressScheduler())
+            {
+                lock (orderedEgressLifecycleLock)
+                {
+                    ClearXbox360PendingResynchronization();
+                    ClearXboxOnePendingResynchronization();
+                    ClearSwitch2PendingResynchronization();
+                    ulong presentationGeneration =
+                        GetOrderedEgressPresentationGeneration();
+                    Interlocked.Exchange(
+                        ref orderedEgressOwnedPresentationGeneration,
+                        unchecked((long)presentationGeneration));
+                    AdvanceOrderedEgressAdmissionGeneration();
+                }
+                if (!string.IsNullOrEmpty(xbox360PresentationPolicyError))
+                {
+                    AppLogger.LogToGui(
+                        $"{xbox360PresentationPolicyError} Xbox 360 presentation is using compatibility mode with no ordered-age deadline.",
+                        true);
+                }
+                if (!string.IsNullOrEmpty(xboxOnePresentationPolicyError))
+                {
+                    AppLogger.LogToGui(
+                        $"{xboxOnePresentationPolicyError} Xbox One presentation is using compatibility mode with no ordered-age deadline.",
+                        true);
+                }
+                if (!string.IsNullOrEmpty(switch2PresentationPolicyError))
+                {
+                    AppLogger.LogToGui(
+                        $"{switch2PresentationPolicyError} Switch 2 presentation is using compatibility mode with no ordered-age deadline.",
+                        true);
+                }
+            }
             Volatile.Write(ref submitFailureLogged, 0);
             Volatile.Write(ref microphoneUnavailableLogged, 0);
             Volatile.Write(ref microphoneNoiseSuppressionUnavailableLogged, 0);
             Volatile.Write(ref microphoneProcessingFailureLogged, 0);
             Volatile.Write(ref microphoneMuted, 0);
-            Volatile.Write(ref lastInputDeviceIndex, -1);
-            Volatile.Write(ref publishedPhysicalControllerTargetDevice, null);
+            Volatile.Write(ref lastInputDeviceIndex,
+                preparedPhysicalControllerIndex);
+            Volatile.Write(ref publishedPhysicalControllerTargetDevice,
+                ResolvePhysicalControllerTarget(
+                    preparedPhysicalControllerIndex));
             Interlocked.Exchange(ref streamRecoveryAttempts, 0);
             Interlocked.Exchange(ref replacedPendingPacketCount, 0);
             Interlocked.Exchange(ref submittedPacketCount, 0);
@@ -983,6 +1209,10 @@ namespace DS4Windows
             Interlocked.Exchange(ref feedbackControlDelivered, 0);
             Interlocked.Exchange(ref feedbackControlStale, 0);
             Interlocked.Exchange(ref feedbackControlCallbackFailures, 0);
+            Interlocked.Exchange(ref switch2FeedbackValidated, 0);
+            Interlocked.Exchange(ref switch2FeedbackRejected, 0);
+            Interlocked.Exchange(ref switch2RumbleFramesPreserved, 0);
+            Interlocked.Exchange(ref switch2LedOnlyFramesPreserved, 0);
             feedbackDispatchBuffer.Reset();
             lock (physicalDualSenseIdentityLock)
             {
@@ -1004,6 +1234,18 @@ namespace DS4Windows
             writerRateWaitStopSignal.Reset();
             long writerGeneration = Interlocked.Increment(
                 ref stateWriterGeneration);
+            if (UsesOrderedEgressScheduler())
+            {
+                lock (orderedEgressLifecycleLock)
+                {
+                    orderedEgressWriterAdmissionGate.Activate(
+                        writerGeneration,
+                        Interlocked.Read(
+                            ref orderedEgressOwnedPresentationGeneration),
+                        Interlocked.Read(
+                            ref orderedEgressAdmissionGeneration));
+                }
+            }
             inputScheduler.Reset(Volatile.Read(ref streamGeneration));
             lock (preparedMicrophoneQueueLock)
             {
@@ -1015,24 +1257,56 @@ namespace DS4Windows
                     preparedMicrophoneTimestamps.Length);
             }
             writerStopRequested = false;
+            xboxOneTerminalFeedbackAcknowledged.Reset();
             lock (feedbackCallbackAdmissionLock)
             {
                 feedbackDispatchStopRequested = false;
-                connected = true;
+                Volatile.Write(ref connected, true);
                 Interlocked.Increment(ref feedbackDispatchGeneration);
             }
             long workerGeneration = Interlocked.Read(
                 ref microphoneWorkerGeneration);
-            StartStateWriter(writerGeneration);
-            StartMicrophoneWriter(workerGeneration);
-            StartMicrophoneInterfaceMonitor(workerGeneration);
-            StartFeedbackDispatchWorkers();
-            ResetState();
-            StartFeedbackReader();
+            if (viiperType == ViiperVirtualDeviceType.XboxOne)
+            {
+                // Install the reverse canonical-feedback consumer before
+                // Windows can enumerate and send the first GIP output. The
+                // specialized activation endpoint refuses to attach until
+                // ConsumerReady has completed on this exact stream.
+                StartFeedbackDispatchWorkers();
+                StartFeedbackReader();
+                try
+                {
+                    client.ActivateAuthorizedXboxOneDevice(deviceStream);
+                }
+                catch
+                {
+                    Disconnect();
+                    throw;
+                }
+                StartStateWriter(writerGeneration);
+                ResetState();
+            }
+            else
+            {
+                StartStateWriter(writerGeneration);
+                StartMicrophoneWriter(workerGeneration);
+                StartMicrophoneInterfaceMonitor(workerGeneration);
+                StartFeedbackDispatchWorkers();
+                ResetState();
+                StartFeedbackReader();
+            }
+            StartSwitch2RuntimeStatusBridge();
             if (stateWriteRateHz > 0)
             {
+                string queuePolicy = UsesXbox360EgressScheduler() ?
+                    "ordered button/trigger boundaries and latest continuous state" :
+                    UsesXboxOneEgressScheduler() ?
+                    "ordered button/trigger boundaries and latest continuous state" :
+                    UsesSwitch2EgressScheduler() ?
+                    "ordered button boundaries and latest axes/motion state" :
+                    "latest-state coalescing";
                 AppLogger.LogToGui(
-                    $"VIIPER {viiperType} virtual input presentation is capped at {stateWriteRateHz} Hz with latest-state coalescing.",
+                    $"DS4Windows -> VIIPER {viiperType} input publication limit: {stateWriteRateHz} Hz; DS4Windows queue: {queuePolicy}. Virtual USB service cadence is determined separately by the device descriptor.",
                     false);
             }
         }
@@ -1164,7 +1438,377 @@ namespace DS4Windows
             }
 
             activeFeedbackLength = ViiperStatePacketBuilder.GetFeedbackLength(viiperType);
+            if (viiperType == ViiperVirtualDeviceType.Xbox360)
+            {
+                object options = xbox360MaximumOrderedAgeMilliseconds > 0 ?
+                    new ViiperClient.Xbox360CreateOptions
+                    {
+                        MaximumOrderedAgeMilliseconds =
+                            xbox360MaximumOrderedAgeMilliseconds,
+                    } : null;
+                return client.CreateDeviceAndOpenStream("xbox360",
+                    deviceSpecific: options);
+            }
+            if (viiperType == ViiperVirtualDeviceType.XboxOne)
+            {
+                XboxOnePhysicalFeedbackSession previousPhysicalSession =
+                    Volatile.Read(ref xboxOnePhysicalFeedbackSession);
+                if (previousPhysicalSession != null)
+                {
+                    if (!previousPhysicalSession.TryRetire())
+                    {
+                        throw new IOException(
+                            "The previous Xbox One physical feedback owner could not be neutralized; a successor was not started.");
+                    }
+                    _ = Interlocked.CompareExchange(
+                        ref xboxOnePhysicalFeedbackSession, null,
+                        previousPhysicalSession);
+                }
+                XboxOneAuthorizedPersonaConfiguration configuration =
+                    XboxOneAuthorizedPersonaConfiguration.LoadExplicit();
+                XboxOneAuthorizedCreateRequestV1 request;
+                Switch2VirtualFeedbackSession switch2Session = null;
+                XboxOnePhysicalFeedbackSession physicalFeedbackSession = null;
+                int physicalIndex = Volatile.Read(ref lastInputDeviceIndex);
+                Switch2RuntimeInputDevice switch2Target =
+                    Program.rootHub != null && physicalIndex >= 0 &&
+                    physicalIndex < Program.rootHub.DS4Controllers.Length ?
+                        Program.rootHub.DS4Controllers[physicalIndex] as
+                            Switch2RuntimeInputDevice : null;
+                if (switch2Target != null)
+                {
+                    if (!switch2Target.TryGetFeedbackBinding(
+                            out ulong deviceGeneration,
+                            out ulong transportGeneration))
+                    {
+                        throw new IOException(
+                            "The bound Switch 2 controller has no active, generation-authenticated feedback output lifetime.");
+                    }
+                    if (!switch2Target.TryCreateVirtualFeedbackSession(
+                            ControllerFeedbackSource.XboxOneVirtualDevice,
+                            deviceGeneration, transportGeneration,
+                            out switch2Session))
+                    {
+                        throw new IOException(
+                            "The bound Switch 2 controller rejected the Xbox One feedback session.");
+                    }
+                    request = XboxOneAuthorizedCreateRequestV1.
+                        CreateForFeedbackTarget(configuration,
+                            deviceGeneration, transportGeneration,
+                            switch2Session.OwnershipEpoch);
+                }
+                else
+                {
+                    DS4Device physicalTarget = Program.rootHub != null &&
+                        physicalIndex >= 0 && physicalIndex <
+                            Program.rootHub.DS4Controllers.Length ?
+                        Program.rootHub.DS4Controllers[physicalIndex] : null;
+                    if (physicalTarget == null)
+                    {
+                        throw new IOException(
+                            "Xbox One output requires an exact bound physical controller before persona creation.");
+                    }
+                    request = XboxOneAuthorizedCreateRequestV1.Create(
+                        configuration);
+                    if (!TryCreateXboxOnePhysicalFeedbackSession(
+                            request.Feedback, physicalTarget, physicalIndex,
+                            out physicalFeedbackSession))
+                    {
+                        throw new IOException(
+                            "The Xbox One physical feedback binding was invalid.");
+                    }
+                }
+                activeFeedbackLength =
+                    ControllerFeedbackFrame.SerializedLength;
+                try
+                {
+                    ViiperDeviceStream stream = client.
+                        CreateAuthorizedXboxOneDeviceAndOpenStream(request);
+                    xboxOneFeedbackBinding = request.Feedback;
+                    xboxOneLastFeedbackSequence = 0;
+                    Volatile.Write(ref xboxOneSwitch2FeedbackPreRetired, 0);
+                    Interlocked.Exchange(ref switch2FeedbackSession,
+                        switch2Session)?.TryRetire();
+                    if (Interlocked.CompareExchange(
+                            ref xboxOnePhysicalFeedbackSession,
+                            physicalFeedbackSession, null) != null)
+                    {
+                        stream.Dispose();
+                        throw new IOException(
+                            "Another Xbox One physical feedback owner is still active.");
+                    }
+                    return stream;
+                }
+                catch
+                {
+                    switch2Session?.TryRetire();
+                    physicalFeedbackSession?.TryRetire();
+                    throw;
+                }
+            }
+            if (viiperType == ViiperVirtualDeviceType.Switch2Pro)
+            {
+                object metadata = null;
+                Switch2RuntimeInputDevice source =
+                    ResolveSwitch2RuntimeStatusSource();
+                if (ViiperSwitch2RuntimeStatusV1.TryCreate(source,
+                        out ViiperSwitch2RuntimeStatusV1 status))
+                {
+                    metadata = status.ToCreationMetadata();
+                }
+                return client.CreateDeviceAndOpenStream("ns2pro",
+                    deviceSpecific: metadata);
+            }
             return client.CreateDeviceAndOpenStream(viiperType);
+        }
+
+        private Switch2RuntimeInputDevice ResolveSwitch2RuntimeStatusSource()
+        {
+            if (viiperType != ViiperVirtualDeviceType.Switch2Pro ||
+                Program.rootHub == null)
+            {
+                return null;
+            }
+            int deviceIndex = Volatile.Read(ref lastInputDeviceIndex);
+            return deviceIndex >= 0 &&
+                    deviceIndex < Program.rootHub.DS4Controllers.Length ?
+                Program.rootHub.DS4Controllers[deviceIndex] as
+                    Switch2RuntimeInputDevice : null;
+        }
+
+        private void StartSwitch2RuntimeStatusBridge()
+        {
+            if (viiperType != ViiperVirtualDeviceType.Switch2Pro ||
+                !connected)
+            {
+                return;
+            }
+            lock (switch2RuntimeStatusLifecycleLock)
+            {
+                StopSwitch2RuntimeStatusBridgeCore();
+                Switch2RuntimeInputDevice source =
+                    ResolveSwitch2RuntimeStatusSource();
+                if (source == null || !connected)
+                {
+                    return;
+                }
+
+                Thread worker;
+                bool signalInitial;
+                lock (switch2RuntimeStatusLock)
+                {
+                    switch2RuntimeStatusStopSignal.Reset();
+                    switch2RuntimeStatusSource = source;
+                    hasPendingSwitch2RuntimeStatus =
+                        ViiperSwitch2RuntimeStatusV1.TryCreate(source,
+                            out pendingSwitch2RuntimeStatus);
+                    signalInitial = hasPendingSwitch2RuntimeStatus;
+                    Volatile.Write(ref switch2RuntimeStatusFailureLogged, 0);
+                    source.BatteryChanged +=
+                        Switch2RuntimeStatusSourceBatteryChanged;
+                    worker = new Thread(Switch2RuntimeStatusWorker)
+                    {
+                        IsBackground = true,
+                        Name = "VIIPER Switch 2 status",
+                    };
+                    switch2RuntimeStatusThread = worker;
+                }
+                worker.Start();
+                if (signalInitial)
+                {
+                    switch2RuntimeStatusSignal.Set();
+                }
+            }
+        }
+
+        private void RebindSwitch2RuntimeStatusBridge()
+        {
+            if (viiperType != ViiperVirtualDeviceType.Switch2Pro ||
+                !connected)
+            {
+                return;
+            }
+            Switch2RuntimeInputDevice resolved =
+                ResolveSwitch2RuntimeStatusSource();
+            lock (switch2RuntimeStatusLock)
+            {
+                if (ReferenceEquals(switch2RuntimeStatusSource, resolved))
+                {
+                    return;
+                }
+            }
+            StartSwitch2RuntimeStatusBridge();
+        }
+
+        private void StopSwitch2RuntimeStatusBridge()
+        {
+            lock (switch2RuntimeStatusLifecycleLock)
+            {
+                StopSwitch2RuntimeStatusBridgeCore();
+            }
+        }
+
+        private void StopSwitch2RuntimeStatusBridgeCore()
+        {
+            Thread worker;
+            lock (switch2RuntimeStatusLock)
+            {
+                Switch2RuntimeInputDevice source = switch2RuntimeStatusSource;
+                if (source != null)
+                {
+                    source.BatteryChanged -=
+                        Switch2RuntimeStatusSourceBatteryChanged;
+                }
+                switch2RuntimeStatusSource = null;
+                hasPendingSwitch2RuntimeStatus = false;
+                pendingSwitch2RuntimeStatus = default;
+                switch2RuntimeStatusStopSignal.Set();
+                switch2RuntimeStatusSignal.Set();
+                worker = switch2RuntimeStatusThread;
+            }
+            if (worker != null && worker.IsAlive &&
+                Thread.CurrentThread.ManagedThreadId != worker.ManagedThreadId)
+            {
+                worker.Join();
+            }
+            lock (switch2RuntimeStatusLock)
+            {
+                if (ReferenceEquals(switch2RuntimeStatusThread, worker))
+                {
+                    switch2RuntimeStatusThread = null;
+                }
+            }
+        }
+
+        private void Switch2RuntimeStatusSourceBatteryChanged(object sender,
+            EventArgs e)
+        {
+            if (sender is not Switch2RuntimeInputDevice source ||
+                !ViiperSwitch2RuntimeStatusV1.TryCreate(source,
+                    out ViiperSwitch2RuntimeStatusV1 status))
+            {
+                return;
+            }
+            lock (switch2RuntimeStatusLock)
+            {
+                if (!ReferenceEquals(switch2RuntimeStatusSource, source) ||
+                    switch2RuntimeStatusStopSignal.WaitOne(0))
+                {
+                    return;
+                }
+                pendingSwitch2RuntimeStatus = status;
+                hasPendingSwitch2RuntimeStatus = true;
+            }
+            switch2RuntimeStatusSignal.Set();
+        }
+
+        private void Switch2RuntimeStatusWorker()
+        {
+            WaitHandle[] waits =
+            {
+                switch2RuntimeStatusSignal,
+                switch2RuntimeStatusStopSignal,
+            };
+            while (WaitHandle.WaitAny(waits) == 0)
+            {
+                while (true)
+                {
+                    ViiperSwitch2RuntimeStatusV1 status;
+                    Switch2RuntimeInputDevice source;
+                    lock (switch2RuntimeStatusLock)
+                    {
+                        if (!hasPendingSwitch2RuntimeStatus)
+                        {
+                            break;
+                        }
+                        status = pendingSwitch2RuntimeStatus;
+                        source = switch2RuntimeStatusSource;
+                        hasPendingSwitch2RuntimeStatus = false;
+                    }
+
+                    ViiperDeviceStream stream = Volatile.Read(
+                        ref deviceStream);
+                    if (switch2RuntimeStatusStopSignal.WaitOne(0) ||
+                        !connected || stream == null || source == null ||
+                        !ReferenceEquals(source,
+                            ResolveSwitch2RuntimeStatusSource()))
+                    {
+                        continue;
+                    }
+                    try
+                    {
+                        client.UpdateNS2ProRuntimeStatusV1(stream.BusId,
+                            stream.DevId, status);
+                        Volatile.Write(ref switch2RuntimeStatusFailureLogged,
+                            0);
+                    }
+                    catch (Exception ex) when (ex is IOException ||
+                        ex is SocketException ||
+                        ex is ObjectDisposedException)
+                    {
+                        if (Interlocked.Exchange(
+                                ref switch2RuntimeStatusFailureLogged, 1) == 0)
+                        {
+                            AppLogger.LogToGui(
+                                $"VIIPER Switch 2 runtime status update failed: {ex.Message}",
+                                true);
+                        }
+                    }
+                }
+            }
+        }
+
+        private void PrepareSwitch2VirtualFeedbackSession()
+        {
+            if (viiperType == ViiperVirtualDeviceType.XboxOne ||
+                audioOnlySidecar ||
+                Volatile.Read(ref switch2FeedbackSession) != null)
+            {
+                return;
+            }
+
+            int physicalIndex = Volatile.Read(ref lastInputDeviceIndex);
+            Switch2RuntimeInputDevice target = Program.rootHub != null &&
+                    physicalIndex >= 0 && physicalIndex <
+                        Program.rootHub.DS4Controllers.Length ?
+                Program.rootHub.DS4Controllers[physicalIndex] as
+                    Switch2RuntimeInputDevice : null;
+            if (target == null)
+            {
+                return;
+            }
+            if (!target.TryGetFeedbackBinding(out ulong deviceGeneration,
+                    out ulong transportGeneration))
+            {
+                throw new IOException(
+                    "The bound Switch 2 controller has no active, generation-authenticated feedback output lifetime.");
+            }
+
+            ControllerFeedbackSource source = viiperType switch
+            {
+                ViiperVirtualDeviceType.Xbox360 =>
+                    ControllerFeedbackSource.Xbox360VirtualDevice,
+                ViiperVirtualDeviceType.DualShock4 =>
+                    ControllerFeedbackSource.DualShock4VirtualDevice,
+                ViiperVirtualDeviceType.DualSense =>
+                    ControllerFeedbackSource.DualSenseVirtualDevice,
+                ViiperVirtualDeviceType.DualSenseEdge =>
+                    ControllerFeedbackSource.DualSenseEdgeVirtualDevice,
+                ViiperVirtualDeviceType.Switch2Pro =>
+                    ControllerFeedbackSource.Switch2VirtualDevice,
+                _ => ControllerFeedbackSource.Invalid,
+            };
+            if (source == ControllerFeedbackSource.Invalid ||
+                !target.TryCreateVirtualFeedbackSession(source,
+                    deviceGeneration, transportGeneration,
+                    out Switch2VirtualFeedbackSession session))
+            {
+                throw new IOException(
+                    $"The bound Switch 2 controller rejected the {viiperType} feedback session.");
+            }
+
+            Interlocked.Exchange(ref switch2FeedbackSession, session)?
+                .TryRetire();
         }
 
         internal static string GetV5RawInputDeviceName(
@@ -1287,29 +1931,126 @@ namespace DS4Windows
 
         public override void Disconnect()
         {
+            // Invalidate producer admission before any worker generation or
+            // stream teardown work. A callback which was paused after capture
+            // can then neither stage into nor adopt a successor lifecycle.
+            long orderedPresentationGenerationToRetire = 0;
+            if (UsesOrderedEgressScheduler())
+            {
+                lock (orderedEgressLifecycleLock)
+                {
+                    // This is the final-write linearization point. It must be
+                    // the first ordered-egress teardown mutation so a writer
+                    // paused before TryAdmit either wins admission entirely
+                    // before Disconnect or is rejected before socket I/O.
+                    orderedEgressWriterAdmissionGate.Invalidate();
+                    writerStopRequested = true;
+                    orderedPresentationGenerationToRetire =
+                        Interlocked.Exchange(
+                            ref orderedEgressOwnedPresentationGeneration, 0);
+                    AdvanceOrderedEgressAdmissionGeneration();
+                }
+            }
+            else
+            {
+                writerStopRequested = true;
+            }
             Interlocked.Increment(ref microphoneWorkerGeneration);
             Interlocked.Increment(ref stateWriterGeneration);
+
+            if (viiperType == ViiperVirtualDeviceType.XboxOne)
+            {
+                // The retained Xbox persona publishes its terminal Stop over
+                // this exact authenticated broker while usbip detaches. Fence
+                // and join the input writer first, but keep feedback admission,
+                // the physical feedback session, and the broker transport
+                // alive until that Stop has been delivered and acknowledged.
+                // Closing the broker first makes the disconnect ambiguous and
+                // correctly quarantines the one-shot retained import, which in
+                // turn breaks ordinary profile-driven output reconstruction.
+                writerRateWaitStopSignal.Set();
+                writerSignal.Set();
+                JoinStateWriterThread();
+                Switch2VirtualFeedbackSession switch2Session = Volatile.Read(
+                    ref switch2FeedbackSession);
+                if (switch2Session != null && switch2Session.TryRetire() &&
+                    !switch2Session.WasRetiredDisconnected)
+                {
+                    // The physical Switch 2 lifetime has now delivered its
+                    // own authenticated terminal neutral and retired the exact
+                    // canonical ingress. VIIPER still sends the corresponding
+                    // retained-persona Stop after usbip detach. That later
+                    // value must be authenticated and acknowledged, but must
+                    // not attempt a second write through the retired physical
+                    // session.
+                    Volatile.Write(ref xboxOneSwitch2FeedbackPreRetired, 1);
+                }
+                ViiperDeviceStream retiringStream = Volatile.Read(
+                    ref deviceStream);
+                // Connect resets this exact incarnation's acknowledgement.
+                // A history fault may already have delivered its terminal Stop
+                // before the input writer enters Disconnect; keep that proof.
+                retiringStream?.DisposeDeviceLifetimeBeforeTransportClose();
+                if (retiringStream?.IsXboxOneBrokerEnabled == true &&
+                    retiringStream.UsbipPort > 0)
+                {
+                    // usbip-win2 detach returns before VIIPER's retained
+                    // import goroutine has necessarily published and received
+                    // the ACK for its terminal Stop. Keep callback admission
+                    // and the physical feedback lease alive for that bounded
+                    // handoff. The feedback value itself carries a 250 ms TTL;
+                    // this wait is only a shutdown fence, never a hot-path
+                    // delay.
+                    xboxOneTerminalFeedbackAcknowledged.WaitOne(
+                        XboxOneTerminalFeedbackAckWaitMilliseconds);
+                }
+            }
+
             lock (feedbackCallbackAdmissionLock)
             {
                 Interlocked.Increment(ref feedbackDispatchGeneration);
-                connected = false;
+                Volatile.Write(ref connected, false);
                 feedbackDispatchStopRequested = true;
                 Volatile.Write(ref publishedPhysicalControllerTargetDevice,
                     null);
             }
+            StopSwitch2RuntimeStatusBridge();
             // A worker generation is an ownership boundary. Never carry a
             // failed disable into a replacement VIIPER device where the same
             // physical controller may already have been re-enabled.
             microphoneDisableRetries.Clear();
             Interlocked.Increment(ref microphoneControlEpoch);
             Interlocked.Increment(ref microphoneSourceGeneration);
-            writerStopRequested = true;
             writerRateWaitStopSignal.Set();
             writerSignal.Set();
             microphoneWriterSignal.Set();
             feedbackSpeakerSignal.Set();
             feedbackControlSignal.Set();
             WaitForFeedbackDispatchCallbacks();
+            Switch2VirtualFeedbackSession retiringSwitch2Feedback =
+                Interlocked.Exchange(ref switch2FeedbackSession, null);
+            Interlocked.Exchange(ref switch2XboxPolicyRefreshRequested, null);
+            Interlocked.Exchange(ref xboxOnePhysicalOutputSuppressionRequested, null);
+            retiringSwitch2Feedback?.TryRetire();
+            XboxOnePhysicalFeedbackSession retiringXboxOneFeedback =
+                Volatile.Read(ref xboxOnePhysicalFeedbackSession);
+            if (retiringXboxOneFeedback != null)
+            {
+                if (!retiringXboxOneFeedback.TryRetire())
+                {
+                    AppLogger.LogToGui(
+                        "Xbox One physical feedback stopped, but neutral state acceptance could not be confirmed.", true);
+                }
+                else
+                {
+                    _ = Interlocked.CompareExchange(
+                        ref xboxOnePhysicalFeedbackSession, null,
+                        retiringXboxOneFeedback);
+                }
+            }
+            xboxOneFeedbackBinding = null;
+            xboxOneLastFeedbackSequence = 0;
+            Volatile.Write(ref xboxOneSwitch2FeedbackPreRetired, 0);
             ClearNativeGameOutputProcessLease();
             ReleaseNativeDualSenseFeedbackOwnership();
             // A real output-device disconnect must not inherit the interface
@@ -1317,8 +2058,13 @@ namespace DS4Windows
             // old monitor from reattaching after this synchronous detach.
             DetachBluetoothMicrophoneSource();
             ResetLegacyDualSenseRumbleDeduplication();
-            ReleaseTriggerLabRumbleOverrides(
-                Volatile.Read(ref lastInputDeviceIndex));
+            if (viiperType != ViiperVirtualDeviceType.XboxOne)
+            {
+                // Xbox ownership was released by the exact captured session
+                // above. A second slot-based release could touch a successor.
+                ReleaseTriggerLabRumbleOverrides(
+                    Volatile.Read(ref lastInputDeviceIndex));
+            }
             ResetTriggerLabRumbleState();
             StopMicrophoneInterfaceMonitor();
             lock (pendingPacketLock)
@@ -1338,28 +2084,36 @@ namespace DS4Windows
                 ref deviceStream, null);
             Interlocked.Increment(ref streamGeneration);
             stream?.Dispose();
-
-            Thread writerThread;
-            lock (writerThreadLock)
+            JoinStateWriterThread();
+            if (UsesOrderedEgressScheduler())
             {
-                writerThread = stateWriterThread;
-            }
-            if (writerThread != null && writerThread.IsAlive)
-            {
-                if (Thread.CurrentThread.ManagedThreadId != writerThread.ManagedThreadId)
+                if (orderedPresentationGenerationToRetire != 0)
                 {
-                    writerThread.Join();
+                    if (UsesXbox360EgressScheduler())
+                    {
+                        xbox360EgressScheduler.RetirePresentationGeneration(
+                            unchecked((ulong)
+                                orderedPresentationGenerationToRetire),
+                            Stopwatch.GetTimestamp());
+                    }
+                    else if (UsesXboxOneEgressScheduler())
+                    {
+                        xboxOneEgressScheduler.RetirePresentationGeneration(
+                            unchecked((ulong)
+                                orderedPresentationGenerationToRetire),
+                            Stopwatch.GetTimestamp());
+                    }
+                    else
+                    {
+                        switch2EgressScheduler.RetirePresentationGeneration(
+                            unchecked((ulong)
+                                orderedPresentationGenerationToRetire),
+                            Stopwatch.GetTimestamp());
+                    }
                 }
-            }
-
-            lock (writerThreadLock)
-            {
-                if (ReferenceEquals(stateWriterThread, writerThread) &&
-                    (writerThread == null || !writerThread.IsAlive))
-                {
-                    stateWriterThread = null;
-                    stateWriterThreadGeneration = 0;
-                }
+                ClearXbox360PendingResynchronization();
+                ClearXboxOnePendingResynchronization();
+                ClearSwitch2PendingResynchronization();
             }
             if (microphoneWriterThread != null && microphoneWriterThread.IsAlive &&
                 Thread.CurrentThread.ManagedThreadId != microphoneWriterThread.ManagedThreadId)
@@ -1377,6 +2131,31 @@ namespace DS4Windows
             streamRecoveryGate.WaitForIdle();
             StopFeedbackDispatchWorkers();
             feedbackDispatchBuffer.ClearPending();
+        }
+
+        private void JoinStateWriterThread()
+        {
+            Thread writerThread;
+            lock (writerThreadLock)
+            {
+                writerThread = stateWriterThread;
+            }
+            if (writerThread != null && writerThread.IsAlive &&
+                Thread.CurrentThread.ManagedThreadId !=
+                    writerThread.ManagedThreadId)
+            {
+                writerThread.Join();
+            }
+
+            lock (writerThreadLock)
+            {
+                if (ReferenceEquals(stateWriterThread, writerThread) &&
+                    (writerThread == null || !writerThread.IsAlive))
+                {
+                    stateWriterThread = null;
+                    stateWriterThreadGeneration = 0;
+                }
+            }
         }
 
         private void ReleaseNativeDualSenseFeedbackOwnership()
@@ -1847,15 +2626,84 @@ namespace DS4Windows
 
         public override void ConvertandSendReport(DS4State state, int device)
         {
-            PublishPhysicalControllerBinding(device);
-            if (!connected)
+            bool usesXbox360EgressScheduler = UsesXbox360EgressScheduler();
+            bool usesXboxOneEgressScheduler = UsesXboxOneEgressScheduler();
+            bool usesSwitch2EgressScheduler = UsesSwitch2EgressScheduler();
+            OrderedEgressPublicationLease orderedLease = default;
+            if (usesXbox360EgressScheduler || usesXboxOneEgressScheduler ||
+                usesSwitch2EgressScheduler)
             {
-                return;
+                bool captured = usesXbox360EgressScheduler ?
+                    TryCaptureXbox360PublicationLease(out orderedLease) :
+                    usesXboxOneEgressScheduler ?
+                    TryCaptureXboxOnePublicationLease(out orderedLease) :
+                    TryCaptureSwitch2PublicationLease(out orderedLease);
+                if (!captured)
+                {
+                    return;
+                }
+                PublishPhysicalControllerBinding(device);
+                bool current = usesXbox360EgressScheduler ?
+                    IsXbox360PublicationLifecycleCurrent(orderedLease) :
+                    usesXboxOneEgressScheduler ?
+                    IsXboxOnePublicationLifecycleCurrent(orderedLease) :
+                    IsSwitch2PublicationLifecycleCurrent(orderedLease);
+                if (!current)
+                {
+                    return;
+                }
+            }
+            else
+            {
+                PublishPhysicalControllerBinding(device);
+                if (!Volatile.Read(ref connected))
+                {
+                    return;
+                }
             }
 
             try
             {
-                if (UsesMappedInputScheduler())
+                if (usesXbox360EgressScheduler)
+                {
+                    Xbox360EgressState projected = ViiperStatePacketBuilder.
+                        BuildXbox360State(state, device);
+                    long projectedAt = Stopwatch.GetTimestamp();
+                    if (PublishXbox360State(orderedLease, projected,
+                            projectedAt))
+                    {
+                        RecordStateQueued(projectedAt);
+                        Interlocked.Increment(ref submittedPacketCount);
+                        writerSignal.Set();
+                    }
+                }
+                else if (usesXboxOneEgressScheduler)
+                {
+                    XboxOneEgressState projected = XboxOneEgressState.
+                        FromLegacyMappedState(state, device);
+                    long projectedAt = Stopwatch.GetTimestamp();
+                    if (PublishXboxOneState(orderedLease, projected,
+                            projectedAt))
+                    {
+                        RecordStateQueued(projectedAt);
+                        Interlocked.Increment(ref submittedPacketCount);
+                        writerSignal.Set();
+                    }
+                }
+                else if (usesSwitch2EgressScheduler)
+                {
+                    Switch2EgressState projected = ViiperStatePacketBuilder.
+                        BuildSwitch2State(state, device);
+                    long projectedAt = Stopwatch.GetTimestamp();
+                    if (PublishSwitch2State(orderedLease, projected,
+                            projectedAt))
+                    {
+                        RecordStateQueued(projectedAt);
+                        Interlocked.Increment(ref submittedPacketCount);
+                        writerSignal.Set();
+                    }
+                }
+                else if (UsesMappedInputScheduler())
                 {
                     ViiperMappedInputState mapped = ViiperStatePacketBuilder.
                         BuildMappedState(state, device);
@@ -1893,14 +2741,60 @@ namespace DS4Windows
 
         public override void ResetState(bool submit = true)
         {
-            if (!submit || !connected)
+            if (!submit)
+            {
+                return;
+            }
+
+            bool usesXbox360EgressScheduler = UsesXbox360EgressScheduler();
+            bool usesXboxOneEgressScheduler = UsesXboxOneEgressScheduler();
+            bool usesSwitch2EgressScheduler = UsesSwitch2EgressScheduler();
+            if (!usesXbox360EgressScheduler &&
+                !usesXboxOneEgressScheduler &&
+                !usesSwitch2EgressScheduler &&
+                !Volatile.Read(ref connected))
             {
                 return;
             }
 
             try
             {
-                if (UsesMappedInputScheduler())
+                if (usesXbox360EgressScheduler ||
+                    usesXboxOneEgressScheduler ||
+                    usesSwitch2EgressScheduler)
+                {
+                    long queuedAt = Stopwatch.GetTimestamp();
+                    OrderedEgressPublicationLease resetLease;
+                    bool resetStarted = usesXbox360EgressScheduler ?
+                        TryBeginXbox360LifecycleReset(queuedAt,
+                            out resetLease) :
+                        usesXboxOneEgressScheduler ?
+                        TryBeginXboxOneLifecycleReset(queuedAt,
+                            out resetLease) :
+                        TryBeginSwitch2LifecycleReset(queuedAt,
+                            out resetLease);
+                    if (!resetStarted)
+                    {
+                        return;
+                    }
+
+                    bool staged = usesXbox360EgressScheduler ?
+                        StageXbox360Resynchronization(resetLease,
+                            Xbox360EgressState.Neutral, queuedAt) :
+                        usesXboxOneEgressScheduler ?
+                        StageXboxOneResynchronization(resetLease,
+                            XboxOneEgressState.Neutral, queuedAt) :
+                        StageSwitch2Resynchronization(resetLease,
+                            Switch2EgressState.Neutral, queuedAt);
+                    if (staged)
+                    {
+                        RecordStateQueued(queuedAt);
+                        Interlocked.Increment(ref submittedPacketCount);
+                        StartStateWriter(resetLease.WriterGeneration);
+                        writerSignal.Set();
+                    }
+                }
+                else if (UsesMappedInputScheduler())
                 {
                     long queuedAt = Stopwatch.GetTimestamp();
                     if (inputScheduler.Publish(ViiperMappedInputState.Neutral,
@@ -1946,6 +2840,7 @@ namespace DS4Windows
         public static bool IsViiperType(OutContType type)
         {
             return type == OutContType.ViiperX360 ||
+                type == OutContType.ViiperXboxOne ||
                 type == OutContType.ViiperDS4 ||
                 type == OutContType.ViiperDualSense ||
                 type == OutContType.ViiperDualSenseEdge ||
@@ -1983,6 +2878,904 @@ namespace DS4Windows
         {
             return IsDualSenseType() && activeStreamUsesFramedProtocol &&
                 activeStreamFrameVersion == ViiperStreamFrameVersionV5;
+        }
+
+        private bool UsesXbox360EgressScheduler() =>
+            viiperType == ViiperVirtualDeviceType.Xbox360 &&
+            xbox360EgressScheduler != null;
+
+        private bool UsesXboxOneEgressScheduler() =>
+            viiperType == ViiperVirtualDeviceType.XboxOne &&
+            xboxOneEgressScheduler != null;
+
+        private bool UsesSwitch2EgressScheduler() =>
+            viiperType == ViiperVirtualDeviceType.Switch2Pro &&
+            switch2EgressScheduler != null;
+
+        private bool UsesOrderedEgressScheduler() =>
+            UsesXbox360EgressScheduler() || UsesXboxOneEgressScheduler() ||
+            UsesSwitch2EgressScheduler();
+
+        private ulong GetOrderedEgressPresentationGeneration()
+        {
+            if (UsesXbox360EgressScheduler())
+            {
+                return xbox360EgressScheduler.PresentationGeneration;
+            }
+            if (UsesXboxOneEgressScheduler())
+            {
+                return xboxOneEgressScheduler.PresentationGeneration;
+            }
+            if (UsesSwitch2EgressScheduler())
+            {
+                return switch2EgressScheduler.PresentationGeneration;
+            }
+            return 0;
+        }
+
+        private long AdvanceOrderedEgressAdmissionGeneration()
+        {
+            long generation = Interlocked.Increment(
+                ref orderedEgressAdmissionGeneration);
+            if (generation == 0)
+            {
+                generation = Interlocked.Increment(
+                    ref orderedEgressAdmissionGeneration);
+            }
+            return generation;
+        }
+
+        private bool TryCaptureXbox360PublicationLease(
+            out OrderedEgressPublicationLease lease)
+        {
+            lease = default;
+            lock (orderedEgressLifecycleLock)
+            {
+                if (!UsesXbox360EgressScheduler())
+                {
+                    return false;
+                }
+
+                long writerGeneration = Interlocked.Read(
+                    ref stateWriterGeneration);
+                long presentationGeneration = Interlocked.Read(
+                    ref orderedEgressOwnedPresentationGeneration);
+                long admissionGeneration = Interlocked.Read(
+                    ref orderedEgressAdmissionGeneration);
+                if (presentationGeneration == 0 ||
+                    admissionGeneration == 0 ||
+                    !xbox360EgressScheduler.TryCaptureProducerEpoch(
+                        unchecked((ulong)presentationGeneration),
+                        out OrderedEgressProducerEpoch producerEpoch))
+                {
+                    return false;
+                }
+
+                OrderedEgressPublicationLease candidate = new(
+                    writerGeneration, presentationGeneration,
+                    admissionGeneration, producerEpoch);
+                if (writerGeneration != Interlocked.Read(
+                        ref stateWriterGeneration) ||
+                    presentationGeneration != Interlocked.Read(
+                        ref orderedEgressOwnedPresentationGeneration) ||
+                    admissionGeneration != Interlocked.Read(
+                        ref orderedEgressAdmissionGeneration) ||
+                    !IsXbox360PublicationLifecycleCurrent(candidate))
+                {
+                    return false;
+                }
+
+                lease = candidate;
+                return true;
+            }
+        }
+
+        private bool TryCaptureSwitch2PublicationLease(
+            out OrderedEgressPublicationLease lease)
+        {
+            lease = default;
+            lock (orderedEgressLifecycleLock)
+            {
+                if (!UsesSwitch2EgressScheduler())
+                {
+                    return false;
+                }
+
+                long writerGeneration = Interlocked.Read(
+                    ref stateWriterGeneration);
+                long presentationGeneration = Interlocked.Read(
+                    ref orderedEgressOwnedPresentationGeneration);
+                long admissionGeneration = Interlocked.Read(
+                    ref orderedEgressAdmissionGeneration);
+                if (presentationGeneration == 0 ||
+                    admissionGeneration == 0 ||
+                    !switch2EgressScheduler.TryCaptureProducerEpoch(
+                        unchecked((ulong)presentationGeneration),
+                        out OrderedEgressProducerEpoch producerEpoch))
+                {
+                    return false;
+                }
+
+                OrderedEgressPublicationLease candidate = new(
+                    writerGeneration, presentationGeneration,
+                    admissionGeneration, producerEpoch);
+                if (writerGeneration != Interlocked.Read(
+                        ref stateWriterGeneration) ||
+                    presentationGeneration != Interlocked.Read(
+                        ref orderedEgressOwnedPresentationGeneration) ||
+                    admissionGeneration != Interlocked.Read(
+                        ref orderedEgressAdmissionGeneration) ||
+                    !IsSwitch2PublicationLifecycleCurrent(candidate))
+                {
+                    return false;
+                }
+
+                lease = candidate;
+                return true;
+            }
+        }
+
+        private bool TryCaptureXboxOnePublicationLease(
+            out OrderedEgressPublicationLease lease)
+        {
+            lease = default;
+            lock (orderedEgressLifecycleLock)
+            {
+                if (!UsesXboxOneEgressScheduler())
+                {
+                    return false;
+                }
+
+                long writerGeneration = Interlocked.Read(
+                    ref stateWriterGeneration);
+                long presentationGeneration = Interlocked.Read(
+                    ref orderedEgressOwnedPresentationGeneration);
+                long admissionGeneration = Interlocked.Read(
+                    ref orderedEgressAdmissionGeneration);
+                if (presentationGeneration == 0 ||
+                    admissionGeneration == 0 ||
+                    !xboxOneEgressScheduler.TryCaptureProducerEpoch(
+                        unchecked((ulong)presentationGeneration),
+                        out OrderedEgressProducerEpoch producerEpoch))
+                {
+                    return false;
+                }
+
+                OrderedEgressPublicationLease candidate = new(
+                    writerGeneration, presentationGeneration,
+                    admissionGeneration, producerEpoch);
+                if (writerGeneration != Interlocked.Read(
+                        ref stateWriterGeneration) ||
+                    presentationGeneration != Interlocked.Read(
+                        ref orderedEgressOwnedPresentationGeneration) ||
+                    admissionGeneration != Interlocked.Read(
+                        ref orderedEgressAdmissionGeneration) ||
+                    !IsXboxOnePublicationLifecycleCurrent(candidate))
+                {
+                    return false;
+                }
+
+                lease = candidate;
+                return true;
+            }
+        }
+
+        private bool IsXbox360PublicationLifecycleCurrent(
+            in OrderedEgressPublicationLease lease)
+        {
+            return lease.IsValid &&
+                IsStateWriterCurrent(lease.WriterGeneration) &&
+                lease.PresentationGenerationBits == Interlocked.Read(
+                    ref orderedEgressOwnedPresentationGeneration) &&
+                lease.AdmissionGeneration == Interlocked.Read(
+                    ref orderedEgressAdmissionGeneration);
+        }
+
+        private bool IsSwitch2PublicationLifecycleCurrent(
+            in OrderedEgressPublicationLease lease) =>
+            lease.IsValid &&
+            IsStateWriterCurrent(lease.WriterGeneration) &&
+            lease.PresentationGenerationBits == Interlocked.Read(
+                ref orderedEgressOwnedPresentationGeneration) &&
+            lease.AdmissionGeneration == Interlocked.Read(
+                ref orderedEgressAdmissionGeneration);
+
+        private bool IsXboxOnePublicationLifecycleCurrent(
+            in OrderedEgressPublicationLease lease) =>
+            lease.IsValid &&
+            IsStateWriterCurrent(lease.WriterGeneration) &&
+            lease.PresentationGenerationBits == Interlocked.Read(
+                ref orderedEgressOwnedPresentationGeneration) &&
+            lease.AdmissionGeneration == Interlocked.Read(
+                ref orderedEgressAdmissionGeneration);
+
+        private bool TryBeginXbox360LifecycleReset(long resetTimestamp,
+            out OrderedEgressPublicationLease lease)
+        {
+            lease = default;
+            lock (orderedEgressLifecycleLock)
+            {
+                if (!UsesXbox360EgressScheduler() ||
+                    !Volatile.Read(ref connected))
+                {
+                    return false;
+                }
+
+                long writerGeneration = Interlocked.Read(
+                    ref stateWriterGeneration);
+                long presentationGeneration = Interlocked.Read(
+                    ref orderedEgressOwnedPresentationGeneration);
+                if (presentationGeneration == 0)
+                {
+                    return false;
+                }
+
+                // Retire final writer admission before changing any of the
+                // externally visible lifecycle generations. This is the reset
+                // boundary: a claim which has not already won TryAdmit cannot
+                // be admitted in the interval before the scheduler installs
+                // its mandatory-neutral successor epoch.
+                orderedEgressWriterAdmissionGate.Invalidate();
+                long admissionGeneration =
+                    AdvanceOrderedEgressAdmissionGeneration();
+                ClearXbox360PendingResynchronization();
+                if (!orderedEgressWriterAdmissionGate.BeginLifecycleReset(
+                        writerGeneration, presentationGeneration,
+                        admissionGeneration, xbox360EgressScheduler,
+                        resetTimestamp,
+                        out OrderedEgressProducerEpoch producerEpoch))
+                {
+                    return false;
+                }
+
+                OrderedEgressPublicationLease candidate = new(
+                    writerGeneration, presentationGeneration,
+                    admissionGeneration, producerEpoch);
+                if (!IsXbox360PublicationLifecycleCurrent(candidate))
+                {
+                    return false;
+                }
+                lease = candidate;
+                return true;
+            }
+        }
+
+        private bool TryBeginSwitch2LifecycleReset(long resetTimestamp,
+            out OrderedEgressPublicationLease lease)
+        {
+            lease = default;
+            lock (orderedEgressLifecycleLock)
+            {
+                if (!UsesSwitch2EgressScheduler() ||
+                    !Volatile.Read(ref connected))
+                {
+                    return false;
+                }
+
+                long writerGeneration = Interlocked.Read(
+                    ref stateWriterGeneration);
+                long presentationGeneration = Interlocked.Read(
+                    ref orderedEgressOwnedPresentationGeneration);
+                if (presentationGeneration == 0)
+                {
+                    return false;
+                }
+
+                // Use the same final-admission boundary as Xbox. Keeping the
+                // gate inactive while the scheduler retires its producer epoch
+                // prevents a pre-reset Switch claim from entering the new
+                // lifecycle through the otherwise-small reset window.
+                orderedEgressWriterAdmissionGate.Invalidate();
+                long admissionGeneration =
+                    AdvanceOrderedEgressAdmissionGeneration();
+                ClearSwitch2PendingResynchronization();
+                if (!orderedEgressWriterAdmissionGate.BeginLifecycleReset(
+                        writerGeneration, presentationGeneration,
+                        admissionGeneration, switch2EgressScheduler,
+                        resetTimestamp,
+                        out OrderedEgressProducerEpoch producerEpoch))
+                {
+                    return false;
+                }
+
+                OrderedEgressPublicationLease candidate = new(
+                    writerGeneration, presentationGeneration,
+                    admissionGeneration, producerEpoch);
+                if (!IsSwitch2PublicationLifecycleCurrent(candidate))
+                {
+                    return false;
+                }
+                lease = candidate;
+                return true;
+            }
+        }
+
+        private bool TryBeginXboxOneLifecycleReset(long resetTimestamp,
+            out OrderedEgressPublicationLease lease)
+        {
+            lease = default;
+            lock (orderedEgressLifecycleLock)
+            {
+                if (!UsesXboxOneEgressScheduler() ||
+                    !Volatile.Read(ref connected))
+                {
+                    return false;
+                }
+
+                long writerGeneration = Interlocked.Read(
+                    ref stateWriterGeneration);
+                long presentationGeneration = Interlocked.Read(
+                    ref orderedEgressOwnedPresentationGeneration);
+                if (presentationGeneration == 0)
+                {
+                    return false;
+                }
+
+                orderedEgressWriterAdmissionGate.Invalidate();
+                long admissionGeneration =
+                    AdvanceOrderedEgressAdmissionGeneration();
+                ClearXboxOnePendingResynchronization();
+                if (!orderedEgressWriterAdmissionGate.BeginLifecycleReset(
+                        writerGeneration, presentationGeneration,
+                        admissionGeneration, xboxOneEgressScheduler,
+                        resetTimestamp,
+                        out OrderedEgressProducerEpoch producerEpoch))
+                {
+                    return false;
+                }
+
+                OrderedEgressPublicationLease candidate = new(
+                    writerGeneration, presentationGeneration,
+                    admissionGeneration, producerEpoch);
+                if (!IsXboxOnePublicationLifecycleCurrent(candidate))
+                {
+                    return false;
+                }
+                lease = candidate;
+                return true;
+            }
+        }
+
+        private bool PublishXbox360State(
+            in OrderedEgressPublicationLease lease,
+            in Xbox360EgressState state, long receivedTimestamp)
+        {
+            if (!IsXbox360PublicationLifecycleCurrent(lease))
+            {
+                return false;
+            }
+
+            OrderedEgressPublishDisposition disposition =
+                xbox360EgressScheduler.Publish(lease.ProducerEpoch, state,
+                    receivedTimestamp);
+            if (IsAcceptedOrderedEgressPublication(disposition))
+            {
+                return IsXbox360PublicationLifecycleCurrent(lease);
+            }
+
+            if (disposition == OrderedEgressPublishDisposition.
+                    FaultedOverflow ||
+                disposition == OrderedEgressPublishDisposition.
+                    RejectedFaultNeutralPending ||
+                disposition == OrderedEgressPublishDisposition.
+                    RejectedStaleProducerEpoch ||
+                disposition == OrderedEgressPublishDisposition.
+                    RejectedResynchronizationRequired)
+            {
+                if (StageXbox360Resynchronization(lease, state,
+                        receivedTimestamp))
+                {
+                    writerSignal.Set();
+                }
+            }
+
+            return false;
+        }
+
+        private static bool IsAcceptedOrderedEgressPublication(
+            OrderedEgressPublishDisposition disposition)
+        {
+            return disposition ==
+                    OrderedEgressPublishDisposition.AcceptedContinuous ||
+                disposition ==
+                    OrderedEgressPublishDisposition.AcceptedOrdered ||
+                disposition == OrderedEgressPublishDisposition.
+                    AcceptedResynchronization;
+        }
+
+        private bool StageXbox360Resynchronization(
+            in OrderedEgressPublicationLease lease,
+            in Xbox360EgressState state, long receivedTimestamp)
+        {
+            if (receivedTimestamp < 0)
+            {
+                return false;
+            }
+
+            lock (xbox360ResynchronizationLock)
+            {
+                if (!IsXbox360PublicationLifecycleCurrent(lease))
+                {
+                    return false;
+                }
+
+                if (!xbox360PendingResynchronization ||
+                    receivedTimestamp >=
+                        xbox360PendingResynchronizationTimestamp)
+                {
+                    xbox360PendingResynchronizationLease = lease;
+                    xbox360PendingResynchronizationState = state;
+                    xbox360PendingResynchronizationTimestamp =
+                        receivedTimestamp;
+                    Volatile.Write(ref xbox360PendingResynchronization, true);
+                }
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// The state writer is the sole recovery producer. It consumes the
+        /// newest staged snapshot under the same lock used by callbacks. A
+        /// delayed old-epoch callback which arrives after recovery is handed
+        /// back through the current writer rather than adopting that epoch
+        /// itself.
+        /// </summary>
+        private bool TryPublishXbox360PendingResynchronization(
+            long writerGeneration)
+        {
+            if (!Volatile.Read(ref xbox360PendingResynchronization))
+            {
+                return false;
+            }
+
+            long queuedAt = 0;
+            bool accepted = false;
+            lock (xbox360ResynchronizationLock)
+            {
+                if (!xbox360PendingResynchronization)
+                {
+                    return false;
+                }
+
+                OrderedEgressPublicationLease lease =
+                    xbox360PendingResynchronizationLease;
+                if (lease.WriterGeneration != writerGeneration ||
+                    !IsXbox360PublicationLifecycleCurrent(lease))
+                {
+                    ClearXbox360PendingResynchronizationLocked();
+                    return false;
+                }
+
+                for (int attempt = 0; attempt < 3; attempt++)
+                {
+                    OrderedEgressSchedulerSnapshot snapshot =
+                        xbox360EgressScheduler.Snapshot();
+                    if (snapshot.PresentationGeneration !=
+                            lease.PresentationGeneration)
+                    {
+                        ClearXbox360PendingResynchronizationLocked();
+                        return false;
+                    }
+                    if (snapshot.MandatoryNeutralPending)
+                    {
+                        return false;
+                    }
+
+                    OrderedEgressProducerEpoch epoch =
+                        xbox360EgressScheduler.CurrentProducerEpoch;
+                    OrderedEgressPublishDisposition disposition =
+                        snapshot.ResynchronizationRequired ?
+                            xbox360EgressScheduler.Resynchronize(epoch,
+                                xbox360PendingResynchronizationState,
+                                xbox360PendingResynchronizationTimestamp) :
+                            xbox360EgressScheduler.Publish(epoch,
+                                xbox360PendingResynchronizationState,
+                                xbox360PendingResynchronizationTimestamp);
+                    if (IsAcceptedOrderedEgressPublication(disposition))
+                    {
+                        queuedAt =
+                            xbox360PendingResynchronizationTimestamp;
+                        ClearXbox360PendingResynchronizationLocked();
+                        accepted = true;
+                        break;
+                    }
+
+                    if (disposition == OrderedEgressPublishDisposition.
+                            RejectedInvalidTimestamp)
+                    {
+                        // A newer state in this producer epoch already won.
+                        ClearXbox360PendingResynchronizationLocked();
+                        return false;
+                    }
+                    if (disposition == OrderedEgressPublishDisposition.
+                            FaultedOverflow ||
+                        disposition == OrderedEgressPublishDisposition.
+                            RejectedFaultNeutralPending)
+                    {
+                        return false;
+                    }
+                    if (disposition != OrderedEgressPublishDisposition.
+                            RejectedStaleProducerEpoch &&
+                        disposition != OrderedEgressPublishDisposition.
+                            RejectedResynchronizationRequired &&
+                        disposition != OrderedEgressPublishDisposition.
+                            RejectedResynchronizationNotRequired)
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            if (accepted)
+            {
+                RecordStateQueued(queuedAt);
+                Interlocked.Increment(ref submittedPacketCount);
+                writerSignal.Set();
+            }
+            return accepted;
+        }
+
+        private void ClearXbox360PendingResynchronization()
+        {
+            lock (xbox360ResynchronizationLock)
+            {
+                ClearXbox360PendingResynchronizationLocked();
+            }
+        }
+
+        private void ClearXbox360PendingResynchronizationLocked()
+        {
+            xbox360PendingResynchronizationLease = default;
+            xbox360PendingResynchronizationState = default;
+            xbox360PendingResynchronizationTimestamp = 0;
+            Volatile.Write(ref xbox360PendingResynchronization, false);
+        }
+
+        private bool PublishSwitch2State(
+            in OrderedEgressPublicationLease lease,
+            in Switch2EgressState state, long receivedTimestamp)
+        {
+            if (!IsSwitch2PublicationLifecycleCurrent(lease))
+            {
+                return false;
+            }
+
+            OrderedEgressPublishDisposition disposition =
+                switch2EgressScheduler.Publish(lease.ProducerEpoch, state,
+                    receivedTimestamp);
+            if (IsAcceptedOrderedEgressPublication(disposition))
+            {
+                return IsSwitch2PublicationLifecycleCurrent(lease);
+            }
+
+            if (disposition == OrderedEgressPublishDisposition.
+                    FaultedOverflow ||
+                disposition == OrderedEgressPublishDisposition.
+                    RejectedFaultNeutralPending ||
+                disposition == OrderedEgressPublishDisposition.
+                    RejectedStaleProducerEpoch ||
+                disposition == OrderedEgressPublishDisposition.
+                    RejectedResynchronizationRequired)
+            {
+                if (StageSwitch2Resynchronization(lease, state,
+                        receivedTimestamp))
+                {
+                    writerSignal.Set();
+                }
+            }
+            return false;
+        }
+
+        private bool PublishXboxOneState(
+            in OrderedEgressPublicationLease lease,
+            in XboxOneEgressState state, long receivedTimestamp)
+        {
+            if (!IsXboxOnePublicationLifecycleCurrent(lease))
+            {
+                return false;
+            }
+
+            OrderedEgressPublishDisposition disposition =
+                xboxOneEgressScheduler.Publish(lease.ProducerEpoch, state,
+                    receivedTimestamp);
+            if (IsAcceptedOrderedEgressPublication(disposition))
+            {
+                return IsXboxOnePublicationLifecycleCurrent(lease);
+            }
+
+            if (disposition == OrderedEgressPublishDisposition.
+                    FaultedOverflow ||
+                disposition == OrderedEgressPublishDisposition.
+                    RejectedFaultNeutralPending ||
+                disposition == OrderedEgressPublishDisposition.
+                    RejectedStaleProducerEpoch ||
+                disposition == OrderedEgressPublishDisposition.
+                    RejectedResynchronizationRequired)
+            {
+                if (StageXboxOneResynchronization(lease, state,
+                        receivedTimestamp))
+                {
+                    writerSignal.Set();
+                }
+            }
+
+            return false;
+        }
+
+        private bool StageXboxOneResynchronization(
+            in OrderedEgressPublicationLease lease,
+            in XboxOneEgressState state, long receivedTimestamp)
+        {
+            if (receivedTimestamp < 0)
+            {
+                return false;
+            }
+
+            lock (xboxOneResynchronizationLock)
+            {
+                if (!IsXboxOnePublicationLifecycleCurrent(lease))
+                {
+                    return false;
+                }
+
+                if (!xboxOnePendingResynchronization ||
+                    receivedTimestamp >=
+                        xboxOnePendingResynchronizationTimestamp)
+                {
+                    xboxOnePendingResynchronizationLease = lease;
+                    xboxOnePendingResynchronizationState = state;
+                    xboxOnePendingResynchronizationTimestamp =
+                        receivedTimestamp;
+                    Volatile.Write(ref xboxOnePendingResynchronization, true);
+                }
+                return true;
+            }
+        }
+
+        private bool TryPublishXboxOnePendingResynchronization(
+            long writerGeneration)
+        {
+            if (!Volatile.Read(ref xboxOnePendingResynchronization))
+            {
+                return false;
+            }
+
+            long queuedAt = 0;
+            bool accepted = false;
+            lock (xboxOneResynchronizationLock)
+            {
+                if (!xboxOnePendingResynchronization)
+                {
+                    return false;
+                }
+
+                OrderedEgressPublicationLease lease =
+                    xboxOnePendingResynchronizationLease;
+                if (lease.WriterGeneration != writerGeneration ||
+                    !IsXboxOnePublicationLifecycleCurrent(lease))
+                {
+                    ClearXboxOnePendingResynchronizationLocked();
+                    return false;
+                }
+
+                for (int attempt = 0; attempt < 3; attempt++)
+                {
+                    OrderedEgressSchedulerSnapshot snapshot =
+                        xboxOneEgressScheduler.Snapshot();
+                    if (snapshot.PresentationGeneration !=
+                            lease.PresentationGeneration)
+                    {
+                        ClearXboxOnePendingResynchronizationLocked();
+                        return false;
+                    }
+                    if (snapshot.MandatoryNeutralPending)
+                    {
+                        return false;
+                    }
+
+                    OrderedEgressProducerEpoch epoch =
+                        xboxOneEgressScheduler.CurrentProducerEpoch;
+                    OrderedEgressPublishDisposition disposition =
+                        snapshot.ResynchronizationRequired ?
+                            xboxOneEgressScheduler.Resynchronize(epoch,
+                                xboxOnePendingResynchronizationState,
+                                xboxOnePendingResynchronizationTimestamp) :
+                            xboxOneEgressScheduler.Publish(epoch,
+                                xboxOnePendingResynchronizationState,
+                                xboxOnePendingResynchronizationTimestamp);
+                    if (IsAcceptedOrderedEgressPublication(disposition))
+                    {
+                        queuedAt = xboxOnePendingResynchronizationTimestamp;
+                        ClearXboxOnePendingResynchronizationLocked();
+                        accepted = true;
+                        break;
+                    }
+
+                    if (disposition == OrderedEgressPublishDisposition.
+                            RejectedInvalidTimestamp)
+                    {
+                        ClearXboxOnePendingResynchronizationLocked();
+                        return false;
+                    }
+                    if (disposition == OrderedEgressPublishDisposition.
+                            FaultedOverflow ||
+                        disposition == OrderedEgressPublishDisposition.
+                            RejectedFaultNeutralPending)
+                    {
+                        return false;
+                    }
+                    if (disposition != OrderedEgressPublishDisposition.
+                            RejectedStaleProducerEpoch &&
+                        disposition != OrderedEgressPublishDisposition.
+                            RejectedResynchronizationRequired &&
+                        disposition != OrderedEgressPublishDisposition.
+                            RejectedResynchronizationNotRequired)
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            if (accepted)
+            {
+                RecordStateQueued(queuedAt);
+                Interlocked.Increment(ref submittedPacketCount);
+                writerSignal.Set();
+            }
+            return accepted;
+        }
+
+        private void ClearXboxOnePendingResynchronization()
+        {
+            lock (xboxOneResynchronizationLock)
+            {
+                ClearXboxOnePendingResynchronizationLocked();
+            }
+        }
+
+        private void ClearXboxOnePendingResynchronizationLocked()
+        {
+            xboxOnePendingResynchronizationLease = default;
+            xboxOnePendingResynchronizationState = default;
+            xboxOnePendingResynchronizationTimestamp = 0;
+            Volatile.Write(ref xboxOnePendingResynchronization, false);
+        }
+
+        private bool StageSwitch2Resynchronization(
+            in OrderedEgressPublicationLease lease,
+            in Switch2EgressState state, long receivedTimestamp)
+        {
+            if (receivedTimestamp < 0)
+            {
+                return false;
+            }
+
+            lock (switch2ResynchronizationLock)
+            {
+                if (!IsSwitch2PublicationLifecycleCurrent(lease))
+                {
+                    return false;
+                }
+                if (!switch2PendingResynchronization ||
+                    receivedTimestamp >=
+                        switch2PendingResynchronizationTimestamp)
+                {
+                    switch2PendingResynchronizationLease = lease;
+                    switch2PendingResynchronizationState = state;
+                    switch2PendingResynchronizationTimestamp =
+                        receivedTimestamp;
+                    Volatile.Write(ref switch2PendingResynchronization, true);
+                }
+                return true;
+            }
+        }
+
+        private bool TryPublishSwitch2PendingResynchronization(
+            long writerGeneration)
+        {
+            if (!Volatile.Read(ref switch2PendingResynchronization))
+            {
+                return false;
+            }
+
+            long queuedAt = 0;
+            bool accepted = false;
+            lock (switch2ResynchronizationLock)
+            {
+                if (!switch2PendingResynchronization)
+                {
+                    return false;
+                }
+
+                OrderedEgressPublicationLease lease =
+                    switch2PendingResynchronizationLease;
+                if (lease.WriterGeneration != writerGeneration ||
+                    !IsSwitch2PublicationLifecycleCurrent(lease))
+                {
+                    ClearSwitch2PendingResynchronizationLocked();
+                    return false;
+                }
+
+                for (int attempt = 0; attempt < 3; attempt++)
+                {
+                    OrderedEgressSchedulerSnapshot snapshot =
+                        switch2EgressScheduler.Snapshot();
+                    if (snapshot.PresentationGeneration !=
+                            lease.PresentationGeneration)
+                    {
+                        ClearSwitch2PendingResynchronizationLocked();
+                        return false;
+                    }
+                    if (snapshot.MandatoryNeutralPending)
+                    {
+                        return false;
+                    }
+
+                    OrderedEgressProducerEpoch epoch =
+                        switch2EgressScheduler.CurrentProducerEpoch;
+                    OrderedEgressPublishDisposition disposition =
+                        snapshot.ResynchronizationRequired ?
+                            switch2EgressScheduler.Resynchronize(epoch,
+                                switch2PendingResynchronizationState,
+                                switch2PendingResynchronizationTimestamp) :
+                            switch2EgressScheduler.Publish(epoch,
+                                switch2PendingResynchronizationState,
+                                switch2PendingResynchronizationTimestamp);
+                    if (IsAcceptedOrderedEgressPublication(disposition))
+                    {
+                        queuedAt = switch2PendingResynchronizationTimestamp;
+                        ClearSwitch2PendingResynchronizationLocked();
+                        accepted = true;
+                        break;
+                    }
+                    if (disposition == OrderedEgressPublishDisposition.
+                            RejectedInvalidTimestamp)
+                    {
+                        ClearSwitch2PendingResynchronizationLocked();
+                        return false;
+                    }
+                    if (disposition == OrderedEgressPublishDisposition.
+                            FaultedOverflow ||
+                        disposition == OrderedEgressPublishDisposition.
+                            RejectedFaultNeutralPending)
+                    {
+                        return false;
+                    }
+                    if (disposition != OrderedEgressPublishDisposition.
+                            RejectedStaleProducerEpoch &&
+                        disposition != OrderedEgressPublishDisposition.
+                            RejectedResynchronizationRequired &&
+                        disposition != OrderedEgressPublishDisposition.
+                            RejectedResynchronizationNotRequired)
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            if (accepted)
+            {
+                RecordStateQueued(queuedAt);
+                Interlocked.Increment(ref submittedPacketCount);
+                writerSignal.Set();
+            }
+            return accepted;
+        }
+
+        private void ClearSwitch2PendingResynchronization()
+        {
+            lock (switch2ResynchronizationLock)
+            {
+                ClearSwitch2PendingResynchronizationLocked();
+            }
+        }
+
+        private void ClearSwitch2PendingResynchronizationLocked()
+        {
+            switch2PendingResynchronizationLease = default;
+            switch2PendingResynchronizationState = default;
+            switch2PendingResynchronizationTimestamp = 0;
+            Volatile.Write(ref switch2PendingResynchronization, false);
         }
 
         private void RecordStateQueued(long queuedAt)
@@ -2282,7 +4075,8 @@ namespace DS4Windows
                                     ApplyFeedback(atomicFeedbackScratch,
                                         atomicFeedbackLength,
                                         targetDeviceIndex,
-                                        freshNativeOutput: false);
+                                        freshNativeOutput: false,
+                                        nativeOutputStreamGeneration: streamItemGeneration);
                                     Buffer.BlockCopy(payload,
                                         speakerPcmOffset, payload, 0,
                                         speakerPcmLength);
@@ -2309,7 +4103,7 @@ namespace DS4Windows
                                 // controller-clocked report immediately before
                                 // CRC and the single HID write.
                                 ApplyAtomicAudioHapticsFeedback(payload,
-                                    length, targetDeviceIndex);
+                                    length, targetDeviceIndex, streamItemGeneration);
                             }
                             else
                             {
@@ -2373,6 +4167,11 @@ namespace DS4Windows
             {
                 while (IsFeedbackDispatchGenerationActive(generation))
                 {
+                    if (Interlocked.Exchange(ref switch2DualSensePolicyRefreshRequested, 0) != 0)
+                    {
+                        RefreshSwitch2DualSenseConversionPolicy(
+                            Volatile.Read(ref lastInputDeviceIndex));
+                    }
                     bool dequeued = feedbackDispatchBuffer
                         .TryDequeueOrderedControl(payload, out int length,
                             out long streamItemGeneration,
@@ -2483,8 +4282,9 @@ namespace DS4Windows
 
         private bool IsStateWriterCurrent(long writerGeneration)
         {
-            return !writerStopRequested && connected && writerGeneration ==
-                Interlocked.Read(ref stateWriterGeneration);
+            return !writerStopRequested && Volatile.Read(ref connected) &&
+                writerGeneration == Interlocked.Read(
+                    ref stateWriterGeneration);
         }
 
         private void StateWriteLoop(long writerGeneration)
@@ -2504,6 +4304,22 @@ namespace DS4Windows
 
                     while (IsStateWriterCurrent(writerGeneration))
                     {
+                        if (UsesXbox360EgressScheduler())
+                        {
+                            TryPublishXbox360PendingResynchronization(
+                                writerGeneration);
+                        }
+                        else if (UsesXboxOneEgressScheduler())
+                        {
+                            TryPublishXboxOnePendingResynchronization(
+                                writerGeneration);
+                        }
+                        else if (UsesSwitch2EgressScheduler())
+                        {
+                            TryPublishSwitch2PendingResynchronization(
+                                writerGeneration);
+                        }
+
                         if (consecutiveInputWrites >=
                                 MaximumInputBurstBeforeDueMicrophone &&
                             HasPreparedMicrophoneFrame())
@@ -2519,10 +4335,84 @@ namespace DS4Windows
 
                         bool mappedClaim = false;
                         ViiperInputClaim inputClaim = default;
+                        bool xbox360Claim = false;
+                        OrderedEgressClaim<Xbox360EgressState> xbox360InputClaim = default;
+                        OrderedEgressWriterAdmissionLease
+                            xbox360WriterAdmissionLease = default;
+                        bool xboxOneClaim = false;
+                        OrderedEgressClaim<XboxOneEgressState>
+                            xboxOneInputClaim = default;
+                        OrderedEgressWriterAdmissionLease
+                            xboxOneWriterAdmissionLease = default;
+                        bool switch2Claim = false;
+                        OrderedEgressClaim<Switch2EgressState>
+                            switch2InputClaim = default;
+                        OrderedEgressWriterAdmissionLease
+                            switch2WriterAdmissionLease = default;
                         byte[] packet = null;
                         long queuedAt = 0;
                         long claimedAt = 0;
-                        if (UsesMappedInputScheduler())
+                        if (UsesXbox360EgressScheduler())
+                        {
+                            claimedAt = Stopwatch.GetTimestamp();
+                            xbox360Claim = orderedEgressWriterAdmissionGate.
+                                TryClaim(writerGeneration,
+                                xbox360EgressScheduler, claimedAt,
+                                out xbox360InputClaim,
+                                out xbox360WriterAdmissionLease,
+                                includeIdle: false);
+                            if (xbox360Claim)
+                            {
+                                queuedAt = xbox360InputClaim.
+                                    ReceivedTimestamp;
+                                if (queuedAt > 0)
+                                {
+                                    publishToWriterClaimLatency.Observe(
+                                        claimedAt - queuedAt);
+                                }
+                            }
+                        }
+                        else if (UsesXboxOneEgressScheduler())
+                        {
+                            claimedAt = Stopwatch.GetTimestamp();
+                            xboxOneClaim = orderedEgressWriterAdmissionGate.
+                                TryClaim(writerGeneration,
+                                xboxOneEgressScheduler, claimedAt,
+                                out xboxOneInputClaim,
+                                out xboxOneWriterAdmissionLease,
+                                includeIdle: false);
+                            if (xboxOneClaim)
+                            {
+                                queuedAt = xboxOneInputClaim.
+                                    ReceivedTimestamp;
+                                if (queuedAt > 0)
+                                {
+                                    publishToWriterClaimLatency.Observe(
+                                        claimedAt - queuedAt);
+                                }
+                            }
+                        }
+                        else if (UsesSwitch2EgressScheduler())
+                        {
+                            claimedAt = Stopwatch.GetTimestamp();
+                            switch2Claim = orderedEgressWriterAdmissionGate.
+                                TryClaim(writerGeneration,
+                                switch2EgressScheduler, claimedAt,
+                                out switch2InputClaim,
+                                out switch2WriterAdmissionLease,
+                                includeIdle: false);
+                            if (switch2Claim)
+                            {
+                                queuedAt = switch2InputClaim.
+                                    ReceivedTimestamp;
+                                if (queuedAt > 0)
+                                {
+                                    publishToWriterClaimLatency.Observe(
+                                        claimedAt - queuedAt);
+                                }
+                            }
+                        }
+                        else if (UsesMappedInputScheduler())
                         {
                             mappedClaim = inputScheduler.TryClaim(
                                 out inputClaim);
@@ -2537,7 +4427,8 @@ namespace DS4Windows
                                 }
                             }
                         }
-                        if (!mappedClaim)
+                        if (!mappedClaim && !xbox360Claim && !xboxOneClaim &&
+                            !switch2Claim)
                         {
                             lock (pendingPacketLock)
                             {
@@ -2552,7 +4443,9 @@ namespace DS4Windows
                             }
                         }
 
-                        if (!mappedClaim && packet == null)
+                        if (!mappedClaim && !xbox360Claim && !xboxOneClaim &&
+                            !switch2Claim &&
+                            packet == null)
                         {
                             if (HasPreparedMicrophoneFrame())
                             {
@@ -2575,6 +4468,24 @@ namespace DS4Windows
                             if (mappedClaim)
                             {
                                 inputScheduler.CompleteFailure(inputClaim);
+                            }
+                            else if (xbox360Claim)
+                            {
+                                xbox360EgressScheduler.Complete(
+                                    xbox360InputClaim,
+                                    OrderedEgressCompletion.Defer);
+                            }
+                            else if (xboxOneClaim)
+                            {
+                                xboxOneEgressScheduler.Complete(
+                                    xboxOneInputClaim,
+                                    OrderedEgressCompletion.Defer);
+                            }
+                            else if (switch2Claim)
+                            {
+                                switch2EgressScheduler.Complete(
+                                    switch2InputClaim,
+                                    OrderedEgressCompletion.Defer);
                             }
                             else
                             {
@@ -2633,13 +4544,78 @@ namespace DS4Windows
                                         GetDualSenseInputPacketSize(
                                             includeRawInputStatus));
                             }
+                            else if (xbox360Claim)
+                            {
+                                xbox360InputClaim.BuildInto(
+                                    stateWriterPacket.AsSpan(0,
+                                        Xbox360EgressState.WireSize));
+                                long admittedAt = Stopwatch.GetTimestamp();
+                                if (!orderedEgressWriterAdmissionGate.TryAdmit(
+                                        xbox360WriterAdmissionLease,
+                                        xbox360EgressScheduler,
+                                        xbox360InputClaim, admittedAt))
+                                {
+                                    xbox360EgressScheduler.Complete(
+                                        xbox360InputClaim,
+                                        OrderedEgressCompletion.Defer);
+                                    writerSignal.Set();
+                                    continue;
+                                }
+                                writeTiming = WriteState(writeStream,
+                                    stateWriterPacket,
+                                    Xbox360EgressState.WireSize);
+                            }
+                            else if (xboxOneClaim)
+                            {
+                                xboxOneInputClaim.BuildInto(
+                                    stateWriterPacket.AsSpan(0,
+                                        XboxOneEgressState.WireSize));
+                                long admittedAt = Stopwatch.GetTimestamp();
+                                if (!orderedEgressWriterAdmissionGate.TryAdmit(
+                                        xboxOneWriterAdmissionLease,
+                                        xboxOneEgressScheduler,
+                                        xboxOneInputClaim, admittedAt))
+                                {
+                                    xboxOneEgressScheduler.Complete(
+                                        xboxOneInputClaim,
+                                        OrderedEgressCompletion.Defer);
+                                    writerSignal.Set();
+                                    continue;
+                                }
+                                writeTiming = WriteState(writeStream,
+                                    stateWriterPacket,
+                                    XboxOneEgressState.WireSize);
+                            }
+                            else if (switch2Claim)
+                            {
+                                switch2InputClaim.BuildInto(
+                                    stateWriterPacket.AsSpan(0,
+                                        Switch2EgressState.WireSize));
+                                long admittedAt = Stopwatch.GetTimestamp();
+                                if (!orderedEgressWriterAdmissionGate.TryAdmit(
+                                        switch2WriterAdmissionLease,
+                                        switch2EgressScheduler,
+                                        switch2InputClaim, admittedAt))
+                                {
+                                    switch2EgressScheduler.Complete(
+                                        switch2InputClaim,
+                                        OrderedEgressCompletion.Defer);
+                                    writerSignal.Set();
+                                    continue;
+                                }
+                                writeTiming = WriteState(writeStream,
+                                    stateWriterPacket,
+                                    Switch2EgressState.WireSize);
+                            }
                             else
                             {
                                 writeTiming = WriteState(writeStream, packet,
                                     packet.Length);
                             }
                             long writtenAt = Stopwatch.GetTimestamp();
-                            if (mappedClaim && claimedAt > 0 &&
+                            if ((mappedClaim || xbox360Claim || xboxOneClaim ||
+                                    switch2Claim) &&
+                                claimedAt > 0 &&
                                 writeTiming.SocketWriteStartedTimestamp > 0)
                             {
                                 claimToSocketStartLatency.Observe(
@@ -2648,11 +4624,72 @@ namespace DS4Windows
                                 socketWriteLatency.Observe(
                                     writeTiming.SocketWriteCompletedTimestamp -
                                         writeTiming.SocketWriteStartedTimestamp);
+                                if (xboxOneClaim &&
+                                    writeTiming.AcceptanceAcknowledgedTimestamp >
+                                        writeTiming.SocketWriteStartedTimestamp)
+                                {
+                                    xboxOneBrokerAcceptanceLatency.Observe(
+                                        writeTiming.
+                                            AcceptanceAcknowledgedTimestamp -
+                                        writeTiming.
+                                            SocketWriteStartedTimestamp);
+                                }
+                                if (xboxOneClaim &&
+                                    writeTiming.WaitCompletedTimestamp >=
+                                        writeTiming.
+                                            AcceptanceAcknowledgedTimestamp &&
+                                    writeTiming.
+                                        AcceptanceAcknowledgedTimestamp > 0)
+                                {
+                                    xboxOneAckWakeLatency.Observe(
+                                        writeTiming.WaitCompletedTimestamp -
+                                        writeTiming.
+                                            AcceptanceAcknowledgedTimestamp);
+                                }
                             }
                             if (mappedClaim)
                             {
                                 inputScheduler.CompleteSuccess(inputClaim,
                                     writtenAt);
+                            }
+                            else if (xbox360Claim)
+                            {
+                                bool completed = xbox360EgressScheduler.
+                                    Complete(xbox360InputClaim,
+                                        OrderedEgressCompletion.Commit);
+                                if (completed && xbox360InputClaim.Kind ==
+                                        OrderedEgressClaimKind.
+                                            MandatoryNeutral)
+                                {
+                                    TryPublishXbox360PendingResynchronization(
+                                        writerGeneration);
+                                }
+                            }
+                            else if (xboxOneClaim)
+                            {
+                                bool completed = xboxOneEgressScheduler.
+                                    Complete(xboxOneInputClaim,
+                                        OrderedEgressCompletion.Commit);
+                                if (completed && xboxOneInputClaim.Kind ==
+                                        OrderedEgressClaimKind.
+                                            MandatoryNeutral)
+                                {
+                                    TryPublishXboxOnePendingResynchronization(
+                                        writerGeneration);
+                                }
+                            }
+                            else if (switch2Claim)
+                            {
+                                bool completed = switch2EgressScheduler.
+                                    Complete(switch2InputClaim,
+                                        OrderedEgressCompletion.Commit);
+                                if (completed && switch2InputClaim.Kind ==
+                                        OrderedEgressClaimKind.
+                                            MandatoryNeutral)
+                                {
+                                    TryPublishSwitch2PendingResynchronization(
+                                        writerGeneration);
+                                }
                             }
                             RecordMaximum(ref maximumStateWriteDurationTicks,
                                 writtenAt - writeStartedAt);
@@ -2677,10 +4714,38 @@ namespace DS4Windows
                             {
                                 inputScheduler.CompleteFailure(inputClaim);
                             }
+                            else if (xbox360Claim)
+                            {
+                                xbox360EgressScheduler.Complete(
+                                    xbox360InputClaim,
+                                    OrderedEgressCompletion.Defer);
+                            }
+                            else if (xboxOneClaim)
+                            {
+                                xboxOneEgressScheduler.Complete(
+                                    xboxOneInputClaim,
+                                    OrderedEgressCompletion.Defer);
+                            }
+                            else if (switch2Claim)
+                            {
+                                switch2EgressScheduler.Complete(
+                                    switch2InputClaim,
+                                    OrderedEgressCompletion.Defer);
+                            }
+                            if (ex is XboxOneSemanticInputRejectedException)
+                            {
+                                StopXboxOneRejectedInput(writeStream,
+                                    writeStreamGeneration, writerGeneration,
+                                    ex.Message);
+                                return;
+                            }
                             if (IsStateWriterCurrent(writerGeneration) &&
                                 TryRecoverStream(ex.Message,
                                     writeStreamGeneration,
-                                    mappedClaim ? null : packet))
+                                    mappedClaim || xbox360Claim ||
+                                        xboxOneClaim || switch2Claim ?
+                                        null :
+                                        packet))
                             {
                                 continue;
                             }
@@ -2973,6 +5038,18 @@ namespace DS4Windows
                 return false;
             }
 
+            // The authorized Xbox persona is a one-shot capability. A broken
+            // broker connection leaves input acceptance and canonical
+            // feedback acceptance potentially ambiguous, so reopening the
+            // same retained device and replaying a claim could cross the
+            // persona's exact acknowledgement boundary. Its owner must tear
+            // down this entire output and construct a fresh authorized
+            // incarnation instead.
+            if (!SupportsInPlaceStreamRecovery(viiperType))
+            {
+                return false;
+            }
+
             if (Volatile.Read(ref streamGeneration) != failedStreamGeneration &&
                 deviceStream != null)
             {
@@ -3006,6 +5083,10 @@ namespace DS4Windows
             }
             return recovered;
         }
+
+        internal static bool SupportsInPlaceStreamRecovery(
+            ViiperVirtualDeviceType type) =>
+            type != ViiperVirtualDeviceType.XboxOne;
 
         private bool RecoverStreamAsOwner(string reason,
             long failedStreamGeneration)
@@ -3113,6 +5194,14 @@ namespace DS4Windows
                 // retired generation before starting its replacement reader.
                 WaitForFeedbackDispatchCallbacks();
 
+                // The physical session can survive stream recovery, but a
+                // pre-recovery source packet must not be re-presented by a
+                // later profile edit. Release through its exact session and
+                // publication watermark, outside the callback admission lock.
+                RefreshSwitch2DualSenseConversionPolicy(
+                    Volatile.Read(ref lastInputDeviceIndex));
+                switch2DualSenseFeedbackPolicyLane.Invalidate();
+
                 // No new feedback reader can enqueue this generation until
                 // StartFeedbackReader below. Old workers revalidate the item
                 // stream generation under their independent callback lease,
@@ -3186,6 +5275,11 @@ namespace DS4Windows
             if (stream == null)
             {
                 throw new ObjectDisposedException(nameof(ViiperDeviceStream));
+            }
+
+            if (viiperType == ViiperVirtualDeviceType.XboxOne)
+            {
+                return stream.WriteXboxOneInputAndWaitForAck(data, length);
             }
 
             if (activeStreamUsesFramedProtocol)
@@ -3679,6 +5773,37 @@ namespace DS4Windows
                 ref maximumFeedbackSpeakerDispatchGapTicks, 0);
             long maximumSpeakerCallback = Interlocked.Exchange(
                 ref maximumFeedbackSpeakerCallbackTicks, 0);
+            string orderedEgressStats = string.Empty;
+            if (UsesOrderedEgressScheduler())
+            {
+                OrderedEgressSchedulerSnapshot orderedSnapshot =
+                    UsesXbox360EgressScheduler() ?
+                        xbox360EgressScheduler.Snapshot() :
+                    UsesXboxOneEgressScheduler() ?
+                        xboxOneEgressScheduler.Snapshot() :
+                        switch2EgressScheduler.Snapshot();
+                orderedEgressStats =
+                    $" orderedDepth={orderedSnapshot.OrderedDepth}" +
+                    $" orderedHighWater={orderedSnapshot.OrderedHighWater}" +
+                    $" orderedContinuousPending={orderedSnapshot.ContinuousPending}" +
+                    $" orderedRetryPending={orderedSnapshot.RetryPending}" +
+                    $" orderedClaimPending={orderedSnapshot.ClaimPending}" +
+                    $" orderedClaimAdmitted={orderedSnapshot.ClaimAdmitted}" +
+                    $" orderedAccepted={orderedSnapshot.AcceptedPublications}" +
+                    $" orderedRejected={orderedSnapshot.RejectedPublications}" +
+                    $" orderedReplacements={orderedSnapshot.ContinuousReplacements}" +
+                    $" orderedPromotions={orderedSnapshot.ContinuousPromotions}" +
+                    $" orderedRetries={orderedSnapshot.RetryCount}" +
+                    $" orderedOverflowFaults={orderedSnapshot.OverflowFaults}" +
+                    $" orderedStaleFaults={orderedSnapshot.OrderedAgeFaults}" +
+                    $" orderedLifecycleFaults={orderedSnapshot.LifecycleResetFaults}" +
+                    $" orderedStaleProducerRejects={orderedSnapshot.StaleProducerRejections}" +
+                    $" orderedNeutralPending={orderedSnapshot.MandatoryNeutralPending}" +
+                    $" orderedNeutralCommits={orderedSnapshot.MandatoryNeutralCommits}" +
+                    $" orderedResyncRequired={orderedSnapshot.ResynchronizationRequired}" +
+                    $" orderedResyncs={orderedSnapshot.ResynchronizationCount}" +
+                    $" orderedInvalidTimestamps={orderedSnapshot.InvalidTimestampCount}";
+            }
             string latencyDistributions = string.Empty;
             if (ViiperLatencyHistogram.Enabled)
             {
@@ -3690,6 +5815,14 @@ namespace DS4Windows
                     claimToSocketStartLatency.Snapshot().Format(
                         "claim->socket") + " " +
                     socketWriteLatency.Snapshot().Format("socketWrite");
+                if (UsesXboxOneEgressScheduler())
+                {
+                    latencyDistributions += " " +
+                        xboxOneBrokerAcceptanceLatency.Snapshot().Format(
+                            "xboxSocketStart->accepted") + " " +
+                        xboxOneAckWakeLatency.Snapshot().Format(
+                            "xboxAckReceived->writerWake");
+                }
 
                 int deviceIndex = Volatile.Read(ref lastInputDeviceIndex);
                 if (Program.rootHub != null && deviceIndex >= 0 &&
@@ -3756,7 +5889,12 @@ namespace DS4Windows
                 $"hapticsQueueAgeMaxMs={feedbackDispatchBuffer.OrderedControlMaximumQueueAgeMilliseconds:F2} " +
                 $"controlDelivered={Interlocked.Read(ref feedbackControlDelivered)} " +
                 $"controlStale={Interlocked.Read(ref feedbackControlStale)} " +
-                $"controlCallbackFailures={Interlocked.Read(ref feedbackControlCallbackFailures)}" +
+                $"controlCallbackFailures={Interlocked.Read(ref feedbackControlCallbackFailures)} " +
+                $"switch2FeedbackValidated={Interlocked.Read(ref switch2FeedbackValidated)} " +
+                $"switch2FeedbackRejected={Interlocked.Read(ref switch2FeedbackRejected)} " +
+                $"switch2RumblePreserved={Interlocked.Read(ref switch2RumbleFramesPreserved)} " +
+                $"switch2LedOnlyPreserved={Interlocked.Read(ref switch2LedOnlyFramesPreserved)}" +
+                orderedEgressStats +
                 latencyDistributions,
                 false);
         }
@@ -3811,18 +5949,20 @@ namespace DS4Windows
             int length = activeFeedbackLength > 0 ? activeFeedbackLength : ViiperStatePacketBuilder.GetFeedbackLength(viiperType);
             ViiperDeviceStream stream = deviceStream;
             long readStreamGeneration = Volatile.Read(ref streamGeneration);
+            XboxOnePhysicalFeedbackSession physicalFeedbackSession =
+                Volatile.Read(ref xboxOnePhysicalFeedbackSession);
             if (length <= 0 || stream == null || !connected)
             {
                 return;
             }
 
             Thread thread = new Thread(() => FeedbackReadLoop(length, stream,
-                readStreamGeneration))
+                readStreamGeneration, physicalFeedbackSession))
             {
                 IsBackground = true,
                 Name = $"VIIPER {viiperType} feedback",
-                Priority = activeStreamSupportsDirectSpeaker ?
-                    ThreadPriority.Highest : ThreadPriority.AboveNormal,
+                Priority = GetFeedbackReaderThreadPriority(viiperType,
+                    activeStreamSupportsDirectSpeaker),
             };
             lock (feedbackThreadLock)
             {
@@ -3836,6 +5976,12 @@ namespace DS4Windows
             }
             thread.Start();
         }
+
+        internal static ThreadPriority GetFeedbackReaderThreadPriority(
+            ViiperVirtualDeviceType deviceType, bool supportsDirectSpeaker) =>
+            supportsDirectSpeaker ||
+                deviceType == ViiperVirtualDeviceType.XboxOne ?
+                ThreadPriority.Highest : ThreadPriority.AboveNormal;
 
         private static void RecordMinimum(ref long target, long candidate)
         {
@@ -3859,12 +6005,28 @@ namespace DS4Windows
         }
 
         private void FeedbackReadLoop(int feedbackLength,
-            ViiperDeviceStream stream, long readStreamGeneration)
+            ViiperDeviceStream stream, long readStreamGeneration,
+            XboxOnePhysicalFeedbackSession physicalFeedbackSession)
         {
             using MultimediaThreadRegistration mmcss =
                 activeStreamSupportsDirectSpeaker ?
                     MultimediaThreadRegistration.EnterProAudio() :
                     MultimediaThreadRegistration.EnterGames();
+            using XboxOneFeedbackDeliveryDispatcher xboxOneFeedbackDispatcher =
+                viiperType == ViiperVirtualDeviceType.XboxOne ?
+                    new XboxOneFeedbackDeliveryDispatcher(
+                        (payload, length) =>
+                            DeliverXboxOneFeedback(stream,
+                                readStreamGeneration, payload, length),
+                        stream.AcknowledgeXboxOneFeedback,
+                        stream.CloseTransport,
+                        $"VIIPER {viiperType} physical feedback delivery",
+                        (payload, length, correlation, delivered, acknowledged) =>
+                            OnXboxOneFeedbackDispatchCompleted(stream,
+                                readStreamGeneration, payload, length,
+                                correlation, delivered, acknowledged),
+                        feedbackControlSignal, ProcessXboxFeedbackPolicyRefresh) :
+                    null;
             int bufferLength = IsDualSenseType() ? Math.Max(feedbackLength, DualSenseCombinedExtendedFeedbackLength) : feedbackLength;
             byte[] buffer = new byte[bufferLength];
             byte[] framedPayload = new byte[ushort.MaxValue];
@@ -3875,7 +6037,37 @@ namespace DS4Windows
                 while (connected && readStreamGeneration ==
                     Volatile.Read(ref streamGeneration))
                 {
-                    if (activeStreamSupportsDirectSpeaker)
+                    if (viiperType == ViiperVirtualDeviceType.XboxOne)
+                    {
+                        int payloadLength = stream.ReadXboxOneBrokerFrame(
+                            out byte frameType, out ulong correlation,
+                            framedPayload);
+                        if (frameType == ViiperDeviceStream.
+                                XboxOneBrokerSemanticInputAck)
+                        {
+                            stream.AcceptXboxOneInputAck(correlation,
+                                framedPayload[0]);
+                            continue;
+                        }
+                        if (frameType != ViiperDeviceStream.
+                                XboxOneBrokerCanonicalFeedback ||
+                            payloadLength !=
+                                ControllerFeedbackFrame.SerializedLength)
+                        {
+                            throw new IOException(
+                                "VIIPER returned an unexpected Xbox One broker frame.");
+                        }
+
+                        if (xboxOneFeedbackDispatcher == null ||
+                            !xboxOneFeedbackDispatcher.TryEnqueue(
+                                framedPayload.AsSpan(0, payloadLength),
+                                correlation))
+                        {
+                            throw new IOException(
+                                "DS4Windows rejected an overlapping or invalid canonical Xbox One feedback value; the one-shot persona was retired.");
+                        }
+                    }
+                    else if (activeStreamSupportsDirectSpeaker)
                     {
                         int payloadLength = stream.ReadFrame(
                             activeStreamFrameVersion, out byte frameType,
@@ -4005,7 +6197,8 @@ namespace DS4Windows
                                         ApplyAtomicAudioHapticsFeedback(
                                             framedPayload, payloadLength,
                                             Volatile.Read(
-                                                ref lastInputDeviceIndex));
+                                                ref lastInputDeviceIndex),
+                                            readStreamGeneration);
                                     }
                                     finally
                                     {
@@ -4045,17 +6238,19 @@ namespace DS4Windows
                     }
                 }
             }
-            catch (IOException)
+            catch (IOException exception)
             {
-                if (connected &&
+                MarkXboxOneRuntimeStreamFault(stream, readStreamGeneration);
+                if (connected && !writerStopRequested &&
                     !TryRecoverStream("feedback reader stopped", readStreamGeneration))
                 {
-                    AppLogger.LogToGui($"VIIPER {viiperType} feedback reader stopped.", true);
+                    AppLogger.LogToGui($"VIIPER {viiperType} feedback reader stopped: {exception.Message}", true);
                 }
             }
             catch (SocketException)
             {
-                if (connected &&
+                MarkXboxOneRuntimeStreamFault(stream, readStreamGeneration);
+                if (connected && !writerStopRequested &&
                     !TryRecoverStream("feedback reader stopped due to socket error",
                         readStreamGeneration))
                 {
@@ -4064,9 +6259,18 @@ namespace DS4Windows
             }
             catch (ObjectDisposedException)
             {
+                MarkXboxOneRuntimeStreamFault(stream, readStreamGeneration);
             }
             finally
             {
+                // The captured reader owns this exact session. A stale reader
+                // must never retire whichever successor is now in the field.
+                if (physicalFeedbackSession != null &&
+                    !physicalFeedbackSession.TryRetire())
+                {
+                    AppLogger.LogToGui(
+                        "Xbox One feedback stream ended, but physical neutral state acceptance could not be confirmed.", true);
+                }
                 lock (feedbackThreadLock)
                 {
                     if (ReferenceEquals(feedbackThread, Thread.CurrentThread))
@@ -4075,6 +6279,65 @@ namespace DS4Windows
                     }
                 }
             }
+        }
+
+        private bool DeliverXboxOneFeedback(ViiperDeviceStream stream,
+            long readStreamGeneration, byte[] feedback, int feedbackLength)
+        {
+            if (!TryBeginFeedbackReaderCallback(stream, readStreamGeneration))
+            {
+                return false;
+            }
+
+            try
+            {
+                return TryApplyXboxOneFeedback(feedback, feedbackLength);
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogToGui(
+                    $"VIIPER Xbox One feedback delivery failed: {ex.GetType().Name}: {ex.Message}",
+                    true);
+                return false;
+            }
+            finally
+            {
+                EndFeedbackCallback();
+            }
+        }
+
+        private void OnXboxOneFeedbackDispatchCompleted(
+            ViiperDeviceStream stream, long readStreamGeneration, byte[] payload,
+            int payloadLength, ulong correlation, bool delivered,
+            bool acknowledged)
+        {
+            if (IsAcknowledgedXboxOneTerminalFeedback(payload,
+                    payloadLength, correlation, delivered, acknowledged))
+            {
+                lock (feedbackCallbackAdmissionLock)
+                {
+                    if (connected && !feedbackDispatchStopRequested &&
+                        readStreamGeneration == Interlocked.Read(
+                            ref streamGeneration) &&
+                        ReferenceEquals(Volatile.Read(ref deviceStream), stream))
+                    {
+                        xboxOneTerminalFeedbackAcknowledged.Set();
+                    }
+                }
+            }
+        }
+
+        internal static bool IsAcknowledgedXboxOneTerminalFeedback(
+            byte[] payload, int payloadLength, ulong correlation,
+            bool delivered, bool acknowledged)
+        {
+            return delivered && acknowledged && correlation != 0 &&
+                payload != null && payloadLength ==
+                    ControllerFeedbackFrame.SerializedLength &&
+                payloadLength <= payload.Length &&
+                ControllerFeedbackFrame.TryReadFrom(
+                    payload.AsSpan(0, payloadLength),
+                    out ControllerFeedbackFrame frame) && frame.IsStop;
         }
 
         private void ApplyFeedback(byte[] feedback, int feedbackLength,
@@ -4114,14 +6377,41 @@ namespace DS4Windows
                 return;
             }
 
+            if (device is Switch2RuntimeInputDevice && IsDualSenseType() &&
+                TryHandleSwitch2DualSenseHdRumbleFeedback(device, feedback,
+                    feedbackLength, nativeOutputStreamGeneration))
+            {
+                return;
+            }
+
+            if (device is Switch2RuntimeInputDevice &&
+                viiperType != ViiperVirtualDeviceType.XboxOne &&
+                TryDecodeCanonicalFeedbackForSwitch2(viiperType, feedback,
+                    feedbackLength, out ControllerFeedbackActuatorState
+                        switch2State))
+            {
+                TryApplySwitch2VirtualFeedback(switch2State);
+                return;
+            }
+
             switch (viiperType)
             {
+                case ViiperVirtualDeviceType.XboxOne:
+                    TryApplyXboxOneFeedback(feedback, feedbackLength);
+                    break;
+
                 case ViiperVirtualDeviceType.Xbox360:
-                    if (feedbackLength >= 2)
+                    if (Xbox360CanonicalFeedbackAdapter.TryDecode(feedback,
+                            feedbackLength,
+                            out ControllerFeedbackActuatorState xboxState))
                     {
-                        Program.rootHub.SetDevRumble(device, feedback[0], feedback[1], deviceIndex);
+                        Xbox360CanonicalFeedbackAdapter.ProjectLegacy(
+                            xboxState, out byte heavySlow,
+                            out byte lightFast);
+                        Program.rootHub.SetDevRumble(device, heavySlow,
+                            lightFast, deviceIndex);
                         ApplyGameRumbleTriggerVibration(device, deviceIndex,
-                            feedback[1], feedback[0]);
+                            lightFast, heavySlow);
                     }
                     break;
 
@@ -4157,6 +6447,19 @@ namespace DS4Windows
                             TryApplyBluetoothHapticsOutputReport(device,
                                 deviceIndex, feedback, feedbackLength))
                         {
+                            break;
+                        }
+
+                        if (nativeForwardingAllowed && !freshNativeOutput)
+                        {
+                            // An audio interval is not a new HID command.
+                            // USB targets cannot consume the BT carrier, and
+                            // BT template admission can temporarily be busy.
+                            // Neither rejection permits replaying the cached
+                            // native state or converting its compatibility
+                            // motor bytes (usually zero) into local rumble:
+                            // that can disarm the game's waveform haptics.
+                            // Keep transport recovery in the native media lane.
                             break;
                         }
 
@@ -4201,16 +6504,879 @@ namespace DS4Windows
                     break;
 
                 case ViiperVirtualDeviceType.Switch2Pro:
-                    if (feedbackLength >= 34)
+                    if (feedbackLength ==
+                            Switch2VirtualOutputState.WireLength &&
+                        Switch2VirtualOutputState.TryDecode(
+                            feedback.AsSpan(0, feedbackLength),
+                            out Switch2VirtualOutputState output,
+                            out _))
                     {
-                        byte left = MaxByte(feedback, 0, 16);
-                        byte right = MaxByte(feedback, 16, 16);
-                        Program.rootHub.SetDevRumble(device, left, right, deviceIndex);
-                        ApplyGameRumbleTriggerVibration(device, deviceIndex,
-                            right, left);
+                        Interlocked.Increment(
+                            ref switch2FeedbackValidated);
+                        Switch2VirtualFeedbackSession switch2Session =
+                            device is Switch2RuntimeInputDevice ?
+                                Volatile.Read(
+                                    ref switch2FeedbackSession) : null;
+                        if (output.HasRumble)
+                        {
+                            if (device is Switch2RuntimeInputDevice)
+                            {
+                                bool hasAmplitude =
+                                    HasHdRumbleAmplitude(output.LeftRumble) ||
+                                    HasHdRumbleAmplitude(output.RightRumble);
+                                ControllerFeedbackActuatorState marker =
+                                    hasAmplitude ?
+                                        new ControllerFeedbackActuatorState(
+                                            1, 0, 0, 0) : default;
+                                int bodyStrengthPercent =
+                                    GetSwitch2BodyStrengthPercent(
+                                        deviceIndex);
+                                bool xboxBodyCarrierMode =
+                                    GetSwitch2XboxBodyRumbleMode(
+                                        deviceIndex);
+                                int xboxBodyFrequencyLevel =
+                                    GetSwitch2XboxBodyRumbleFrequency(
+                                        deviceIndex);
+                                int rumbleDelayMilliseconds =
+                                    GetSwitch2RumbleDelayMilliseconds(
+                                        deviceIndex);
+                                long feedbackProfileRevision =
+                                    GetSwitch2FeedbackProfileRevision(
+                                        deviceIndex);
+                                bool published = switch2Session != null &&
+                                    (hasAmplitude ?
+                                        switch2Session.
+                                            TryPublishSourcePreserved(
+                                            marker,
+                                            Switch2HdRumbleFeedbackFidelity.
+                                                NativeSwitch2PassThrough,
+                                            output.LeftRumble,
+                                            output.RightRumble,
+                                            bodyStrengthPercent,
+                                            xboxBodyCarrierMode,
+                                            xboxBodyFrequencyLevel,
+                                            rumbleDelayMilliseconds,
+                                            feedbackProfileRevision) :
+                                        switch2Session.TryPublish(marker,
+                                            bodyStrengthPercent:
+                                                bodyStrengthPercent,
+                                            xboxBodyCarrierMode:
+                                                xboxBodyCarrierMode,
+                                            xboxBodyFrequencyLevel:
+                                                xboxBodyFrequencyLevel,
+                                            rumbleDelayMilliseconds:
+                                                rumbleDelayMilliseconds,
+                                            profileRevision:
+                                                feedbackProfileRevision));
+                                if (!published)
+                                {
+                                    Interlocked.Increment(
+                                        ref switch2FeedbackRejected);
+                                }
+                            }
+                            else
+                            {
+                                // Preserve the validated oscillator fields for
+                                // a future basis-backed translator. Raw maxima
+                                // mix headers, frequency/control, and amplitude
+                                // and can dangerously mis-drive a physical
+                                // controller.
+                                Interlocked.Increment(
+                                    ref switch2RumbleFramesPreserved);
+                                if (TryTranslateSwitch2VirtualOutputToLegacyRumble(
+                                        output, out byte lightFast,
+                                        out byte heavySlow))
+                                {
+                                    Program.rootHub.SetDevRumble(device,
+                                        lightFast, heavySlow, deviceIndex);
+                                    ApplyGameRumbleTriggerVibration(device,
+                                        deviceIndex, lightFast, heavySlow);
+                                }
+                            }
+                        }
+                        if (output.HasPlayerLed)
+                        {
+                            if (device is Switch2RuntimeInputDevice)
+                            {
+                                if (switch2Session == null ||
+                                    !switch2Session.TryRequestPlayerLedMask(
+                                        output.PlayerLedMask))
+                                {
+                                    Interlocked.Increment(
+                                        ref switch2FeedbackRejected);
+                                }
+                            }
+                            else
+                            {
+                                // Other physical protocols do not expose an
+                                // equivalent four-segment player indicator.
+                                Interlocked.Increment(
+                                    ref switch2LedOnlyFramesPreserved);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // Unknown or malformed output is ignored. In
+                        // particular, do not convert rejection into a
+                        // synthetic stop which could clobber another owner.
+                        Interlocked.Increment(ref switch2FeedbackRejected);
                     }
                     break;
             }
+        }
+
+        private static bool HasHdRumbleAmplitude(
+            in Switch2HdRumbleGroup group) =>
+            group.First.HasNonzeroAmplitude ||
+            group.Second.HasNonzeroAmplitude ||
+            group.Third.HasNonzeroAmplitude;
+
+        private bool TryHandleSwitch2DualSenseHdRumbleFeedback(
+            DS4Device device, byte[] feedback, int feedbackLength,
+            long sourceStreamGeneration)
+        {
+            if (!TryDecodeCanonicalFeedbackForSwitch2(viiperType,
+                    feedback, feedbackLength, out _))
+            {
+                return false;
+            }
+            DS4State state = device?.GetRawCurrentStateRef();
+            bool leftTriggerActive = state != null &&
+                (state.L2Btn || state.L2 != 0);
+            bool rightTriggerActive = state != null &&
+                (state.R2Btn || state.R2 != 0);
+            int hapticsReportOffset = feedback != null && feedbackLength >=
+                    DualSenseCombinedExtendedFeedbackLength &&
+                feedback[DualSenseCombinedBluetoothReportOffset] == 0x36 ?
+                DualSenseCombinedBluetoothReportOffset :
+                DualSenseBluetoothHapticsReportOffset;
+            Switch2VirtualFeedbackSession session =
+                Volatile.Read(ref switch2FeedbackSession);
+            int deviceIndex = Volatile.Read(ref lastInputDeviceIndex);
+            int bodyStrengthPercent = GetSwitch2BodyStrengthPercent(
+                deviceIndex);
+            bool xboxBodyCarrierMode = GetSwitch2XboxBodyRumbleMode(
+                deviceIndex);
+            int xboxBodyFrequencyLevel =
+                GetSwitch2XboxBodyRumbleFrequency(deviceIndex);
+            int rumbleDelayMilliseconds =
+                GetSwitch2RumbleDelayMilliseconds(deviceIndex);
+            long feedbackProfileRevision =
+                GetSwitch2FeedbackProfileRevision(deviceIndex);
+            bool published = switch2DualSenseFeedbackPolicyLane.TryPublish(
+                session, deviceIndex, feedback, feedbackLength,
+                hapticsReportOffset, leftTriggerActive, rightTriggerActive,
+                bodyStrengthPercent, xboxBodyCarrierMode,
+                xboxBodyFrequencyLevel, rumbleDelayMilliseconds,
+                feedbackProfileRevision, sourceStreamGeneration != 0 ?
+                    sourceStreamGeneration : Interlocked.Read(ref streamGeneration));
+            if (published)
+            {
+                Interlocked.Increment(ref switch2FeedbackValidated);
+            }
+            else
+            {
+                Interlocked.Increment(ref switch2FeedbackRejected);
+            }
+            return true;
+        }
+
+        internal void RefreshSwitch2DualSenseConversionPolicy(
+            int expectedDeviceIndex)
+        {
+            // Profile UI only, never input publication. The captured session's
+            // existing owner still authenticates its exact physical lifetime.
+            if (!connected || !IsDualSenseType() || audioOnlySidecar ||
+                expectedDeviceIndex != Volatile.Read(ref lastInputDeviceIndex))
+            {
+                return;
+            }
+            ViiperDeviceStream stream = Volatile.Read(ref deviceStream);
+            long generation = Interlocked.Read(ref streamGeneration);
+            if (!TryBeginFeedbackReaderCallback(stream, generation))
+            {
+                return;
+            }
+            try
+            {
+                DS4Device target = Program.rootHub != null && expectedDeviceIndex >= 0 &&
+                    expectedDeviceIndex < Program.rootHub.DS4Controllers.Length ?
+                    Program.rootHub.DS4Controllers[expectedDeviceIndex] : null;
+                if (target is not Switch2RuntimeInputDevice)
+                {
+                    return;
+                }
+                DS4State state = target.GetRawCurrentStateRef();
+                _ = switch2DualSenseFeedbackPolicyLane.TryRefresh(
+                    Volatile.Read(ref switch2FeedbackSession), expectedDeviceIndex,
+                    GetSwitch2FeedbackProfileRevision(expectedDeviceIndex), generation,
+                    state != null && (state.L2Btn || state.L2 != 0),
+                    state != null && (state.R2Btn || state.R2 != 0));
+            }
+            finally
+            {
+                EndFeedbackCallback();
+            }
+        }
+
+        internal void QueueSwitch2DualSenseConversionPolicyRefresh(int expectedDeviceIndex)
+        {
+            // CheckProfileOptions can execute on the physical input queue.
+            // This is only a bounded wake request; the existing feedback
+            // worker owns the release/publication and physical pump.
+            if (IsDualSenseType() && !audioOnlySidecar &&
+                expectedDeviceIndex == Volatile.Read(ref lastInputDeviceIndex))
+            {
+                Interlocked.Exchange(ref switch2DualSensePolicyRefreshRequested, 1);
+                feedbackControlSignal.Set();
+            }
+        }
+
+        internal void QueueXboxFeedbackPolicyRefresh(int expectedDeviceIndex)
+        {
+            if (viiperType != ViiperVirtualDeviceType.XboxOne || audioOnlySidecar ||
+                expectedDeviceIndex != Volatile.Read(ref lastInputDeviceIndex) ||
+                expectedDeviceIndex < 0 || expectedDeviceIndex >= Global.EnableOutputDataToDS4.Length) return;
+            var session = Volatile.Read(ref switch2FeedbackSession);
+            if (session == null)
+            {
+                if (Volatile.Read(ref Global.EnableOutputDataToDS4[expectedDeviceIndex])) return;
+                var physical = Volatile.Read(ref xboxOnePhysicalFeedbackSession);
+                if (physical == null || !physical.TryCaptureOutputPolicySequence(out ulong sequence)) return;
+                EnqueueXboxOnePhysicalOutputSuppression(
+                    new(physical, expectedDeviceIndex, Interlocked.Read(ref streamGeneration), sequence));
+                feedbackControlSignal.Set();
+                return;
+            }
+            if (expectedDeviceIndex >= Global.Switch2MapXboxImpulseTriggersToHdRumble.Length ||
+                !session.TryCaptureXboxPolicyRevision(out ulong revision)) return;
+            var policy = new Switch2XboxFeedbackPolicy(
+                Volatile.Read(ref Global.EnableOutputDataToDS4[expectedDeviceIndex]),
+                Volatile.Read(ref Global.Switch2MapXboxImpulseTriggersToHdRumble[expectedDeviceIndex]));
+            Switch2XboxFeedbackPolicyRequest.Enqueue(ref switch2XboxPolicyRefreshRequested,
+                new(session, expectedDeviceIndex, Interlocked.Read(ref streamGeneration), revision, policy),
+                isCurrent: isCurrentSwitch2XboxPolicyRequest);
+            feedbackControlSignal.Set();
+        }
+
+        private bool ProcessXboxFeedbackPolicyRefresh()
+        {
+            // Both source families use the existing Xbox delivery worker and
+            // callback admission. Neither policy change invents a broker ACK.
+            bool physicalComplete = ProcessXboxOnePhysicalOutputSuppression();
+            bool switch2Complete = ProcessSwitch2XboxFeedbackPolicyRefreshCore();
+            return physicalComplete && switch2Complete;
+        }
+
+        private bool ProcessXboxOnePhysicalOutputSuppression()
+        {
+            var request = Interlocked.Exchange(ref xboxOnePhysicalOutputSuppressionRequested, null);
+            if (request == null) return true;
+            bool completed = false;
+            try
+            {
+                if (!connected || viiperType != ViiperVirtualDeviceType.XboxOne || audioOnlySidecar ||
+                    request.DeviceIndex != Volatile.Read(ref lastInputDeviceIndex) ||
+                    request.StreamGeneration != Interlocked.Read(ref streamGeneration) ||
+                    !ReferenceEquals(request.Session, Volatile.Read(ref xboxOnePhysicalFeedbackSession)))
+                    return completed = true;
+                ViiperDeviceStream stream = Volatile.Read(ref deviceStream);
+                if (!TryBeginFeedbackReaderCallback(stream, request.StreamGeneration)) return false;
+                try
+                {
+                    var hub = Program.rootHub;
+                    if (hub == null || request.DeviceIndex < 0 || request.DeviceIndex >= hub.DS4Controllers.Length ||
+                        !request.Session.Targets(hub.DS4Controllers[request.DeviceIndex])) return completed = true;
+                    return completed = request.Session.TrySuppressCurrentOutput(request.Sequence);
+                }
+                finally { EndFeedbackCallback(); }
+            }
+            finally
+            {
+                // Retry uses the same worker's bounded backoff, and can never
+                // replace a newer profile request published while it ran.
+                if (!completed) EnqueueXboxOnePhysicalOutputSuppression(request);
+            }
+        }
+
+        private void EnqueueXboxOnePhysicalOutputSuppression(XboxOnePhysicalOutputSuppressionRequest request)
+        {
+            while (true)
+            {
+                // Read the pending identity before the live checks. If a new
+                // owner publishes during this check, CAS retries those checks;
+                // a delayed predecessor cannot overwrite its queued request.
+                var previous = Volatile.Read(ref xboxOnePhysicalOutputSuppressionRequested);
+                if (request.DeviceIndex != Volatile.Read(ref lastInputDeviceIndex) ||
+                    request.StreamGeneration != Interlocked.Read(ref streamGeneration) ||
+                    !ReferenceEquals(request.Session, Volatile.Read(ref xboxOnePhysicalFeedbackSession))) return;
+                if (previous != null && ReferenceEquals(previous.Session, request.Session) &&
+                    previous.DeviceIndex == request.DeviceIndex && previous.StreamGeneration == request.StreamGeneration &&
+                    previous.Sequence >= request.Sequence) return;
+                if (ReferenceEquals(Interlocked.CompareExchange(ref xboxOnePhysicalOutputSuppressionRequested,
+                        request, previous), previous)) return;
+            }
+        }
+
+        private bool ProcessSwitch2XboxFeedbackPolicyRefreshCore()
+        {
+            var request = Interlocked.Exchange(ref switch2XboxPolicyRefreshRequested, null);
+            if (request == null) return true;
+            bool completed = false;
+            try
+            {
+                completed = RefreshSwitch2XboxFeedbackPolicy(request);
+                return completed;
+            }
+            finally
+            {
+                // Preserve cleanup authority even if a dependency throws; the
+                // dispatcher owns retry pacing and must not lose the request.
+                if (!completed) Switch2XboxFeedbackPolicyRequest.Enqueue(
+                    ref switch2XboxPolicyRefreshRequested, request, retry: true,
+                    isCurrent: isCurrentSwitch2XboxPolicyRequest);
+            }
+        }
+
+        private bool IsCurrentSwitch2XboxPolicyRequest(Switch2XboxFeedbackPolicyRequest request) =>
+            request.DeviceIndex == Volatile.Read(ref lastInputDeviceIndex) &&
+            request.StreamGeneration == Interlocked.Read(ref streamGeneration) &&
+            ReferenceEquals(request.Session, Volatile.Read(ref switch2FeedbackSession));
+
+        private Switch2XboxFeedbackPolicy ReadSwitch2XboxLivePolicy()
+        {
+            int index = Volatile.Read(ref lastInputDeviceIndex);
+            if (index < 0 || index >= Global.EnableOutputDataToDS4.Length ||
+                index >= Global.Switch2MapXboxImpulseTriggersToHdRumble.Length) return new(false, false);
+            return new(Volatile.Read(ref Global.EnableOutputDataToDS4[index]),
+                Volatile.Read(ref Global.Switch2MapXboxImpulseTriggersToHdRumble[index]));
+        }
+
+        private bool RefreshSwitch2XboxFeedbackPolicy(Switch2XboxFeedbackPolicyRequest request)
+        {
+            // UI/profile edits wake this existing feedback worker. A request
+            // for a replaced stream, slot or session is obsolete, not retryable.
+            if (!connected || viiperType != ViiperVirtualDeviceType.XboxOne || audioOnlySidecar ||
+                request.DeviceIndex != Volatile.Read(ref lastInputDeviceIndex) ||
+                request.StreamGeneration != Interlocked.Read(ref streamGeneration) ||
+                !ReferenceEquals(request.Session, Volatile.Read(ref switch2FeedbackSession))) return true;
+            ViiperDeviceStream stream = Volatile.Read(ref deviceStream);
+            if (!TryBeginFeedbackReaderCallback(stream, request.StreamGeneration)) return false;
+            try
+            {
+                var hub = Program.rootHub;
+                if (hub == null || request.DeviceIndex < 0 || request.DeviceIndex >= hub.DS4Controllers.Length ||
+                    hub.DS4Controllers[request.DeviceIndex] is not Switch2RuntimeInputDevice) return true;
+                if (!request.Session.TryCaptureXboxPolicyRevision(out _)) return true;
+                return request.Session.TryRefreshXboxOutputPolicy(request.Policy, request.PublicationRevision);
+            }
+            finally { EndFeedbackCallback(); }
+        }
+
+        private static Switch2DualSenseConversionPolicy
+            ReadSwitch2DualSenseConversionPolicy(int deviceIndex) =>
+                Switch2DualSenseConversionPolicy.ReadProfile(deviceIndex);
+
+        private long ReadFeedbackStreamGeneration() =>
+            Volatile.Read(ref streamGeneration);
+
+        /// <summary>
+        /// Builds one atomic DualSense-to-Switch-2 haptic representation. PCM
+        /// keeps its three chronological stereo slices, compatibility motors
+        /// are added rather than discarded, and a supported adaptive-trigger
+        /// program is overlaid only on its pressed physical side. The latter
+        /// is an explicit approximation because Switch 2 has digital triggers
+        /// and no resistance actuator.
+        /// </summary>
+        internal static bool TryBuildSwitch2DualSenseHdRumbleGroups(
+            byte[] feedback, int feedbackLength, int hapticsReportOffset,
+            bool leftTriggerActive, bool rightTriggerActive,
+            out Switch2HdRumbleGroup left,
+            out Switch2HdRumbleGroup right,
+            out Switch2HdRumbleFeedbackFidelity fidelity,
+            bool audioHapticsEnabled = true,
+            bool adaptiveTriggersEnabled = true)
+        {
+            left = default;
+            right = default;
+            fidelity = Switch2HdRumbleFeedbackFidelity.Invalid;
+            if (feedback == null || feedbackLength <
+                    DualSenseBaseFeedbackLength ||
+                feedbackLength > feedback.Length)
+            {
+                return false;
+            }
+
+            ushort bodyLow = (ushort)(feedback[0] * 257);
+            ushort bodyHigh = (ushort)(feedback[1] * 257);
+            Switch2HdRumbleGroup body =
+                Switch2HdRumbleFeedbackTranslator.
+                    CreateCompatibilityGroup(bodyLow, bodyHigh);
+            bool hasPcm = audioHapticsEnabled && DualSenseHapticsTranslator.
+                TryTranslateToSwitch2Groups(feedback, feedbackLength,
+                    hapticsReportOffset, out left, out right);
+            if (hasPcm)
+            {
+                // Compatibility motor bytes can coexist with the audio lane.
+                // Preserve both instead of letting a silent PCM carrier erase
+                // conventional game rumble.
+                left = DualSenseAdaptiveTriggerHdRumbleTranslator.
+                    MixPcmWithCompatibility(left, body);
+                right = DualSenseAdaptiveTriggerHdRumbleTranslator.
+                    MixPcmWithCompatibility(right, body);
+            }
+            else
+            {
+                left = body;
+                right = body;
+            }
+
+            bool hasAdaptiveTrigger = false;
+            if (adaptiveTriggersEnabled &&
+                feedbackLength >= DualSenseCompatExtendedFeedbackLength)
+            {
+                if (rightTriggerActive &&
+                    DualSenseAdaptiveTriggerHdRumbleTranslator.TryTranslate(
+                        feedback.AsSpan(DualSenseTriggerFeedbackOffset,
+                            DualSenseTriggerEffectLength),
+                        out Switch2HdRumbleGroup rightTrigger))
+                {
+                    right = DualSenseAdaptiveTriggerHdRumbleTranslator.Mix(
+                        right, rightTrigger);
+                    hasAdaptiveTrigger = true;
+                }
+
+                int leftOffset = DualSenseTriggerFeedbackOffset +
+                    DualSenseTriggerEffectLength;
+                if (leftTriggerActive &&
+                    DualSenseAdaptiveTriggerHdRumbleTranslator.TryTranslate(
+                        feedback.AsSpan(leftOffset,
+                            DualSenseTriggerEffectLength),
+                        out Switch2HdRumbleGroup leftTrigger))
+                {
+                    left = DualSenseAdaptiveTriggerHdRumbleTranslator.Mix(
+                        left, leftTrigger);
+                    hasAdaptiveTrigger = true;
+                }
+            }
+
+            if (!hasPcm && !hasAdaptiveTrigger)
+            {
+                // Let the canonical body-rumble path retain its normal
+                // arbitration and fidelity label when no richer source data
+                // was present.
+                left = right = default;
+                return false;
+            }
+
+            fidelity = hasAdaptiveTrigger ?
+                Switch2HdRumbleFeedbackFidelity.
+                    DualSenseAdaptiveTriggerApproximation :
+                Switch2HdRumbleFeedbackFidelity.DualSensePcmDualBand;
+            return true;
+        }
+
+        internal static bool TryDecodeCanonicalFeedbackForSwitch2(
+            ViiperVirtualDeviceType sourceType, byte[] feedback,
+            int feedbackLength, out ControllerFeedbackActuatorState state)
+        {
+            state = default;
+            if (feedback == null || feedbackLength < 0 ||
+                feedbackLength > feedback.Length)
+            {
+                return false;
+            }
+
+            if (sourceType == ViiperVirtualDeviceType.Xbox360)
+            {
+                return Xbox360CanonicalFeedbackAdapter.TryDecode(feedback,
+                    feedbackLength, out state);
+            }
+
+            byte lightFast;
+            byte heavySlow;
+            switch (sourceType)
+            {
+                case ViiperVirtualDeviceType.DualShock4:
+                    if (feedbackLength < 7)
+                    {
+                        return false;
+                    }
+                    lightFast = feedback[0];
+                    heavySlow = feedback[1];
+                    break;
+
+                case ViiperVirtualDeviceType.DualSense:
+                case ViiperVirtualDeviceType.DualSenseEdge:
+                    if (feedbackLength < DualSenseBaseFeedbackLength)
+                    {
+                        return false;
+                    }
+                    lightFast = feedback[1];
+                    heavySlow = feedback[0];
+                    int hapticsReportOffset = feedbackLength >=
+                            DualSenseCombinedExtendedFeedbackLength &&
+                        feedback[DualSenseCombinedBluetoothReportOffset] ==
+                            0x36 ?
+                        DualSenseCombinedBluetoothReportOffset :
+                        DualSenseBluetoothHapticsReportOffset;
+                    DualSenseHapticsTranslator.Translate(feedback,
+                        feedbackLength, hapticsReportOffset, out lightFast,
+                        out heavySlow);
+                    break;
+
+                default:
+                    return false;
+            }
+
+            state = new ControllerFeedbackActuatorState(
+                (ushort)(heavySlow * 257),
+                (ushort)(lightFast * 257), 0, 0);
+            return true;
+        }
+
+        private bool TryApplySwitch2VirtualFeedback(
+            in ControllerFeedbackActuatorState state)
+        {
+            Switch2VirtualFeedbackSession session =
+                Volatile.Read(ref switch2FeedbackSession);
+            int deviceIndex = Volatile.Read(ref lastInputDeviceIndex);
+            int bodyStrengthPercent = GetSwitch2BodyStrengthPercent(
+                deviceIndex);
+            bool xboxBodyCarrierMode = GetSwitch2XboxBodyRumbleMode(
+                deviceIndex);
+            int xboxBodyFrequencyLevel =
+                GetSwitch2XboxBodyRumbleFrequency(deviceIndex);
+            bool published = session != null && session.TryPublish(state,
+                bodyStrengthPercent: bodyStrengthPercent,
+                xboxBodyCarrierMode: xboxBodyCarrierMode,
+                xboxBodyFrequencyLevel: xboxBodyFrequencyLevel,
+                rumbleDelayMilliseconds:
+                    GetSwitch2RumbleDelayMilliseconds(deviceIndex),
+                profileRevision:
+                    GetSwitch2FeedbackProfileRevision(deviceIndex));
+            if (published)
+            {
+                Interlocked.Increment(ref switch2FeedbackValidated);
+            }
+            else
+            {
+                Interlocked.Increment(ref switch2FeedbackRejected);
+            }
+            return published;
+        }
+
+        private bool TryApplyXboxOneFeedback(byte[] feedback,
+            int feedbackLength)
+        {
+            if (feedback == null || feedbackLength !=
+                    ControllerFeedbackFrame.SerializedLength ||
+                feedbackLength > feedback.Length ||
+                !ControllerFeedbackFrame.TryReadFrom(
+                    feedback.AsSpan(0, feedbackLength),
+                    out ControllerFeedbackFrame canonicalFrame))
+            {
+                return false;
+            }
+
+            if (Volatile.Read(ref xboxOneSwitch2FeedbackPreRetired) == 1)
+            {
+                bool accepted =
+                    IsAuthorizedXboxOneTerminalStopAfterPhysicalRetirement(
+                        canonicalFrame, xboxOneFeedbackBinding,
+                        xboxOneLastFeedbackSequence);
+                if (accepted)
+                {
+                    xboxOneLastFeedbackSequence = canonicalFrame.Sequence;
+                    Interlocked.Increment(ref switch2FeedbackValidated);
+                }
+                else
+                {
+                    Interlocked.Increment(ref switch2FeedbackRejected);
+                }
+                return accepted;
+            }
+
+            int deviceIndex = Volatile.Read(ref lastInputDeviceIndex);
+            if (deviceIndex < 0 ||
+                Program.rootHub == null ||
+                deviceIndex >= Program.rootHub.DS4Controllers.Length ||
+                deviceIndex >= Global.EnableOutputDataToDS4.Length)
+            {
+                return false;
+            }
+
+            DS4Device device = Program.rootHub.DS4Controllers[deviceIndex];
+            if (device == null)
+            {
+                return false;
+            }
+
+            // A profile's output policy is not a broker rejection. Consume
+            // the exact ordering/lifetime watermark as Neutral through the
+            // ordinary canonical owner so old rumble cannot survive or be
+            // resurrected when output is re-enabled. Stop must remain Stop.
+            bool outputEnabled = Volatile.Read(
+                ref Global.EnableOutputDataToDS4[deviceIndex]);
+            if (!TryApplyXboxOneFeedbackOutputPolicy(canonicalFrame,
+                    outputEnabled, out ControllerFeedbackFrame effectiveFrame))
+            {
+                return false;
+            }
+            Span<byte> effectiveFeedback = stackalloc byte[
+                ControllerFeedbackFrame.SerializedLength];
+            if (!effectiveFrame.TryWriteTo(effectiveFeedback))
+            {
+                return false;
+            }
+
+            Switch2VirtualFeedbackSession switch2Session =
+                Volatile.Read(ref switch2FeedbackSession);
+            if (switch2Session != null)
+            {
+                bool mapImpulseTriggers = outputEnabled && deviceIndex <
+                        Global.Switch2MapXboxImpulseTriggersToHdRumble.Length &&
+                    Volatile.Read(ref Global.
+                        Switch2MapXboxImpulseTriggersToHdRumble[deviceIndex]);
+                bool dynamicImpulseFrequency = deviceIndex >=
+                        Global.Switch2XboxImpulseDynamicFrequency.Length ||
+                    Volatile.Read(ref Global.
+                        Switch2XboxImpulseDynamicFrequency[deviceIndex]);
+                int impulseFrequency = deviceIndex <
+                        Global.Switch2XboxImpulseFrequency.Length ?
+                    Volatile.Read(ref Global.
+                        Switch2XboxImpulseFrequency[deviceIndex]) :
+                    Switch2HdRumbleImpulseTuning.DefaultFixedFrequencyLevel;
+                int impulseStrength = deviceIndex <
+                        Global.Switch2XboxImpulseStrength.Length ?
+                    Volatile.Read(ref Global.
+                        Switch2XboxImpulseStrength[deviceIndex]) :
+                    Switch2HdRumbleImpulseTuning.DefaultStrengthLevel;
+                int bodyStrengthPercent =
+                    GetSwitch2BodyStrengthPercent(deviceIndex);
+                bool xboxBodyCarrierMode =
+                    GetSwitch2XboxBodyRumbleMode(deviceIndex);
+                int xboxBodyFrequencyLevel =
+                    GetSwitch2XboxBodyRumbleFrequency(deviceIndex);
+                int rumbleDelayMilliseconds = outputEnabled ?
+                    GetSwitch2RumbleDelayMilliseconds(deviceIndex) : 0;
+                long feedbackProfileRevision =
+                    GetSwitch2FeedbackProfileRevision(deviceIndex);
+                bool published = switch2Session.TryPublish(
+                    effectiveFeedback, mapImpulseTriggers,
+                    dynamicImpulseFrequency, impulseFrequency,
+                    impulseStrength, bodyStrengthPercent,
+                    xboxBodyCarrierMode, xboxBodyFrequencyLevel,
+                    rumbleDelayMilliseconds, feedbackProfileRevision,
+                    readLiveXboxPolicy: readSwitch2XboxLivePolicy);
+                if (published)
+                {
+                    Interlocked.Increment(ref switch2FeedbackValidated);
+                }
+                else
+                {
+                    Interlocked.Increment(ref switch2FeedbackRejected);
+                }
+                if (published)
+                {
+                    xboxOneLastFeedbackSequence = canonicalFrame.Sequence;
+                }
+                return published;
+            }
+
+            XboxOnePhysicalFeedbackSession physicalSession =
+                Volatile.Read(ref xboxOnePhysicalFeedbackSession);
+            if (physicalSession == null || !physicalSession.Targets(device) ||
+                !physicalSession.TryPublish(effectiveFeedback))
+            {
+                return false;
+            }
+            xboxOneLastFeedbackSequence = canonicalFrame.Sequence;
+            return true;
+        }
+
+        internal bool TryCreateXboxOnePhysicalFeedbackSession(
+            XboxOneAuthorizedFeedbackBinding binding, DS4Device target,
+            int deviceIndex, out XboxOnePhysicalFeedbackSession session,
+            TimeProvider timeProvider = null)
+        {
+            XboxOnePhysicalFeedbackSession created = null;
+            bool accepted = XboxOnePhysicalFeedbackSession.TryCreateOwned(
+                binding, target, (state, release) =>
+                    TryPublishXboxOnePhysicalFeedbackState(created, target,
+                        deviceIndex, state, release), out created, timeProvider,
+                onFailure: () => AppLogger.LogToGui(
+                    "Xbox One physical feedback owner was fenced after a state delivery or expiry-watchdog failure.", true),
+                isOutputEnabled: () => deviceIndex >= 0 && deviceIndex < Global.EnableOutputDataToDS4.Length &&
+                    Volatile.Read(ref Global.EnableOutputDataToDS4[deviceIndex]));
+            session = created;
+            return accepted;
+        }
+
+        private bool TryPublishXboxOnePhysicalFeedbackState(
+            XboxOnePhysicalFeedbackSession owner, DS4Device device,
+            int deviceIndex, in ControllerFeedbackActuatorState state,
+            bool release)
+        {
+            ControlService hub = Program.rootHub;
+            if (owner == null || !ReferenceEquals(owner,
+                    Volatile.Read(ref xboxOnePhysicalFeedbackSession)) ||
+                deviceIndex != Volatile.Read(ref lastInputDeviceIndex) ||
+                hub == null || deviceIndex < 0 || deviceIndex >=
+                    hub.DS4Controllers.Length ||
+                !ReferenceEquals(device, hub.DS4Controllers[deviceIndex]))
+            {
+                return false;
+            }
+
+            // This publishes to the existing sole physical output owner; it
+            // does not perform or acknowledge a hardware HID flush.
+            bool hasIndependentTriggerActuators =
+                device is DualSenseDevice dualSense &&
+                IsCurrentPhysicalSonyDualSense(dualSense);
+            XboxOneCanonicalFeedbackAdapter.ProjectPhysical(state,
+                hasIndependentTriggerActuators,
+                out byte heavySlow, out byte lightFast,
+                out byte leftImpulse, out byte rightImpulse);
+            hub.SetDevRumble(device, heavySlow, lightFast,
+                deviceIndex);
+            if (hasIndependentTriggerActuators)
+            {
+                ApplyGameRumbleTriggerVibration(device, deviceIndex,
+                    rightImpulse, leftImpulse);
+                if (release)
+                {
+                    ReleaseTriggerLabRumbleOverrides(deviceIndex, device);
+                }
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Disabling profile output suppresses actuator state, never its
+        /// authenticated lifetime, anti-replay sequence, expiry, or terminal
+        /// Stop. The resulting frame must still pass the exact existing
+        /// physical/session ingress before feedback may be acknowledged.
+        /// </summary>
+        internal static bool TryApplyXboxOneFeedbackOutputPolicy(
+            in ControllerFeedbackFrame frame, bool outputEnabled,
+            out ControllerFeedbackFrame effectiveFrame)
+        {
+            effectiveFrame = default;
+            if (!frame.HasValidInvariants() || frame.Source is not (
+                    ControllerFeedbackSource.XboxOneVirtualDevice or
+                    ControllerFeedbackSource.XboxSeriesVirtualDevice))
+            {
+                return false;
+            }
+            if (outputEnabled || frame.Command !=
+                    ControllerFeedbackCommand.Apply)
+            {
+                effectiveFrame = frame;
+                return true;
+            }
+
+            return ControllerFeedbackFrame.TryCreate(frame.Source,
+                ControllerFeedbackCommand.Neutral, frame.Actuators,
+                0, 0, 0, 0, frame.Sequence, frame.DeviceGeneration,
+                frame.TransportGeneration, frame.OwnershipEpoch,
+                frame.TimestampMicroseconds, frame.TimeToLiveMicroseconds,
+                out effectiveFrame);
+        }
+
+        internal static bool
+            IsAuthorizedXboxOneTerminalStopAfterPhysicalRetirement(
+                in ControllerFeedbackFrame frame,
+                XboxOneAuthorizedFeedbackBinding binding,
+                ulong lastAcceptedSequence)
+        {
+            return binding != null && frame.HasValidInvariants() &&
+                frame.IsStop && frame.Sequence > lastAcceptedSequence &&
+                frame.Source == (ControllerFeedbackSource)binding.Source &&
+                frame.DeviceGeneration == binding.DeviceGeneration &&
+                frame.TransportGeneration == binding.TransportGeneration &&
+                frame.OwnershipEpoch == binding.OwnershipEpoch &&
+                frame.TimeToLiveMicroseconds ==
+                    binding.TimeToLiveMicroseconds &&
+                ControllerFeedbackClock.TryGetTimestampMicroseconds(
+                    out ulong nowMicroseconds) &&
+                frame.IsFreshAt(nowMicroseconds);
+        }
+
+        private static int GetSwitch2BodyStrengthPercent(int deviceIndex)
+        {
+            if (deviceIndex < 0 || deviceIndex >= Global.RumbleBoost.Length)
+            {
+                return Switch2HdRumbleBodyTuning.DefaultStrengthPercent;
+            }
+
+            int strengthPercent = Global.RumbleBoost[deviceIndex];
+            return strengthPercent <=
+                    Switch2HdRumbleBodyTuning.MaximumStrengthPercent ?
+                strengthPercent :
+                Switch2HdRumbleBodyTuning.DefaultStrengthPercent;
+        }
+
+        private static bool GetSwitch2XboxBodyRumbleMode(int deviceIndex) =>
+            deviceIndex >= 0 &&
+            deviceIndex < Global.Switch2XboxBodyRumbleMode.Length &&
+            Volatile.Read(ref Global.
+                Switch2XboxBodyRumbleMode[deviceIndex]);
+
+        private static int GetSwitch2XboxBodyRumbleFrequency(int deviceIndex)
+        {
+            if (deviceIndex < 0 || deviceIndex >=
+                    Global.Switch2XboxBodyRumbleFrequency.Length)
+            {
+                return Switch2HdRumbleBodyTuning.
+                    DefaultXboxFrequencyLevel;
+            }
+
+            int level = Volatile.Read(ref Global.
+                Switch2XboxBodyRumbleFrequency[deviceIndex]);
+            return level is >=
+                    Switch2HdRumbleBodyTuning.MinimumXboxFrequencyLevel and <=
+                    Switch2HdRumbleBodyTuning.MaximumXboxFrequencyLevel ?
+                level :
+                Switch2HdRumbleBodyTuning.DefaultXboxFrequencyLevel;
+        }
+
+        private static int GetSwitch2RumbleDelayMilliseconds(int deviceIndex)
+        {
+            if (deviceIndex < 0 || deviceIndex >=
+                    Global.Switch2RumbleDelayMilliseconds.Length)
+            {
+                return Switch2RumbleDelay.DefaultMilliseconds;
+            }
+            return Switch2RumbleDelay.Normalize(Volatile.Read(ref Global.
+                Switch2RumbleDelayMilliseconds[deviceIndex]));
+        }
+
+        private static long GetSwitch2FeedbackProfileRevision(int deviceIndex)
+        {
+            if (deviceIndex < 0 || deviceIndex >= Global.
+                    TEST_PROFILE_ITEM_COUNT)
+            {
+                return 0;
+            }
+            long revision = Global.ReadProfileSwitchRevision(deviceIndex);
+            return revision < 0 ? 0 : revision;
+        }
+
+        /// <summary>
+        /// Explicit safety gate for the unvalidated Switch 2 oscillator basis.
+        /// A decoded frame is retained semantically, but neither raw maxima nor
+        /// guessed frequency/amplitude routing may drive legacy motors.
+        /// </summary>
+        internal static bool TryTranslateSwitch2VirtualOutputToLegacyRumble(
+            in Switch2VirtualOutputState output, out byte lightFast,
+            out byte heavySlow)
+        {
+            _ = output;
+            lightFast = 0;
+            heavySlow = 0;
+            return false;
         }
 
         private bool IsDualSenseType()
@@ -4438,7 +7604,8 @@ namespace DS4Windows
             }
         }
 
-        private void ReleaseTriggerLabRumbleOverrides(int deviceIndex)
+        private void ReleaseTriggerLabRumbleOverrides(int deviceIndex,
+            DS4Device expectedDevice = null)
         {
             lock (triggerLabRumbleLock)
             {
@@ -4449,6 +7616,8 @@ namespace DS4Windows
                     deviceIndex >= Program.rootHub.DS4Controllers.Length ||
                     Program.rootHub.DS4Controllers[deviceIndex] is not
                         DualSenseDevice dualSenseDevice ||
+                    expectedDevice != null &&
+                        !ReferenceEquals(expectedDevice, dualSenseDevice) ||
                     !IsCurrentPhysicalSonyDualSense(dualSenseDevice))
                 {
                     return;
@@ -6465,25 +9634,52 @@ namespace DS4Windows
                     LightbarMode.Passthru;
         }
 
-        private static byte MaxByte(byte[] data, int start, int count)
+        private void StopXboxOneRejectedInput(ViiperDeviceStream failedStream,
+            long failedStreamGeneration, long failedWriterGeneration,
+            string message)
         {
-            byte result = 0;
-            int end = Math.Min(data.Length, start + count);
-            for (int i = start; i < end; i++)
+            lock (orderedEgressLifecycleLock)
             {
-                if (data[i] > result)
+                if (viiperType != ViiperVirtualDeviceType.XboxOne ||
+                    failedStream == null || !failedStream.IsXboxOneInputRejected ||
+                    !IsStateWriterCurrent(failedWriterGeneration) ||
+                    failedWriterGeneration != Interlocked.Read(
+                        ref stateWriterThreadGeneration) ||
+                    !ReferenceEquals(Volatile.Read(ref stateWriterThread),
+                        Thread.CurrentThread) ||
+                    failedStreamGeneration != Interlocked.Read(
+                        ref streamGeneration) ||
+                    !ReferenceEquals(Volatile.Read(ref deviceStream), failedStream))
                 {
-                    result = data[i];
+                    return;
                 }
+
+                // Elect the exact writer's single failure owner and stop new
+                // producer/final-write admission before any blocking teardown.
+                // Do not clear connected: the existing Disconnect path needs
+                // its canonical reader and callback admission until Stop ACK.
+                orderedEgressWriterAdmissionGate.Invalidate();
+                writerStopRequested = true;
             }
 
-            return result;
+            // This is the authenticated state writer itself, not a queued
+            // cleanup callback. Connect first calls Disconnect, whose Xbox
+            // path joins this exact writer before it can retire/replace the
+            // stream. A concurrent lifecycle owner therefore cannot install a
+            // successor between the election above and this self-teardown.
+            Disconnect();
+            LogSubmitFailureOnce(message);
         }
 
         private void LogSubmitFailure(string message)
         {
             connected = false;
             Disconnect();
+            LogSubmitFailureOnce(message);
+        }
+
+        private void LogSubmitFailureOnce(string message)
+        {
             if (Interlocked.Exchange(ref submitFailureLogged, 1) == 1)
             {
                 return;
@@ -6826,6 +10022,7 @@ namespace DS4Windows
     internal sealed class ViiperClient
     {
         private const int ApiReceiveTimeoutMs = 5000;
+        private const int RuntimeStatusReceiveTimeoutMs = 1000;
         private const int StreamReceiveTimeoutMs = 0;
 
         private static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions
@@ -6835,11 +10032,20 @@ namespace DS4Windows
 
         private readonly string host;
         private readonly int port;
+        private readonly Func<Stream, Stream> authenticate;
 
         public ViiperClient(string host, int port)
+            : this(host, port, ViiperAuthentication.Authenticate)
+        {
+        }
+
+        internal ViiperClient(string host, int port,
+            Func<Stream, Stream> authenticate)
         {
             this.host = host;
             this.port = port;
+            this.authenticate = authenticate ??
+                throw new ArgumentNullException(nameof(authenticate));
         }
 
         public ViiperDeviceStream CreateDeviceAndOpenStream(ViiperVirtualDeviceType deviceType)
@@ -6848,22 +10054,178 @@ namespace DS4Windows
         }
 
         public ViiperDeviceStream CreateDeviceAndOpenStream(string deviceName,
-            ushort? idProduct = null)
+            ushort? idProduct = null, object deviceSpecific = null)
         {
+            string payload = SerializeDeviceCreateRequest(deviceName,
+                idProduct, deviceSpecific);
+            return CreateDeviceAndOpenStream(busId =>
+                SendRequest<ViiperDeviceResponse>($"bus/{busId}/add",
+                    payload));
+        }
+
+        internal ViiperDeviceStream CreateAuthorizedXboxOneDeviceAndOpenStream(
+            XboxOneAuthorizedCreateRequestV1 request)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            ArgumentNullException.ThrowIfNull(request.Identity);
+            string payload = SerializeAuthorizedXboxOneCreateRequest(request);
+            ViiperVirtualDeviceLifetime lifetime = null;
+            ViiperDeviceStream stream = null;
+            try
+            {
+                uint busId = XboxOneAuthorizedRegistrationV1.ParseBusCreateResponse(
+                    SendBoundedXboxOneManagementRequest(XboxOneManagementOperation.CreateBus,
+                        "bus/create", "0", ApiReceiveTimeoutMs));
+                JsonElement device = SendBoundedXboxOneManagementRequest(
+                    XboxOneManagementOperation.CreatePersona,
+                    $"bus/{busId}/add-authorized-xboxone", payload, ApiReceiveTimeoutMs);
+                XboxOneAuthorizedRegistrationV1 registration =
+                    XboxOneAuthorizedRegistrationV1.ParseCreateResponse(device,
+                        busId, request.Identity.VendorId, request.Identity.ProductId);
+                lifetime = new ViiperVirtualDeviceLifetime(registration,
+                    value => RemoveAuthorizedXboxOneRegistration(value,
+                        value.RemovalResponseTimeoutMilliseconds));
+                stream = OpenStream(busId, registration.DevId, -1, lifetime);
+                return stream;
+            }
+            catch (Exception error)
+            {
+                if (stream != null)
+                {
+                    stream.Dispose();
+                }
+                else
+                {
+                    // No numeric fallback, even if creation failed or its
+                    // receipt was lost. Server exact orphan cleanup owns that
+                    // case; a reused bus/device address is not authority.
+                    lifetime?.Dispose();
+                }
+                if (error is XboxOneManagementException) throw;
+                if (error is IOException || error is JsonException ||
+                    error is ObjectDisposedException)
+                    throw new IOException("VIIPER did not complete exact Xbox One startup.");
+                throw;
+            }
+        }
+
+        internal void ActivateAuthorizedXboxOneDevice(
+            ViiperDeviceStream stream)
+        {
+            ArgumentNullException.ThrowIfNull(stream);
+            XboxOneAuthorizedRegistrationV1 registration =
+                stream.DeviceLifetime.XboxOneRegistration;
+            if (!stream.IsXboxOneBrokerEnabled || stream.UsbipPort >= 0 ||
+                registration == null || stream.DeviceLifetime.IsDisposed)
+            {
+                throw new InvalidOperationException(
+                    "The VIIPER Xbox One broker is not awaiting activation.");
+            }
+            using XboxOneActivationRequest request =
+                stream.DeviceLifetime.BeginXboxOneActivationRequest();
+            try
+            {
+                ViiperUsbipPortManager.WithNativePortMutationLock(() =>
+                {
+                    JsonElement activation;
+                    try
+                    {
+                        activation = SendBoundedXboxOneManagementRequest(
+                            XboxOneManagementOperation.ActivatePersona,
+                            registration.ActivationPath, registration.SerializeRemovalRequest(),
+                            registration.RemovalResponseTimeoutMilliseconds, request.Token);
+                    }
+                    catch (Exception error) when (error is not XboxOneManagementException &&
+                        (error is IOException ||
+                        error is JsonException || error is ObjectDisposedException ||
+                        error is OperationCanceledException))
+                    {
+                        throw new IOException("VIIPER did not acknowledge exact Xbox One activation.");
+                    }
+                    int port = registration.ParseActivationResponse(activation);
+                    ViiperXboxOnePortLease lease =
+                        ViiperUsbipPortManager.RegisterXboxOnePort(port, registration.UsbipBusId);
+                    try
+                    {
+                        stream.DeviceLifetime.BindXboxOnePort(lease);
+                    }
+                    catch
+                    {
+                        lease.Dispose();
+                        // Exact server removal owns rollback, never a bare port.
+                        stream.DeviceLifetime.Dispose();
+                        throw;
+                    }
+                    return true;
+                }, request.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                throw new IOException("VIIPER Xbox One activation was canceled before native attach admission.");
+            }
+        }
+
+        internal static string SerializeAuthorizedXboxOneCreateRequest(
+            XboxOneAuthorizedCreateRequestV1 request)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            return JsonSerializer.Serialize(request, JsonOptions);
+        }
+
+        internal static string SerializeNS2ProRuntimeStatusV1(
+            ViiperSwitch2RuntimeStatusV1 status)
+        {
+            if (!status.IsValid)
+            {
+                throw new ArgumentException(
+                    "A complete VIIPER Switch 2 runtime status v1 snapshot is required.",
+                    nameof(status));
+            }
+            return JsonSerializer.Serialize(status, JsonOptions);
+        }
+
+        internal void UpdateNS2ProRuntimeStatusV1(uint busId, string devId,
+            ViiperSwitch2RuntimeStatusV1 status)
+        {
+            if (string.IsNullOrWhiteSpace(devId))
+            {
+                throw new ArgumentException(
+                    "A VIIPER device ID is required.", nameof(devId));
+            }
+            ViiperRuntimeStatusUpdateResponse response =
+                SendRequest<ViiperRuntimeStatusUpdateResponse>(
+                    $"bus/{busId}/{devId}/ns2pro-status-v1",
+                    SerializeNS2ProRuntimeStatusV1(status),
+                    RuntimeStatusReceiveTimeoutMs);
+            if (response == null || response.Version !=
+                    ViiperSwitch2RuntimeStatusV1.ContractVersion ||
+                !response.Updated)
+            {
+                throw new IOException(
+                    "VIIPER did not acknowledge Switch 2 runtime status v1.");
+            }
+        }
+
+        private ViiperDeviceStream CreateDeviceAndOpenStream(
+            Func<uint, ViiperDeviceResponse> createDevice)
+        {
+            return ViiperUsbipPortManager.WithNativePortMutationLock(() =>
+                CreateDeviceAndOpenStreamCore(createDevice));
+        }
+
+        private ViiperDeviceStream CreateDeviceAndOpenStreamCore(
+            Func<uint, ViiperDeviceResponse> createDevice)
+        {
+            ArgumentNullException.ThrowIfNull(createDevice);
             ViiperUsbipPortManager.DetachStaleLocalViiperPorts();
 
-            ViiperBusCreateResponse bus = SendRequest<ViiperBusCreateResponse>("bus/create", "0");
+            ViiperBusCreateResponse bus = SendRequest<ViiperBusCreateResponse>(
+                "bus/create", "0");
             ViiperDeviceResponse device = null;
             int usbipPort = -1;
             try
             {
-                string payload = JsonSerializer.Serialize(new ViiperDeviceCreateRequest
-                {
-                    Type = deviceName,
-                    IdProduct = idProduct,
-                }, JsonOptions);
-
-                device = SendRequest<ViiperDeviceResponse>($"bus/{bus.BusId}/add", payload);
+                device = createDevice(bus.BusId);
                 usbipPort = device.UsbipPort;
                 if (!ViiperUsbipPortManager.IsTrustedCreateResponse(
                     usbipPort, device.UsbipOwnerSerial))
@@ -6872,7 +10234,8 @@ namespace DS4Windows
                         $"VIIPER created {bus.BusId}-{device.DevId}, but its native usbip-win2 attach response did not contain a positive port and supported ownership metadata.");
                 }
 
-                ViiperUsbipPortManager.DetachDuplicateLocalViiperPorts(bus.BusId, device.DevId, usbipPort);
+                ViiperUsbipPortManager.DetachDuplicateLocalViiperPorts(
+                    bus.BusId, device.DevId, usbipPort);
                 ViiperUsbipPortManager.RegisterActivePort(usbipPort,
                     $"{bus.BusId}-{device.DevId}");
                 return OpenStream(bus.BusId, device.DevId, usbipPort);
@@ -6948,6 +10311,24 @@ namespace DS4Windows
                 "VIIPER did not return the matching device for the microphone-interface query.");
         }
 
+        internal static string SerializeDeviceCreateRequest(
+            string deviceName, ushort? idProduct = null,
+            object deviceSpecific = null)
+        {
+            if (string.IsNullOrWhiteSpace(deviceName))
+            {
+                throw new ArgumentException("A VIIPER device name is required.",
+                    nameof(deviceName));
+            }
+
+            return JsonSerializer.Serialize(new ViiperDeviceCreateRequest
+            {
+                Type = deviceName,
+                IdProduct = idProduct,
+                DeviceSpecific = deviceSpecific,
+            }, JsonOptions);
+        }
+
         internal ViiperMicrophoneInterfaceStatus
             GetNarrowMicrophoneInterfaceStatus(uint busId, string devId)
         {
@@ -6997,6 +10378,8 @@ namespace DS4Windows
             string devId, int usbipPort,
             ViiperVirtualDeviceLifetime deviceLifetime)
         {
+            if (deviceLifetime?.XboxOneRegistration != null)
+                throw new InvalidOperationException("Xbox One streams cannot reopen in place.");
             if (string.IsNullOrWhiteSpace(devId))
             {
                 throw new ArgumentException(
@@ -7021,20 +10404,152 @@ namespace DS4Windows
             int usbipPort,
             ViiperVirtualDeviceLifetime deviceLifetime = null)
         {
-            TcpClient tcp = Connect(StreamReceiveTimeoutMs);
+            XboxOneAuthorizedRegistrationV1 registration =
+                deviceLifetime?.XboxOneRegistration;
+            TcpClient tcp = Connect(registration == null ?
+                StreamReceiveTimeoutMs : ApiReceiveTimeoutMs);
+            Stream stream = null;
+            ViiperDeviceStream result = null;
             try
             {
-                NetworkStream stream = tcp.GetStream();
-                byte[] request = Encoding.UTF8.GetBytes($"bus/{busId}/{devId}\0");
+                using CancellationTokenSource startupDeadline = registration == null ?
+                    null : new CancellationTokenSource(ApiReceiveTimeoutMs);
+                using CancellationTokenRegistration cancellation = startupDeadline == null ?
+                    default : startupDeadline.Token.Register(
+                        static state => ((TcpClient)state).Dispose(), tcp);
+                stream = authenticate(tcp.GetStream());
+                string command = registration == null ? $"bus/{busId}/{devId}" :
+                    registration.StreamPath + " " + registration.SerializeRemovalRequest();
+                byte[] request = Encoding.UTF8.GetBytes(command + "\0");
                 stream.Write(request, 0, request.Length);
                 deviceLifetime ??= new ViiperVirtualDeviceLifetime(busId,
                     devId, usbipPort, RemoveDevice);
-                return new ViiperDeviceStream(tcp, stream, deviceLifetime);
+                result = new ViiperDeviceStream(tcp, stream, deviceLifetime);
+                if (registration != null)
+                {
+                    result.EnableXboxOneBroker();
+                    cancellation.Dispose();
+                    if (startupDeadline.IsCancellationRequested)
+                        throw new IOException("Xbox One broker startup timed out.");
+                    tcp.ReceiveTimeout = StreamReceiveTimeoutMs;
+                }
+                return result;
             }
             catch
             {
                 tcp.Dispose();
+                // Startup has not handed the stream to its feedback reader.
+                // Release wrappers/wait handles even if ConsumerReady failed;
+                // exact lifetime disposal is joined by the caller's rollback.
+                if (result != null)
+                    result.Dispose();
+                else
+                {
+                    try { stream?.Dispose(); }
+                    catch { }
+                }
                 throw;
+            }
+        }
+
+        // Neither response value authorizes detaching a bare numeric port.
+        internal bool RemoveAuthorizedXboxOneRegistration(
+            XboxOneAuthorizedRegistrationV1 registration,
+            int receiveTimeoutMs = ApiReceiveTimeoutMs)
+        {
+            ArgumentNullException.ThrowIfNull(registration);
+            if (receiveTimeoutMs <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(receiveTimeoutMs));
+            }
+            try
+            {
+                JsonElement response = SendBoundedXboxOneManagementRequest(
+                    XboxOneManagementOperation.RemovePersona,
+                    registration.RemovalPath,
+                    registration.SerializeRemovalRequest(), receiveTimeoutMs);
+                return XboxOneAuthorizedRegistrationV1.ParseRemovalResponse(response);
+            }
+            catch (Exception error) when (error is not XboxOneManagementException &&
+                (error is IOException || error is JsonException || error is ObjectDisposedException))
+            {
+                // A remote error may echo its request. Do not retain that
+                // error (including as InnerException) in ordinary logs.
+                throw new IOException(
+                    "VIIPER did not acknowledge exact Xbox One registration removal.");
+            }
+        }
+
+        private JsonElement SendBoundedXboxOneManagementRequest(XboxOneManagementOperation operation,
+            string path,
+            string payload, int receiveTimeoutMs,
+            CancellationToken cancellationToken = default)
+        {
+            // Connect has its own three-second bound. After connection, one
+            // absolute deadline includes authentication, write, and the whole
+            // response; partial reads never extend it. The live caller must
+            // choose a budget compatible with the server's close/join limit.
+            cancellationToken.ThrowIfCancellationRequested();
+            using TcpClient tcp = Connect(receiveTimeoutMs, cancellationToken);
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            deadline.CancelAfter(receiveTimeoutMs);
+            using CancellationTokenRegistration cancellation = deadline.Token.Register(
+                static state => ((TcpClient)state).Dispose(), tcp);
+            using Stream stream = authenticate(tcp.GetStream());
+            byte[] request = Encoding.UTF8.GetBytes(path + " " + payload + "\0");
+            stream.Write(request, 0, request.Length);
+
+            // Bound factory, activation, removal, and malformed/error replies
+            // without inheriting the legacy unbounded API
+            // accumulator. This allocation is management-only, never input.
+            const int maximumResponseBytes = 1024;
+            byte[] response = new byte[maximumResponseBytes];
+            int length = 0;
+            while (true)
+            {
+                int read = stream.Read(response, length, response.Length - length);
+                if (read == 0)
+                    break;
+                length += read;
+                if (length == response.Length)
+                    throw new IOException("Xbox One management response exceeds its limit.");
+            }
+            if (deadline.IsCancellationRequested)
+                throw new IOException("Xbox One management response timed out.");
+            using JsonDocument document = JsonDocument.Parse(
+                response.AsMemory(0, length));
+            ThrowIfXboxOneManagementError(document.RootElement, operation);
+            return document.RootElement.Clone();
+        }
+
+        internal static void ThrowIfXboxOneManagementError(JsonElement response,
+            XboxOneManagementOperation operation)
+        {
+            if (response.ValueKind != JsonValueKind.Object) return;
+            bool errorEnvelope = false;
+            int statusCount = 0;
+            int status = 0;
+            foreach (JsonProperty property in response.EnumerateObject())
+            {
+                if (property.Name == "status")
+                {
+                    errorEnvelope = true;
+                    statusCount++;
+                    if (property.Value.ValueKind == JsonValueKind.Number &&
+                        property.Value.TryGetInt32(out int numeric) && numeric is >= 400 and <= 599)
+                        status = numeric;
+                    else
+                        status = 0;
+                }
+                else if (property.Name is "title" or "detail")
+                    errorEnvelope = true;
+            }
+            if (errorEnvelope)
+            {
+                // No title/detail, request path, response fragment, or inner
+                // exception: the peer may echo an authentication capability.
+                throw new XboxOneManagementException(operation,
+                    statusCount == 1 ? status : 0);
             }
         }
 
@@ -7066,9 +10581,10 @@ namespace DS4Windows
             }
         }
 
-        private T SendRequest<T>(string path, string payload = null)
+        private T SendRequest<T>(string path, string payload = null,
+            int receiveTimeout = ApiReceiveTimeoutMs)
         {
-            string raw = SendRequestRaw(path, payload);
+            string raw = SendRequestRaw(path, payload, receiveTimeout);
             if (string.IsNullOrWhiteSpace(raw))
             {
                 throw new IOException("VIIPER returned an empty response.");
@@ -7084,10 +10600,11 @@ namespace DS4Windows
             return JsonSerializer.Deserialize<T>(raw, JsonOptions);
         }
 
-        private string SendRequestRaw(string path, string payload = null)
+        private string SendRequestRaw(string path, string payload = null,
+            int receiveTimeout = ApiReceiveTimeoutMs)
         {
-            using TcpClient tcp = Connect(ApiReceiveTimeoutMs);
-            NetworkStream stream = tcp.GetStream();
+            using TcpClient tcp = Connect(receiveTimeout);
+            using Stream stream = authenticate(tcp.GetStream());
             string request = string.IsNullOrEmpty(payload) ? path : $"{path} {payload}";
             byte[] requestBytes = Encoding.UTF8.GetBytes(request + "\0");
             stream.Write(requestBytes, 0, requestBytes.Length);
@@ -7103,7 +10620,8 @@ namespace DS4Windows
             return Encoding.UTF8.GetString(response.ToArray()).TrimEnd('\n');
         }
 
-        private TcpClient Connect(int receiveTimeout)
+        private TcpClient Connect(int receiveTimeout,
+            CancellationToken cancellationToken = default)
         {
             TcpClient tcp = new TcpClient
             {
@@ -7120,8 +10638,8 @@ namespace DS4Windows
                 // handle caused an unhandled ObjectDisposedException in the
                 // microphone monitor. The cancellable socket API has no shared
                 // wait handle and gives every request its own timeout owner.
-                using var timeout = new CancellationTokenSource(
-                    TimeSpan.FromSeconds(3));
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeout.CancelAfter(TimeSpan.FromSeconds(3));
                 tcp.ConnectAsync(host, port, timeout.Token).AsTask()
                     .GetAwaiter().GetResult();
             }
@@ -7164,6 +10682,15 @@ namespace DS4Windows
             public string UsbipOwnerSerial { get; set; }
         }
 
+        private sealed class ViiperRuntimeStatusUpdateResponse
+        {
+            [JsonPropertyName("version")]
+            public ushort Version { get; set; }
+
+            [JsonPropertyName("updated")]
+            public bool Updated { get; set; }
+        }
+
         private sealed class ViiperDeviceCreateRequest
         {
             [JsonPropertyName("type")]
@@ -7172,6 +10699,17 @@ namespace DS4Windows
             [JsonPropertyName("idProduct")]
             [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
             public ushort? IdProduct { get; set; }
+
+            [JsonPropertyName("deviceSpecific")]
+            [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+            public object DeviceSpecific { get; set; }
+        }
+
+        internal sealed class Xbox360CreateOptions
+        {
+            [JsonPropertyName("maximumOrderedAgeMilliseconds")]
+            [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+            public int? MaximumOrderedAgeMilliseconds { get; set; }
         }
 
         private sealed class ViiperBusDevicesResponse
@@ -7200,6 +10738,38 @@ namespace DS4Windows
             [JsonPropertyName("detail")]
             public string Detail { get; set; }
         }
+    }
+
+    internal enum XboxOneManagementOperation : byte
+    {
+        CreateBus,
+        CreatePersona,
+        ActivatePersona,
+        RemovePersona,
+    }
+
+    internal sealed class XboxOneManagementException : IOException
+    {
+        internal XboxOneManagementException(XboxOneManagementOperation operation, int status)
+            : base($"VIIPER rejected Xbox One {OperationLabel(operation)}" +
+                (status is >= 400 and <= 599 ? $" (API status {status})." :
+                    " (invalid API error response)."))
+        {
+            Operation = operation;
+            Status = status is >= 400 and <= 599 ? status : 0;
+        }
+
+        internal XboxOneManagementOperation Operation { get; }
+        internal int Status { get; }
+
+        private static string OperationLabel(XboxOneManagementOperation operation) => operation switch
+        {
+            XboxOneManagementOperation.CreateBus => "bus creation",
+            XboxOneManagementOperation.CreatePersona => "persona creation",
+            XboxOneManagementOperation.ActivatePersona => "activation",
+            XboxOneManagementOperation.RemovePersona => "removal",
+            _ => "management",
+        };
     }
 
     internal sealed class ViiperApiException : IOException
@@ -7233,13 +10803,55 @@ namespace DS4Windows
         private const int OwnershipSerialLength = 15;
         private const int ViiperUsbipServerPort = 3241;
         private static readonly object ActivePortsLock = new object();
+        private static readonly ViiperNativeMutationGate NativePortMutationGate = new();
         private static readonly Dictionary<int, string> ActivePorts =
             new Dictionary<int, string>();
+        private static readonly Dictionary<int, ViiperXboxOnePortLease> XboxOnePorts = new();
+
+        internal static T WithNativePortMutationLock<T>(Func<T> operation,
+            CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(operation);
+            using (NativePortMutationGate.Enter(cancellationToken))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                return operation();
+            }
+        }
+
+        internal static ViiperXboxOnePortLease RegisterXboxOnePort(int port, string alias)
+        {
+            if (port <= 0 || !XboxOneAuthorizedRegistrationV1.IsCanonicalUsbipBusId(alias))
+                throw new ArgumentException("An exact Xbox One port and export alias are required.");
+            var lease = new ViiperXboxOnePortLease(port, alias);
+            lock (ActivePortsLock)
+            {
+                ActivePorts.Remove(port);
+                XboxOnePorts[port] = lease;
+            }
+            return lease;
+        }
+
+        internal static void UnregisterXboxOnePort(ViiperXboxOnePortLease lease)
+        {
+            lock (ActivePortsLock)
+            {
+                if (XboxOnePorts.TryGetValue(lease.Port, out var current) &&
+                    ReferenceEquals(current, lease))
+                    XboxOnePorts.Remove(lease.Port);
+            }
+        }
 
         internal delegate bool UsbipCommandRunner(string[] arguments,
             out string output, out string error);
 
         public static void DetachStaleLocalViiperPorts()
+        {
+            using (NativePortMutationGate.Enter())
+                DetachStaleLocalViiperPortsCore();
+        }
+
+        private static void DetachStaleLocalViiperPortsCore()
         {
             HashSet<int> activePorts;
             lock (ActivePortsLock)
@@ -7287,6 +10899,12 @@ namespace DS4Windows
         }
 
         public static void DetachDuplicateLocalViiperPorts(uint busId, string devId, int keepPort)
+        {
+            using (NativePortMutationGate.Enter())
+                DetachDuplicateLocalViiperPortsCore(busId, devId, keepPort);
+        }
+
+        private static void DetachDuplicateLocalViiperPortsCore(uint busId, string devId, int keepPort)
         {
             if (keepPort < 0)
             {
@@ -7357,16 +10975,23 @@ namespace DS4Windows
 
             lock (ActivePortsLock)
             {
-                return ActivePorts.ContainsKey(port);
+                return ActivePorts.ContainsKey(port) || XboxOnePorts.ContainsKey(port);
             }
         }
 
         internal static void DetachRegisteredPort(int port, string reason)
         {
+            using (NativePortMutationGate.Enter())
+                DetachRegisteredPortCore(port, reason);
+        }
+
+        private static void DetachRegisteredPortCore(int port, string reason)
+        {
             string remoteBusId;
             lock (ActivePortsLock)
             {
-                if (!ActivePorts.TryGetValue(port, out remoteBusId))
+                if (XboxOnePorts.ContainsKey(port) ||
+                    !ActivePorts.TryGetValue(port, out remoteBusId))
                 {
                     return;
                 }
@@ -7498,6 +11123,12 @@ namespace DS4Windows
             {
                 return false;
             }
+
+            // Protected Xbox imports belong to exact server lifetimes. Even
+            // an unregistered/late-visible alias must never enter legacy
+            // numeric port cleanup. Case variants fail closed as well.
+            if (parsedBusId.StartsWith("x1-", StringComparison.OrdinalIgnoreCase))
+                return false;
 
             if (!string.IsNullOrEmpty(remoteBusId) &&
                 !string.Equals(parsedBusId, remoteBusId,
@@ -7782,16 +11413,85 @@ namespace DS4Windows
         }
     }
 
+    internal sealed class ViiperXboxOnePortLease : IDisposable
+    {
+        internal ViiperXboxOnePortLease(int port, string alias)
+        {
+            Port = port;
+            Alias = alias;
+        }
+        internal int Port { get; }
+        internal string Alias { get; }
+        public void Dispose() => ViiperUsbipPortManager.UnregisterXboxOnePort(this);
+    }
+
     internal sealed class ViiperVirtualDeviceLifetime : IDisposable
     {
+        private readonly object lifecycleLock = new object();
         private readonly uint busId;
         private readonly string devId;
-        private readonly int usbipPort;
+        private int usbipPort;
         private readonly Action<int, string> detachPort;
         private readonly Action<int> unregisterPort;
         private readonly Action<uint, string> removeDevice;
         private readonly Action detachStalePorts;
+        private readonly Func<XboxOneAuthorizedRegistrationV1, bool> removeXboxOne;
+        private readonly TaskCompletionSource<bool> xboxOneCleanupDone;
+        private int xboxOneCleanupThread;
+        private ViiperXboxOnePortLease xboxOnePort;
+        private XboxOneActivationRequest xboxOneActivationRequest;
         private int disposed;
+
+        internal ViiperVirtualDeviceLifetime(XboxOneAuthorizedRegistrationV1 registration,
+            Func<XboxOneAuthorizedRegistrationV1, bool> removeXboxOne)
+        {
+            XboxOneRegistration = registration ?? throw new ArgumentNullException(nameof(registration));
+            this.removeXboxOne = removeXboxOne ?? throw new ArgumentNullException(nameof(removeXboxOne));
+            xboxOneCleanupDone = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            busId = registration.BusId;
+            devId = registration.DevId;
+            usbipPort = -1;
+        }
+
+        internal XboxOneAuthorizedRegistrationV1 XboxOneRegistration { get; }
+
+        internal XboxOneActivationRequest BeginXboxOneActivationRequest()
+        {
+            lock (lifecycleLock)
+            {
+                if (disposed == 1)
+                    throw new ObjectDisposedException(nameof(ViiperVirtualDeviceLifetime));
+                if (XboxOneRegistration == null || usbipPort != -1 ||
+                    xboxOneActivationRequest != null)
+                    throw new InvalidOperationException("Xbox One activation already has an owner or completed.");
+                return xboxOneActivationRequest = new XboxOneActivationRequest(this);
+            }
+        }
+
+        internal void ReleaseXboxOneActivationRequest(XboxOneActivationRequest request)
+        {
+            lock (lifecycleLock)
+            {
+                if (ReferenceEquals(xboxOneActivationRequest, request))
+                    xboxOneActivationRequest = null;
+            }
+        }
+
+        internal void BindXboxOnePort(ViiperXboxOnePortLease lease)
+        {
+            ArgumentNullException.ThrowIfNull(lease);
+            lock (lifecycleLock)
+            {
+                if (disposed == 1)
+                    throw new ObjectDisposedException(nameof(ViiperVirtualDeviceLifetime));
+                if (XboxOneRegistration == null ||
+                    lease.Alias != XboxOneRegistration.UsbipBusId || usbipPort != -1)
+                    throw new InvalidOperationException("Xbox One activation does not match this lifetime.");
+                xboxOnePort = lease;
+                usbipPort = lease.Port;
+            }
+        }
 
         internal ViiperVirtualDeviceLifetime(uint busId, string devId,
             int usbipPort, Action<uint, string> removeDevice,
@@ -7815,21 +11515,94 @@ namespace DS4Windows
 
         internal string DevId => devId;
 
-        internal int UsbipPort => usbipPort;
+        internal int UsbipPort => Volatile.Read(ref usbipPort);
+
+        internal void BindUsbipPort(int value)
+        {
+            if (value <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(value));
+            }
+            lock (lifecycleLock)
+            {
+                if (disposed == 1)
+                {
+                    throw new ObjectDisposedException(
+                        nameof(ViiperVirtualDeviceLifetime));
+                }
+                if (XboxOneRegistration != null)
+                    throw new InvalidOperationException("Xbox One requires exact port-lease binding.");
+                if (usbipPort != -1 && usbipPort != value)
+                {
+                    throw new InvalidOperationException(
+                        "The VIIPER virtual-device lifetime already owns another usbip-win2 port.");
+                }
+                usbipPort = value;
+            }
+        }
 
         internal bool IsDisposed => Volatile.Read(ref disposed) == 1;
 
         public void Dispose()
         {
-            if (Interlocked.Exchange(ref disposed, 1) == 1)
+            int ownedPort;
+            XboxOneActivationRequest pendingActivation;
+            bool joinXboxOneCleanup = false;
+            lock (lifecycleLock)
             {
+                if (disposed == 1)
+                {
+                    if (XboxOneRegistration == null)
+                        return;
+                    if (xboxOneCleanupThread == Environment.CurrentManagedThreadId &&
+                        !xboxOneCleanupDone.Task.IsCompleted)
+                        throw new InvalidOperationException("Xbox One cleanup cannot reenter its own disposal.");
+                    joinXboxOneCleanup = true;
+                }
+                else
+                {
+                    disposed = 1;
+                    xboxOneCleanupThread = Environment.CurrentManagedThreadId;
+                }
+                ownedPort = usbipPort;
+                pendingActivation = xboxOneActivationRequest;
+            }
+            if (joinXboxOneCleanup)
+            {
+                // A concurrent stream Dispose must not close the broker while
+                // the first lifetime owner is still awaiting its Stop ACK.
+                xboxOneCleanupDone.Task.GetAwaiter().GetResult();
                 return;
             }
-
+            if (XboxOneRegistration != null)
+            {
+                // Abort only the pending management socket. Keep the broker
+                // reader alive for the following exact retained Stop/ACK.
+                // No lifecycle lock is held across cancellation callbacks.
+                try { pendingActivation?.Cancel(); }
+                catch { /* Exact removal must still run if local abort fails. */ }
+                try
+                {
+                    removeXboxOne(XboxOneRegistration);
+                }
+                catch
+                {
+                    // No numeric fallback on uncertain exact removal.
+                }
+                finally
+                {
+                    try { xboxOnePort?.Dispose(); }
+                    finally { xboxOneCleanupDone.TrySetResult(true); }
+                }
+                return;
+            }
             try
             {
-                detachPort?.Invoke(usbipPort,
-                    "DS4Windows VIIPER device stopped");
+                if (ownedPort > 0)
+                {
+                    detachPort?.Invoke(ownedPort,
+                        "DS4Windows VIIPER device stopped");
+                }
             }
             catch
             {
@@ -7837,7 +11610,10 @@ namespace DS4Windows
 
             try
             {
-                unregisterPort?.Invoke(usbipPort);
+                if (ownedPort > 0)
+                {
+                    unregisterPort?.Invoke(ownedPort);
+                }
             }
             catch
             {
@@ -7865,14 +11641,21 @@ namespace DS4Windows
     internal readonly struct ViiperFrameWriteTiming
     {
         internal ViiperFrameWriteTiming(long socketWriteStartedTimestamp,
-            long socketWriteCompletedTimestamp)
+            long socketWriteCompletedTimestamp,
+            long acceptanceAcknowledgedTimestamp = 0,
+            long waitCompletedTimestamp = 0)
         {
             SocketWriteStartedTimestamp = socketWriteStartedTimestamp;
             SocketWriteCompletedTimestamp = socketWriteCompletedTimestamp;
+            AcceptanceAcknowledgedTimestamp =
+                acceptanceAcknowledgedTimestamp;
+            WaitCompletedTimestamp = waitCompletedTimestamp;
         }
 
         internal long SocketWriteStartedTimestamp { get; }
         internal long SocketWriteCompletedTimestamp { get; }
+        internal long AcceptanceAcknowledgedTimestamp { get; }
+        internal long WaitCompletedTimestamp { get; }
     }
 
     internal sealed class ViiperDeviceStream : IDisposable
@@ -7882,8 +11665,17 @@ namespace DS4Windows
         private readonly ViiperVirtualDeviceLifetime deviceLifetime;
         private readonly object frameWriterOwnership = new object();
         private readonly object sendLock = new object();
+        private readonly object xboxOneInputLock = new object();
+        private readonly AutoResetEvent xboxOneInputAckSignal =
+            new AutoResetEvent(false);
         private readonly byte[] incomingFrameHeader =
             new byte[FramedHeaderLength];
+        private readonly byte[] xboxOneBrokerHeader =
+            new byte[XboxOneBrokerHeaderLength];
+        private readonly byte[] xboxOneBrokerSendBuffer =
+            new byte[XboxOneBrokerHeaderLength +
+                ControllerFeedbackFrame.SerializedLength];
+        private readonly byte[] xboxOneBrokerAckPayload = new byte[1];
         // The production state writer is the sole owner of this buffer and
         // sequence. Compatibility callers take frameWriterOwnership before
         // entering the same core. Reusing the storage removes the per-frame
@@ -7893,7 +11685,14 @@ namespace DS4Windows
         private uint frameSequence;
         private uint incomingFrameSequence;
         private bool incomingFrameSequenceKnown;
+        private ulong xboxOneInputRevision = 1;
+        private long xboxOneAwaitingInputRevision;
+        private long xboxOneInputAckReceivedTimestamp;
+        private long xboxOneRejectedInputRevision;
+        private int xboxOneInputAckResult;
+        private bool xboxOneBrokerEnabled;
         private int transportClosed;
+        private int streamDisposed;
         private const int FramedHeaderLength = 16;
         private const byte FrameMagic0 = (byte)'V';
         private const byte FrameMagic1 = (byte)'P';
@@ -7901,6 +11700,21 @@ namespace DS4Windows
         private const byte FrameMagic3 = (byte)'M';
         private const byte FrameVersionV3 = 0x03;
         private const byte FrameVersionV5 = 0x05;
+        private const int XboxOneBrokerHeaderLength = 16;
+        private const byte XboxOneBrokerVersion = 1;
+        private const byte XboxOneBrokerConsumerReady = 0x01;
+        private const byte XboxOneBrokerSemanticInput = 0x02;
+        private const byte XboxOneBrokerCanonicalAck = 0x03;
+        private const byte XboxOneBrokerConsumerReadyAck = 0x81;
+        internal const byte XboxOneBrokerSemanticInputAck = 0x82;
+        internal const byte XboxOneBrokerCanonicalFeedback = 0x83;
+        private const byte XboxOneBrokerRejected = 0;
+        private const byte XboxOneBrokerAccepted = 1;
+        private const int XboxOneBrokerInputAckTimeoutMilliseconds = 250;
+        private const int XboxOneInputAckPending = 0;
+        private const int XboxOneInputAckAccepted = 1;
+        private const int XboxOneInputAckRejected = 2;
+        private const int XboxOneInputAckClosed = 3;
         private static readonly uint[] FramedCrcTable = BuildFramedCrcTable();
 
         public ViiperDeviceStream(TcpClient tcp, Stream stream,
@@ -7928,6 +11742,264 @@ namespace DS4Windows
 
         internal bool IsTransportClosed =>
             Volatile.Read(ref transportClosed) == 1;
+
+        internal bool IsXboxOneBrokerEnabled => xboxOneBrokerEnabled;
+
+        internal bool IsXboxOneInputRejected =>
+            Interlocked.Read(ref xboxOneRejectedInputRevision) != 0;
+
+        internal void BindUsbipPort(int port) =>
+            deviceLifetime.BindUsbipPort(port);
+
+        internal void EnableXboxOneBroker()
+        {
+            if (xboxOneBrokerEnabled ||
+                Volatile.Read(ref transportClosed) == 1)
+            {
+                throw new InvalidOperationException(
+                    "The VIIPER Xbox One broker cannot be enabled in this stream state.");
+            }
+
+            WriteXboxOneBrokerFrame(XboxOneBrokerConsumerReady, 0,
+                Array.Empty<byte>(), 0);
+            byte[] readyPayload = Array.Empty<byte>();
+            int payloadLength = ReadXboxOneBrokerFrame(
+                out byte type, out ulong correlation, readyPayload);
+            if (type != XboxOneBrokerConsumerReadyAck || correlation != 0 ||
+                payloadLength != 0)
+            {
+                throw new IOException(
+                    "VIIPER returned an invalid Xbox One consumer-ready acknowledgement.");
+            }
+            xboxOneBrokerEnabled = true;
+        }
+
+        internal ViiperFrameWriteTiming WriteXboxOneInputAndWaitForAck(
+            byte[] data, int length)
+        {
+            ArgumentNullException.ThrowIfNull(data);
+            if (!xboxOneBrokerEnabled || length != XboxOneEgressState.WireSize ||
+                length > data.Length)
+            {
+                throw new IOException(
+                    "The VIIPER Xbox One semantic-input broker is unavailable.");
+            }
+
+            lock (xboxOneInputLock)
+            {
+                if (Volatile.Read(ref transportClosed) == 1)
+                {
+                    throw new ObjectDisposedException(nameof(ViiperDeviceStream));
+                }
+                ulong rejectedRevision = unchecked((ulong)Interlocked.Read(
+                    ref xboxOneRejectedInputRevision));
+                if (rejectedRevision != 0)
+                {
+                    throw new XboxOneSemanticInputRejectedException(rejectedRevision);
+                }
+                if (xboxOneInputRevision == ulong.MaxValue)
+                {
+                    throw new IOException(
+                        "The VIIPER Xbox One semantic-input revision was exhausted.");
+                }
+                ulong revision = xboxOneInputRevision + 1;
+                Interlocked.Exchange(ref xboxOneAwaitingInputRevision,
+                    unchecked((long)revision));
+                Interlocked.Exchange(ref xboxOneInputAckReceivedTimestamp, 0);
+                Volatile.Write(ref xboxOneInputAckResult,
+                    XboxOneInputAckPending);
+                ViiperFrameWriteTiming timing;
+                try
+                {
+                    timing = WriteXboxOneBrokerFrame(
+                        XboxOneBrokerSemanticInput, revision, data, length);
+                }
+                catch
+                {
+                    Interlocked.Exchange(ref xboxOneAwaitingInputRevision, 0);
+                    throw;
+                }
+
+                if (!xboxOneInputAckSignal.WaitOne(
+                        XboxOneBrokerInputAckTimeoutMilliseconds))
+                {
+                    CloseTransport();
+                    throw new IOException(
+                        "VIIPER Xbox One semantic-input acceptance acknowledgement timed out; the one-shot persona was retired.");
+                }
+                int result = Volatile.Read(ref xboxOneInputAckResult);
+                Interlocked.Exchange(ref xboxOneAwaitingInputRevision, 0);
+                if (result != XboxOneInputAckAccepted)
+                {
+                    if (result == XboxOneInputAckRejected)
+                    {
+                        // Only an exact negative ACK permits this input-only
+                        // fence. Keep canonical feedback/ACK alive so the owner
+                        // can perform its bounded terminal Stop handshake.
+                        throw new XboxOneSemanticInputRejectedException(revision);
+                    }
+                    CloseTransport();
+                    throw new IOException(
+                        "The VIIPER Xbox One broker closed before accepting semantic input.");
+                }
+                long waitCompletedTimestamp = Stopwatch.GetTimestamp();
+                long acknowledgedTimestamp = Interlocked.Read(
+                    ref xboxOneInputAckReceivedTimestamp);
+                if (acknowledgedTimestamp <= 0 ||
+                    acknowledgedTimestamp > waitCompletedTimestamp)
+                {
+                    acknowledgedTimestamp = waitCompletedTimestamp;
+                }
+                xboxOneInputRevision = revision;
+                return new ViiperFrameWriteTiming(
+                    timing.SocketWriteStartedTimestamp,
+                    timing.SocketWriteCompletedTimestamp,
+                    acknowledgedTimestamp, waitCompletedTimestamp);
+            }
+        }
+
+        internal int ReadXboxOneBrokerFrame(out byte type,
+            out ulong correlation, byte[] payloadBuffer)
+        {
+            ArgumentNullException.ThrowIfNull(payloadBuffer);
+            byte[] header = xboxOneBrokerHeader;
+            ReadExactly(header, 0, header.Length);
+            if (header[0] != (byte)'X' || header[1] != (byte)'1' ||
+                header[2] != (byte)'B' || header[3] != (byte)'R' ||
+                header[4] != XboxOneBrokerVersion)
+            {
+                throw new IOException(
+                    "VIIPER returned an invalid Xbox One broker frame header.");
+            }
+            type = header[5];
+            int payloadLength = BinaryPrimitives.ReadUInt16LittleEndian(
+                header.AsSpan(6, sizeof(ushort)));
+            correlation = BinaryPrimitives.ReadUInt64LittleEndian(
+                header.AsSpan(8, sizeof(ulong)));
+            if (!XboxOneBrokerPayloadLengthValid(type, payloadLength) ||
+                payloadLength > payloadBuffer.Length)
+            {
+                throw new IOException(
+                    "VIIPER returned an invalid Xbox One broker payload length.");
+            }
+            ReadExactly(payloadBuffer, 0, payloadLength);
+            return payloadLength;
+        }
+
+        internal void AcceptXboxOneInputAck(ulong correlation, byte status)
+        {
+            ulong awaiting = unchecked((ulong)Interlocked.Read(
+                ref xboxOneAwaitingInputRevision));
+            if (awaiting == 0 || correlation != awaiting ||
+                (status != XboxOneBrokerAccepted &&
+                    status != XboxOneBrokerRejected))
+            {
+                CloseTransport();
+                throw new IOException(
+                    "VIIPER returned an invalid Xbox One semantic-input acknowledgement.");
+            }
+            Interlocked.Exchange(ref xboxOneInputAckReceivedTimestamp,
+                Stopwatch.GetTimestamp());
+            int previous = Interlocked.CompareExchange(ref xboxOneInputAckResult,
+                status == XboxOneBrokerAccepted ?
+                    XboxOneInputAckAccepted : XboxOneInputAckRejected,
+                XboxOneInputAckPending);
+            if (previous != XboxOneInputAckPending)
+            {
+                CloseTransport();
+                throw new IOException(
+                    "VIIPER returned a duplicate or retired Xbox One semantic-input acknowledgement.");
+            }
+            if (status == XboxOneBrokerRejected)
+            {
+                // Set the permanent input fence before waking the writer. It
+                // remains separate from transportClosed so feedback ACK writes
+                // are still possible during this incarnation's retirement.
+                // A malformed/duplicate acknowledgement cannot set this fence.
+                Interlocked.CompareExchange(ref xboxOneRejectedInputRevision,
+                    unchecked((long)correlation), 0);
+            }
+            xboxOneInputAckSignal.Set();
+        }
+
+        internal void AcknowledgeXboxOneFeedback(ulong correlation,
+            bool accepted)
+        {
+            if (correlation == 0)
+            {
+                throw new IOException(
+                    "VIIPER returned an invalid Xbox One feedback revision.");
+            }
+            byte[] status = xboxOneBrokerAckPayload;
+            status[0] = accepted ? XboxOneBrokerAccepted :
+                XboxOneBrokerRejected;
+            WriteXboxOneBrokerFrame(XboxOneBrokerCanonicalAck,
+                correlation, status, 1);
+        }
+
+        private ViiperFrameWriteTiming WriteXboxOneBrokerFrame(byte type,
+            ulong correlation, byte[] payload, int payloadLength)
+        {
+            if (payload == null || payloadLength < 0 ||
+                payloadLength > payload.Length ||
+                !XboxOneBrokerPayloadLengthValid(type, payloadLength) ||
+                Volatile.Read(ref transportClosed) == 1)
+            {
+                throw new IOException(
+                    "The VIIPER Xbox One broker frame is invalid.");
+            }
+            lock (sendLock)
+            {
+                if (Volatile.Read(ref transportClosed) == 1)
+                {
+                    throw new ObjectDisposedException(
+                        nameof(ViiperDeviceStream));
+                }
+                // Input and canonical-feedback ACKs are emitted by different
+                // owners. Build under the same socket lock that owns the
+                // reusable frame so their bytes cannot interleave or overwrite
+                // one another before the contiguous write.
+                byte[] frame = xboxOneBrokerSendBuffer;
+                frame[0] = (byte)'X';
+                frame[1] = (byte)'1';
+                frame[2] = (byte)'B';
+                frame[3] = (byte)'R';
+                frame[4] = XboxOneBrokerVersion;
+                frame[5] = type;
+                BinaryPrimitives.WriteUInt16LittleEndian(
+                    frame.AsSpan(6, sizeof(ushort)),
+                    (ushort)payloadLength);
+                BinaryPrimitives.WriteUInt64LittleEndian(
+                    frame.AsSpan(8, sizeof(ulong)), correlation);
+                if (payloadLength > 0)
+                {
+                    Buffer.BlockCopy(payload, 0, frame,
+                        XboxOneBrokerHeaderLength, payloadLength);
+                }
+                long started = Stopwatch.GetTimestamp();
+                stream.Write(frame, 0,
+                    XboxOneBrokerHeaderLength + payloadLength);
+                return new ViiperFrameWriteTiming(started,
+                    Stopwatch.GetTimestamp());
+            }
+        }
+
+        private static bool XboxOneBrokerPayloadLengthValid(byte type,
+            int payloadLength)
+        {
+            return type switch
+            {
+                XboxOneBrokerConsumerReady or
+                    XboxOneBrokerConsumerReadyAck => payloadLength == 0,
+                XboxOneBrokerSemanticInput =>
+                    payloadLength == XboxOneEgressState.WireSize,
+                XboxOneBrokerCanonicalAck or
+                    XboxOneBrokerSemanticInputAck => payloadLength == 1,
+                XboxOneBrokerCanonicalFeedback =>
+                    payloadLength == ControllerFeedbackFrame.SerializedLength,
+                _ => false,
+            };
+        }
 
         public void Write(byte[] data)
         {
@@ -8240,6 +12312,10 @@ namespace DS4Windows
                 return;
             }
 
+            Volatile.Write(ref xboxOneInputAckResult,
+                XboxOneInputAckClosed);
+            xboxOneInputAckSignal.Set();
+
             try
             {
                 stream.Dispose();
@@ -8260,16 +12336,37 @@ namespace DS4Windows
             }
         }
 
+        internal void DisposeDeviceLifetimeBeforeTransportClose()
+        {
+            // Retained Xbox One teardown needs the authenticated broker to
+            // remain readable and writable while usbip disconnect publishes
+            // and awaits acknowledgement for its terminal canonical Stop.
+            // The lifetime is idempotent, so Dispose can safely repeat it.
+            deviceLifetime.Dispose();
+        }
+
         public void Dispose()
         {
+            if (Interlocked.Exchange(ref streamDisposed, 1) == 1)
+            {
+                return;
+            }
+
+            if (xboxOneBrokerEnabled &&
+                Volatile.Read(ref transportClosed) == 0)
+            {
+                DisposeDeviceLifetimeBeforeTransportClose();
+            }
             CloseTransport();
             deviceLifetime.Dispose();
+            xboxOneInputAckSignal.Dispose();
         }
     }
 
     internal static class ViiperStatePacketBuilder
     {
         private const int X360PacketSize = 20;
+        private const int XboxOnePacketSize = XboxOneEgressState.WireSize;
         private const int DS4PacketSize = 31;
         private const int DualSensePacketSize = 33;
         private const int DualSenseRawInputStatusPacketSize = 53;
@@ -8291,13 +12388,14 @@ namespace DS4Windows
             return type switch
             {
                 ViiperVirtualDeviceType.Xbox360 => "xbox360",
+                ViiperVirtualDeviceType.XboxOne => "xboxone",
                 ViiperVirtualDeviceType.DualShock4 => "dualshock4",
                 ViiperVirtualDeviceType.DualSense =>
                     "dualsensecombinedaudioduplexv5",
                 ViiperVirtualDeviceType.DualSenseEdge =>
                     "dualsenseedgecombinedaudioduplexv5",
                 ViiperVirtualDeviceType.Switch2Pro => "ns2pro",
-                _ => "xbox360",
+                _ => throw new ArgumentOutOfRangeException(nameof(type)),
             };
         }
 
@@ -8306,11 +12404,13 @@ namespace DS4Windows
             return type switch
             {
                 ViiperVirtualDeviceType.Xbox360 => 2,
+                ViiperVirtualDeviceType.XboxOne =>
+                    ControllerFeedbackFrame.SerializedLength,
                 ViiperVirtualDeviceType.DualShock4 => 7,
                 ViiperVirtualDeviceType.DualSense => DualSenseFeedbackPacketSize,
                 ViiperVirtualDeviceType.DualSenseEdge => DualSenseFeedbackPacketSize,
                 ViiperVirtualDeviceType.Switch2Pro => 34,
-                _ => 0,
+                _ => throw new ArgumentOutOfRangeException(nameof(type)),
             };
         }
 
@@ -8319,6 +12419,7 @@ namespace DS4Windows
             return type switch
             {
                 ViiperVirtualDeviceType.Xbox360 => X360PacketSize,
+                ViiperVirtualDeviceType.XboxOne => XboxOnePacketSize,
                 ViiperVirtualDeviceType.DualShock4 => DS4PacketSize,
                 ViiperVirtualDeviceType.DualSense => DualSensePacketSize,
                 ViiperVirtualDeviceType.DualSenseEdge => DualSensePacketSize,
@@ -8336,11 +12437,12 @@ namespace DS4Windows
             return type switch
             {
                 ViiperVirtualDeviceType.Xbox360 => BuildXbox360(state, device),
+                ViiperVirtualDeviceType.XboxOne => BuildXboxOne(state, device),
                 ViiperVirtualDeviceType.DualShock4 => BuildDualShock4(state, device),
                 ViiperVirtualDeviceType.DualSense => BuildDualSense(state, device),
                 ViiperVirtualDeviceType.DualSenseEdge => BuildDualSense(state, device),
                 ViiperVirtualDeviceType.Switch2Pro => BuildSwitch2Pro(state, device),
-                _ => BuildXbox360(state, device),
+                _ => throw new ArgumentOutOfRangeException(nameof(type)),
             };
         }
 
@@ -8363,6 +12465,21 @@ namespace DS4Windows
         private static byte[] BuildXbox360(DS4State state, int device)
         {
             byte[] packet = new byte[X360PacketSize];
+            BuildXbox360State(state, device).BuildInto(packet);
+            return packet;
+        }
+
+        private static byte[] BuildXboxOne(DS4State state, int device)
+        {
+            byte[] packet = new byte[XboxOnePacketSize];
+            XboxOneEgressState.FromLegacyMappedState(state, device)
+                .BuildInto(packet);
+            return packet;
+        }
+
+        internal static Xbox360EgressState BuildXbox360State(DS4State state,
+            int device)
+        {
             uint buttons = 0;
             if (state.DpadUp) buttons |= 0x0001;
             if (state.DpadDown) buttons |= 0x0002;
@@ -8382,21 +12499,14 @@ namespace DS4Windows
 
             byte l2 = state.L2;
             byte r2 = state.R2;
-            short lx = AxisScaleX360(state.LX, false);
-            short ly = AxisScaleX360(state.LY, true);
-            short rx = AxisScaleX360(state.RX, false);
-            short ry = AxisScaleX360(state.RY, true);
+            short lx = ScaleMappedXboxAxis(state.LXAxis, false);
+            short ly = ScaleMappedXboxAxis(state.LYAxis, true);
+            short rx = ScaleMappedXboxAxis(state.RXAxis, false);
+            short ry = ScaleMappedXboxAxis(state.RYAxis, true);
 
             ApplySteeringWheelX360(state, device, ref l2, ref r2, ref lx, ref ly, ref rx, ref ry);
 
-            WriteUInt32(packet, 0, buttons);
-            packet[4] = l2;
-            packet[5] = r2;
-            WriteInt16(packet, 6, lx);
-            WriteInt16(packet, 8, ly);
-            WriteInt16(packet, 10, rx);
-            WriteInt16(packet, 12, ry);
-            return packet;
+            return new Xbox360EgressState(buttons, l2, r2, lx, ly, rx, ry);
         }
 
         private static byte[] BuildDualShock4(DS4State state, int device)
@@ -8618,24 +12728,27 @@ namespace DS4Windows
         private static byte[] BuildSwitch2Pro(DS4State state, int device)
         {
             byte[] packet = new byte[Switch2PacketSize];
-            ushort lx = ScaleSwitchAxis(state.LX);
-            ushort ly = ScaleSwitchAxis(state.LY);
-            ushort rx = ScaleSwitchAxis(state.RX);
-            ushort ry = ScaleSwitchAxis(state.RY);
+            BuildSwitch2State(state, device).BuildInto(packet);
+            return packet;
+        }
+
+        internal static Switch2EgressState BuildSwitch2State(DS4State state,
+            int device)
+        {
+            ushort lx = ScaleMappedSwitchAxis(state.LXAxis);
+            ushort ly = ScaleMappedSwitchAxis(state.LYAxis);
+            ushort rx = ScaleMappedSwitchAxis(state.RXAxis);
+            ushort ry = ScaleMappedSwitchAxis(state.RYAxis);
             ApplySteeringWheelSwitchAxes(state, device, ref lx, ref ly, ref rx, ref ry);
 
-            WriteUInt32(packet, 0, BuildSwitch2Buttons(state));
-            WriteUInt16(packet, 4, lx);
-            WriteUInt16(packet, 6, ly);
-            WriteUInt16(packet, 8, rx);
-            WriteUInt16(packet, 10, ry);
-            WriteInt16(packet, 12, ClampShort(state.Motion?.accelXFull ?? 0));
-            WriteInt16(packet, 14, ClampShort(state.Motion?.accelYFull ?? 0));
-            WriteInt16(packet, 16, ClampShort(state.Motion?.accelZFull ?? 0));
-            WriteInt16(packet, 18, ClampShort(state.Motion?.gyroYawFull ?? 0));
-            WriteInt16(packet, 20, ClampShort(state.Motion?.gyroPitchFull ?? 0));
-            WriteInt16(packet, 22, ClampShort(state.Motion?.gyroRollFull ?? 0));
-            return packet;
+            return new Switch2EgressState(BuildSwitch2Buttons(state),
+                lx, ly, rx, ry,
+                ClampShort(state.Motion?.accelXFull ?? 0),
+                ClampShort(state.Motion?.accelYFull ?? 0),
+                ClampShort(state.Motion?.accelZFull ?? 0),
+                ClampShort(state.Motion?.gyroYawFull ?? 0),
+                ClampShort(state.Motion?.gyroPitchFull ?? 0),
+                ClampShort(state.Motion?.gyroRollFull ?? 0));
         }
 
         private static ushort BuildDualShock4Buttons(DS4State state)
@@ -8882,6 +12995,16 @@ namespace DS4Windows
             return unchecked((byte)((sbyte)Math.Clamp(value - 128, sbyte.MinValue, sbyte.MaxValue)));
         }
 
+        // Only final mapping-owned values cross this boundary. Legacy sources
+        // retain their exact historical float/byte conversion; precise sources
+        // quantize once to the target's wire domain. Steering overrides below
+        // the call sites remain authoritative.
+        private static short ScaleMappedXboxAxis(in DS4MappedStickAxis value, bool flip) =>
+            value.IsHighResolution ? value.ToSigned16(flip) : AxisScaleX360(value.LegacyValue, flip);
+
+        private static ushort ScaleMappedSwitchAxis(in DS4MappedStickAxis value) =>
+            value.IsHighResolution ? value.ToUnsigned12() : ScaleSwitchAxis(value.LegacyValue);
+
         private static short AxisScaleX360(int value, bool flip)
         {
             unchecked
@@ -8902,7 +13025,15 @@ namespace DS4Windows
 
         private static ushort ScaleSwitchAxis(byte value)
         {
-            return (ushort)Math.Clamp((value * 4095 + 127) / 255, 0, 4095);
+            // Preserve all three exact anchors of the asymmetric byte range:
+            // 0 -> 0, 128 -> the protocol's 0x0800 center, 255 -> 0x0fff.
+            if (value <= 128)
+            {
+                return (ushort)(value * 16);
+            }
+
+            return (ushort)(0x0800 +
+                ((value - 128) * 0x07ff + 63) / 127);
         }
 
         private static short ClampShort(int value)

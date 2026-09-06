@@ -1,7 +1,30 @@
 using System;
+using System.Threading;
+using DS4Windows.Switch2;
 
 namespace DS4Windows
 {
+    // One cold-path attempt, not an index-only sticky error. A completion may
+    // mutate only this object; replacing the array entry fences an older
+    // asynchronous attempt from changing its successor's readiness.
+    internal sealed class ControllerVirtualOutputAttempt
+    {
+        private readonly DS4Device physicalDevice;
+        private readonly OutContType outputType;
+        private int failed;
+
+        internal ControllerVirtualOutputAttempt(DS4Device physicalDevice, OutContType outputType)
+        {
+            this.physicalDevice = physicalDevice ?? throw new ArgumentNullException(nameof(physicalDevice));
+            this.outputType = outputType.Normalize();
+        }
+
+        internal bool Matches(DS4Device device, OutContType requestedType, bool virtualRequired) =>
+            virtualRequired && ReferenceEquals(physicalDevice, device) && outputType == requestedType.Normalize();
+        internal bool Failed => Volatile.Read(ref failed) != 0;
+        internal void MarkFailed() => Volatile.Write(ref failed, 1);
+    }
+
     public enum ControllerRuntimeLaneState : byte
     {
         NotRequired,
@@ -33,7 +56,8 @@ namespace DS4Windows
             ControllerRuntimeLaneState speaker,
             ControllerRuntimeLaneState microphone,
             ControllerRuntimeLaneState audioHaptics,
-            string virtualControllerName)
+            string virtualControllerName, bool virtualFailed = false,
+            bool physicalCleanupQuarantined = false)
         {
             PhysicalPresent = physicalPresent;
             PhysicalSynced = physicalSynced;
@@ -46,6 +70,8 @@ namespace DS4Windows
             Microphone = microphone;
             AudioHaptics = audioHaptics;
             VirtualControllerName = virtualControllerName ?? "virtual controller";
+            VirtualFailed = virtualFailed;
+            PhysicalCleanupQuarantined = physicalCleanupQuarantined;
         }
 
         public bool PhysicalPresent { get; }
@@ -59,6 +85,8 @@ namespace DS4Windows
         public ControllerRuntimeLaneState Microphone { get; }
         public ControllerRuntimeLaneState AudioHaptics { get; }
         public string VirtualControllerName { get; }
+        public bool VirtualFailed { get; }
+        public bool PhysicalCleanupQuarantined { get; }
     }
 
     public readonly struct ControllerStartupStatus : IEquatable<ControllerStartupStatus>
@@ -94,6 +122,26 @@ namespace DS4Windows
 
     public static class ControllerRuntimeStatusPolicy
     {
+        internal static bool HasQuarantinedPhysicalRuntime(DS4Device device,
+            int index, InputControllerRegistrationTable table)
+        {
+            if (device is not Switch2RuntimeInputDevice runtime ||
+                runtime.RuntimeState is not (Switch2RuntimeInputDeviceState.Terminal or
+                    Switch2RuntimeInputDeviceState.AbortedUnpublished) ||
+                table == null || index < 0 || index >= table.SlotCount)
+                return false;
+
+            // This is cold status observation, not a cleanup credential. A
+            // terminal runtime alone is normal during removal; only an exact
+            // quarantined registration proves that cleanup needs attention.
+            InputControllerSlotSnapshot snapshot = table.GetSnapshot()[index];
+            return snapshot.State == InputControllerSlotState.Quarantined &&
+                snapshot.Token.IsValid && snapshot.Token.Slot == index &&
+                ReferenceEquals(snapshot.Token.Registration.Device, runtime) &&
+                snapshot.Token.Registration.OwnershipKind == InputControllerOwnershipKind.Switch2Runtime &&
+                snapshot.Token.Registration.Generation == runtime.RuntimeGeneration;
+        }
+
         public static ControllerStartupStatus Evaluate(
             ControllerRuntimeSignals signals)
         {
@@ -104,11 +152,23 @@ namespace DS4Windows
                     "No physical controller is assigned to this slot.");
             }
 
+            if (signals.PhysicalCleanupQuarantined)
+            {
+                return new ControllerStartupStatus(ControllerStartupStage.Attention,
+                    "Needs attention", "This controller session ended, but its cleanup is incomplete. Check the log before retrying; the slot remains reserved for safe cleanup.");
+            }
+
             if (!signals.PhysicalSynced || !signals.PhysicalAlive)
             {
                 return new ControllerStartupStatus(
                     ControllerStartupStage.Connecting, "Connecting",
                     "Waiting for stable input from the physical controller.");
+            }
+
+            if (signals.VirtualRequired && signals.VirtualFailed)
+            {
+                return new ControllerStartupStatus(ControllerStartupStage.Attention,
+                    "Needs attention", $"The virtual {signals.VirtualControllerName} pad failed to start or its connection ended. Check the log, then retry the output connection.");
             }
 
             if (signals.VirtualRequired && !signals.VirtualConnected)

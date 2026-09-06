@@ -32,6 +32,9 @@ using DS4Windows;
 using DS4Windows.StickModifiers;
 using DS4WinWPF.DS4Forms.ViewModels.Util;
 using DS4Windows.InputDevices;
+using DS4Windows.Switch2;
+using Switch2CemuhookYawPolicy =
+    DS4Windows.Switch2.Switch2CemuhookYawSensitivity;
 
 namespace DS4WinWPF.DS4Forms.ViewModels
 {
@@ -48,8 +51,58 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             // START Extra buttons for DualSense Edge controller
             "Function Left", "Function Right", "Bottom Left Paddle", "Bottom Right Paddle",
             // END Extra buttons for DualSense Edge controller
+            // Append-only: profiles persist the numeric trigger indices.
+            "Switch 2 Joy-Con Left IR Sensor",
+            "Switch 2 Joy-Con Right IR Sensor",
             "Always On",
+            "Switch 2 C / Chat",
+            "Switch 2 Joy-Con Left SL",
+            "Switch 2 Joy-Con Left SR",
+            "Switch 2 Joy-Con Right SL",
+            "Switch 2 Joy-Con Right SR",
         };
+
+        private static readonly (Switch2JoyConProfileButton Button,
+            string Label)[] switch2IrGyroButtonChoices =
+        {
+            (Switch2JoyConProfileButton.FaceWest, "X / West"),
+            (Switch2JoyConProfileButton.FaceNorth, "Y / North"),
+            (Switch2JoyConProfileButton.FaceSouth, "A / South"),
+            (Switch2JoyConProfileButton.FaceEast, "B / East"),
+            (Switch2JoyConProfileButton.Back, "Minus / Back"),
+            (Switch2JoyConProfileButton.Start, "Plus / Start"),
+            (Switch2JoyConProfileButton.Guide, "Home"),
+            (Switch2JoyConProfileButton.Capture, "Capture"),
+            (Switch2JoyConProfileButton.LeftStick, "Left Stick"),
+            (Switch2JoyConProfileButton.RightStick, "Right Stick"),
+            (Switch2JoyConProfileButton.LeftShoulder, "L"),
+            (Switch2JoyConProfileButton.RightShoulder, "R"),
+            (Switch2JoyConProfileButton.LeftTrigger, "ZL"),
+            (Switch2JoyConProfileButton.RightTrigger, "ZR"),
+            (Switch2JoyConProfileButton.DpadDown, "Down"),
+            (Switch2JoyConProfileButton.DpadUp, "Up"),
+            (Switch2JoyConProfileButton.DpadRight, "Right"),
+            (Switch2JoyConProfileButton.DpadLeft, "Left"),
+            (Switch2JoyConProfileButton.C, "C / Chat"),
+            (Switch2JoyConProfileButton.LeftPaddle1, "GL 1"),
+            (Switch2JoyConProfileButton.LeftPaddle2, "GL 2"),
+            (Switch2JoyConProfileButton.RightPaddle1, "GR 1"),
+            (Switch2JoyConProfileButton.RightPaddle2, "GR 2"),
+            (Switch2JoyConProfileButton.LeftRailSL, "Left SL (rail)"),
+            (Switch2JoyConProfileButton.LeftRailSR, "Left SR (rail)"),
+            (Switch2JoyConProfileButton.RightRailSL, "Right SL (rail)"),
+            (Switch2JoyConProfileButton.RightRailSR, "Right SR (rail)"),
+        };
+
+        private static readonly (Switch2JoyConProfileButton Button,
+            string Label)[] switch2ModeShiftButtonChoices =
+            switch2IrGyroButtonChoices.Concat(new[]
+            {
+                (Switch2JoyConProfileButton.LeftIrSensor,
+                    "Left IR sensor"),
+                (Switch2JoyConProfileButton.RightIrSensor,
+                    "Right IR sensor"),
+            }).ToArray();
 
         private int device;
         public int Device { get => device; }
@@ -70,6 +123,12 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public bool ShowPlayStationControllerSettings =>
             controllerUiCapabilities.ShowPlayStationControllerSettings;
+
+        public bool ShowSwitch2Controls =>
+            controllerUiCapabilities.ShowSwitch2Controls;
+
+        public bool ShowSwitch2StandaloneJoyConControls =>
+            controllerUiCapabilities.ShowSwitch2StandaloneJoyConControls;
 
         public bool SupportsAdaptiveTriggers =>
             controllerUiCapabilities.SupportsAdaptiveTriggers;
@@ -758,7 +817,12 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public bool EnableOutputDataToDS4
         {
             get => Global.EnableOutputDataToDS4[device];
-            set => Global.EnableOutputDataToDS4[device] = value;
+            set
+            {
+                System.Threading.Volatile.Write(ref Global.EnableOutputDataToDS4[device], value);
+                RefreshSwitch2DualSenseConversionPolicy();
+                QueueXboxFeedbackPolicyRefresh();
+            }
         }
 
         public bool GameBarControllerCompatibility
@@ -1103,6 +1167,10 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                         type = 4;
                         break;
 
+                    case OutContType.ViiperXboxOne:
+                        type = 5;
+                        break;
+
                     default: break;
                 }
 
@@ -1148,6 +1216,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 2 => OutContType.ViiperDualSense,
                 3 => OutContType.ViiperDualSenseEdge,
                 4 => OutContType.ViiperSwitch2Pro,
+                5 => OutContType.ViiperXboxOne,
                 _ => OutContType.ViiperX360,
             };
         }
@@ -3574,6 +3643,666 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             set => Global.InverseRumbleMotors[device] = value;
         }
 
+        public bool Switch2MapXboxImpulseTriggersToHdRumble
+        {
+            get => Global.Switch2MapXboxImpulseTriggersToHdRumble[device];
+            set
+            {
+                System.Threading.Volatile.Write(ref Global.Switch2MapXboxImpulseTriggersToHdRumble[device], value);
+                QueueXboxFeedbackPolicyRefresh();
+            }
+        }
+
+        public bool Switch2XboxImpulseDynamicFrequency
+        {
+            get => Global.Switch2XboxImpulseDynamicFrequency[device];
+            set => Global.Switch2XboxImpulseDynamicFrequency[device] = value;
+        }
+
+        public int Switch2XboxImpulseFrequency
+        {
+            get => Global.Switch2XboxImpulseFrequency[device];
+            set => Global.Switch2XboxImpulseFrequency[device] =
+                Math.Max(Switch2HdRumbleImpulseTuning.MinimumLevel,
+                    Math.Min(Switch2HdRumbleImpulseTuning.MaximumLevel,
+                        value));
+        }
+
+        public int Switch2XboxImpulseStrength
+        {
+            get => Global.Switch2XboxImpulseStrength[device];
+            set => Global.Switch2XboxImpulseStrength[device] =
+                Math.Max(Switch2HdRumbleImpulseTuning.MinimumLevel,
+                    Math.Min(Switch2HdRumbleImpulseTuning.MaximumLevel,
+                        value));
+        }
+
+        public bool Switch2XboxBodyRumbleMode
+        {
+            get => Global.Switch2XboxBodyRumbleMode[device];
+            set => Global.Switch2XboxBodyRumbleMode[device] = value;
+        }
+
+        public int Switch2XboxBodyRumbleFrequency
+        {
+            get => Global.Switch2XboxBodyRumbleFrequency[device];
+            set => Global.Switch2XboxBodyRumbleFrequency[device] =
+                Math.Max(
+                    Switch2HdRumbleBodyTuning.MinimumXboxFrequencyLevel,
+                    Math.Min(
+                        Switch2HdRumbleBodyTuning.MaximumXboxFrequencyLevel,
+                        value));
+        }
+
+        public int Switch2RumbleDelayMilliseconds
+        {
+            get => Global.Switch2RumbleDelayMilliseconds[device];
+            set => Global.Switch2RumbleDelayMilliseconds[device] =
+                Switch2RumbleDelay.Normalize(value);
+        }
+
+        public bool Switch2DualSenseAudioHapticsEnabled
+        {
+            get => Global.Switch2DualSenseAudioHapticsEnabled[device];
+            set
+            {
+                System.Threading.Volatile.Write(ref Global.
+                    Switch2DualSenseAudioHapticsEnabled[device], value);
+                RefreshSwitch2DualSenseConversionPolicy();
+            }
+        }
+
+        public bool Switch2DualSenseAdaptiveTriggersEnabled
+        {
+            get => Global.Switch2DualSenseAdaptiveTriggersEnabled[device];
+            set
+            {
+                System.Threading.Volatile.Write(ref Global.
+                    Switch2DualSenseAdaptiveTriggersEnabled[device], value);
+                RefreshSwitch2DualSenseConversionPolicy();
+            }
+        }
+
+        private void RefreshSwitch2DualSenseConversionPolicy()
+        {
+            ControlService hub = App.rootHub;
+            if (hub != null && device >= 0 && device < hub.outputDevices.Length)
+            {
+                (hub.outputDevices[device] as ViiperOutDevice)?.
+                    RefreshSwitch2DualSenseConversionPolicy(device);
+            }
+        }
+
+        private void QueueXboxFeedbackPolicyRefresh()
+        {
+            ControlService hub = App.rootHub;
+            if (hub != null && device >= 0 && device < hub.outputDevices.Length)
+                (hub.outputDevices[device] as ViiperOutDevice)?.QueueXboxFeedbackPolicyRefresh(device);
+        }
+
+        public bool Switch2MagnetometerYawAssistEnabled
+        {
+            get => Global.Switch2MagnetometerYawAssistEnabled[device];
+            set => Global.Switch2MagnetometerYawAssistEnabled[device] = value;
+        }
+
+        public double Switch2VirtualGyroSoftDeadzone
+        {
+            get => Global.Switch2VirtualGyroSoftDeadzone[device];
+            set => Global.Switch2VirtualGyroSoftDeadzone[device] =
+                Switch2MotionSoftDeadzone.Normalize(value);
+        }
+
+        public double Switch2GyroMouseStickAssistSensitivity
+        {
+            get => Global.Switch2GyroMouseStickAssistSensitivity[device];
+            set => Global.Switch2GyroMouseStickAssistSensitivity[device] =
+                Switch2StickAssistProfileLane.NormalizeSensitivity(value);
+        }
+
+        public double Switch2LeftStickMouseSensitivity
+        {
+            get => Global.Switch2LeftStickMouseSensitivity[device];
+            set => Global.Switch2LeftStickMouseSensitivity[device] =
+                Switch2MappedStickMouseSensitivity.Normalize(value);
+        }
+
+        public double Switch2RightStickMouseSensitivity
+        {
+            get => Global.Switch2RightStickMouseSensitivity[device];
+            set => Global.Switch2RightStickMouseSensitivity[device] =
+                Switch2MappedStickMouseSensitivity.Normalize(value);
+        }
+
+        public bool Switch2HighRateMousePresentation
+        {
+            get => Global.Switch2HighRateMousePresentation[device];
+            set => Global.Switch2HighRateMousePresentation[device] = value;
+        }
+
+        public bool Switch2ConnectionHapticEnabled
+        {
+            get => Global.Switch2ConnectionHapticEnabled[device];
+            set => Global.Switch2ConnectionHapticEnabled[device] = value;
+        }
+
+        public int Switch2AutoDisconnectModeIndex
+        {
+            get
+            {
+                Switch2AutoDisconnectMode mode = Global.
+                    Switch2AutoDisconnectMode[device];
+                if (mode == Switch2AutoDisconnectMode.LegacyProfile)
+                {
+                    return Global.IdleDisconnectTimeout[device] > 0 ? 1 : 0;
+                }
+                return mode switch
+                {
+                    Switch2AutoDisconnectMode.Inactive => 1,
+                    Switch2AutoDisconnectMode.Absolute => 2,
+                    _ => 0,
+                };
+            }
+            set
+            {
+                if (Global.Switch2AutoDisconnectMode[device] ==
+                        Switch2AutoDisconnectMode.LegacyProfile &&
+                    Global.Switch2AutoDisconnectTimeoutSeconds[device] == 0 &&
+                    Global.IdleDisconnectTimeout[device] > 0)
+                {
+                    Global.Switch2AutoDisconnectTimeoutSeconds[device] =
+                        Global.IdleDisconnectTimeout[device];
+                }
+                Global.Switch2AutoDisconnectMode[device] = value switch
+                {
+                    1 => Switch2AutoDisconnectMode.Inactive,
+                    2 => Switch2AutoDisconnectMode.Absolute,
+                    _ => Switch2AutoDisconnectMode.Off,
+                };
+            }
+        }
+
+        public int Switch2AutoDisconnectDays
+        {
+            get
+            {
+                GetSwitch2AutoDisconnectComponents(out long days, out _,
+                    out _);
+                return (int)Math.Min(int.MaxValue, days);
+            }
+            set
+            {
+                GetSwitch2AutoDisconnectComponents(out _, out int hours,
+                    out int minutes);
+                SetSwitch2AutoDisconnectComponents(Math.Max(0, value),
+                    hours, minutes);
+            }
+        }
+
+        public int Switch2AutoDisconnectHours
+        {
+            get
+            {
+                GetSwitch2AutoDisconnectComponents(out _, out int hours,
+                    out _);
+                return hours;
+            }
+            set
+            {
+                GetSwitch2AutoDisconnectComponents(out long days, out _,
+                    out int minutes);
+                SetSwitch2AutoDisconnectComponents(days,
+                    Math.Clamp(value, 0, 23), minutes);
+            }
+        }
+
+        public int Switch2AutoDisconnectMinutes
+        {
+            get
+            {
+                GetSwitch2AutoDisconnectComponents(out _, out _,
+                    out int minutes);
+                return minutes;
+            }
+            set
+            {
+                GetSwitch2AutoDisconnectComponents(out long days,
+                    out int hours, out _);
+                SetSwitch2AutoDisconnectComponents(days, hours,
+                    Math.Clamp(value, 0, 59));
+            }
+        }
+
+        private long GetSwitch2AutoDisconnectTimeoutSeconds()
+        {
+            if (Global.Switch2AutoDisconnectMode[device] ==
+                Switch2AutoDisconnectMode.LegacyProfile)
+            {
+                return Math.Max(0, Global.IdleDisconnectTimeout[device]);
+            }
+            return Switch2AutoDisconnectPolicyResolver.
+                NormalizeTimeoutSeconds(
+                    Global.Switch2AutoDisconnectTimeoutSeconds[device]);
+        }
+
+        private void GetSwitch2AutoDisconnectComponents(out long days,
+            out int hours, out int minutes) =>
+            Switch2AutoDisconnectPolicyResolver.DecomposeTimeoutSeconds(
+                GetSwitch2AutoDisconnectTimeoutSeconds(), out days,
+                out hours, out minutes);
+
+        private void SetSwitch2AutoDisconnectComponents(long days,
+            int hours, int minutes)
+        {
+            if (Global.Switch2AutoDisconnectMode[device] ==
+                Switch2AutoDisconnectMode.LegacyProfile)
+            {
+                Global.Switch2AutoDisconnectMode[device] =
+                    Global.IdleDisconnectTimeout[device] > 0 ?
+                        Switch2AutoDisconnectMode.Inactive :
+                        Switch2AutoDisconnectMode.Off;
+            }
+            Global.Switch2AutoDisconnectTimeoutSeconds[device] =
+                Switch2AutoDisconnectPolicyResolver.ComposeTimeoutSeconds(
+                    days, hours, minutes);
+        }
+
+        public int Switch2CemuhookYawSensitivity
+        {
+            get => Global.Switch2CemuhookYawSensitivity[device];
+            set => Global.Switch2CemuhookYawSensitivity[device] =
+                Switch2CemuhookYawPolicy.NormalizeLevel(value);
+        }
+
+        public bool Switch2HorizonStabilizationEnabled
+        {
+            get => Global.Switch2HorizonStabilizationEnabled[device];
+            set => Global.Switch2HorizonStabilizationEnabled[device] = value;
+        }
+
+        public Switch2DualGyroEditorViewModel Switch2DualGyroEditor { get; }
+
+        public int Switch2JoyConStandaloneHoldModeIndex
+        {
+            get => Global.Switch2JoyConStandaloneHoldMode[device] ==
+                Switch2JoyConHoldMode.Horizontal ? 1 : 0;
+            set => Global.Switch2JoyConStandaloneHoldMode[device] =
+                value == 1 ? Switch2JoyConHoldMode.Horizontal :
+                    Switch2JoyConHoldMode.Vertical;
+        }
+
+        public int Switch2FaceButtonLayoutIndex
+        {
+            get => Global.Switch2FaceButtonLayout[device] ==
+                Switch2FaceButtonLayout.Nintendo ? 1 : 0;
+            set => Global.Switch2FaceButtonLayout[device] = value == 1 ?
+                Switch2FaceButtonLayout.Nintendo :
+                Switch2FaceButtonLayout.Xbox;
+        }
+
+        public bool Switch2JoyConIrMouseEnabled
+        {
+            get => Global.Switch2JoyConIrMouseEnabled[device];
+            set => Global.Switch2JoyConIrMouseEnabled[device] = value;
+        }
+
+        public int Switch2JoyConIrMouseSourceIndex
+        {
+            get => Global.Switch2JoyConIrMouseSource[device] switch
+            {
+                Switch2IrMouseSource.Left => 1,
+                Switch2IrMouseSource.Right => 2,
+                Switch2IrMouseSource.Both => 3,
+                _ => 0,
+            };
+            set => Global.Switch2JoyConIrMouseSource[device] = value switch
+            {
+                1 => Switch2IrMouseSource.Left,
+                2 => Switch2IrMouseSource.Right,
+                3 => Switch2IrMouseSource.Both,
+                _ => Switch2IrMouseSource.Auto,
+            };
+        }
+
+        public int Switch2JoyConIrMouseScrollModeIndex
+        {
+            get => Global.Switch2JoyConIrMouseScrollMode[device] ==
+                Switch2IrMouseScrollMode.FourWay ? 1 : 0;
+            set => Global.Switch2JoyConIrMouseScrollMode[device] = value == 1 ?
+                Switch2IrMouseScrollMode.FourWay :
+                Switch2IrMouseScrollMode.Vertical;
+        }
+
+        public int Switch2LeftStickScrollActivationModeIndex
+        {
+            get => Global.Switch2LeftStickScrollActivationMode[device] ==
+                Switch2StickScrollActivationMode.Tap ? 1 : 0;
+            set => Global.Switch2LeftStickScrollActivationMode[device] =
+                value == 1 ? Switch2StickScrollActivationMode.Tap :
+                    Switch2StickScrollActivationMode.Hold;
+        }
+
+        public int Switch2RightStickScrollActivationModeIndex
+        {
+            get => Global.Switch2RightStickScrollActivationMode[device] ==
+                Switch2StickScrollActivationMode.Tap ? 1 : 0;
+            set => Global.Switch2RightStickScrollActivationMode[device] =
+                value == 1 ? Switch2StickScrollActivationMode.Tap :
+                    Switch2StickScrollActivationMode.Hold;
+        }
+
+        public int Switch2LeftStickUpActivationModeIndex
+        {
+            get => ToSwitch2StickDirectionActivationModeIndex(
+                Global.Switch2LeftStickUpActivationMode[device]);
+            set => Global.Switch2LeftStickUpActivationMode[device] =
+                FromSwitch2StickDirectionActivationModeIndex(value);
+        }
+
+        public int Switch2LeftStickDownActivationModeIndex
+        {
+            get => ToSwitch2StickDirectionActivationModeIndex(
+                Global.Switch2LeftStickDownActivationMode[device]);
+            set => Global.Switch2LeftStickDownActivationMode[device] =
+                FromSwitch2StickDirectionActivationModeIndex(value);
+        }
+
+        public int Switch2LeftStickLeftActivationModeIndex
+        {
+            get => ToSwitch2StickDirectionActivationModeIndex(
+                Global.Switch2LeftStickLeftActivationMode[device]);
+            set => Global.Switch2LeftStickLeftActivationMode[device] =
+                FromSwitch2StickDirectionActivationModeIndex(value);
+        }
+
+        public int Switch2LeftStickRightActivationModeIndex
+        {
+            get => ToSwitch2StickDirectionActivationModeIndex(
+                Global.Switch2LeftStickRightActivationMode[device]);
+            set => Global.Switch2LeftStickRightActivationMode[device] =
+                FromSwitch2StickDirectionActivationModeIndex(value);
+        }
+
+        public int Switch2RightStickUpActivationModeIndex
+        {
+            get => ToSwitch2StickDirectionActivationModeIndex(
+                Global.Switch2RightStickUpActivationMode[device]);
+            set => Global.Switch2RightStickUpActivationMode[device] =
+                FromSwitch2StickDirectionActivationModeIndex(value);
+        }
+
+        public int Switch2RightStickDownActivationModeIndex
+        {
+            get => ToSwitch2StickDirectionActivationModeIndex(
+                Global.Switch2RightStickDownActivationMode[device]);
+            set => Global.Switch2RightStickDownActivationMode[device] =
+                FromSwitch2StickDirectionActivationModeIndex(value);
+        }
+
+        public int Switch2RightStickLeftActivationModeIndex
+        {
+            get => ToSwitch2StickDirectionActivationModeIndex(
+                Global.Switch2RightStickLeftActivationMode[device]);
+            set => Global.Switch2RightStickLeftActivationMode[device] =
+                FromSwitch2StickDirectionActivationModeIndex(value);
+        }
+
+        public int Switch2RightStickRightActivationModeIndex
+        {
+            get => ToSwitch2StickDirectionActivationModeIndex(
+                Global.Switch2RightStickRightActivationMode[device]);
+            set => Global.Switch2RightStickRightActivationMode[device] =
+                FromSwitch2StickDirectionActivationModeIndex(value);
+        }
+
+        public int Switch2JoyConLeftIrMouseActivationThresholdIndex
+        {
+            get => ToSwitch2IrActivationThresholdIndex(
+                Global.Switch2JoyConLeftIrMouseActivationThreshold[device]);
+            set => Global.Switch2JoyConLeftIrMouseActivationThreshold[device] =
+                FromSwitch2IrActivationThresholdIndex(value);
+        }
+
+        public double Switch2JoyConLeftIrMouseSensitivity
+        {
+            get => Global.Switch2JoyConLeftIrMouseSensitivity[device];
+            set => Global.Switch2JoyConLeftIrMouseSensitivity[device] =
+                NormalizeSwitch2IrMouseSensitivity(value);
+        }
+
+        public int Switch2JoyConRightIrMouseActivationThresholdIndex
+        {
+            get => ToSwitch2IrActivationThresholdIndex(
+                Global.Switch2JoyConRightIrMouseActivationThreshold[device]);
+            set => Global.Switch2JoyConRightIrMouseActivationThreshold[device] =
+                FromSwitch2IrActivationThresholdIndex(value);
+        }
+
+        public double Switch2JoyConRightIrMouseSensitivity
+        {
+            get => Global.Switch2JoyConRightIrMouseSensitivity[device];
+            set => Global.Switch2JoyConRightIrMouseSensitivity[device] =
+                NormalizeSwitch2IrMouseSensitivity(value);
+        }
+
+        public IReadOnlyList<Switch2IrGyroButtonChoice>
+            Switch2JoyConLeftIrGyroDeadzoneButtonChoices { get; private set; }
+
+        public IReadOnlyList<Switch2IrGyroButtonChoice>
+            Switch2JoyConLeftIrGyroDampeningButtonChoices { get; private set; }
+
+        public IReadOnlyList<Switch2IrGyroButtonChoice>
+            Switch2JoyConRightIrGyroDeadzoneButtonChoices { get; private set; }
+
+        public IReadOnlyList<Switch2IrGyroButtonChoice>
+            Switch2JoyConRightIrGyroDampeningButtonChoices { get; private set; }
+
+        public Switch2GyroTriggerTuningEditorViewModel
+            Switch2GyroTriggerEditor { get; }
+
+        public Switch2GyroLockEditorViewModel Switch2GyroLockEditor { get; }
+
+        public Switch2ModeShiftEditorViewModel Switch2ModeShiftEditor
+        {
+            get;
+        }
+
+        public double Switch2JoyConLeftIrGyroDeadzoneAmount
+        {
+            get => GetIrGyroTuning(left: true).DeadzoneAmount;
+            set => UpdateIrGyroTuning(left: true, deadzoneAmount: value);
+        }
+
+        public int Switch2JoyConLeftIrGyroPauseAfterPressedMilliseconds
+        {
+            get => GetIrGyroTuning(left: true).
+                PauseAfterPressedMilliseconds;
+            set => UpdateIrGyroTuning(left: true,
+                pauseAfterPressedMilliseconds: value);
+        }
+
+        public int Switch2JoyConLeftIrGyroPauseAfterReleasedMilliseconds
+        {
+            get => GetIrGyroTuning(left: true).
+                PauseAfterReleasedMilliseconds;
+            set => UpdateIrGyroTuning(left: true,
+                pauseAfterReleasedMilliseconds: value);
+        }
+
+        public int Switch2JoyConLeftIrGyroDeadzoneEffectAfterReleasedMilliseconds
+        {
+            get => GetIrGyroTuning(left: true).
+                DeadzoneEffectAfterReleasedMilliseconds;
+            set => UpdateIrGyroTuning(left: true,
+                deadzoneEffectAfterReleasedMilliseconds: value);
+        }
+
+        public double Switch2JoyConLeftIrGyroDampeningAmountPercent
+        {
+            get => GetIrGyroTuning(left: true).DampeningAmountPercent;
+            set => UpdateIrGyroTuning(left: true,
+                dampeningAmountPercent: value);
+        }
+
+        public int Switch2JoyConLeftIrGyroDampeningEffectAfterReleasedMilliseconds
+        {
+            get => GetIrGyroTuning(left: true).
+                DampeningEffectAfterReleasedMilliseconds;
+            set => UpdateIrGyroTuning(left: true,
+                dampeningEffectAfterReleasedMilliseconds: value);
+        }
+
+        public double Switch2JoyConRightIrGyroDeadzoneAmount
+        {
+            get => GetIrGyroTuning(left: false).DeadzoneAmount;
+            set => UpdateIrGyroTuning(left: false, deadzoneAmount: value);
+        }
+
+        public int Switch2JoyConRightIrGyroPauseAfterPressedMilliseconds
+        {
+            get => GetIrGyroTuning(left: false).
+                PauseAfterPressedMilliseconds;
+            set => UpdateIrGyroTuning(left: false,
+                pauseAfterPressedMilliseconds: value);
+        }
+
+        public int Switch2JoyConRightIrGyroPauseAfterReleasedMilliseconds
+        {
+            get => GetIrGyroTuning(left: false).
+                PauseAfterReleasedMilliseconds;
+            set => UpdateIrGyroTuning(left: false,
+                pauseAfterReleasedMilliseconds: value);
+        }
+
+        public int Switch2JoyConRightIrGyroDeadzoneEffectAfterReleasedMilliseconds
+        {
+            get => GetIrGyroTuning(left: false).
+                DeadzoneEffectAfterReleasedMilliseconds;
+            set => UpdateIrGyroTuning(left: false,
+                deadzoneEffectAfterReleasedMilliseconds: value);
+        }
+
+        public double Switch2JoyConRightIrGyroDampeningAmountPercent
+        {
+            get => GetIrGyroTuning(left: false).DampeningAmountPercent;
+            set => UpdateIrGyroTuning(left: false,
+                dampeningAmountPercent: value);
+        }
+
+        public int Switch2JoyConRightIrGyroDampeningEffectAfterReleasedMilliseconds
+        {
+            get => GetIrGyroTuning(left: false).
+                DampeningEffectAfterReleasedMilliseconds;
+            set => UpdateIrGyroTuning(left: false,
+                dampeningEffectAfterReleasedMilliseconds: value);
+        }
+
+        private Switch2IrGyroTuning GetIrGyroTuning(bool left) => left ?
+            Global.Switch2JoyConLeftIrGyroTuning[device] :
+            Global.Switch2JoyConRightIrGyroTuning[device];
+
+        private void UpdateIrGyroTuning(bool left,
+            Switch2JoyConProfileButton? deadzoneButtons = null,
+            double? deadzoneAmount = null,
+            int? pauseAfterPressedMilliseconds = null,
+            int? pauseAfterReleasedMilliseconds = null,
+            int? deadzoneEffectAfterReleasedMilliseconds = null,
+            Switch2JoyConProfileButton? dampeningButtons = null,
+            double? dampeningAmountPercent = null,
+            int? dampeningEffectAfterReleasedMilliseconds = null)
+        {
+            Switch2IrGyroTuning current = GetIrGyroTuning(left);
+            Switch2IrGyroTuning next = Switch2IrGyroTuning.Normalize(new(
+                deadzoneButtons ?? current.DeadzoneButtons,
+                deadzoneAmount ?? current.DeadzoneAmount,
+                pauseAfterPressedMilliseconds ??
+                    current.PauseAfterPressedMilliseconds,
+                pauseAfterReleasedMilliseconds ??
+                    current.PauseAfterReleasedMilliseconds,
+                deadzoneEffectAfterReleasedMilliseconds ??
+                    current.DeadzoneEffectAfterReleasedMilliseconds,
+                dampeningButtons ?? current.DampeningButtons,
+                dampeningAmountPercent ?? current.DampeningAmountPercent,
+                dampeningEffectAfterReleasedMilliseconds ??
+                    current.DampeningEffectAfterReleasedMilliseconds));
+            if (left)
+            {
+                Global.Switch2JoyConLeftIrGyroTuning[device] = next;
+            }
+            else
+            {
+                Global.Switch2JoyConRightIrGyroTuning[device] = next;
+            }
+        }
+
+        private void UpdateIrGyroButton(bool left, bool deadzone,
+            Switch2JoyConProfileButton button, bool selected)
+        {
+            Switch2IrGyroTuning current = GetIrGyroTuning(left);
+            Switch2JoyConProfileButton mask = deadzone ?
+                current.DeadzoneButtons : current.DampeningButtons;
+            mask = selected ? mask | button : mask & ~button;
+            if (deadzone)
+            {
+                UpdateIrGyroTuning(left, deadzoneButtons: mask);
+            }
+            else
+            {
+                UpdateIrGyroTuning(left, dampeningButtons: mask);
+            }
+        }
+
+        private IReadOnlyList<Switch2IrGyroButtonChoice>
+            CreateIrGyroButtonChoices(bool left, bool deadzone)
+        {
+            Switch2IrGyroTuning tuning = GetIrGyroTuning(left);
+            Switch2JoyConProfileButton selected = deadzone ?
+                tuning.DeadzoneButtons : tuning.DampeningButtons;
+            var result = new List<Switch2IrGyroButtonChoice>(
+                switch2IrGyroButtonChoices.Length);
+            foreach ((Switch2JoyConProfileButton button, string label) in
+                switch2IrGyroButtonChoices)
+            {
+                result.Add(new Switch2IrGyroButtonChoice(button, label,
+                    (selected & button) != 0,
+                    (changedButton, isSelected) => UpdateIrGyroButton(left,
+                        deadzone, changedButton, isSelected)));
+            }
+            return result;
+        }
+
+        private static int ToSwitch2IrActivationThresholdIndex(
+            Switch2IrActivationThreshold value) => value switch
+            {
+                Switch2IrActivationThreshold.Strict => 0,
+                Switch2IrActivationThreshold.Relaxed => 2,
+                _ => 1,
+            };
+
+        private static Switch2IrActivationThreshold
+            FromSwitch2IrActivationThresholdIndex(int value) => value switch
+            {
+                0 => Switch2IrActivationThreshold.Strict,
+                2 => Switch2IrActivationThreshold.Relaxed,
+                _ => Switch2IrActivationThreshold.Balanced,
+            };
+
+        private static int ToSwitch2StickDirectionActivationModeIndex(
+            Switch2StickDirectionActivationMode value) =>
+                value == Switch2StickDirectionActivationMode.Tap ? 1 : 0;
+
+        private static Switch2StickDirectionActivationMode
+            FromSwitch2StickDirectionActivationModeIndex(int value) =>
+                value == 1 ? Switch2StickDirectionActivationMode.Tap :
+                    Switch2StickDirectionActivationMode.Hold;
+
+        private static double NormalizeSwitch2IrMouseSensitivity(
+            double value) => double.IsFinite(value) ?
+                Math.Clamp(value,
+                    Switch2IrMouseProjection.MinimumProfileSensitivity,
+                    Switch2IrMouseProjection.MaximumProfileSensitivity) :
+                Switch2IrMouseProjection.DefaultSensitivity;
+
         public ProfileSettingsViewModel(int device,
             InputDeviceType? physicalControllerType = null,
             ConnectionType? physicalControllerConnection = null,
@@ -3581,6 +4310,21 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             int? physicalControllerProductId = null)
         {
             this.device = device;
+            Switch2DualGyroEditor = new(device, switch2ModeShiftButtonChoices);
+            Switch2GyroTriggerEditor = new(
+                device, gyroTriggerItems, switch2IrGyroButtonChoices);
+            Switch2GyroLockEditor = new(device,
+                switch2IrGyroButtonChoices);
+            Switch2ModeShiftEditor = new(device,
+                switch2ModeShiftButtonChoices);
+            Switch2JoyConLeftIrGyroDeadzoneButtonChoices =
+                CreateIrGyroButtonChoices(left: true, deadzone: true);
+            Switch2JoyConLeftIrGyroDampeningButtonChoices =
+                CreateIrGyroButtonChoices(left: true, deadzone: false);
+            Switch2JoyConRightIrGyroDeadzoneButtonChoices =
+                CreateIrGyroButtonChoices(left: false, deadzone: true);
+            Switch2JoyConRightIrGyroDampeningButtonChoices =
+                CreateIrGyroButtonChoices(left: false, deadzone: false);
             controllerUiCapabilities =
                 physicalControllerType == null ?
                     ControllerUiCapabilities.For(null) :
@@ -3645,14 +4389,23 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public void CreateGyroTriggerMenuItems(ContextMenu menu, RoutedEventHandler itemClickHandler)
         {
-            foreach (string btnName in gyroTriggerItems)
+            for (int index = 0; index < gyroTriggerItems.Count; index++)
             {
-                MenuItem item = new MenuItem()
+                if (index == Switch2GyroTriggerTuningTable.AlwaysOnTriggerIndex)
                 {
-                    Header = btnName,
-                    IsCheckable = true,
-                };
+                    continue;
+                }
+                AddItem(index, gyroTriggerItems[index]);
+            }
+            // The click handlers expect Always On last, but persisted tokens
+            // and tuning IDs are independent of display order.
+            AddItem(-1, gyroTriggerItems[
+                Switch2GyroTriggerTuningTable.AlwaysOnTriggerIndex]);
 
+            void AddItem(int token, string label)
+            {
+                var item = new MenuItem { Header = label, Tag = token,
+                    IsCheckable = true };
                 item.Click += itemClickHandler;
                 menu.Items.Add(item);
             }
@@ -3966,305 +4719,123 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             TouchDisInvertString = string.Join(", ", triggerName.ToArray());
         }
 
-        public void UpdateGyroMouseTrig(ContextMenu menu, bool alwaysOnChecked)
+        // All four gyro modes share one append-only token contract. Menu
+        // positions may change; Tag is the serialized token, never the index.
+        private static string ReadGyroTriggerMenu(ContextMenu menu,
+            bool alwaysOnChecked, out string display)
         {
-            int index = 0;
-            List<int> triggerList = new List<int>();
-            List<string> triggerName = new List<string>();
-
-            int itemCount = menu.Items.Count;
-            MenuItem alwaysOnItem = menu.Items[itemCount - 1] as MenuItem;
-            if (alwaysOnChecked)
+            var tokens = new List<int>();
+            var names = new List<string>();
+            MenuItem alwaysOn = null;
+            foreach (MenuItem item in menu.Items)
             {
-                for (int i = 0; i < itemCount - 1; i++)
+                if (item.Tag is not int token)
+                    continue;
+                if (token == -1)
                 {
-                    MenuItem item = menu.Items[i] as MenuItem;
+                    alwaysOn = item;
                     item.IsChecked = false;
                 }
-            }
-            else
-            {
-                alwaysOnItem.IsChecked = false;
-                foreach (MenuItem item in menu.Items)
+                else if (alwaysOnChecked)
+                    item.IsChecked = false;
+                else if (item.IsChecked)
                 {
-                    if (item.IsChecked)
-                    {
-                        triggerList.Add(index);
-                        triggerName.Add(item.Header.ToString());
-                    }
-
-                    index++;
+                    tokens.Add(token);
+                    names.Add(item.Header.ToString());
                 }
             }
-
-            if (triggerList.Count == 0)
+            if (tokens.Count == 0)
             {
-                triggerList.Add(-1);
-                triggerName.Add("Always On");
-                alwaysOnItem.IsChecked = true;
+                tokens.Add(-1);
+                names.Add("Always On");
+                if (alwaysOn != null)
+                    alwaysOn.IsChecked = true;
             }
+            display = string.Join(", ", names);
+            return string.Join(",", tokens);
+        }
 
-            Global.SATriggers[device] = string.Join(",", triggerList.ToArray());
-            GyroMouseTrigDisplay = string.Join(", ", triggerName.ToArray());
+        private static string PopulateGyroTriggerMenu(ContextMenu menu,
+            string savedTokens)
+        {
+            var selected = new HashSet<int>();
+            bool unsupported = false;
+            foreach (string token in (savedTokens ?? string.Empty).Split(','))
+            {
+                if (int.TryParse(token, out int id))
+                    selected.Add(id);
+                else if (!string.IsNullOrWhiteSpace(savedTokens))
+                    unsupported = true;
+            }
+            var names = new List<string>();
+            foreach (MenuItem item in menu.Items)
+            {
+                item.IsChecked = false;
+                if (item.Tag is not int id)
+                    continue;
+                if (selected.Remove(id))
+                {
+                    item.IsChecked = true;
+                    names.Add(item.Header.ToString());
+                }
+            }
+            // Loading is non-mutating. Unknown/reserved tokens must not be
+            // described as Always On when the runtime rejects those tokens.
+            if (unsupported || selected.Count != 0)
+                names.Add("Unsupported trigger");
+            return names.Count == 0 ? "None" : string.Join(", ", names);
+        }
+
+        public void UpdateGyroMouseTrig(ContextMenu menu, bool alwaysOnChecked)
+        {
+            Global.SATriggers[device] = ReadGyroTriggerMenu(menu,
+                alwaysOnChecked, out string display);
+            GyroMouseTrigDisplay = display;
         }
 
         public void PopulateGyroMouseTrig(ContextMenu menu)
         {
-            string[] triggers = Global.SATriggers[device].Split(',');
-            int itemCount = menu.Items.Count;
-            List<string> triggerName = new List<string>();
-            foreach (string trig in triggers)
-            {
-                bool valid = int.TryParse(trig, out int trigid);
-                if (valid && trigid >= 0 && trigid < itemCount - 1)
-                {
-                    MenuItem current = menu.Items[trigid] as MenuItem;
-                    current.IsChecked = true;
-                    triggerName.Add(current.Header.ToString());
-                }
-                else if (valid && trigid == -1)
-                {
-                    MenuItem current = menu.Items[itemCount - 1] as MenuItem;
-                    current.IsChecked = true;
-                    triggerName.Add("Always On");
-                    break;
-                }
-            }
-
-            if (triggerName.Count == 0)
-            {
-                MenuItem current = menu.Items[itemCount - 1] as MenuItem;
-                current.IsChecked = true;
-                triggerName.Add("Always On");
-            }
-
-            GyroMouseTrigDisplay = string.Join(", ", triggerName.ToArray());
+            GyroMouseTrigDisplay = PopulateGyroTriggerMenu(menu,
+                Global.SATriggers[device]);
         }
 
         public void UpdateGyroMouseStickTrig(ContextMenu menu, bool alwaysOnChecked)
         {
-            int index = 0;
-            List<int> triggerList = new List<int>();
-            List<string> triggerName = new List<string>();
-
-            int itemCount = menu.Items.Count;
-            MenuItem alwaysOnItem = menu.Items[itemCount - 1] as MenuItem;
-            if (alwaysOnChecked)
-            {
-                for (int i = 0; i < itemCount - 1; i++)
-                {
-                    MenuItem item = menu.Items[i] as MenuItem;
-                    item.IsChecked = false;
-                }
-            }
-            else
-            {
-                alwaysOnItem.IsChecked = false;
-                foreach (MenuItem item in menu.Items)
-                {
-                    if (item.IsChecked)
-                    {
-                        triggerList.Add(index);
-                        triggerName.Add(item.Header.ToString());
-                    }
-
-                    index++;
-                }
-            }
-
-            if (triggerList.Count == 0)
-            {
-                triggerList.Add(-1);
-                triggerName.Add("Always On");
-                alwaysOnItem.IsChecked = true;
-            }
-
-            Global.SAMousestickTriggers[device] = string.Join(",", triggerList.ToArray());
-            GyroMouseStickTrigDisplay = string.Join(", ", triggerName.ToArray());
+            Global.SAMousestickTriggers[device] = ReadGyroTriggerMenu(menu,
+                alwaysOnChecked, out string display);
+            GyroMouseStickTrigDisplay = display;
         }
 
         public void PopulateGyroMouseStickTrig(ContextMenu menu)
         {
-            string[] triggers = Global.SAMousestickTriggers[device].Split(',');
-            int itemCount = menu.Items.Count;
-            List<string> triggerName = new List<string>();
-            foreach (string trig in triggers)
-            {
-                bool valid = int.TryParse(trig, out int trigid);
-                if (valid && trigid >= 0 && trigid < itemCount - 1)
-                {
-                    MenuItem current = menu.Items[trigid] as MenuItem;
-                    current.IsChecked = true;
-                    triggerName.Add(current.Header.ToString());
-                }
-                else if (valid && trigid == -1)
-                {
-                    MenuItem current = menu.Items[itemCount-1] as MenuItem;
-                    current.IsChecked = true;
-                    triggerName.Add("Always On");
-                    break;
-                }
-            }
-
-            if (triggerName.Count == 0)
-            {
-                MenuItem current = menu.Items[itemCount - 1] as MenuItem;
-                current.IsChecked = true;
-                triggerName.Add("Always On");
-            }
-
-            GyroMouseStickTrigDisplay = string.Join(", ", triggerName.ToArray());
+            GyroMouseStickTrigDisplay = PopulateGyroTriggerMenu(menu,
+                Global.SAMousestickTriggers[device]);
         }
 
         public void UpdateGyroSwipeTrig(ContextMenu menu, bool alwaysOnChecked)
         {
-            int index = 0;
-            List<int> triggerList = new List<int>();
-            List<string> triggerName = new List<string>();
-
-            int itemCount = menu.Items.Count;
-            MenuItem alwaysOnItem = menu.Items[itemCount - 1] as MenuItem;
-            if (alwaysOnChecked)
-            {
-                for (int i = 0; i < itemCount - 1; i++)
-                {
-                    MenuItem item = menu.Items[i] as MenuItem;
-                    item.IsChecked = false;
-                }
-            }
-            else
-            {
-                alwaysOnItem.IsChecked = false;
-                foreach (MenuItem item in menu.Items)
-                {
-                    if (item.IsChecked)
-                    {
-                        triggerList.Add(index);
-                        triggerName.Add(item.Header.ToString());
-                    }
-
-                    index++;
-                }
-            }
-
-            if (triggerList.Count == 0)
-            {
-                triggerList.Add(-1);
-                triggerName.Add("Always On");
-                alwaysOnItem.IsChecked = true;
-            }
-
-            Global.GyroSwipeInf[device].triggers = string.Join(",", triggerList.ToArray());
-            GyroSwipeTrigDisplay = string.Join(", ", triggerName.ToArray());
+            Global.GyroSwipeInf[device].triggers = ReadGyroTriggerMenu(menu,
+                alwaysOnChecked, out string display);
+            GyroSwipeTrigDisplay = display;
         }
 
         public void PopulateGyroSwipeTrig(ContextMenu menu)
         {
-            string[] triggers = Global.GyroSwipeInf[device].triggers.Split(',');
-            int itemCount = menu.Items.Count;
-            List<string> triggerName = new List<string>();
-            foreach (string trig in triggers)
-            {
-                bool valid = int.TryParse(trig, out int trigid);
-                if (valid && trigid >= 0 && trigid < itemCount - 1)
-                {
-                    MenuItem current = menu.Items[trigid] as MenuItem;
-                    current.IsChecked = true;
-                    triggerName.Add(current.Header.ToString());
-                }
-                else if (valid && trigid == -1)
-                {
-                    MenuItem current = menu.Items[itemCount - 1] as MenuItem;
-                    current.IsChecked = true;
-                    triggerName.Add("Always On");
-                    break;
-                }
-            }
-
-            if (triggerName.Count == 0)
-            {
-                MenuItem current = menu.Items[itemCount - 1] as MenuItem;
-                current.IsChecked = true;
-                triggerName.Add("Always On");
-            }
-
-            GyroSwipeTrigDisplay = string.Join(", ", triggerName.ToArray());
+            GyroSwipeTrigDisplay = PopulateGyroTriggerMenu(menu,
+                Global.GyroSwipeInf[device].triggers);
         }
-
 
         public void UpdateGyroControlsTrig(ContextMenu menu, bool alwaysOnChecked)
         {
-            int index = 0;
-            List<int> triggerList = new List<int>();
-            List<string> triggerName = new List<string>();
-
-            int itemCount = menu.Items.Count;
-            MenuItem alwaysOnItem = menu.Items[itemCount - 1] as MenuItem;
-            if (alwaysOnChecked)
-            {
-                for (int i = 0; i < itemCount - 1; i++)
-                {
-                    MenuItem item = menu.Items[i] as MenuItem;
-                    item.IsChecked = false;
-                }
-            }
-            else
-            {
-                alwaysOnItem.IsChecked = false;
-                foreach (MenuItem item in menu.Items)
-                {
-                    if (item.IsChecked)
-                    {
-                        triggerList.Add(index);
-                        triggerName.Add(item.Header.ToString());
-                    }
-
-                    index++;
-                }
-            }
-
-            if (triggerList.Count == 0)
-            {
-                triggerList.Add(-1);
-                triggerName.Add("Always On");
-                alwaysOnItem.IsChecked = true;
-            }
-
-            Global.GyroControlsInf[device].triggers = string.Join(",", triggerList.ToArray());
-            GyroControlsTrigDisplay = string.Join(", ", triggerName.ToArray());
+            Global.GyroControlsInf[device].triggers = ReadGyroTriggerMenu(menu,
+                alwaysOnChecked, out string display);
+            GyroControlsTrigDisplay = display;
         }
 
         public void PopulateGyroControlsTrig(ContextMenu menu)
         {
-            string[] triggers = Global.GyroControlsInf[device].triggers.Split(',');
-            int itemCount = menu.Items.Count;
-            List<string> triggerName = new List<string>();
-            foreach (string trig in triggers)
-            {
-                bool valid = int.TryParse(trig, out int trigid);
-                if (valid && trigid >= 0 && trigid < itemCount - 1)
-                {
-                    MenuItem current = menu.Items[trigid] as MenuItem;
-                    current.IsChecked = true;
-                    triggerName.Add(current.Header.ToString());
-                }
-                else if (valid && trigid == -1)
-                {
-                    MenuItem current = menu.Items[itemCount - 1] as MenuItem;
-                    current.IsChecked = true;
-                    triggerName.Add("Always On");
-                    break;
-                }
-            }
-
-            if (triggerName.Count == 0)
-            {
-                MenuItem current = menu.Items[itemCount - 1] as MenuItem;
-                current.IsChecked = true;
-                triggerName.Add("Always On");
-            }
-
-            GyroControlsTrigDisplay = string.Join(", ", triggerName.ToArray());
+            GyroControlsTrigDisplay = PopulateGyroTriggerMenu(menu,
+                Global.GyroControlsInf[device].triggers);
         }
 
         private int CalculateOutputMouseSpeed(int mouseSpeed)
@@ -4332,6 +4903,21 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public void UpdateLateProperties()
         {
+            // Reload and preset application retain this VM while DataContext
+            // is detached. Refresh cached choices from the newly loaded fields
+            // without replaying checkbox setters into the profile.
+            Switch2DualGyroEditor.RefreshFromProfile();
+            Switch2GyroLockEditor.RefreshFromProfile();
+            Switch2GyroTriggerEditor.RefreshFromProfile();
+            Switch2ModeShiftEditor.RefreshFromProfile();
+            Switch2JoyConLeftIrGyroDeadzoneButtonChoices =
+                CreateIrGyroButtonChoices(left: true, deadzone: true);
+            Switch2JoyConLeftIrGyroDampeningButtonChoices =
+                CreateIrGyroButtonChoices(left: true, deadzone: false);
+            Switch2JoyConRightIrGyroDeadzoneButtonChoices =
+                CreateIrGyroButtonChoices(left: false, deadzone: true);
+            Switch2JoyConRightIrGyroDampeningButtonChoices =
+                CreateIrGyroButtonChoices(left: false, deadzone: false);
             tempControllerIndex = ControllerTypeIndex;
             Global.outDevTypeTemp[device] = Global.OutContType[device];
             tempBtPollRate = Global.BTPollRate[device];

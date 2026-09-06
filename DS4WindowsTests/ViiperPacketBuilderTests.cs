@@ -115,6 +115,41 @@ namespace DS4WindowsTests
                 (string)method.Invoke(null, new object[] { type }));
         }
 
+        [TestMethod]
+        public void UndefinedVirtualDeviceTypeNeverFallsBackToXbox360()
+        {
+            Type builderType = typeof(ViiperVirtualDeviceType).Assembly.GetType(
+                "DS4Windows.ViiperStatePacketBuilder",
+                throwOnError: true)!;
+            var invalid = (ViiperVirtualDeviceType)int.MaxValue;
+
+            foreach (string methodName in new[]
+                     {
+                         "GetViiperDeviceName", "GetFeedbackLength",
+                         "GetPacketSize", "BuildNeutral",
+                     })
+            {
+                MethodInfo method = builderType.GetMethod(methodName,
+                    BindingFlags.Public | BindingFlags.Static)!;
+                TargetInvocationException exception =
+                    Assert.ThrowsException<TargetInvocationException>(() =>
+                        method.Invoke(null, new object[] { invalid }));
+                Assert.IsInstanceOfType<ArgumentOutOfRangeException>(
+                    exception.InnerException, methodName);
+            }
+
+            MethodInfo build = builderType.GetMethod("Build",
+                BindingFlags.Public | BindingFlags.Static)!;
+            TargetInvocationException buildException =
+                Assert.ThrowsException<TargetInvocationException>(() =>
+                    build.Invoke(null, new object[]
+                    {
+                        invalid, new DS4State(), -1,
+                    }));
+            Assert.IsInstanceOfType<ArgumentOutOfRangeException>(
+                buildException.InnerException);
+        }
+
         private static DS4State CreateMotionState()
         {
             DS4State state = new DS4State();

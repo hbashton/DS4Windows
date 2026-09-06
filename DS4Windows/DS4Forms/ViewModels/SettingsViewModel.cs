@@ -53,12 +53,30 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public bool SwipeTouchSwitchProfile { get => DS4Windows.Global.SwipeProfiles;
             set => DS4Windows.Global.SwipeProfiles = value; }
 
+        public bool AutomaticJoyConPairing
+        {
+            get => DS4Windows.Global.DeviceOptions.JoyConDeviceOpts.
+                AutomaticPairing;
+            set
+            {
+                if (DS4Windows.Global.DeviceOptions.JoyConDeviceOpts.
+                        AutomaticPairing == value)
+                {
+                    return;
+                }
+                DS4Windows.Global.DeviceOptions.JoyConDeviceOpts.
+                    AutomaticPairing = value;
+                DS4Windows.Global.Save();
+            }
+        }
+
         private bool runAtStartup;
         public bool RunAtStartup
         {
             get => runAtStartup;
             set
             {
+                if (!SystemIntegrationEnabled) return;
                 runAtStartup = value;
                 RunAtStartupChanged?.Invoke(this, EventArgs.Empty);
             }
@@ -71,6 +89,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             get => runStartProg;
             set
             {
+                if (!SystemIntegrationEnabled) return;
                 runStartProg = value;
                 RunStartProgChanged?.Invoke(this, EventArgs.Empty);
             }
@@ -83,6 +102,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             get => runStartTask;
             set
             {
+                if (!SystemIntegrationEnabled) return;
                 runStartTask = value;
                 RunStartTaskChanged?.Invoke(this, EventArgs.Empty);
             }
@@ -90,7 +110,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public event EventHandler RunStartTaskChanged;
 
         private bool canWriteTask;
-        public bool CanWriteTask { get => canWriteTask; }
+        public bool CanWriteTask { get => canWriteTask && SystemIntegrationEnabled; }
+        public bool SystemIntegrationEnabled => !PortableLabContext.IsActive;
 
         public ImageSource uacSource;
         public ImageSource UACSource { get => uacSource; }
@@ -575,6 +596,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         private void SettingsViewModel_FakeExeNameChangeCompare(SettingsViewModel sender,
             string oldvalue, string newvalue)
         {
+            if (PortableLabContext.IsActive) return;
             string old_exefile = Path.Combine(DS4Windows.Global.exedirpath, $"{oldvalue}.exe");
             string old_conf_file = Path.Combine(DS4Windows.Global.exedirpath, $"{oldvalue}.runtimeconfig.json");
             string old_deps_file = Path.Combine(DS4Windows.Global.exedirpath, $"{oldvalue}.deps.json");
@@ -662,6 +684,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         private void CheckStartupOptions()
         {
+            if (PortableLabContext.IsActive) return;
             bool lnkExists = File.Exists(Environment.GetFolderPath(Environment.SpecialFolder.Startup) + "\\DS4Windows.lnk");
             if (lnkExists)
             {
@@ -687,6 +710,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public void CreateFakeExe(string filename)
         {
+            if (PortableLabContext.IsActive) return;
             string exefile = Path.Combine(DS4Windows.Global.exedirpath, $"{filename}.exe");
             string current_conf_file_path = $"{DS4Windows.Global.exelocation}.runtimeconfig.json";
             string current_deps_file_path = $"{DS4Windows.Global.exelocation}.deps.json";

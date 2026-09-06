@@ -32,7 +32,14 @@ namespace DS4Windows.InputDevices
         JoyConR,
         JoyConGrip,
         DualSense,
-        DS3
+        DS3,
+        // Switch 2 input is owned by the dormant runtime transport boundary.
+        // Keep these values append-only: profiles and controller settings have
+        // historically persisted InputDeviceType identities.
+        Switch2Pro,
+        Switch2JoyConLeft,
+        Switch2JoyConRight,
+        Switch2JoyConJoined,
     }
 
     public abstract class InputDeviceFactory
@@ -61,6 +68,12 @@ namespace DS4Windows.InputDevices
                 case InputDeviceType.DS3:
                     temp = new DS3Device(hidDevice, disName, featureSet);
                     break;
+                case InputDeviceType.Switch2Pro:
+                case InputDeviceType.Switch2JoyConLeft:
+                case InputDeviceType.Switch2JoyConRight:
+                case InputDeviceType.Switch2JoyConJoined:
+                    throw new NotSupportedException(
+                        $"{tempType} is runtime-owned and cannot be created from a legacy HID device.");
             }
 
             return temp;

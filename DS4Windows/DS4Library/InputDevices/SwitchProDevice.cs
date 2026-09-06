@@ -168,7 +168,12 @@ namespace DS4Windows.InputDevices
         private const string BLUETOOTH_HID_GUID = "{00001124-0000-1000-8000-00805F9B34FB}";
 
         private byte frameCount = 0;
-        public byte FrameCount { get => frameCount; set => frameCount = value; }
+        private readonly object nintendoOutputLock = new();
+        public byte FrameCount
+        {
+            get { lock (nintendoOutputLock) return frameCount; }
+            set { lock (nintendoOutputLock) frameCount = value; }
+        }
 
         private const int INPUT_REPORT_LEN = 362;
         private const int OUTPUT_REPORT_LEN = 49;
@@ -180,6 +185,9 @@ namespace DS4Windows.InputDevices
         private byte[] inputReportBuffer;
         private byte[] outputReportBuffer;
         private byte[] rumbleReportBuffer;
+        private LegacyNintendoRumbleOutput rumbleOutput;
+        private byte[] neutralRumbleReportBuffer;
+        private int rumbleStopWarningLogged;
 
         public int InputReportLen { get => INPUT_REPORT_LEN; }
         public int OutputReportLen { get => OUTPUT_REPORT_LEN; }
@@ -318,17 +326,39 @@ namespace DS4Windows.InputDevices
             }
             else if (ds4Input == null)
             {
+                InitializeRumbleOutput();
+                rumbleOutput.Start("Switch Pro Rumble Writer");
                 // Device is open. Create Reader Input thread
-                ds4Input = new Thread(ReadInput);
-                ds4Input.IsBackground = true;
-                ds4Input.Priority = ThreadPriority.AboveNormal;
-                ds4Input.Name = "Switch Pro Reader Thread";
-                ds4Input.Start();
+                try
+                {
+                    ds4Input = new Thread(() =>
+                    {
+                        try { ReadInput(); }
+                        finally { StopOutputUpdate(); }
+                    });
+                    ds4Input.IsBackground = true;
+                    ds4Input.Priority = ThreadPriority.AboveNormal;
+                    ds4Input.Name = "Switch Pro Reader Thread";
+                    ds4Input.Start();
+                }
+                catch { StopOutputUpdate(); throw; }
             }
         }
 
         protected override void StopOutputUpdate()
         {
+            if (rumbleOutput != null && !rumbleOutput.StopAndJoin(neutralRumbleReportBuffer) &&
+                Interlocked.Exchange(ref rumbleStopWarningLogged, 1) == 0)
+                AppLogger.LogToGui("Switch Pro rumble stop could not be confirmed before output retirement. " +
+                    (rumbleOutput.LastWriteException?.GetType().Name ?? "HID write rejected."), true);
+        }
+
+        internal LegacyNintendoRumbleOutput InitializeRumbleOutput()
+        {
+            if (rumbleOutput != null) return rumbleOutput;
+            neutralRumbleReportBuffer = new byte[rumbleReportBuffer.Length];
+            EncodeRumbleData(neutralRumbleReportBuffer, 0, 0);
+            return rumbleOutput = new LegacyNintendoRumbleOutput(rumbleReportBuffer.Length, SubmitRumbleReport);
         }
 
         protected unsafe void ReadInput()
@@ -408,6 +438,7 @@ namespace DS4Windows.InputDevices
                             {
                                 exitInputThread = true;
                                 isDisconnecting = true;
+                                StopOutputUpdate();
                                 Removal?.Invoke(this, EventArgs.Empty);
                             }
 
@@ -419,6 +450,7 @@ namespace DS4Windows.InputDevices
                         readWaitEv.Reset();
                         exitInputThread = true;
                         isDisconnecting = true;
+                        StopOutputUpdate();
                         Removal?.Invoke(this, EventArgs.Empty);
                         continue;
                     }
@@ -852,10 +884,12 @@ namespace DS4Windows.InputDevices
             byte[] tmpRumble = new byte[RUMBLE_REPORT_LEN];
             Array.Copy(rumble_data, 0, tmpRumble, 2, rumble_data.Length);
             tmpRumble[0] = 0x10;
-            tmpRumble[1] = frameCount;
-            frameCount = (byte)(++frameCount & 0x0F);
-
-            result = hDevice.WriteOutputReportViaInterrupt(tmpRumble, 0);
+            lock (nintendoOutputLock)
+            {
+                tmpRumble[1] = frameCount;
+                frameCount = (byte)(++frameCount & 0x0F);
+                result = hDevice.WriteOutputReportViaInterrupt(tmpRumble, 0);
+            }
             //res = hidDevice.ReadWithFileStream(tmpReport, 500);
             //res = hidDevice.ReadFile(tmpReport);
         }
@@ -874,11 +908,13 @@ namespace DS4Windows.InputDevices
                 Array.Copy(tmpBuffer, 0, commandBuffer, 11, bufLen);
 
                 commandBuffer[0] = 0x01;
-                commandBuffer[1] = frameCount;
-                frameCount = (byte)(++frameCount & 0x0F);
                 commandBuffer[10] = subcommand;
-
-                result = hDevice.WriteOutputReportViaInterrupt(commandBuffer, 0);
+                lock (nintendoOutputLock)
+                {
+                    commandBuffer[1] = frameCount;
+                    frameCount = (byte)(++frameCount & 0x0F);
+                    result = hDevice.WriteOutputReportViaInterrupt(commandBuffer, 0);
+                }
 
                 tmpReport = null;
                 if (result && checkResponse)
@@ -934,16 +970,25 @@ namespace DS4Windows.InputDevices
 
         public void PrepareRumbleData(byte[] buffer)
         {
+            lock (nintendoOutputLock)
+            {
+                EncodeRumbleData(buffer, currentLeftAmpRatio, currentRightAmpRatio);
+                buffer[1] = frameCount;
+                frameCount = (byte)(++frameCount & 0x0F);
+            }
+        }
+
+        private void EncodeRumbleData(byte[] buffer, double leftRatio, double rightRatio)
+        {
             // Using rumble frequency and amplitude values documented at
             // https://github.com/dekuNukem/Nintendo_Switch_Reverse_Engineering/blob/master/rumble_data_table.md
             //Array.Copy(commandBuffHeader, 0, buffer, 2, SUBCOMMAND_HEADER_LEN);
             buffer[0] = 0x10;
-            buffer[1] = frameCount;
-            frameCount = (byte)(++frameCount & 0x0F);
+            buffer[1] = 0; // the sole native writer assigns the counter at submission
 
             ushort freq_data_high = 0x0001; // 320 Hz
             byte freq_data_low = 0x60; // 320 Hz
-            int idx = (int)(currentLeftAmpRatio * AMP_LIMIT_MAX);
+            int idx = (int)(leftRatio * AMP_LIMIT_MAX);
             RumbleTableData entry = compiledRumbleTable[idx];
             byte amp_high = entry.high;
             ushort amp_low = entry.low;
@@ -967,7 +1012,7 @@ namespace DS4Windows.InputDevices
             buffer[4] = (byte)(freq_data_low + (amp_low >> 8) & 0xFF); // 2
             buffer[5] = (byte)(amp_low & 0xFF); // 3
 
-            idx = (int)(currentRightAmpRatio * AMP_LIMIT_MAX);
+            idx = (int)(rightRatio * AMP_LIMIT_MAX);
             entry = compiledRumbleTable[idx];
             amp_high = entry.high;
             amp_low = entry.low;
@@ -1277,6 +1322,7 @@ namespace DS4Windows.InputDevices
 
         public void Detach()
         {
+            StopOutputUpdate();
             bool result;
 
             if (connectionOpened)
@@ -1309,6 +1355,7 @@ namespace DS4Windows.InputDevices
 
         public void WriteReport()
         {
+            if (rumbleOutput == null) return;
             MergeStates();
 
             bool dirty;
@@ -1322,10 +1369,24 @@ namespace DS4Windows.InputDevices
 
             if (dirty)
             {
-                PrepareRumbleData(rumbleReportBuffer);
-                bool result = hDevice.WriteOutputReportViaInterrupt(rumbleReportBuffer, 100);
+                EncodeRumbleData(rumbleReportBuffer, currentLeftAmpRatio, currentRightAmpRatio);
+                rumbleOutput.Publish(rumbleReportBuffer, currentLeftAmpRatio != 0 || currentRightAmpRatio != 0);
+            }
+            else rumbleOutput.RequestRetry();
+        }
+
+        private bool SubmitRumbleReport(byte[] report)
+        {
+            lock (nintendoOutputLock)
+            {
+                report[1] = frameCount;
+                frameCount = (byte)(++frameCount & 0x0F);
+                return WriteRumbleReport(report);
             }
         }
+
+        protected virtual bool WriteRumbleReport(byte[] report) =>
+            hDevice.WriteOutputReportViaInterrupt(report, 100);
 
         public override bool IsAlive()
         {

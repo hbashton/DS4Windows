@@ -14,6 +14,7 @@ namespace DS4WindowsTests;
 public sealed class JoyConPresentationRenderTests
 {
     public TestContext TestContext { get; set; }
+    private readonly List<string> renderedFiles = new();
     private static readonly XNamespace Wpf = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
     private static readonly (string File, string Binding, string Label)[] Hosts =
     {
@@ -27,7 +28,9 @@ public sealed class JoyConPresentationRenderTests
 
     [DataTestMethod]
     [DataRow(96)]
+    [DataRow(120)]
     [DataRow(144)]
+    [DataRow(168)]
     [DataRow(192)]
     public void ProductionThumbnailHostsKeepEveryOrientationInsideAllFourEdges(int dpi)
     {
@@ -60,6 +63,37 @@ public sealed class JoyConPresentationRenderTests
                 Assert.IsTrue(count > 40, $"{spec.Label} must not be blank.");
             }
         });
+    }
+
+    [TestMethod]
+    public void ThumbnailsIncludeUpperTriggersAndLowestButtonsFromTheMappingArtwork()
+    {
+        // A nonblank, padded bitmap is not enough: b85 silently omitted ZL/ZR
+        // from icons, leaving a flat truncated-looking top despite safe bounds.
+        var required = new[]
+        {
+            new[] { "ZL", "L", "Capture" }, new[] { "ZR", "R", "Home", "C" },
+            new[] { "ZL", "L", "Capture" }, new[] { "ZR", "R", "Home", "C" },
+            new[] { "ZL", "L", "ZR", "R", "Capture", "Home", "C" },
+        };
+        for (int i = 0; i < Icons.Length; i++)
+        {
+            var painted = Shapes(Icons[i].Drawing).ToArray();
+            foreach (string name in required[i])
+                Assert.IsTrue(painted.Any(g => g.Bounds == JoyConArtwork.ButtonShape(name).Bounds),
+                    $"Icon {i} is missing the actual painted {name} shape.");
+        }
+
+        static IEnumerable<Geometry> Shapes(Drawing drawing)
+        {
+            if (drawing is GeometryDrawing geometry && geometry.Brush != null &&
+                geometry.Brush is not SolidColorBrush { Color.A: 0 })
+                yield return geometry.Geometry;
+            if (drawing is DrawingGroup group)
+                foreach (var child in group.Children)
+                foreach (var shape in Shapes(child))
+                    yield return shape;
+        }
     }
 
     [TestMethod]
@@ -107,6 +141,28 @@ public sealed class JoyConPresentationRenderTests
             }
             Save(visual, 1040, 670, "joycon-thumbnail-hosts.png");
 
+            // Match the user's 125% desktop at native pixel size, without
+            // resizing the thumbnail after WPF has rendered it.
+            visual = new DrawingVisual();
+            using (var dc = visual.RenderOpen())
+            {
+                dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(15, 23, 33)), null, new Rect(0, 0, 1040, 670));
+                for (int row = 0; row < Hosts.Length; row++)
+                {
+                    var spec = Hosts[row];
+                    Label(dc, spec.Label + " · 125%", 20, 15 + row * 165);
+                    for (int col = 0; col < Icons.Length; col++)
+                    {
+                        var host = CreateHost(spec.File, spec.Binding, Icons[col]);
+                        host.Background = new SolidColorBrush(Color.FromRgb(23, 33, 44));
+                        var bitmap = Render(host, 120);
+                        dc.DrawImage(bitmap, new Rect(20 + col * 205, 42 + row * 165,
+                            bitmap.PixelWidth, bitmap.PixelHeight));
+                    }
+                }
+            }
+            Save(visual, 1040, 670, "joycon-thumbnail-hosts-125.png");
+
             visual = new DrawingVisual();
             using (var dc = visual.RenderOpen())
             {
@@ -131,6 +187,12 @@ public sealed class JoyConPresentationRenderTests
             }
             Save(visual, 880, 1250, "joycon-artwork-and-masks.png");
         });
+        // Associate attachments on the MSTest thread, not its STA renderer.
+        foreach (string path in renderedFiles)
+        {
+            TestContext.WriteLine(path);
+            TestContext.AddResultFile(path);
+        }
     }
 
     private static Border CreateHost(string file, string binding, ImageSource source)
@@ -181,10 +243,14 @@ public sealed class JoyConPresentationRenderTests
         bitmap.Render(visual);
         var encoder = new PngBitmapEncoder();
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
-        Directory.CreateDirectory(TestContext.TestResultsDirectory);
-        string path = Path.Combine(TestContext.TestResultsDirectory, name);
+        // Optional durable output for visual review: some MSTest runners remove
+        // successful-run deployment folders (and their image attachments).
+        string directory = Environment.GetEnvironmentVariable("DS4W_ARTWORK_EVIDENCE_DIRECTORY")
+            ?? TestContext.TestResultsDirectory;
+        Directory.CreateDirectory(directory);
+        string path = Path.Combine(directory, name);
         using (var file = File.Create(path)) encoder.Save(file);
-        TestContext.AddResultFile(path);
+        renderedFiles.Add(path);
     }
 
     private static void RunSta(Action action)

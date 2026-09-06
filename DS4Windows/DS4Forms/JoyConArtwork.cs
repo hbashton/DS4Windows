@@ -203,7 +203,6 @@ namespace DS4WinWPF.DS4Forms
                     foreach (bool sl in new[] { true, false })
                     {
                         Rect bounds = transform.TransformBounds(RailBounds(left, sl));
-                        if (!diagram) continue;
                         var label = new FormattedText(sl ? "SL" : "SR", CultureInfo.InvariantCulture,
                             FlowDirection.LeftToRight, new Typeface("Segoe UI"), 10, Brushes.WhiteSmoke, 1);
                         dc.DrawText(label, new Point(bounds.X + (bounds.Width - label.Width) / 2,
@@ -229,6 +228,10 @@ namespace DS4WinWPF.DS4Forms
                         "L29,205 C9,205 0,192 0,172 L0,61 C0,41 11,28 30,28 Z").Clone();
                     shell.Transform = new MatrixTransform(isLeft
                         ? new Matrix(1, 0, 0, 1, x, 0) : new Matrix(-1, 0, 0, 1, x + 76, 0));
+                    // The rear trigger and its housing belong to the complete
+                    // silhouette in icons too, not only to the mapping diagram.
+                    dc.DrawRoundedRectangle(Gradient(0x363B41, 0x101318), new Pen(Brush(0x161A1F), .8),
+                        new Rect(x + 15, 12, 46, 24), 7, 7);
                     dc.PushTransform(new TranslateTransform(1.5, 4));
                     dc.DrawGeometry(Gradient(0x393D42, 0x0B0D10), new Pen(Brush(0x090B0E), 2), shell);
                     dc.Pop();
@@ -252,7 +255,7 @@ namespace DS4WinWPF.DS4Forms
                     if (!isLeft) dc.Pop();
                     dc.Pop();
                     DrawKey(dc, ButtonShape(isLeft ? "L" : "R"));
-                    if (diagram) DrawKey(dc, ButtonShape(isLeft ? "ZL" : "ZR"));
+                    DrawKey(dc, ButtonShape(isLeft ? "ZL" : "ZR"));
                     double stickY = isLeft ? 76 : 140;
                     DrawStick(dc, new Point(x + 38, stickY), accent);
                     double faceY = isLeft ? 141 : 84;
@@ -278,11 +281,8 @@ namespace DS4WinWPF.DS4Forms
                             FlowDirection.LeftToRight, new Typeface("Segoe UI"), size, ink, 1);
                         dc.DrawText(formatted, new Point(cx - formatted.Width / 2, cy - formatted.Height / 2));
                     }
-                    if (diagram)
-                    {
-                        Label(isLeft ? "L" : "R", x + 38, 30.5, 8);
-                        Label(isLeft ? "ZL" : "ZR", x + 38, 13.5, 8);
-                    }
+                    Label(isLeft ? "L" : "R", x + 38, 30.5, 8);
+                    Label(isLeft ? "ZL" : "ZR", x + 38, 13.5, 8);
                     var labels = isLeft ? new[] { "▴", "▸", "▾", "◂" } : new[] { "X", "A", "B", "Y" };
                     Label(labels[0], x + 38, faceY - 19);
                     Label(labels[1], x + 57, faceY);

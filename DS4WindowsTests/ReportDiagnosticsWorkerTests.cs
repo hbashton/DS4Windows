@@ -68,6 +68,27 @@ public sealed class ReportDiagnosticsWorkerTests
     }
 
     [TestMethod]
+    public void OpticalTraceCoalescesIndependentlyWithoutReplayingOnBatteryUpdate()
+    {
+        using var fixture = new Fixture();
+        var source = fixture.Register();
+        Assert.IsTrue(source.TryPublish(new ReportDiagnosticsSnapshot
+        {
+            Switch2MouseDiagnostic = true,
+            Switch2Mouse = new() { LeftChanges = 7, Reports = 100 },
+        }));
+        Assert.IsTrue(source.TryPublish(new ReportDiagnosticsSnapshot
+            { BatteryNotification = true, Battery = 80 }));
+        Assert.AreEqual(1, fixture.Worker.DrainOnce());
+        Assert.IsTrue(fixture.Observed.Last().Switch2MouseDiagnostic);
+        Assert.AreEqual(7, fixture.Observed.Last().Switch2Mouse.LeftChanges);
+        Assert.IsTrue(source.TryPublish(new ReportDiagnosticsSnapshot
+            { BatteryNotification = true, Battery = 81 }));
+        Assert.AreEqual(1, fixture.Worker.DrainOnce());
+        Assert.IsFalse(fixture.Observed.Last().Switch2MouseDiagnostic);
+    }
+
+    [TestMethod]
     public void FirstBatteryZeroIsDeliveredAndUnchangedBatteryDoesNotWakeOrReplay()
     {
         using var fixture = new Fixture();

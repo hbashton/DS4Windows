@@ -937,11 +937,15 @@ internal sealed partial class Switch2BluetoothProductionCoordinator
                 ConfigureAwait(false);
             if (!open.Succeeded)
             {
-                diagnostic?.Invoke($"Switch 2 {observation.Model} Bluetooth open rejected: {open.Failure}.");
+                diagnostic?.Invoke($"Switch 2 {observation.Model} Bluetooth open rejected: {open.Failure}" +
+                    (open.SensorFailure != Switch2BluetoothSensorInitializationFailure.None ?
+                        $"/{open.SensorFailure}." : "."));
                 return Switch2BluetoothWindowsAssociationResult.Failed(
                     Switch2BluetoothWindowsAssociationFailure.DeviceOpenFailed);
             }
             lease = open.Lease;
+            if (lease.JoyConSensorsInitialized)
+                ReportDiagnostic($"Switch 2 {observation.Model} Bluetooth motion and optical mouse sensor startup acknowledged.");
             ReportDiagnostic(lease.ThroughputOptimizedRequested ?
                 "Switch 2 Bluetooth throughput preference accepted by Windows; " +
                 "negotiated report interval is measured separately." :

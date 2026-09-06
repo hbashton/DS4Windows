@@ -10,6 +10,7 @@ the Free Software Foundation, either version 3 of the License, or
 
 using System;
 using System.Threading;
+using DS4Windows.Switch2;
 
 namespace DS4Windows;
 
@@ -176,7 +177,7 @@ internal sealed class ReportDiagnosticsWorker : IDisposable
         private struct VersionedSnapshot
         {
             internal ReportDiagnosticsSnapshot Value;
-            internal ulong Error, Lag, First, Battery, Startup;
+            internal ulong Error, Lag, First, Battery, Startup, Switch2Mouse;
         }
 
         private const int Dirty = 4, IndexMask = 3;
@@ -185,6 +186,9 @@ internal sealed class ReportDiagnosticsWorker : IDisposable
         private VersionedSnapshot cumulative, delivered;
         private int writeIndex, readIndex = 1, middle = 2, retired, publishing;
         private long coalesced, concurrentPublishRejections;
+        private readonly bool traceSwitch2Mouse = PortableLabContext.IsActive &&
+            Environment.GetEnvironmentVariable("DS4WINDOWS_SWITCH2_MOUSE_TRACE") == "1";
+        private Switch2MouseTraceWindow mouseTrace;
 
         internal Source(ReportDiagnosticsWorker owner, int controller, DS4Device device)
         {
@@ -203,6 +207,26 @@ internal sealed class ReportDiagnosticsWorker : IDisposable
             ReferenceEquals(Volatile.Read(ref owner.sources[Controller]), this);
         internal long CoalescedCount => Interlocked.Read(ref coalesced);
         internal long ConcurrentPublishRejectionCount => Interlocked.Read(ref concurrentPublishRejections);
+
+        internal void CaptureSwitch2Mouse(DS4State state, ref ReportDiagnosticsSnapshot snapshot)
+        {
+            if (!traceSwitch2Mouse || !IsCurrent ||
+                !mouseTrace.TrySample(state.Switch2JoyConRawInputStatus, out var sample)) return;
+            sample.Enabled = Global.Switch2JoyConIrMouseEnabled[Controller];
+            sample.HighRate = Global.Switch2HighRateMousePresentation[Controller];
+            sample.CustomMapper = snapshot.Switch2MouseMapperRan;
+            sample.GyroMode = Global.GetGyroOutMode(Controller);
+            sample.ZLHeld = state.L2 > 0;
+            sample.LHeld = state.L1;
+            sample.RHeld = state.R1;
+            sample.MappedYaw = state.Motion?.angVelYaw ?? 0.0;
+            sample.MappedPitch = state.Motion?.angVelPitch ?? 0.0;
+            sample.Source = Global.Switch2JoyConIrMouseSource[Controller];
+            sample.LeftThreshold = Global.Switch2JoyConLeftIrMouseActivationThreshold[Controller];
+            sample.RightThreshold = Global.Switch2JoyConRightIrMouseActivationThreshold[Controller];
+            snapshot.Switch2MouseDiagnostic = true;
+            snapshot.Switch2Mouse = sample;
+        }
 
         internal bool TryPublish(in ReportDiagnosticsSnapshot snapshot)
         {
@@ -232,6 +256,7 @@ internal sealed class ReportDiagnosticsWorker : IDisposable
                 if (update.FirstReport) cumulative.First++;
                 if (update.BatteryNotification) cumulative.Battery++;
                 if (update.StartupDiagnostic) cumulative.Startup++;
+                if (update.Switch2MouseDiagnostic) cumulative.Switch2Mouse++;
                 cumulative.Value.Merge(update);
                 buffers[writeIndex] = cumulative;
                 if (!IsCurrent) return false;
@@ -267,6 +292,7 @@ internal sealed class ReportDiagnosticsWorker : IDisposable
             snapshot.FirstReport = current.First != delivered.First;
             snapshot.BatteryNotification = current.Battery != delivered.Battery;
             snapshot.StartupDiagnostic = current.Startup != delivered.Startup;
+            snapshot.Switch2MouseDiagnostic = current.Switch2Mouse != delivered.Switch2Mouse;
             delivered = current;
             return true;
         }
@@ -303,14 +329,22 @@ internal struct ReportDiagnosticsSnapshot
     internal byte RY;
     internal byte L2;
     internal byte R2;
+    internal bool Switch2MouseDiagnostic;
+    internal bool Switch2MouseMapperRan;
+    internal Switch2MouseTraceSummary Switch2Mouse;
 
     internal bool HasWork => !string.IsNullOrEmpty(DeviceError) ||
-        LagChanged || FirstReport || BatteryNotification || StartupDiagnostic;
+        LagChanged || FirstReport || BatteryNotification || StartupDiagnostic || Switch2MouseDiagnostic;
 
     internal void Merge(in ReportDiagnosticsSnapshot newer)
     {
         // Source identity is immutable and never copied from producer input.
         if (!string.IsNullOrEmpty(newer.DeviceError)) DeviceError = newer.DeviceError;
+        if (newer.Switch2MouseDiagnostic)
+        {
+            Switch2MouseDiagnostic = true;
+            Switch2Mouse = newer.Switch2Mouse;
+        }
         if (newer.LagChanged)
         {
             LagChanged = true;

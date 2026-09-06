@@ -5844,6 +5844,7 @@ namespace DS4Windows
                     }
 
                     Mapping.MapCustom(ind, cState, tempMapState, ExposedState[ind], touchPad[ind], this);
+                    deferredDiagnostics.Switch2MouseMapperRan = true;
 
                     // Mapping owns controls; same-report physical metadata,
                     // touch, and motion remain observations from cState.
@@ -5976,6 +5977,7 @@ namespace DS4Windows
         private static void PublishReportDiagnostics(ReportDiagnosticsWorker.Source source,
             ref ReportDiagnosticsSnapshot snapshot, DS4State state)
         {
+            source?.CaptureSwitch2Mouse(state, ref snapshot);
             if (source == null || !snapshot.HasWork) return;
             if (snapshot.StartupDiagnostic)
             {
@@ -6184,6 +6186,21 @@ namespace DS4Windows
             if (!string.IsNullOrEmpty(snapshot.DeviceError))
             {
                 LogDebug(snapshot.DeviceError);
+            }
+
+            if (snapshot.Switch2MouseDiagnostic)
+            {
+                var mouse = snapshot.Switch2Mouse;
+                var raw = mouse;
+                LogDebug($"[Switch2Mouse] slot={snapshot.Controller + 1} reports={mouse.Reports} " +
+                    $"enabled={mouse.Enabled} source={mouse.Source} highRate={mouse.HighRate} mapperRan={mouse.CustomMapper}; " +
+                    $"left present={raw.LeftPresent} changes={mouse.LeftChanges} xy={raw.LeftIrX},{raw.LeftIrY} " +
+                    $"distance={raw.LeftIrDistance} roughness={raw.LeftIrRoughness} threshold={mouse.LeftThreshold}; " +
+                    $"right present={raw.RightPresent} changes={mouse.RightChanges} xy={raw.RightIrX},{raw.RightIrY} " +
+                    $"distance={raw.RightIrDistance} roughness={raw.RightIrRoughness} threshold={mouse.RightThreshold}; " +
+                    $"gyro rawPeakL={mouse.LeftGyroPeak} rawPeakR={mouse.RightGyroPeak} " +
+                    $"mode={mouse.GyroMode} mappedYaw={mouse.MappedYaw:F2} mappedPitch={mouse.MappedPitch:F2} " +
+                    $"heldZL={mouse.ZLHeld} heldL={mouse.LHeld} heldR={mouse.RHeld}.");
             }
 
             if (snapshot.LagChanged)

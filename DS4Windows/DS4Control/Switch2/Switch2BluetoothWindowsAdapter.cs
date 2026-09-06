@@ -210,16 +210,19 @@ internal enum Switch2BluetoothWindowsOpenFailure : byte
     CommandChannelPropertiesMismatch,
     CommandResponseSubscriptionFailed,
     NotificationSetupFailed,
+    SensorInitializationFailed,
 }
 
 internal readonly struct Switch2BluetoothWindowsOpenResult
 {
     private Switch2BluetoothWindowsOpenResult(
         Switch2BluetoothWindowsOpenFailure failure,
-        Switch2BluetoothWindowsInputLease lease)
+        Switch2BluetoothWindowsInputLease lease,
+        Switch2BluetoothSensorInitializationFailure sensorFailure = default)
     {
         Failure = failure;
         Lease = lease;
+        SensorFailure = sensorFailure;
     }
 
     internal bool Succeeded => Failure ==
@@ -228,13 +231,16 @@ internal readonly struct Switch2BluetoothWindowsOpenResult
     internal Switch2BluetoothWindowsOpenFailure Failure { get; }
 
     internal Switch2BluetoothWindowsInputLease Lease { get; }
+    internal Switch2BluetoothSensorInitializationFailure SensorFailure { get; }
 
     internal static Switch2BluetoothWindowsOpenResult Success(
         Switch2BluetoothWindowsInputLease lease) => new(
             Switch2BluetoothWindowsOpenFailure.None, lease);
 
     internal static Switch2BluetoothWindowsOpenResult Failed(
-        Switch2BluetoothWindowsOpenFailure failure) => new(failure, null);
+        Switch2BluetoothWindowsOpenFailure failure,
+        Switch2BluetoothSensorInitializationFailure sensorFailure = default) =>
+        new(failure, null, sensorFailure);
 }
 
 /// <summary>
@@ -1131,16 +1137,20 @@ internal sealed class Switch2BluetoothWindowsAdapter
             responseCharacteristic = null;
             if (!await lease.PrepareAsync(boundedToken).ConfigureAwait(false))
             {
+                bool sensorInitializationFailed = lease.SensorInitializationFailure !=
+                    Switch2BluetoothSensorInitializationFailure.None;
                 bool commandResponseFailed = lease.
                     PlayerLedPreparationFailed;
                 await lease.BeginAndWaitForBoundedTeardownAsync(
                     CancellationToken.None).ConfigureAwait(false);
                 return Switch2BluetoothWindowsOpenResult.Failed(
+                    sensorInitializationFailed ?
+                        Switch2BluetoothWindowsOpenFailure.SensorInitializationFailed :
                     commandResponseFailed ?
                         Switch2BluetoothWindowsOpenFailure.
                             CommandResponseSubscriptionFailed :
                         Switch2BluetoothWindowsOpenFailure.
-                            NotificationSetupFailed);
+                            NotificationSetupFailed, lease.SensorInitializationFailure);
             }
             boundedToken.ThrowIfCancellationRequested();
 
@@ -1947,6 +1957,9 @@ internal sealed class Switch2BluetoothWindowsInputLease :
     private byte pendingPlayerLedPattern;
     private bool playerLedPreparationFailed;
     private Switch2BluetoothPlayerLedChannelFailure lastPlayerLedFailure;
+    internal Switch2BluetoothSensorInitializationFailure SensorInitializationFailure
+        { get; private set; }
+    internal bool JoyConSensorsInitialized { get; private set; }
 
     internal Switch2BluetoothWindowsInputLease(
         Switch2BluetoothConnectionAdmission admission,
@@ -2441,6 +2454,23 @@ internal sealed class Switch2BluetoothWindowsInputLease :
             {
                 BeginTeardown();
                 return false;
+            }
+
+            if (playerLedChannel != null && Admission.Model is
+                (Switch2ControllerModel.JoyCon2Left or Switch2ControllerModel.JoyCon2Right))
+            {
+                using var sensorTimeout = CancellationTokenSource.
+                    CreateLinkedTokenSource(cancellationToken);
+                sensorTimeout.CancelAfter(PlayerLedCommandTimeoutMilliseconds);
+                SensorInitializationFailure = await playerLedChannel.
+                    InitializeJoyConSensorsAsync(sensorTimeout.Token).ConfigureAwait(false);
+                if (SensorInitializationFailure !=
+                    Switch2BluetoothSensorInitializationFailure.None)
+                {
+                    BeginTeardown();
+                    return false;
+                }
+                JoyConSensorsInitialized = true;
             }
 
             Task<bool> enableTask = characteristic.

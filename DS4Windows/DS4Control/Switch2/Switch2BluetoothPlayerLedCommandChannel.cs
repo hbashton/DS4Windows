@@ -87,7 +87,7 @@ internal readonly struct Switch2BluetoothMemoryReadChannelResult
 
 /// <summary>
 /// Sole serialized owner of the persistent BLE command/response pair used for
-/// bounded memory reads and player LEDs. Response Notify is subscribed before
+/// sensor startup, bounded memory reads and player LEDs. Response Notify is subscribed before
 /// publication. A rejected, cancelled, or ambiguous exchange terminally fences
 /// the channel; retirement waits for an admitted write before the lease may
 /// dispose either endpoint.
@@ -283,6 +283,80 @@ internal sealed class Switch2BluetoothPlayerLedCommandChannel
         finally
         {
             CompleteOperation(responseCompletion, terminalFailure: false);
+        }
+    }
+
+    /// <summary>
+    /// Holds the same command ownership across both acknowledged sensor
+    /// startup steps. LEDs and calibration cannot interleave, and any
+    /// ambiguous exchange fences the channel before a successor may write.
+    /// Called before input publication, never from the report hot path.
+    /// </summary>
+    internal async ValueTask<Switch2BluetoothSensorInitializationFailure>
+        InitializeJoyConSensorsAsync(CancellationToken cancellationToken)
+    {
+        TaskCompletionSource<byte[]> completion;
+        lock (sync)
+        {
+            if (terminal)
+                return Switch2BluetoothSensorInitializationFailure.Retired;
+            if (!prepared)
+                return Switch2BluetoothSensorInitializationFailure.NotPrepared;
+            if (pendingResponse != null || activeOperations != 0)
+                return Switch2BluetoothSensorInitializationFailure.Busy;
+
+            completion = new TaskCompletionSource<byte[]>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            pendingResponse = completion;
+            pendingCommandId = Switch2BluetoothSensorCodec.CommandId;
+            activeOperations = 1;
+            operationsDrained = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+
+        bool terminalFailure = true;
+        try
+        {
+            for (int step = 0; step < 2; step++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (step != 0)
+                {
+                    lock (sync)
+                    {
+                        if (terminal)
+                            return Switch2BluetoothSensorInitializationFailure.Retired;
+                        completion = new TaskCompletionSource<byte[]>(
+                            TaskCreationOptions.RunContinuationsAsynchronously);
+                        pendingResponse = completion;
+                        pendingCommandId = Switch2BluetoothSensorCodec.CommandId;
+                    }
+                }
+                byte[] request = Switch2BluetoothSensorCodec.CreateRequest(
+                    enable: step == 1);
+                if (!await command.WriteValueAsync(request, writeWithoutResponse,
+                        cancellationToken).ConfigureAwait(false))
+                    return Switch2BluetoothSensorInitializationFailure.WriteRejected;
+
+                byte[] value = await completion.Task.WaitAsync(cancellationToken).
+                    ConfigureAwait(false);
+                if (value == null || !Switch2BluetoothSensorCodec.IsAccepted(value))
+                    return Switch2BluetoothSensorInitializationFailure.ResponseRejected;
+            }
+            terminalFailure = false;
+            return Switch2BluetoothSensorInitializationFailure.None;
+        }
+        catch (OperationCanceledException)
+        {
+            return Switch2BluetoothSensorInitializationFailure.Cancelled;
+        }
+        catch
+        {
+            return Switch2BluetoothSensorInitializationFailure.DependencyThrew;
+        }
+        finally
+        {
+            CompleteOperation(completion, terminalFailure);
         }
     }
 

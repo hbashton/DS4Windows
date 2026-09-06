@@ -165,6 +165,117 @@ public sealed class Switch2BluetoothPlayerLedCommandChannelTests
         Assert.IsTrue(events.IndexOf("detach") > events.IndexOf("write"));
     }
 
+    [TestMethod]
+    public async Task SensorsSelectThenEnableAndLeaveLedOwnerUsable()
+    {
+        var command = FakeCharacteristic.Command();
+        var response = FakeCharacteristic.Response();
+        var writes = new List<string>();
+        command.WriteOverride = (request, _, _) =>
+        {
+            writes.Add(Convert.ToHexString(request.Span));
+            response.Emit(new byte[] { request.Span[0], 1, 0, 0, 0, 0, 0, 0 });
+            return ValueTask.FromResult(true);
+        };
+        var channel = new Switch2BluetoothPlayerLedCommandChannel(command, response);
+        Assert.AreEqual(Switch2BluetoothSensorInitializationFailure.NotPrepared,
+            await channel.InitializeJoyConSensorsAsync(CancellationToken.None));
+        Assert.IsTrue(await channel.PrepareAsync(CancellationToken.None));
+        Assert.AreEqual(Switch2BluetoothSensorInitializationFailure.None,
+            await channel.InitializeJoyConSensorsAsync(CancellationToken.None));
+        Assert.IsTrue((await channel.SetPlayerAsync(1, CancellationToken.None)).Succeeded);
+        CollectionAssert.AreEqual(new[]
+        {
+            "0C9101020004000094000000", "0C9101040004000094000000",
+            "099101070004000001000000",
+        }, writes);
+        Assert.IsTrue(await channel.RetireAsync(CancellationToken.None));
+    }
+
+    [DataTestMethod]
+    [DataRow(1, false)]
+    [DataRow(2, false)]
+    [DataRow(1, true)]
+    [DataRow(2, true)]
+    public async Task SensorFailureStopsSequenceAndFencesSuccessor(int failingStep, bool rejectWrite)
+    {
+        var command = FakeCharacteristic.Command();
+        var response = FakeCharacteristic.Response();
+        command.WriteOverride = (_, _, _) =>
+        {
+            bool fail = command.WriteCalls == failingStep;
+            if (fail && rejectWrite) return ValueTask.FromResult(false);
+            response.Emit(new byte[] { 0x0C, fail ? (byte)4 : (byte)1, 0, 0, 0, 0, 0, 0 });
+            return ValueTask.FromResult(true);
+        };
+        var channel = new Switch2BluetoothPlayerLedCommandChannel(command, response);
+        Assert.IsTrue(await channel.PrepareAsync(CancellationToken.None));
+        Assert.AreEqual(rejectWrite ? Switch2BluetoothSensorInitializationFailure.WriteRejected :
+            Switch2BluetoothSensorInitializationFailure.ResponseRejected,
+            await channel.InitializeJoyConSensorsAsync(CancellationToken.None));
+        Assert.AreEqual(Switch2BluetoothPlayerLedChannelFailure.Retired,
+            (await channel.SetPlayerAsync(1, CancellationToken.None)).Failure);
+        Assert.AreEqual(failingStep, command.WriteCalls);
+        Assert.IsTrue(await channel.RetireAsync(CancellationToken.None));
+    }
+
+    [TestMethod]
+    public async Task SensorExchangeIgnoresUnrelatedAckAndExcludesOtherOperations()
+    {
+        var command = FakeCharacteristic.Command();
+        var response = FakeCharacteristic.Response();
+        command.WriteOverride = (_, _, _) => ValueTask.FromResult(true);
+        var channel = new Switch2BluetoothPlayerLedCommandChannel(command, response);
+        Assert.IsTrue(await channel.PrepareAsync(CancellationToken.None));
+        using var cancellation = new CancellationTokenSource();
+        Task<Switch2BluetoothSensorInitializationFailure> pending = channel.
+            InitializeJoyConSensorsAsync(cancellation.Token).AsTask();
+        response.Emit(Convert.FromHexString("0901000000000000"));
+        Assert.IsFalse(pending.IsCompleted);
+        Assert.AreEqual(Switch2BluetoothPlayerLedChannelFailure.Busy,
+            (await channel.SetPlayerAsync(1, CancellationToken.None)).Failure);
+        Assert.AreEqual(Switch2BluetoothMemoryReadChannelFailure.Busy,
+            (await channel.ReadMemoryAsync(1, 0x013000, CancellationToken.None)).Failure);
+        Assert.AreEqual(Switch2BluetoothSensorInitializationFailure.Busy,
+            await channel.InitializeJoyConSensorsAsync(CancellationToken.None));
+        cancellation.Cancel();
+        Assert.AreEqual(Switch2BluetoothSensorInitializationFailure.Cancelled, await pending);
+        Assert.AreEqual(1, command.WriteCalls);
+        Assert.AreEqual(Switch2BluetoothSensorInitializationFailure.Retired,
+            await channel.InitializeJoyConSensorsAsync(CancellationToken.None));
+        Assert.IsTrue(await channel.RetireAsync(CancellationToken.None));
+    }
+
+    [TestMethod]
+    public async Task SensorRetirementWaitsForWriteAndNeverSendsEnableAfterRetirement()
+    {
+        var events = new List<string>();
+        var command = FakeCharacteristic.Command(events);
+        var response = FakeCharacteristic.Response(events);
+        var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        command.WriteOverride = (_, _, _) => new ValueTask<bool>(release.Task);
+        var channel = new Switch2BluetoothPlayerLedCommandChannel(command, response);
+        Assert.IsTrue(await channel.PrepareAsync(CancellationToken.None));
+        Task<Switch2BluetoothSensorInitializationFailure> pending = channel.
+            InitializeJoyConSensorsAsync(CancellationToken.None).AsTask();
+        Task<bool> retirement = channel.RetireAsync(CancellationToken.None).AsTask();
+        Assert.IsFalse(retirement.IsCompleted);
+        CollectionAssert.DoesNotContain(events, "detach");
+        release.SetResult(true);
+        Assert.AreNotEqual(Switch2BluetoothSensorInitializationFailure.None, await pending);
+        Assert.IsTrue(await retirement);
+        Assert.AreEqual(1, command.WriteCalls);
+    }
+
+    [TestMethod]
+    public void SensorResponseRequiresLengthCommandAndSuccessWithoutInventedEcho()
+    {
+        Assert.IsFalse(Switch2BluetoothSensorCodec.IsAccepted(new byte[7]));
+        Assert.IsFalse(Switch2BluetoothSensorCodec.IsAccepted(Convert.FromHexString("0901000000000000")));
+        Assert.IsFalse(Switch2BluetoothSensorCodec.IsAccepted(Convert.FromHexString("0C04000000000000")));
+        Assert.IsTrue(Switch2BluetoothSensorCodec.IsAccepted(Convert.FromHexString("0C01FFFFFFFFFFFF")));
+    }
+
     private sealed class FakeCharacteristic :
         ISwitch2BluetoothWindowsGattCharacteristic
     {

@@ -119,8 +119,16 @@ public sealed partial class Switch2BluetoothWindowsAdapterTests
                     response.AsSpan(16).Fill(0xFF);
                 device.Service.ResponseCharacteristic.Emit(response, 1);
             }
+            else if (bytes[0] == Switch2BluetoothSensorCodec.CommandId)
+            {
+                CollectionAssert.AreEqual(Switch2BluetoothSensorCodec.CreateRequest(
+                    enable: bytes[3] == 0x04), bytes);
+                device.Service.ResponseCharacteristic.Emit(
+                    Convert.FromHexString("0C01000000000000"), 1);
+            }
             else
             {
+                Assert.AreEqual((byte)0x09, bytes[0]);
                 device.Service.ResponseCharacteristic.Emit(
                     Convert.FromHexString("0901000000000000"), 1);
             }

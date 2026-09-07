@@ -19,6 +19,27 @@ public class Switch2ProtocolPhase1Tests
         Switch2GattProperty.Read | Switch2GattProperty.Notify;
 
     [TestMethod]
+    public void HeadsetCharacteristicsNeverAliasGameInputOrRumble()
+    {
+        // The audio input UUID differs from Pro09 by one final digit. Its
+        // 112-byte notification includes audio AND differently placed motion.
+        // Keep it out of the existing input path until that path is evidenced.
+        Guid audioInput = new("7492866c-ec3e-4619-8258-32755ffcc0f9");
+        Guid audioOutput = new("cc483f51-9258-427d-a939-630c31f72b06");
+        Assert.IsFalse(Switch2InputCodec.TryResolveBluetoothLeInputIdentity(audioInput, out _));
+        Assert.IsFalse(Switch2InputCodec.TryResolveBluetoothLeInputIdentity(audioOutput, out _));
+        foreach (int length in new[] { 63, 112 })
+        {
+            Assert.IsFalse(Switch2InputCodec.TryDecodeBluetoothLe(
+                Switch2InputCodec.ServiceUuid, audioInput, InputProperties,
+                new byte[length], Switch2ControllerModel.ProController2, out _));
+        }
+        Assert.AreNotEqual(audioOutput,
+            Switch2BluetoothHdRumblePhysicalWriter.CharacteristicUuidFor(
+                Switch2ControllerModel.ProController2));
+    }
+
+    [TestMethod]
     public void Common05DecodesCaptureBackedOffsetsWithoutNormalization()
     {
         byte[] body = BuildCommonBody(0x44332211);

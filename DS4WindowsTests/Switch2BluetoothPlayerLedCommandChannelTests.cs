@@ -29,6 +29,26 @@ public sealed class Switch2BluetoothPlayerLedCommandChannelTests
     }
 
     [TestMethod]
+    public async Task LabAudioStateUsesOnlyObservedQueryAndDoesNotPretendItConfiguredPlayback()
+    {
+        var command = FakeCharacteristic.Command();
+        var response = FakeCharacteristic.Response();
+        command.WriteOverride = (request, _, _) =>
+        {
+            CollectionAssert.AreEqual(Convert.FromHexString("1891010100000000"), request.ToArray());
+            response.Emit(Convert.FromHexString("1701010210780000")); // ignored different command
+            response.Emit(Convert.FromHexString("1801010110780000000040F000006000"));
+            return ValueTask.FromResult(true);
+        };
+        var channel = new Switch2BluetoothPlayerLedCommandChannel(command, response);
+        Assert.IsTrue(await channel.PrepareAsync(CancellationToken.None));
+        string result = await channel.ConfigureLabAudioAsync(CancellationToken.None, queryState: true);
+        StringAssert.Contains(result, "\"StateQueryAcknowledged\":true");
+        StringAssert.Contains(result, "\"SetupAcknowledged\":false");
+        Assert.IsTrue(await channel.RetireAsync(CancellationToken.None));
+    }
+
+    [TestMethod]
     public async Task LabAudioCancellationDoesNotDisposeUnderItsActualWrite()
     {
         var events = new List<string>();

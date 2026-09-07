@@ -2,9 +2,13 @@ using System.IO.Pipes;
 using System.Text;
 using System.Text.Json;
 
-if (args.Length != 2 || args[1] is not ("status" or "inventory" or "headset-header" or "configure-audio" or "stop-probe"))
+bool tone = args.Length >= 2 && args[1] is ("tone-opus5" or "tone-opus20" or "tone-rumble-opus5" or "tone-rumble-opus20" or
+    "tone-length-opus5" or "tone-length-opus20" or "tone-rumble-length-opus5" or "tone-rumble-length-opus20" or
+    "active-opus5" or "active-opus20" or "active-rumble-opus5" or "active-rumble-opus20" or
+    "active-length-opus5" or "active-length-opus20" or "active-rumble-length-opus5" or "active-rumble-length-opus20");
+if (tone ? args.Length != 3 : args.Length != 2 || args[1] is not ("status" or "inventory" or "headset-header" or "headset-observe" or "configure-audio" or "audio-state" or "stop-probe"))
 {
-    Console.Error.WriteLine("Use <active lab-data/Switch2AudioProbe/session.json> status|inventory|headset-header|configure-audio|stop-probe");
+    Console.Error.WriteLine("Use <session.json> status|inventory|headset-header|headset-observe|configure-audio|stop-probe, or <session.json> tone-opus5|tone-opus20|tone-rumble-opus5|tone-rumble-opus20 <explicit Realtek Line In ID>");
     return 2;
 }
 try
@@ -22,6 +26,8 @@ try
     using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut,
         PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
     await pipe.ConnectAsync(deadline.Token);
+    using var measurement = tone ? new LineInMeasurement(args[2]) : null;
+    if (measurement != null) await measurement.StartAsync();
     await pipe.WriteAsync(Encoding.ASCII.GetBytes(args[1] + "\n"), deadline.Token);
     using var response = new MemoryStream();
     byte[] chunk = new byte[1024];
@@ -36,6 +42,7 @@ try
     string json = Encoding.UTF8.GetString(response.ToArray()).TrimEnd();
     using var validated = JsonDocument.Parse(json);
     Console.WriteLine(json);
+    if (measurement != null) Console.WriteLine(JsonSerializer.Serialize(await measurement.StopAsync()));
     return validated.RootElement.TryGetProperty("Error", out _) ? 1 : 0;
 }
 catch (Exception error)

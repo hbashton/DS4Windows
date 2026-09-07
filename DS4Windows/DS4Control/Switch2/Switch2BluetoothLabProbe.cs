@@ -26,35 +26,40 @@ internal sealed class Switch2BluetoothLabProbe
     private readonly CancellationTokenSource stopping = new();
     private readonly ISwitch2BluetoothLabAudioAccess access;
     private readonly Func<CancellationToken, Task<string>> configure;
+    private readonly Func<CancellationToken, Task<string>> queryAudioState;
     private readonly Func<bool> connected;
     private readonly string directory;
     private readonly ulong generation;
     private readonly Task worker;
-    private long reports, lastReport;
+    private long reports, lastReport, maximumReportGap;
+    private bool audioSetupAcknowledged;
 
     internal static bool IsEnabled => PortableLabContext.IsActive &&
         Environment.GetEnvironmentVariable("DS4WINDOWS_SWITCH2_AUDIO_PROBE") == "1";
 
     internal static Switch2BluetoothLabProbe TryCreate(Switch2ControllerModel model,
         ISwitch2BluetoothWindowsGattService service, ulong generation,
-        Func<bool> connected, Func<CancellationToken, Task<string>> configure)
+        Func<bool> connected, Func<CancellationToken, Task<string>> configure,
+        Func<CancellationToken, Task<string>> queryAudioState = null)
     {
         if (!IsEnabled || PortableLabContext.Current is not { } lab ||
             model != Switch2ControllerModel.ProController2 ||
             service is not ISwitch2BluetoothLabAudioAccess access)
             return null;
         return new Switch2BluetoothLabProbe(Path.Combine(lab.DataPath, "Switch2AudioProbe"),
-            access, connected, configure, generation);
+            access, connected, configure, generation, queryAudioState);
     }
 
     // Internal injection seam for pipe/lifetime tests; production uses TryCreate.
     internal Switch2BluetoothLabProbe(string directory, ISwitch2BluetoothLabAudioAccess access,
-        Func<bool> connected, Func<CancellationToken, Task<string>> configure, ulong generation)
+        Func<bool> connected, Func<CancellationToken, Task<string>> configure, ulong generation,
+        Func<CancellationToken, Task<string>> queryAudioState = null)
     {
         this.directory = directory;
         this.access = access;
         this.connected = connected;
         this.configure = configure;
+        this.queryAudioState = queryAudioState;
         this.generation = generation;
         PipeName = $"ds4w-s2audio-{Environment.ProcessId}-{Guid.NewGuid():N}";
         worker = Task.Run(RunAsync);
@@ -65,7 +70,16 @@ internal sealed class Switch2BluetoothLabProbe
     internal void ObserveReport(long timestamp)
     {
         Interlocked.Increment(ref reports);
-        Interlocked.Exchange(ref lastReport, timestamp);
+        long previous = Interlocked.Exchange(ref lastReport, timestamp);
+        if (previous <= 0 || timestamp <= previous) return;
+        long gap = timestamp - previous;
+        long observed = Interlocked.Read(ref maximumReportGap);
+        while (gap > observed)
+        {
+            long actual = Interlocked.CompareExchange(ref maximumReportGap, gap, observed);
+            if (actual == observed) break;
+            observed = actual;
+        }
     }
     internal Task StopAsync()
     {
@@ -77,6 +91,7 @@ internal sealed class Switch2BluetoothLabProbe
     {
         State = state, ProcessId = Environment.ProcessId, PipeName, TransportGeneration = generation,
         Connected = connected(), Reports = Interlocked.Read(ref reports),
+        MaximumReportGapMs = 1000.0 * Interlocked.Read(ref maximumReportGap) / Stopwatch.Frequency,
         LastReportAgeMs = Interlocked.Read(ref lastReport) is var last && last > 0
             ? (double?)(1000.0 * (Stopwatch.GetTimestamp() - last) / Stopwatch.Frequency) : null,
         BluetoothPlaybackConfirmed = false,
@@ -111,13 +126,19 @@ internal sealed class Switch2BluetoothLabProbe
                     }
                     else if (!connected())
                         operation = Task.FromResult("{\"Error\":\"Controller lifetime is not active\"}");
+                    else if (Switch2BluetoothLabTone.IsTone(command) && !audioSetupAcknowledged)
+                        operation = Task.FromResult("{\"Error\":\"Audio setup must be acknowledged in this controller generation before tones\"}");
+                    else if (command == "audio-state")
+                        operation = queryAudioState?.Invoke(deadline.Token) ?? Task.FromResult("{\"Error\":\"Audio state query unavailable\"}");
                     else
-                        operation = command == "configure-audio" ? configure(deadline.Token) :
-                            access.QueryAudioLabAsync(command, deadline.Token);
+                        operation = command == "configure-audio" ? ConfigureAudioAsync(deadline.Token) :
+                            QueryAudioAsync(command, deadline.Token);
                     string result;
                     try { result = await operation.WaitAsync(deadline.Token).ConfigureAwait(false); }
                     catch (OperationCanceledException)
                     { result = "{\"Error\":\"Probe deadline; underlying operation retained until completion\"}"; }
+                    catch (Exception error)
+                    { result = JsonSerializer.Serialize(new { Error = error.GetType().Name, Detail = error.Message }); }
                     using var replyDeadline = CancellationTokenSource.CreateLinkedTokenSource(stopping.Token);
                     replyDeadline.CancelAfter(TimeSpan.FromSeconds(1));
                     byte[] bytes = Encoding.UTF8.GetBytes(result + "\n");
@@ -154,6 +175,20 @@ internal sealed class Switch2BluetoothLabProbe
             catch { }
         }
     }
+
+    private async Task<string> ConfigureAudioAsync(CancellationToken token)
+    {
+        audioSetupAcknowledged = false;
+        string reply = await configure(token).ConfigureAwait(false);
+        using var parsed = JsonDocument.Parse(reply);
+        audioSetupAcknowledged = !token.IsCancellationRequested &&
+            parsed.RootElement.TryGetProperty("SetupAcknowledged", out var accepted) &&
+            accepted.ValueKind == JsonValueKind.True;
+        return reply;
+    }
+
+    private async Task<string> QueryAudioAsync(string command, CancellationToken token) =>
+        await access.QueryAudioLabAsync(command, token).ConfigureAwait(false);
 
     internal static async Task<string> ReadCommandAsync(Stream pipe, CancellationToken token)
     {

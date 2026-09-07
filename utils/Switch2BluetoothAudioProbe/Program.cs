@@ -17,10 +17,10 @@ async Task<int> InspectAsync()
 {
     // No bond, firmware, GATT command/output/CCCD, or audio-device writes.
     // --wake-inspect additionally publishes the bounded, targeted wake payload.
-    if (args.Length == 0 || args[0] is not ("--list" or "--inspect" or "--inspect-known" or "--wake-inspect" or "--await-inspect") ||
+    if (args.Length == 0 || args[0] is not ("--list" or "--inspect" or "--inspect-known" or "--wake-inspect" or "--wake-only" or "--await-inspect") ||
         (args[0] == "--list" ? args.Length != 1 : args.Length != 2))
     {
-        Console.Error.WriteLine("Use --list, or --inspect|--inspect-known|--wake-inspect|--await-inspect <exact ProController2 Windows ID>. See README for side effects and deadlines.");
+        Console.Error.WriteLine("Use --list, or --inspect|--inspect-known|--wake-inspect|--wake-only|--await-inspect <exact ProController2 Windows ID>. See README for side effects and deadlines.");
         return 2;
     }
     using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(args[0] == "--await-inspect" ? 50 : 20));
@@ -49,11 +49,15 @@ async Task<int> InspectAsync()
     {
         device.Name,
         Connection = device.ConnectionStatus.ToString(),
-        Mode = args[0] == "--wake-inspect" ? "Targeted wake then read-only inventory" : "Read-only inventory"
+        Mode = args[0] == "--wake-only" ? "Targeted wake only; no GATT service open" :
+            args[0] == "--wake-inspect" ? "Targeted wake then read-only inventory" : "Read-only inventory"
     }));
     if (args[0] == "--await-inspect" && device.ConnectionStatus != BluetoothConnectionStatus.Connected)
         await AwaitAdvertisementAsync(device.BluetoothAddress, timeout.Token);
-    if (args[0] == "--wake-inspect") await WakeAsync(device, timeout.Token);
+    if (args[0] is "--wake-inspect" or "--wake-only") await WakeAsync(device, timeout.Token);
+    // Safe alongside the application's connection owner: publisher only, no
+    // GATT service discovery/open, characteristic reads or connection takeover.
+    if (args[0] == "--wake-only") return 0;
     var services = await device.GetGattServicesForUuidAsync(
         ProbeProtocol.ServiceUuid, BluetoothCacheMode.Uncached).AsTask(timeout.Token);
     if (services.Status != GattCommunicationStatus.Success || services.Services.Count != 1)

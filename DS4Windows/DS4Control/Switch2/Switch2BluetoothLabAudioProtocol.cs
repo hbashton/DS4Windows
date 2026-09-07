@@ -8,7 +8,8 @@ internal static class Switch2BluetoothLabAudioProtocol
     internal static readonly Guid InputUuid = new("7492866c-ec3e-4619-8258-32755ffcc0f9");
 
     internal static bool IsAllowed(string command) => command is
-        "status" or "inventory" or "headset-header" or "configure-audio" or "stop-probe";
+        "status" or "inventory" or "headset-header" or "headset-observe" or "configure-audio" or "audio-state" or "stop-probe" ||
+        Switch2BluetoothLabTone.IsTone(command);
 
     // Exact observed volatile 0x17/0x02 request, not a generic command API.
     // ndeadly/switch2_controller_research d1c5a7f, commands.md; also observed
@@ -18,4 +19,9 @@ internal static class Switch2BluetoothLabAudioProtocol
 
     internal static bool IsSetupAcknowledged(ReadOnlySpan<byte> value) =>
         value.SequenceEqual(new byte[] { 0x17, 1, 1, 2, 0x10, 0x78, 0, 0 });
+
+    // Exact observed 18/01 request; response payload semantics are unknown.
+    internal static byte[] CreateStateRequest() => Convert.FromHexString("1891010100000000");
+    internal static bool IsStateAcknowledged(ReadOnlySpan<byte> value) => value.Length == 16 &&
+        value.Slice(0, 8).SequenceEqual(new byte[] { 0x18, 1, 1, 1, 0x10, 0x78, 0, 0 });
 }

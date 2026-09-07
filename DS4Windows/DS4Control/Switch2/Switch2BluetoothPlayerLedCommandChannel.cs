@@ -448,7 +448,7 @@ internal sealed class Switch2BluetoothPlayerLedCommandChannel
 
     // Only called by the explicitly enabled portable-lab probe. Uses the same
     // subscription/serialization as LEDs; never admits arbitrary command bytes.
-    internal async Task<string> ConfigureLabAudioAsync(CancellationToken cancellationToken)
+    internal async Task<string> ConfigureLabAudioAsync(CancellationToken cancellationToken, bool queryState = false)
     {
         TaskCompletionSource<byte[]> completion;
         lock (sync)
@@ -458,7 +458,7 @@ internal sealed class Switch2BluetoothPlayerLedCommandChannel
                 return "{\"Error\":\"Command lane busy; no probe sent\"}";
             completion = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
             pendingResponse = completion;
-            pendingCommandId = 0x17;
+            pendingCommandId = queryState ? (byte)0x18 : (byte)0x17;
             activeOperations = 1;
             operationsDrained = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         }
@@ -469,14 +469,14 @@ internal sealed class Switch2BluetoothPlayerLedCommandChannel
             cancellationToken.ThrowIfCancellationRequested();
             // Retain actual Windows write completion even if the caller's
             // deadline expires. Retirement cannot detach beneath this write.
-            write = command.WriteValueAsync(Switch2BluetoothLabAudioProtocol.CreateSetupRequest(),
+            write = command.WriteValueAsync(queryState ? Switch2BluetoothLabAudioProtocol.CreateStateRequest() : Switch2BluetoothLabAudioProtocol.CreateSetupRequest(),
                 writeWithoutResponse, CancellationToken.None).AsTask();
             if (!await write.WaitAsync(cancellationToken).ConfigureAwait(false))
                 return "{\"Error\":\"Audio setup write rejected\"}";
             byte[] reply = await completion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
-            bool accepted = reply != null && Switch2BluetoothLabAudioProtocol.IsSetupAcknowledged(reply);
+            bool accepted = reply != null && (queryState ? Switch2BluetoothLabAudioProtocol.IsStateAcknowledged(reply) : Switch2BluetoothLabAudioProtocol.IsSetupAcknowledged(reply));
             terminalFailure = !accepted;
-            return JsonSerializer.Serialize(new { SetupAcknowledged = accepted,
+            return JsonSerializer.Serialize(new { SetupAcknowledged = !queryState && accepted, StateQueryAcknowledged = queryState && accepted,
                 Response = reply == null ? null : Convert.ToHexString(reply), BluetoothPlaybackConfirmed = false });
         }
         catch (OperationCanceledException) { return "{\"Error\":\"Audio setup deadline; command lane fenced\"}"; }

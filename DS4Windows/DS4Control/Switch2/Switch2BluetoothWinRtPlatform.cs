@@ -480,6 +480,14 @@ internal sealed class Switch2BluetoothWinRtPlatform :
     {
         private readonly GattDeviceService service;
         private bool disposed;
+        private bool labAudioFenced;
+        private readonly object notificationStateGate = new();
+        private readonly Dictionary<Guid, bool> ownedNotificationStates = new();
+
+        private void ObserveOwnedNotificationState(Guid uuid, bool enabled)
+        {
+            lock (notificationStateGate) ownedNotificationStates[uuid] = enabled;
+        }
 
         internal WinRtGattService(GattDeviceService service)
         {
@@ -493,6 +501,32 @@ internal sealed class Switch2BluetoothWinRtPlatform :
         {
             cancellationToken.ThrowIfCancellationRequested();
             ObjectDisposedException.ThrowIf(disposed, this);
+            if (labAudioFenced) throw new InvalidOperationException("Lab audio notification cleanup is ambiguous; probe fenced until reconnect.");
+            if (command == "headset-observe")
+                return await ObserveLabHeadsetAsync(cancellationToken).ConfigureAwait(false);
+            if (Switch2BluetoothLabTone.IsActiveTone(command))
+                return await ObserveLabHeadsetAsync(cancellationToken, "tone-" + command.Substring(7)).ConfigureAwait(false);
+            if (Switch2BluetoothLabTone.IsTone(command))
+            {
+                var outputQuery = await service.GetCharacteristicsForUuidAsync(Switch2BluetoothLabAudioProtocol.OutputUuid,
+                    BluetoothCacheMode.Cached).AsTask().ConfigureAwait(false);
+                if (outputQuery.Status != GattCommunicationStatus.Success || outputQuery.Characteristics.Count != 1 ||
+                    !outputQuery.Characteristics[0].CharacteristicProperties.HasFlag(GattCharacteristicProperties.WriteWithoutResponse))
+                    throw new InvalidOperationException("Exact headphone output characteristic unavailable.");
+                var output = outputQuery.Characteristics[0];
+                var tone = Switch2BluetoothLabTone.Create(command);
+                var result = await tone.SendAsync(Math.Max(0, service.Session.MaxPduSize - 3), async packet =>
+                {
+                    // All writes stay on this owned service, with one real WinRT
+                    // operation in flight. Never abandon it via AsTask(token).
+                    using var writer = new DataWriter();
+                    writer.WriteBytes(packet);
+                    var response = await output.WriteValueWithResultAsync(writer.DetachBuffer(),
+                        GattWriteOption.WriteWithoutResponse).AsTask().ConfigureAwait(false);
+                    return response.Status == GattCommunicationStatus.Success;
+                }, cancellationToken).ConfigureAwait(false);
+                return JsonSerializer.Serialize(result);
+            }
             if (command == "inventory")
             {
                 // Actual completion retained by the lab worker, not a cancelled
@@ -529,9 +563,117 @@ internal sealed class Switch2BluetoothWinRtPlatform :
             }
             // Only framing metadata leaves this read. No microphone PCM/encoded
             // bytes, button state, or motion data is returned, stored or played.
-            return JsonSerializer.Serialize(new { Status = read.Status.ToString(), Length = read.Value?.Length,
+            return JsonSerializer.Serialize(new { Status = read.Status.ToString(), read.ProtocolError, Length = read.Value?.Length,
                 JackStateRaw = jack, DeclaredAudioBytes = audioLength, NotificationsChanged = false,
                 BluetoothPlaybackConfirmed = false });
+        }
+
+        private async Task<string> ObserveLabHeadsetAsync(CancellationToken cancellationToken, string toneCommand = null)
+        {
+            var query = await service.GetCharacteristicsForUuidAsync(Switch2BluetoothLabAudioProtocol.InputUuid,
+                BluetoothCacheMode.Cached).AsTask().ConfigureAwait(false);
+            var inputQuery = await service.GetCharacteristicsForUuidAsync(Switch2InputCodec.Common05CharacteristicUuid,
+                BluetoothCacheMode.Cached).AsTask().ConfigureAwait(false);
+            if (query.Status != GattCommunicationStatus.Success || query.Characteristics.Count != 1 ||
+                inputQuery.Status != GattCommunicationStatus.Success || inputQuery.Characteristics.Count != 1)
+                throw new InvalidOperationException("Exact headset and existing common05 interfaces are required.");
+            var headset = query.Characteristics[0];
+            var commonInput = inputQuery.Characteristics[0];
+            var before = await headset.ReadClientCharacteristicConfigurationDescriptorAsync().AsTask().ConfigureAwait(false);
+            var inputBefore = await commonInput.ReadClientCharacteristicConfigurationDescriptorAsync().AsTask().ConfigureAwait(false);
+            bool ownedInput;
+            lock (notificationStateGate)
+                ownedInput = ownedNotificationStates.GetValueOrDefault(Switch2InputCodec.Common05CharacteristicUuid) &&
+                    !ownedNotificationStates.GetValueOrDefault(Switch2BluetoothLabAudioProtocol.InputUuid);
+            var beforeDetails = new { HeadsetStatus = before.Status.ToString(), HeadsetProtocolError = before.ProtocolError,
+                HeadsetCccd = before.Status == GattCommunicationStatus.Success ? before.ClientCharacteristicConfigurationDescriptor.ToString() : null, InputStatus = inputBefore.Status.ToString(),
+                InputProtocolError = inputBefore.ProtocolError, InputCccd = inputBefore.Status == GattCommunicationStatus.Success ? inputBefore.ClientCharacteristicConfigurationDescriptor.ToString() : null,
+                OwnedCommonInputNotify = ownedInput };
+            // Nintendo may reject CCCD reads even though writes work. Use the
+            // exact input lease's successful CCCD writes as authority, not a
+            // failed read's default enum value. No other path opens headset
+            // notifications in this fresh lab service lifetime.
+            if (!ownedInput ||
+                before.Status == GattCommunicationStatus.Success && before.ClientCharacteristicConfigurationDescriptor != GattClientCharacteristicConfigurationDescriptorValue.None ||
+                inputBefore.Status == GattCommunicationStatus.Success && inputBefore.ClientCharacteristicConfigurationDescriptor != GattClientCharacteristicConfigurationDescriptorValue.Notify ||
+                before.Status is not (GattCommunicationStatus.Success or GattCommunicationStatus.ProtocolError) ||
+                inputBefore.Status is not (GattCommunicationStatus.Success or GattCommunicationStatus.ProtocolError))
+                return JsonSerializer.Serialize(new { Error = "Unexpected CCCD ownership; no notification settings changed", Before = beforeDetails });
+            var gate = new object();
+            int reports = 0, valid = 0, idle = 0;
+            var jackCounts = new Dictionary<byte, int>();
+            var lengths = new Dictionary<uint, int>();
+            bool accepting = true;
+            void OnHeadset(GattCharacteristic sender, GattValueChangedEventArgs args)
+            {
+                lock (gate)
+                {
+                    if (!accepting) return;
+                    reports++;
+                    uint size = args.CharacteristicValue.Length;
+                    if (lengths.Count < 8 || lengths.ContainsKey(size)) lengths[size] = lengths.GetValueOrDefault(size) + 1;
+                    if (size != 112) return;
+                    using var reader = DataReader.FromBuffer(args.CharacteristicValue);
+                    byte[] value = new byte[112];
+                    reader.ReadBytes(value);
+                    if (Switch2BluetoothLabHeadsetHeader.TryRead(value, out byte jack, out _, out bool opusIdle))
+                    {
+                        valid++;
+                        jackCounts[jack] = jackCounts.GetValueOrDefault(jack) + 1;
+                        if (opusIdle) idle++;
+                    }
+                    Array.Clear(value); // no recorded or returned microphone payload
+                }
+            }
+            bool attached = false, attempted = false;
+            string restored = null, inputRestored = null;
+            JsonElement? toneResult = null;
+            GattCommunicationStatus enabled;
+            try
+            {
+                headset.ValueChanged += OnHeadset;
+                attached = true;
+                cancellationToken.ThrowIfCancellationRequested();
+                attempted = true;
+                enabled = await headset.WriteClientCharacteristicConfigurationDescriptorAsync(
+                    GattClientCharacteristicConfigurationDescriptorValue.Notify).AsTask().ConfigureAwait(false);
+                if (enabled == GattCommunicationStatus.Success)
+                {
+                    if (toneCommand == null) await Task.Delay(250, cancellationToken).ConfigureAwait(false);
+                    else toneResult = JsonSerializer.Deserialize<JsonElement>(await QueryAudioLabAsync(toneCommand, cancellationToken).ConfigureAwait(false));
+                }
+            }
+            finally
+            {
+                try
+                {
+                    if (attempted)
+                    {
+                        var restore = await headset.WriteClientCharacteristicConfigurationDescriptorAsync(
+                            GattClientCharacteristicConfigurationDescriptorValue.None).AsTask().ConfigureAwait(false);
+                        restored = restore.ToString();
+                        // Donor reports headset notifications can replace normal
+                        // input. Reassert the exact original common05 CCCD state.
+                        var resume = await commonInput.WriteClientCharacteristicConfigurationDescriptorAsync(
+                            GattClientCharacteristicConfigurationDescriptorValue.Notify).AsTask().ConfigureAwait(false);
+                        inputRestored = resume.ToString();
+                        labAudioFenced = restore != GattCommunicationStatus.Success || resume != GattCommunicationStatus.Success;
+                    }
+                }
+                catch { labAudioFenced = true; throw; }
+                finally
+                {
+                    lock (gate) accepting = false;
+                    if (attached) headset.ValueChanged -= OnHeadset;
+                }
+            }
+            lock (gate)
+                return JsonSerializer.Serialize(new { Status = enabled.ToString(), Reports = reports, ValidHeaders = valid,
+                    PublishedOpusIdleMatches = idle, JackStates = jackCounts, Lengths = lengths,
+                    RestoreHeadset = restored, RestoreCommonInput = inputRestored, LabAudioFenced = labAudioFenced,
+                    Before = beforeDetails,
+                    Tone = toneResult,
+                    StoredAudio = false, BluetoothPlaybackConfirmed = false });
         }
 
         public async ValueTask<Switch2BluetoothWindowsGattQuery<
@@ -553,7 +695,7 @@ internal sealed class Switch2BluetoothWinRtPlatform :
             for (int index = 0; index < characteristics.Length; index++)
             {
                 characteristics[index] = new WinRtGattCharacteristic(
-                    nativeCharacteristics[index]);
+                    nativeCharacteristics[index], Switch2BluetoothLabProbe.IsEnabled ? ObserveOwnedNotificationState : null);
             }
             return new Switch2BluetoothWindowsGattQuery<
                 ISwitch2BluetoothWindowsGattCharacteristic>(result?.Status ==
@@ -584,8 +726,11 @@ internal sealed class Switch2BluetoothWinRtPlatform :
         private bool attachAttempted;
         private bool disposed;
 
-        internal WinRtGattCharacteristic(GattCharacteristic characteristic)
+        private readonly Action<Guid, bool> observeNotificationState;
+
+        internal WinRtGattCharacteristic(GattCharacteristic characteristic, Action<Guid, bool> observeNotificationState = null)
         {
+            this.observeNotificationState = observeNotificationState;
             this.characteristic = characteristic ??
                 throw new ArgumentNullException(nameof(characteristic));
             GattCharacteristicProperties nativeProperties = characteristic.
@@ -647,6 +792,7 @@ internal sealed class Switch2BluetoothWinRtPlatform :
                     GattClientCharacteristicConfigurationDescriptorValue.Notify :
                     GattClientCharacteristicConfigurationDescriptorValue.None).
                 AsTask(cancellationToken).ConfigureAwait(false);
+            if (status == GattCommunicationStatus.Success) observeNotificationState?.Invoke(Uuid, enabled);
             return status == GattCommunicationStatus.Success;
         }
 

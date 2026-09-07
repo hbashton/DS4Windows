@@ -2399,7 +2399,10 @@ internal sealed class Switch2BluetoothWindowsInputLease :
         lock (sync) return state == LeaseState.Active && !disconnectObserved && device.IsConnected;
     }
 
-    private Task<string> RequestLabAudioSetupAsync(CancellationToken cancellationToken)
+    private Task<string> RequestLabAudioSetupAsync(CancellationToken cancellationToken) => RequestLabAudioCommandAsync(cancellationToken, false);
+    private Task<string> RequestLabAudioStateAsync(CancellationToken cancellationToken) => RequestLabAudioCommandAsync(cancellationToken, true);
+
+    private Task<string> RequestLabAudioCommandAsync(CancellationToken cancellationToken, bool queryState)
     {
         lock (sync)
         {
@@ -2412,7 +2415,7 @@ internal sealed class Switch2BluetoothWindowsInputLease :
             playerLedOperationActive = true;
             Task<string> operation = Task.Run(async () =>
             {
-                try { return await playerLedChannel.ConfigureLabAudioAsync(cancellationToken).ConfigureAwait(false); }
+                try { return await playerLedChannel.ConfigureLabAudioAsync(cancellationToken, queryState).ConfigureAwait(false); }
                 finally
                 {
                     lock (sync)
@@ -2615,7 +2618,7 @@ internal sealed class Switch2BluetoothWindowsInputLease :
                 this.transportGeneration == transportGeneration;
             if (active && labProbe == null)
                 labProbe = Switch2BluetoothLabProbe.TryCreate(Admission.Model, service,
-                    transportGeneration, IsLabLifetimeActive, RequestLabAudioSetupAsync);
+                    transportGeneration, IsLabLifetimeActive, RequestLabAudioSetupAsync, RequestLabAudioStateAsync);
             return active;
         }
     }

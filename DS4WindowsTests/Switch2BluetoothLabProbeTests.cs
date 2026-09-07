@@ -89,6 +89,35 @@ public class Switch2BluetoothLabProbeTests
     }
 
     [TestMethod]
+    public async Task ToneRequiresAcceptedSameGenerationSetupAndErrorsRemainQueryable()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), "ds4w-lab-probe-" + Guid.NewGuid().ToString("N"));
+        var access = new FakeAccess();
+        bool accepted = false;
+        var probe = new Switch2BluetoothLabProbe(folder, access, () => true,
+            _ => Task.FromResult(JsonSerializer.Serialize(new { SetupAcknowledged = accepted })), 9);
+        try
+        {
+            Assert.IsTrue((await Send(probe, "tone-opus5")).Contains("Error"));
+            Assert.IsTrue((await Send(probe, "active-opus5")).Contains("Error"));
+            await Send(probe, "configure-audio");
+            Assert.IsTrue((await Send(probe, "tone-opus5")).Contains("Error"));
+            Assert.AreEqual(0, access.Calls);
+            accepted = true;
+            await Send(probe, "configure-audio");
+            access.Query = (_, _) => throw new InvalidOperationException("Test failure");
+            Assert.IsTrue((await Send(probe, "tone-opus5")).Contains("Test failure"));
+            Assert.AreEqual(1, access.Calls);
+            Assert.IsTrue((await Send(probe, "status")).Contains("active"));
+        }
+        finally
+        {
+            await probe.StopAsync().WaitAsync(TimeSpan.FromSeconds(3));
+            Directory.Delete(folder, true);
+        }
+    }
+
+    [TestMethod]
     public async Task ReportObservationAllocatesNothing()
     {
         string folder = Path.Combine(Path.GetTempPath(), "ds4w-lab-probe-" + Guid.NewGuid().ToString("N"));

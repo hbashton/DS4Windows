@@ -58,3 +58,10 @@ dotnet test DS4WindowsTests/DS4WindowsTests.csproj -c Release -p:Platform=x64 --
 
 Tests cover exact wake-address byte order, invalid/broadcast address rejection,
 advertisement validation, and separation from the production rumble UUID.
+# Wake-only mode alongside DS4Windows
+
+`--wake-only <exact Pro Windows ID>` emits the same bounded, targeted two-second
+manufacturer wake advertisement and stops. Unlike the historical inspect modes,
+it never discovers or opens a GATT service, so DS4Windows remains the connection
+owner. Windows controls GAP Flags; Started/Stopped is not proof of controller
+wake. No association, firmware or controller command is written.

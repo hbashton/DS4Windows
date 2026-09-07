@@ -419,7 +419,8 @@
                                     </Grid>
                                 </Border>
 
-                                <Border Style="{StaticResource OverviewInsetCardStyle}" Margin="0">
+                                <Border x:Name="managedSpeakerRouteCard" Style="{StaticResource OverviewInsetCardStyle}" Margin="0"
+                                        Visibility="{Binding SelectedControllerSupportsAudio, Converter={StaticResource BooleanToVisibilityConverter}}">
                                     <Grid Style="{StaticResource OverviewSpeakerPanelStyle}">
                                         <Grid.RowDefinitions>
                                             <RowDefinition Height="Auto" />
@@ -494,6 +495,20 @@
                             </StackPanel>
 
                             <StackPanel Grid.Column="2">
+                                <Border x:Name="nativeUsbHeadsetCard" Style="{StaticResource OverviewInsetCardStyle}"
+                                        Visibility="{Binding SelectedControllerShowsUsbHeadsetHelp, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <StackPanel>
+                                        <TextBlock Text="Use a headset over USB" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                        <TextBlock Text="Connect your Switch 2 Pro by USB and plug in headphones or a headset. Choose Headphones (Switch 2 Pro Controller) in your game or Windows Sound settings. Adjust the volume there." Margin="0,10,0,10" TextWrapping="Wrap" />
+                                        <TextBlock Text="For voice chat, choose Microphone (Switch 2 Pro Controller) and use a headset with a microphone." Margin="0,0,0,10" TextWrapping="Wrap" />
+                                        <TextBlock Text="Works independently of your virtual controller. Bluetooth headset audio is not supported yet." Margin="0,0,0,12" TextWrapping="Wrap" Foreground="{DynamicResource MutedForegroundColor}" />
+                                        <Button Content="Open Windows Sound settings" HorizontalAlignment="Left" Padding="10,6"
+                                                Style="{StaticResource BridgeSecondaryButtonStyle}"
+                                                Click="OpenWindowsSoundSettings_Click" ToolTip="Choose where your game sound and voice chat go." />
+                                    </StackPanel>
+                                </Border>
+                                <StackPanel x:Name="managedAudioLevelsPanel"
+                                            Visibility="{Binding SelectedControllerSupportsAudio, Converter={StaticResource BooleanToVisibilityConverter}}">
                                 <Border Style="{StaticResource OverviewInsetCardStyle}">
                                     <StackPanel>
                                         <TextBlock Text="Output levels" FontSize="15" FontWeight="SemiBold" />
@@ -626,6 +641,7 @@
                                         </Grid>
                                     </StackPanel>
                                 </Border>
+                            </StackPanel>
                             </StackPanel>
                         </Grid>
                     </Grid>

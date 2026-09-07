@@ -27,7 +27,11 @@ refuses renamed endpoints until the operator re-audits and adapts it.
 confirm analog delivery. Neither command opens the controller microphone.
 
 The signal is 500 ms of stereo PCM at 48 kHz / 16 bit, left 440 Hz and right
-660 Hz, peak 0.02 (-34 dBFS), with 10 ms fades. The physical endpoint's existing
+660 Hz, default peak 0.02 (-34 dBFS), with 10 ms fades. An optional final numeric
+argument to `--verify-line-in` selects a peak from 0.005 through 0.08
+(-46 through -22 dBFS); values outside that range and nonfinite values are
+rejected before opening playback/capture. This enables quiet, bounded level
+comparisons without changing a Windows volume setting. The physical endpoint's existing
 volume is left alone. The capture command records a short baseline before and
 after the tone and reports RMS, peak and both frequency amplitudes per channel
 in 100 ms windows. Capture is bounded to three seconds of samples and waits
@@ -39,7 +43,9 @@ baseline, 440 Hz primarily on left and 660 Hz primarily on right, then return
 to baseline. `AnalogDeliveryConfirmed: false` on the playback event means that
 WASAPI success alone is not an analog verdict. The tool supplies measurements;
 it does not automatically certify cable delivery, microphone input, lossless
-quality, sample-clock accuracy, or end-to-end latency.
+quality, sample-clock accuracy, or end-to-end latency. Do not extrapolate a
+low-level result to full-volume playback into a PC Line In: DAC/ADC gain and
+input headroom are separate from stereo channel balance.
 
 See `docs/validation/2026-09-06-switch2-pro-usb-audio.md` for the measured result
 and the distinction between native USB audio and unimplemented Bluetooth audio.

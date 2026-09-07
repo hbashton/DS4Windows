@@ -2769,7 +2769,7 @@
                                         <TextBlock Text="3. For voice chat, plug in a headset with a microphone and choose Microphone (Switch 2 Pro Controller) for input." TextWrapping="Wrap" Margin="0,0,0,10" />
                                         <TextBlock Text="Audio goes directly through Windows. It works independently of your chosen virtual controller; no DS4Windows audio toggle is needed." TextWrapping="Wrap" Foreground="{DynamicResource MutedForegroundColor}" Margin="0,0,0,10" />
                                         <TextBlock Text="USB only. Bluetooth headset audio is not supported yet. A regular AUX cable carries sound out, but cannot test the headset microphone." TextWrapping="Wrap" Foreground="{DynamicResource MutedForegroundColor}" Margin="0,0,0,12" />
-                                        <Button x:Name="switch2OpenSoundSettingsButton" Content="Open Windows Sound settings" Click="Switch2OpenSoundSettings_Click" HorizontalAlignment="Left" Padding="12,6" ToolTip="Choose where your game sound and voice chat go." />
+                                        <Button x:Name="switch2OpenSoundSettingsButton" Content="Open Windows Sound settings" Click="Switch2OpenSoundSettings_Click" HorizontalAlignment="Left" Padding="12,6" Style="{StaticResource BridgeSecondaryButtonStyle}" ToolTip="Choose where your game sound and voice chat go." />
                                     </StackPanel>
                                 </Expander>
                             </Border>

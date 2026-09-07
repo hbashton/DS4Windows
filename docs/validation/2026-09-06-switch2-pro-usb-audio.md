@@ -117,3 +117,107 @@ DS4Windows.exe 5E3847A02125F9084B052E0D69F2045D1D7EE27C2EE20532725D34B61E447010
 viiper.exe 7B6B00CF3AC205549AF80692E45BD7785D3B8BC558A92D4FF5A1A61060592B78
 xbox-one-authorized-persona.json 2A85D3395529C7305F55338E4965A7FFD4E269DDE535FA41BD98BC54D67111C4
 ```
+
+## b88 live USB re-verification
+
+b88 launched elevated at 19:50 local with portable VIIPER. The physical USB Pro
+attached through the existing full-duplex runtime and the Overview displayed
+Ready, Xbox 360 output, 4.00 ms / 250 Hz report intervals. No installed software
+or Windows sound settings were changed.
+
+At the user's request to verify audio first, the same opt-in physical cable
+test was repeated with b88 running. Output and capture endpoint identities,
+active state, unmuted state and prior volume were rechecked. The 500 ms test
+again reached Line In in the correct channels and returned to baseline:
+
+- Before (200 ms): left/right RMS 0.000552 / 0.000536.
+- During (500 ms): left 440 Hz amplitude 0.043944 vs 660 Hz 0.000146;
+  right 660 Hz amplitude 0.043564 vs 440 Hz 0.000169.
+- After (1,000 ms): left/right RMS 0.000551 / 0.000546.
+- 60,960 stereo frames captured in RAM; no audio saved, no controller errors
+  appended to the b88 log during the test. Microphone signal remains untested.
+
+Computer-use inspection exposed unsupported Sony output-level controls on
+Overview; a follow-up correction is in progress. Profile navigation could not
+be confirmed through the lower-integrity UI helper, so no successful live
+headset-card navigation or Link/Unlink hardware acceptance is claimed.
+
+## Five-level headphone-out to Line-In verification
+
+The user explicitly requested signal-level verification. Five 500 ms stereo
+tests were played sequentially at source peaks 0.005, 0.01, 0.02, 0.04 and 0.08.
+The script stopped before any higher step on missing signal, an elevated
+baseline (>0.01 RMS), insufficient capture, or a captured peak >=0.90. No stop
+condition occurred. The existing Windows endpoint levels remained unchanged:
+controller render scalar 0.5000053, Realtek Line In scalar 1.0.
+
+| Source peak dBFS | L/R balance difference dB | Left step dB | Right step dB | Captured peak | Captured headroom dB |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| -46.021 | 0.059 | — | — | 0.015234 | 36.344 |
+| -40.000 | 0.007 | 6.044 | 6.096 | 0.025700 | 31.801 |
+| -33.979 | 0.025 | 6.025 | 6.007 | 0.047508 | 26.465 |
+| -27.959 | 0.021 | 6.027 | 6.031 | 0.091691 | 20.753 |
+| -21.938 | 0.014 | 6.016 | 6.023 | 0.179370 | 14.925 |
+
+Baseline noise energy was subtracted before RMS/gain comparisons. The expected
+doubling is 6.0206 dB; the largest measured deviation was 0.076 dB. The
+frequency-specific channel separation at the sampled plateau was 42.35 dB or
+better. Detailed numeric results are in
+`2026-09-06-switch2-usb-audio-levels.json` (metrics only, not recorded audio).
+
+**Verdict:** stereo levels match within 0.06 dB and relative gain tracks the
+source across the tested range, with no captured full-scale clipping. This
+does not mean input/output normalized numbers are identical: the measured
+DAC-to-ADC chain has approximately +6.8 dB gain (~2.2x normalized amplitude).
+It also does not certify voltage calibration or full-volume headroom. A linear
+extrapolation predicts that sufficiently loud source peaks could clip this PC
+Line In; full-volume playback was not attempted and no automatic compensating
+gain was baked into DS4Windows. Headphone use and PC Line-In capture are
+different loads/routes. Windows volume scalars are audio-tapered controls, not
+linear amplitude percentages ([Microsoft documentation](https://learn.microsoft.com/en-us/windows/win32/api/endpointvolume/nf-endpointvolume-iaudioendpointvolume-getmastervolumelevelscalar)).
+
+## DS4Windows compatibility follow-up
+
+Overview now provides the same native USB headset setup/Windows Sound settings
+action as Profile settings. Sony-managed speaker, EQ and microphone controls
+are hidden for incompatible physical controllers. Their view-model setters
+also reject inapplicable edits, and a hidden audio-source binding cannot rewrite
+a shared profile during normalization. Genuine Sony audio controls still work;
+input mapping, rumble, virtual-pad selection and native USB audio routing are
+unchanged. There is deliberately no duplicate capture/playback buffer or fake
+Switch 2 speaker toggle: games select the real Windows USB audio device.
+
+Nine new Overview regression cases pass. The full Release suite passes **3,901
+tests, zero failures, three opt-in audio skips**, including allocation checks.
+The real Overview control was also rendered at 760 and 1100 DIP and inspected;
+native headset guidance is visible for Pro, Sony audio controls remain visible
+for Sony, and neither is advertised as a Joy-Con headset capability. Portable
+b89 packaging/live acceptance is pending at this checkpoint.
+
+## b89 package checkpoint
+
+The final USB Release suite again passed 3,901 tests with zero failures and
+three opt-in audio skips (`full-b89-usb-audio-final.trx`). The portable package
+was published successfully as `5.0.4.89-USB-Audio-Preview`, with the unchanged
+pinned VIIPER and persona. All four launcher hash checks pass. Desktop lab
+shortcut: `DS4Windows Portable b89.lnk`. Its first launch snapshots b88's saved
+settings only after both older portable processes exit.
+
+```text
+DS4Windows.dll D7B07C5200EBA49A4876F38F97A6827D6875821849D8D88EDC3FF70BA6C3F283
+DS4Windows.exe 70CC5340B439C746991B54CFC68F1CDC86990037A64FA8E0EC36FA7D534C0ECE
+viiper.exe 7B6B00CF3AC205549AF80692E45BD7785D3B8BC558A92D4FF5A1A61060592B78
+xbox-one-authorized-persona.json 2A85D3395529C7305F55338E4965A7FFD4E269DDE535FA41BD98BC54D67111C4
+```
+
+**Prepared, not launched.** The old elevated b88 still displays Overview,
+Ready, USB 4.00 ms / 250 Hz, with no open profile editor. The lower-integrity
+computer-use helper could inspect it, but its settings click produced no
+navigation. The normal close action minimizes under the user's saved setting;
+source inspection confirmed portable mode rejects legacy WM_COPYDATA IPC.
+No bypass, force-kill or in-memory settings manipulation was used to close it.
+No b89 live UI acceptance or completed runtime replacement is claimed.
+
+The user's additional Bluetooth-audio request is tracked in
+`2026-09-06-switch2-bluetooth-audio-audit.md`. Its offline Opus idle-pattern
+result is not a claim that wireless headset audio now works.

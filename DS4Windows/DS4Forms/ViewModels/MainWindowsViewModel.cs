@@ -143,6 +143,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public event EventHandler SelectedControllerIsReadyChanged;
         public event EventHandler SelectedControllerNeedsAttentionChanged;
         public event EventHandler SelectedControllerSupportsAudioChanged;
+        public event EventHandler SelectedControllerShowsUsbHeadsetHelpChanged;
         public event EventHandler SelectedControllerSupportsMicrophoneChanged;
         public event EventHandler MicrophoneAvailabilityTextChanged;
         public event EventHandler ShowMicrophoneAvailabilityMessageChanged;
@@ -197,6 +198,14 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public bool SelectedControllerSupportsAudio =>
             selectedController?.SupportsControllerAudio == true;
+
+        public bool SelectedControllerShowsUsbHeadsetHelp =>
+            selectedController?.Device != null &&
+            ControllerUiCapabilities.ForDevice(selectedController.Device).
+                ShowSwitch2UsbHeadsetHelp;
+
+        private bool HasEditableControllerAudio =>
+            HasValidSelectedDevice && SelectedControllerSupportsAudio;
 
         private ControllerMicrophoneUiState SelectedControllerMicrophoneUiState
         {
@@ -341,7 +350,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             get => HasValidSelectedDevice && Global.DualSenseEnableSpeakerOutput[selectedController.DevIndex];
             set
             {
-                if (!HasValidSelectedDevice ||
+                if (!HasEditableControllerAudio ||
                     Global.DualSenseEnableSpeakerOutput[selectedController.DevIndex] == value) return;
 
                 int deviceIndex = selectedController.DevIndex;
@@ -358,7 +367,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 Global.DualSenseHeadsetOnlyAudio[selectedController.DevIndex];
             set
             {
-                if (!HasValidSelectedDevice ||
+                if (!HasEditableControllerAudio ||
                     Global.DualSenseHeadsetOnlyAudio[
                         selectedController.DevIndex] == value)
                 {
@@ -377,7 +386,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             get => HasValidSelectedDevice && Global.DualSenseEnableMicrophonePassthrough[selectedController.DevIndex];
             set
             {
-                if (!HasValidSelectedDevice ||
+                if (!HasEditableControllerAudio ||
                     Global.DualSenseEnableMicrophonePassthrough[selectedController.DevIndex] == value) return;
 
                 int deviceIndex = selectedController.DevIndex;
@@ -397,7 +406,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 : 0;
             set
             {
-                if (!HasValidSelectedDevice) return;
+                if (!HasEditableControllerAudio) return;
 
                 int deviceIndex = selectedController.DevIndex;
                 byte converted = PercentToByte(value);
@@ -435,6 +444,9 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 int deviceIndex = selectedController.DevIndex;
                 string endpointId = Global.DualSenseAudioCaptureEndpointId[
                     deviceIndex] ?? string.Empty;
+                // A hidden, inapplicable binding must not normalize and
+                // rewrite audio settings in a shared controller profile.
+                if (!SelectedControllerSupportsAudio) return endpointId;
                 string normalized = NormalizeAppAudioEndpointId(endpointId);
                 if (!string.Equals(endpointId, normalized,
                         StringComparison.Ordinal))
@@ -446,7 +458,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             }
             set
             {
-                if (!HasValidSelectedDevice) return;
+                if (!HasEditableControllerAudio) return;
 
                 int deviceIndex = selectedController.DevIndex;
                 string normalized = NormalizeAppAudioEndpointId(
@@ -513,7 +525,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 : 0;
             set
             {
-                if (!HasValidSelectedDevice) return;
+                if (!HasEditableControllerAudio) return;
 
                 int deviceIndex = selectedController.DevIndex;
                 byte converted = PercentToByte(value);
@@ -536,7 +548,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 : 0;
             set
             {
-                if (!HasValidSelectedDevice) return;
+                if (!HasEditableControllerAudio) return;
                 int deviceIndex = selectedController.DevIndex;
                 byte converted = (byte)Math.Clamp(value,
                     (int)DualSenseSpeakerCompression.Off,
@@ -558,7 +570,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 : 0;
             set
             {
-                if (!HasValidSelectedDevice) return;
+                if (!HasEditableControllerAudio) return;
                 int deviceIndex = selectedController.DevIndex;
                 byte converted = (byte)Math.Clamp(value, 0,
                     DualSenseSpeakerProcessor.MaximumBassBoostDb);
@@ -577,7 +589,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 : 0;
             set
             {
-                if (!HasValidSelectedDevice) return;
+                if (!HasEditableControllerAudio) return;
 
                 int deviceIndex = selectedController.DevIndex;
                 byte converted = PercentToByte(value);
@@ -600,6 +612,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             SelectedControllerBatteryChanged?.Invoke(this, EventArgs.Empty);
             RaiseControllerStartupStatusChanged();
             SelectedControllerSupportsAudioChanged?.Invoke(this, EventArgs.Empty);
+            SelectedControllerShowsUsbHeadsetHelpChanged?.Invoke(this, EventArgs.Empty);
             RaiseMicrophoneCapabilityChanged();
             SelectedControllerIsWirelessChanged?.Invoke(this, EventArgs.Empty);
             SelectedOutputControllerChanged?.Invoke(this, EventArgs.Empty);
@@ -915,7 +928,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 : 0;
             set
             {
-                if (!HasValidSelectedDevice) return;
+                if (!HasEditableControllerAudio) return;
                 int deviceIndex = selectedController.DevIndex;
                 byte converted = (byte)Math.Clamp(value,
                     (int)DualSenseMicrophoneNoiseSuppression.Off,

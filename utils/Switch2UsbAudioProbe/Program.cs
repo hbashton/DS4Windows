@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Globalization;
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
 
@@ -27,9 +28,12 @@ if (args.Length == 0 || args[0] == "--list")
     }
     return;
 }
-bool verifyLineIn = args[0] == "--verify-line-in" && args.Length == 3;
+bool verifyLineIn = args[0] == "--verify-line-in" && args.Length is 3 or 4;
 if (!verifyLineIn && (args[0] != "--tone" || args.Length != 2))
-    throw new ArgumentException("Use --list, --tone <render ID>, or --verify-line-in <render ID> <Line In ID>.");
+    throw new ArgumentException("Use --list, --tone <render ID>, or --verify-line-in <render ID> <Line In ID> [peak 0.005..0.08].");
+double peakLevel = args.Length == 4 ? double.Parse(args[3], CultureInfo.InvariantCulture) : .02;
+if (!double.IsFinite(peakLevel) || peakLevel < .005 || peakLevel > .08)
+    throw new ArgumentOutOfRangeException(nameof(peakLevel), "Test peak must be between 0.005 and 0.08; endpoint levels are never changed.");
 using var render = enumerator.GetDevice(args[1]);
 if (render.DataFlow != DataFlow.Render || render.State != DeviceState.Active ||
     render.FriendlyName != "Headphones (Switch 2 Pro Controller)")
@@ -67,8 +71,9 @@ for (int i = 0; i < frames; i++)
     double fade = Math.Min(1, Math.Min(i / 480.0, (frames - 1 - i) / 480.0));
     for (int channel = 0; channel < 2; channel++)
     {
-        // -34 dBFS peak, 500 ms, 10 ms fades. No endpoint/default/volume change.
-        short value = (short)(32767 * .02 * fade * Math.Sin(2 * Math.PI * (channel == 0 ? 440 : 660) * i / rate));
+        // Default -34 dBFS peak, bounded to -22 dBFS for level verification.
+        // 500 ms, 10 ms fades. No endpoint/default/volume change.
+        short value = (short)(32767 * peakLevel * fade * Math.Sin(2 * Math.PI * (channel == 0 ? 440 : 660) * i / rate));
         System.Buffers.Binary.BinaryPrimitives.WriteInt16LittleEndian(samples.AsSpan(i * 4 + channel * 2, 2), value);
     }
 }
@@ -81,7 +86,9 @@ output.Play();
 var failure = await stopped.Task.WaitAsync(TimeSpan.FromSeconds(5));
 if (failure != null) throw failure;
 Console.WriteLine(JsonSerializer.Serialize(new { Render = render.ID, Result = "WASAPI playback completed", DurationMs = 500,
-    PeakDbfs = -34, AnalogDeliveryConfirmed = false }));
+    PeakDbfs = 20 * Math.Log10(peakLevel), PeakLinear = peakLevel, AnalogDeliveryConfirmed = false,
+    RenderEndpointVolume = render.AudioEndpointVolume.MasterVolumeLevelScalar,
+    CaptureEndpointVolume = lineDevice?.AudioEndpointVolume.MasterVolumeLevelScalar }));
 if (capture != null)
 {
     await Task.Delay(350);

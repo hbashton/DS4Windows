@@ -10,10 +10,13 @@ namespace DS4WindowsTests
     [TestClass]
     public class ThemeResourceTests
     {
+        public TestContext TestContext { get; set; }
         [TestMethod]
         public void DefaultThemeLoadsBridgeShellStylesOnFreshConfiguration()
         {
             Exception failure = null;
+            var renderedFiles = new System.Collections.Generic.List<string>();
+            string resultsDirectory = TestContext.TestResultsDirectory;
             Thread thread = new Thread(() =>
             {
                 try
@@ -46,6 +49,7 @@ namespace DS4WindowsTests
                     var overview = new ControllerOverviewControl();
                     Assert.IsNotNull(overview.Resources[
                         "InverseBoolConverter"]);
+                    ControllerOverviewAudioTests.ValidateRenderedOverview(overview, resultsDirectory, renderedFiles);
 
                     var repairPrompt = new ViiperSetupPrompt(
                         "usbip-win2 0.9.7.8 must be replaced with supported 0.9.7.7",
@@ -103,6 +107,12 @@ namespace DS4WindowsTests
             if (failure != null)
             {
                 Assert.Fail(failure.ToString());
+            }
+            Assert.AreEqual(2, renderedFiles.Count);
+            foreach (string path in renderedFiles)
+            {
+                Assert.IsTrue(System.IO.File.Exists(path), path);
+                TestContext.AddResultFile(path);
             }
         }
     }

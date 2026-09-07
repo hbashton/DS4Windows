@@ -128,6 +128,9 @@ namespace DS4WinWPF.DS4Forms
         private void DisconnectBtn_Click(object sender, RoutedEventArgs e) =>
             DisconnectRequested?.Invoke(this, EventArgs.Empty);
 
+        private void OpenWindowsSoundSettings_Click(object sender, RoutedEventArgs e) =>
+            ControllerSoundSettingsNavigation.Open();
+
         private void ControllerAudioSourceCombo_SelectionChanged(object sender,
             SelectionChangedEventArgs e)
         {

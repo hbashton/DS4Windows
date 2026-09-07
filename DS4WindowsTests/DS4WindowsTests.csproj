@@ -19,6 +19,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DS4Windows\DS4WinWPF.csproj" />
+    <Compile Include="..\utils\Switch2BluetoothAudioProbe\ProbeProtocol.cs" Link="ProbeProtocol.cs" />
   </ItemGroup>
 
   <ItemGroup>

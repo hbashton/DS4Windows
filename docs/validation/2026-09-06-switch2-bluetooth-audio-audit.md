@@ -87,11 +87,14 @@ audio evidence. Absence in a sample is not proof of an unsupported device.
 
 ## Implementation and acceptance gates
 
-1. Obtain timestamped, known-working console-to-controller headphone traffic,
-   including stream setup/stop and negotiated write size. A console plus a
-   suitable BLE capture setup, or an already-authorized equivalent capture,
-   is needed; neither is established as available on this machine. Do not
-   alter the user's bond or flash firmware just to obtain it.
+1. Establish headphone-output setup/stop, framing, codec, and negotiated write
+   size. Timestamped known-working console traffic is the strongest reference,
+   but is not the only permitted research path. Bounded, source-supported
+   hypotheses on the dedicated audio characteristic can also be evaluated
+   against the user's physical Line-In loopback. A write completing, a codec
+   accepting synthetic silence, or a haptic actuator buzzing cannot establish
+   headphone delivery. Do not alter the user's bond or flash firmware merely
+   to obtain evidence. No known-working headphone capture is currently available.
 2. Separately validate the microphone candidate with a real headset mic and
    known stimulus if input audio is required. The current controller AUX-out
    to PC Line-In cable does not provide microphone-contact input. Do not
@@ -120,3 +123,57 @@ suite with the new separation regression passes **3,902 tests, zero failures,
 three opt-in audio skips** (`full-b89-audio-with-bluetooth-isolation.trx`),
 including allocation checks. The offline utility also rejects unknown modes
 with exit code 2. These are software checks, not Bluetooth delivery acceptance.
+
+## 2026-09-07: Bluetooth-only capability probe
+
+The user left the Pro on Bluetooth with its headphone jack cabled to the PC's
+Realtek Line In. USB controller audio endpoints were absent. No microphone,
+Line-In recording, or audio playback was opened in this session.
+
+1. Windows' connected **association-endpoint** inventory identified the Pro.
+   The default device-interface enumeration did not; it is not equivalent.
+2. With portable b88 running, service discovery succeeded but characteristic
+   discovery returned AccessDenied, including from an elevated helper.
+   Explicit `OpenAsync(SharedReadAndWrite)` exposed **SharingViolation**.
+   That establishes competing service ownership, not a codec failure.
+3. After checking that no profile editor was open, Windows Restart Manager
+   was used to close only the exact portable b88 process gracefully, with its
+   force flag **off**. The scope was verified as one process, no services or
+   file-resource dependents. Shutdown returned 0; DS4Windows logged normal
+   controller/USB-IP cleanup and Stopped. VIIPER remained running and was not
+   altered. No reboot, process kill, or portable IPC-policy bypass was used.
+4. The controller became disconnected. Opening its previously observed Windows
+   identity still returned the correct Pro name, but uncached service discovery
+   returned **Unreachable**. This is not evidence of a broken association.
+5. A two-second targeted wake manufacturer advertisement, using the documented
+   layout and the selected controller's exact address, reached Started and
+   then Stopped. Windows reserves GAP Flags; this was not a byte-identical
+   console advertisement. The subsequent service query remained Unreachable.
+   A separate 30-second scan saw no validated advertisement from this Pro.
+   These observations do not prove that console-style wake is unsupported.
+
+`utils/Switch2BluetoothAudioProbe` retains this bounded inventory/reconnection
+probe. It has no GATT command/output/CCCD writes and never reads a microphone
+payload. Its explicitly selected wake mode is the only transmitter. It cannot
+install drivers, change the controller association, render or record audio, or
+change endpoint defaults/levels. Exact identities are printed only by its local
+inventory mode and are omitted from this public evidence note.
+
+Review corrected an unshipped probe assumption: byte 13 of ordinary Pro input
+must not be labeled as the headset report's jack state. The probe now performs
+no input-value read at all. No such decoded observation had been obtained from
+the hardware before this correction.
+
+Verification: Release x64 **30 protocol tests passed, zero failures** (four new
+probe checks plus 26 existing phase-one tests), and the standalone utility
+builds successfully. The first test attempt omitted the required x64 platform
+and failed to resolve existing architecture-specific references; a new
+synthetic advertisement fixture also initially had an extra zero byte, which
+was corrected before the passing run. No failed test is waived.
+
+**Remaining:** wake the controller, inventory the released audio service, then
+establish the headphone-output protocol and measure actual delivery via Line
+In. No audio setup packet or audio-output payload has yet been sent. DS4Windows'
+Bluetooth input/rumble implementation and the installed Program Files builds
+were not modified. The task remains incomplete; this is diagnostic groundwork,
+not Bluetooth headphone support.

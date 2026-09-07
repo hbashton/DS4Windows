@@ -1933,6 +1933,7 @@ internal sealed class Switch2BluetoothWindowsInputLease :
     private readonly ISwitch2BluetoothWindowsGattCharacteristic
         responseCharacteristic;
     private readonly Switch2BluetoothPlayerLedCommandChannel playerLedChannel;
+    private Switch2BluetoothLabProbe labProbe;
     private readonly TimeSpan teardownTimeout;
     private readonly Switch2CallbackDrainGate callbackGate = new();
     private readonly ManualResetEventSlim outputWritesIdle = new(true);
@@ -2393,6 +2394,45 @@ internal sealed class Switch2BluetoothWindowsInputLease :
         }
     }
 
+    private bool IsLabLifetimeActive()
+    {
+        lock (sync) return state == LeaseState.Active && !disconnectObserved && device.IsConnected;
+    }
+
+    private Task<string> RequestLabAudioSetupAsync(CancellationToken cancellationToken)
+    {
+        lock (sync)
+        {
+            if (state != LeaseState.Active || disconnectObserved || playerLedChannel == null)
+                return Task.FromResult("{\"Error\":\"Inactive controller command lifetime\"}");
+            if (playerLedOperationActive)
+                return Task.FromResult("{\"Error\":\"Command lane busy; no probe sent\"}");
+            // Reserve the normal command lane. LED changes arriving meanwhile
+            // use its existing latest-state queue and are drained afterwards.
+            playerLedOperationActive = true;
+            Task<string> operation = Task.Run(async () =>
+            {
+                try { return await playerLedChannel.ConfigureLabAudioAsync(cancellationToken).ConfigureAwait(false); }
+                finally
+                {
+                    lock (sync)
+                    {
+                        playerLedOperationActive = false;
+                        if (state == LeaseState.Active && playerLedRequestPending)
+                        {
+                            byte pattern = pendingPlayerLedPattern;
+                            playerLedRequestPending = false;
+                            playerLedOperationActive = true;
+                            playerLedOperation = CompletePlayerLedRequestsAsync(pattern);
+                        }
+                    }
+                }
+            });
+            playerLedOperation = operation;
+            return operation;
+        }
+    }
+
     internal Task ResourceRelease
     {
         get
@@ -2571,8 +2611,12 @@ internal sealed class Switch2BluetoothWindowsInputLease :
         {
             // This is subscription-success linearization. A disconnect that
             // won before it cannot be reported as a successful publication.
-            return state == LeaseState.Active &&
+            bool active = state == LeaseState.Active &&
                 this.transportGeneration == transportGeneration;
+            if (active && labProbe == null)
+                labProbe = Switch2BluetoothLabProbe.TryCreate(Admission.Model, service,
+                    transportGeneration, IsLabLifetimeActive, RequestLabAudioSetupAsync);
+            return active;
         }
     }
 
@@ -2688,6 +2732,7 @@ internal sealed class Switch2BluetoothWindowsInputLease :
                 callback = notification;
                 generation = transportGeneration;
             }
+            labProbe?.ObserveReport(completionQpc);
             callback?.Invoke(generation, Switch2InputCodec.ServiceUuid,
                 Switch2InputCodec.Common05CharacteristicUuid, value,
                 completionQpc);
@@ -2777,6 +2822,11 @@ internal sealed class Switch2BluetoothWindowsInputLease :
 
     private async Task<bool> ReleaseResourcesWhenSafeAsync()
     {
+        // Cancels pipe waits/command deadlines, then drains actual operations.
+        // The existing bounded teardown observer handles a noncooperative GATT
+        // operation; never dispose its controller/service underneath it.
+        if (labProbe != null)
+            await labProbe.StopAsync().ConfigureAwait(false);
         bool playerLedClean = true;
         if (playerLedChannel != null)
         {

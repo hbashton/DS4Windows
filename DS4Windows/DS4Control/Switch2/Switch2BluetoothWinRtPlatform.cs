@@ -13,6 +13,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices.WindowsRuntime;
 using System.Text;
+using System.Text.Json;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Windows.Devices.Bluetooth;
@@ -474,7 +476,7 @@ internal sealed class Switch2BluetoothWinRtPlatform :
     }
 
     private sealed class WinRtGattService :
-        ISwitch2BluetoothWindowsGattService
+        ISwitch2BluetoothWindowsGattService, ISwitch2BluetoothLabAudioAccess
     {
         private readonly GattDeviceService service;
         private bool disposed;
@@ -486,6 +488,51 @@ internal sealed class Switch2BluetoothWinRtPlatform :
         }
 
         public Guid Uuid => service.Uuid;
+
+        public async Task<string> QueryAudioLabAsync(string command, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            ObjectDisposedException.ThrowIf(disposed, this);
+            if (command == "inventory")
+            {
+                // Actual completion retained by the lab worker, not a cancelled
+                // WinRT projection. Reuses this exact live service.
+                var result = await service.GetCharacteristicsAsync(BluetoothCacheMode.Uncached).AsTask().ConfigureAwait(false);
+                return JsonSerializer.Serialize(new
+                {
+                    Status = result.Status.ToString(), Service = service.Uuid,
+                    MaxPduSize = service.Session.MaxPduSize,
+                    MaximumSingleAttValueBytes = Math.Max(0, service.Session.MaxPduSize - 3),
+                    Characteristics = result.Characteristics.Select(c => new
+                    { c.Uuid, c.AttributeHandle, Properties = c.CharacteristicProperties.ToString() }),
+                    BluetoothPlaybackConfirmed = false,
+                });
+            }
+            if (command != "headset-header") throw new ArgumentException("Unsupported read-only lab query.");
+            var query = await service.GetCharacteristicsForUuidAsync(Switch2BluetoothLabAudioProtocol.InputUuid,
+                BluetoothCacheMode.Cached).AsTask().ConfigureAwait(false);
+            if (query.Status != GattCommunicationStatus.Success || query.Characteristics.Count != 1)
+                return JsonSerializer.Serialize(new { Error = "Headset characteristic unavailable", Status = query.Status.ToString() });
+            var headset = query.Characteristics[0];
+            if (!headset.CharacteristicProperties.HasFlag(GattCharacteristicProperties.Read))
+                return "{\"Error\":\"Headset characteristic does not permit Read\"}";
+            cancellationToken.ThrowIfCancellationRequested();
+            var read = await headset.ReadValueAsync(BluetoothCacheMode.Uncached).AsTask().ConfigureAwait(false);
+            byte? jack = null, audioLength = null;
+            if (read.Status == GattCommunicationStatus.Success && read.Value.Length >= 15)
+            {
+                using var reader = DataReader.FromBuffer(read.Value);
+                byte[] prefix = new byte[15];
+                reader.ReadBytes(prefix);
+                jack = prefix[13];
+                audioLength = prefix[14];
+            }
+            // Only framing metadata leaves this read. No microphone PCM/encoded
+            // bytes, button state, or motion data is returned, stored or played.
+            return JsonSerializer.Serialize(new { Status = read.Status.ToString(), Length = read.Value?.Length,
+                JackStateRaw = jack, DeclaredAudioBytes = audioLength, NotificationsChanged = false,
+                BluetoothPlaybackConfirmed = false });
+        }
 
         public async ValueTask<Switch2BluetoothWindowsGattQuery<
             ISwitch2BluetoothWindowsGattCharacteristic>>

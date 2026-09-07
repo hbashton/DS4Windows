@@ -116,6 +116,7 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
     private readonly object publicationGate = new();
     private readonly object localFeedbackGate = new();
     private readonly Switch2Transport transport;
+    private readonly bool labAudioProbeKeepConnected;
     private readonly Switch2JoyConRuntimeBindingMode joyConBindingMode;
     private readonly ulong pairEpoch;
     private readonly ulong leftDeviceGeneration;
@@ -211,6 +212,10 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
         : base(displayName, inputDeviceType, connectionType)
     {
         this.transport = transport;
+        // Only the opt-in portable probing session suppresses automatic idle
+        // closure. No profile setting is changed; manual Stop/disconnect works.
+        labAudioProbeKeepConnected = inputDeviceType == InputDeviceType.Switch2Pro &&
+            transport == Switch2Transport.BluetoothLe && Switch2BluetoothLabProbe.IsEnabled;
         RuntimeGeneration = runtimeGeneration;
         this.joyConBindingMode = joyConBindingMode;
         this.pairEpoch = pairEpoch;
@@ -1573,7 +1578,7 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
     private bool ShouldRequestAutoDisconnectNoLock(long timestampQpc,
         long qpcFrequency, bool noPhysicalButtons, DS4State state)
     {
-        if (rawStickOperation != null) return false;
+        if (rawStickOperation != null || labAudioProbeKeepConnected) return false;
         if (transport != Switch2Transport.BluetoothLe || timestampQpc < 0 ||
             qpcFrequency <= 0)
         {

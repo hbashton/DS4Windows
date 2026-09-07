@@ -5,6 +5,12 @@ HD rumble and LEDs are separate, already-existing paths. USB headphone output
 is physically verified in `2026-09-06-switch2-pro-usb-audio.md`. Neither fact
 establishes Bluetooth headset audio.
 
+**Latest probing workflow:** use the
+[b90 in-process probe](2026-09-07-switch2-inprocess-audio-probe.md), leaving
+DS4Windows open. The standalone ownership-handoff approach below is historical
+evidence, not the next hardware step. The user's controller lost its live
+connection when DS4Windows was closed; b90 probes the existing input lease.
+
 ## Source audit
 
 - Switch2Connect `61ac6642ce12fe7217e38a860b14863b18ca7e28`, README known

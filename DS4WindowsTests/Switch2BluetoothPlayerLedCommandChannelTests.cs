@@ -6,6 +6,59 @@ namespace DS4WindowsTests;
 public sealed class Switch2BluetoothPlayerLedCommandChannelTests
 {
     [TestMethod]
+    public async Task LabAudioSetupSharesTheExistingResponseOwnerAndPreservesLeds()
+    {
+        var command = FakeCharacteristic.Command();
+        var response = FakeCharacteristic.Response();
+        command.WriteOverride = (request, _, _) =>
+        {
+            if (request.Span[0] == 0x17)
+            {
+                CollectionAssert.AreEqual(Convert.FromHexString("179101020007000080BB000002F000"), request.ToArray());
+                response.Emit(Convert.FromHexString("0901000000000000")); // Unrelated LED reply.
+                response.Emit(Convert.FromHexString("1701010210780000"));
+            }
+            else response.Emit(Convert.FromHexString("0901000000000000"));
+            return ValueTask.FromResult(true);
+        };
+        var channel = new Switch2BluetoothPlayerLedCommandChannel(command, response);
+        Assert.IsTrue(await channel.PrepareAsync(CancellationToken.None));
+        StringAssert.Contains(await channel.ConfigureLabAudioAsync(CancellationToken.None), "\"SetupAcknowledged\":true");
+        Assert.IsTrue((await channel.SetPlayerAsync(1, CancellationToken.None)).Succeeded);
+        Assert.IsTrue(await channel.RetireAsync(CancellationToken.None));
+    }
+
+    [TestMethod]
+    public async Task LabAudioCancellationDoesNotDisposeUnderItsActualWrite()
+    {
+        var events = new List<string>();
+        var command = FakeCharacteristic.Command(events);
+        var response = FakeCharacteristic.Response(events);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var finish = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        command.WriteOverride = (_, _, token) =>
+        {
+            Assert.IsFalse(token.CanBeCanceled, "The actual WinRT write must stay observable.");
+            entered.TrySetResult();
+            return new ValueTask<bool>(finish.Task);
+        };
+        var channel = new Switch2BluetoothPlayerLedCommandChannel(command, response);
+        Assert.IsTrue(await channel.PrepareAsync(CancellationToken.None));
+        using var cancellation = new CancellationTokenSource();
+        Task<string> setup = channel.ConfigureLabAudioAsync(cancellation.Token);
+        await entered.Task;
+        Assert.AreEqual(Switch2BluetoothPlayerLedChannelFailure.Busy,
+            (await channel.SetPlayerAsync(1, CancellationToken.None)).Failure);
+        cancellation.Cancel();
+        Task<bool> retire = channel.RetireAsync(CancellationToken.None).AsTask();
+        Assert.IsFalse(retire.IsCompleted);
+        CollectionAssert.DoesNotContain(events, "detach");
+        finish.TrySetResult(true);
+        StringAssert.Contains(await setup, "Error");
+        Assert.IsTrue(await retire);
+    }
+
+    [TestMethod]
     public async Task SubscriptionPrecedesExactAcknowledgedLedExchange()
     {
         var events = new List<string>();

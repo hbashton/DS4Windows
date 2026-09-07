@@ -483,6 +483,52 @@ namespace DS4Windows
             return true;
         }
 
+        // Retained pads stay Bound in the manager, so ordinary plug/unplug and
+        // another physical controller cannot discover them as free outputs.
+        internal bool TryHoldBoundOutput(OutputDevice output, OutputDevice[] bound, int index)
+        {
+            using WriteLocker locker = new WriteLocker(queueLocker);
+            if ((uint)index >= bound.Length || !ReferenceEquals(bound[index], output) ||
+                !revDeviceDict.TryGetValue(output, out int slot)) return false;
+            var candidate = outputSlots[slot];
+            if (!IsExactAttachedSlotNoLock(candidate, output) || candidate.InputIndex != index ||
+                candidate.CurrentInputBound != OutSlotDevice.InputBound.Bound) return false;
+            output.ResetState();
+            bound[index] = null;
+            return true;
+        }
+
+        internal bool TryAdoptHeldOutput(OutputDevice output, OutputDevice[] bound, int index, string display)
+        {
+            using WriteLocker locker = new WriteLocker(queueLocker);
+            if ((uint)index >= bound.Length || bound[index] != null ||
+                !revDeviceDict.TryGetValue(output, out int slot)) return false;
+            var candidate = outputSlots[slot];
+            if (!IsExactAttachedSlotNoLock(candidate, output) || candidate.InputIndex != index ||
+                candidate.CurrentInputBound != OutSlotDevice.InputBound.Bound) return false;
+            candidate.InputDisplayString = display;
+            bound[index] = output;
+            return true;
+        }
+
+        internal void RetireHeldOutput(OutputDevice output, OutputDevice[] bound, int index)
+        {
+            using WriteLocker locker = new WriteLocker(queueLocker);
+            if ((uint)index >= bound.Length || bound[index] != null ||
+                !revDeviceDict.TryGetValue(output, out int slot) ||
+                !IsExactAttachedSlotNoLock(outputSlots[slot], output) || outputSlots[slot].InputIndex != index)
+                throw new InvalidOperationException("The retained output no longer has its exact reservation.");
+            // Unlike legacy deferred removal, keep the exact manager record
+            // until Disconnect succeeds. A failure remains retryable at Stop.
+            output.RemoveFeedbacks();
+            output.Disconnect();
+            outputDevices[slot] = null;
+            deviceDict.Remove(slot);
+            revDeviceDict.Remove(output);
+            outputSlots[slot].DetachDevice();
+            SlotUnassigned?.Invoke(this, slot, outputSlots[slot]);
+        }
+
         private bool IsExactAttachedSlotNoLock(OutSlotDevice candidate, OutputDevice output)
         {
             int slot = candidate.Index;

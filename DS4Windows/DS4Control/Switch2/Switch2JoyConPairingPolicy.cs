@@ -68,11 +68,12 @@ internal readonly struct Switch2JoyConManualPairSelectionResult
 {
     internal Switch2JoyConManualPairSelectionResult(
         Switch2JoyConManualPairSelectionDisposition disposition,
-        int leftCandidateId = 0, int rightCandidateId = 0)
+        int leftCandidateId = 0, int rightCandidateId = 0, int preferredCandidateId = 0)
     {
         Disposition = disposition;
         LeftCandidateId = leftCandidateId;
         RightCandidateId = rightCandidateId;
+        PreferredCandidateId = preferredCandidateId;
     }
 
     internal Switch2JoyConManualPairSelectionDisposition Disposition
@@ -82,6 +83,7 @@ internal readonly struct Switch2JoyConManualPairSelectionResult
 
     internal int LeftCandidateId { get; }
     internal int RightCandidateId { get; }
+    internal int PreferredCandidateId { get; }
 }
 
 /// <summary>
@@ -134,10 +136,11 @@ internal sealed class Switch2JoyConManualPairSelection
             armedCandidateId : candidate.Id;
         int right = armedModel == Switch2ControllerModel.JoyCon2Right ?
             armedCandidateId : candidate.Id;
+        int preferred = armedCandidateId;
         Clear();
         return new Switch2JoyConManualPairSelectionResult(
             Switch2JoyConManualPairSelectionDisposition.PairReady,
-            left, right);
+            left, right, preferred);
     }
 
     internal bool Reconcile(

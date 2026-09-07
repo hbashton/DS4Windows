@@ -123,6 +123,7 @@ internal sealed class Switch2VirtualFeedbackSession
     internal ulong OwnershipEpoch { get; }
 
     internal bool WasRetiredDisconnected => Volatile.Read(ref disconnectedRetired);
+    internal bool IsRetired => !Volatile.Read(ref active) || WasRetiredDisconnected;
 
     internal string DescribeWirePublication()
     {

@@ -2630,6 +2630,8 @@ Suspend support not enabled.", true);
             public string Label { get; }
             public bool IsArmed { get; }
             public string PairButtonToolTip { get; }
+            public string ButtonText => IsArmed ? "Cancel" : "Link";
+            public string StatusText => IsArmed ? "Selected — choose the other Joy-Con" : "Works on its own · Available to link";
         }
 
         private void RefreshSwitch2JoyConManualRows(bool force = false)
@@ -2654,9 +2656,19 @@ Suspend support not enabled.", true);
             }
 
             bool canSelect = GetSwitch2JoyConActionAvailability().CanSelect;
+            if (automatic) switch2JoyConManualPairSelection.Clear();
+            var cards = conLvViewModel.GetControllerSnapshot();
+            foreach (var card in cards)
+            {
+                var candidate = candidates.FirstOrDefault(item =>
+                    item.SlotToken.IsValid && ReferenceEquals(item.SlotToken.Registration.Device, card.Device));
+                var joined = App.rootHub.running ? App.rootHub.GetJoinedJoyConToken(card.Device) : default;
+                card.RefreshJoyConLinkAction(candidate, joined,
+                    candidate.Id > 0 && switch2JoyConManualPairSelection.IsArmed(candidate), canSelect, automatic);
+            }
             var signature = new StringBuilder();
             signature.Append(automatic).Append('|').
-                Append(canSelect).Append('|');
+                Append(canSelect).Append('|').Append(cards.Any(card => card.JoyConLinkAction.JoinedToken.IsValid)).Append('|');
             foreach (Switch2JoyConPairCandidate candidate in candidates)
             {
                 signature.Append(candidate.Id).Append(':').
@@ -2674,7 +2686,8 @@ Suspend support not enabled.", true);
             }
             switch2JoyConManualRowsSignature = nextSignature;
 
-            bool show = !automatic && candidates.Length != 0;
+            bool show = !automatic && (candidates.Length != 0 || Switch2ControllerActionBusy ||
+                cards.Any(card => card.JoyConLinkAction.Visible));
             switch2JoyConManualPanel.Visibility = show ? Visibility.Visible :
                 Visibility.Collapsed;
             switch2JoyConManualRows.IsEnabled = canSelect;
@@ -2701,6 +2714,35 @@ Suspend support not enabled.", true);
                 return;
             }
 
+            await SelectJoyConForLinkAsync(row);
+        }
+
+        private async void Switch2JoyConCardLinkBtn_Click(object sender, RoutedEventArgs e)
+        {
+            if (!GetSwitch2JoyConActionAvailability().CanSelect || sender is not Button button ||
+                button.DataContext is not CompositeDeviceModel card || !card.JoyConLinkAction.Enabled) return;
+            var action = card.JoyConLinkAction;
+            if (!action.JoinedToken.IsValid)
+            {
+                await SelectJoyConForLinkAsync(new Switch2JoyConManualRow(action.Candidate, action.IsArmed));
+                return;
+            }
+            switch2JoyConManualPairSelection.Clear();
+            SetSwitch2JoyConMutationBusy(true);
+            switch2JoyConManualStatusText.Text = "Unlinking — keeping both Joy-Cons connected…";
+            try
+            {
+                var result = await Task.Run(async () => await App.rootHub.UnlinkSwitch2JoyConsAsync(action.JoinedToken));
+                switch2JoyConManualStatusText.Text = result.Succeeded ?
+                    "Joy-Cons are now two separate controllers." : $"Could not finish unlinking: {result.Failure}. Check the controller list and log.";
+            }
+            catch (Exception exception)
+            { switch2JoyConManualStatusText.Text = $"Could not finish unlinking: {exception.Message}"; }
+            finally { SetSwitch2JoyConMutationBusy(false); }
+        }
+
+        private async Task SelectJoyConForLinkAsync(Switch2JoyConManualRow row)
+        {
             Switch2JoyConManualPairSelectionResult selection =
                 switch2JoyConManualPairSelection.Select(row.Candidate);
             switch (selection.Disposition)
@@ -2734,10 +2776,10 @@ Suspend support not enabled.", true);
                 "Joining and remembering the selected Joy-Con pair…";
             try
             {
-                Switch2JoyConPairActivationResult result = await App.rootHub.
+                Switch2JoyConPairActivationResult result = await Task.Run(async () => await App.rootHub.
                     CreateAndActivateSwitch2JoyConPairAsync(
                         selection.LeftCandidateId,
-                        selection.RightCandidateId);
+                        selection.RightCandidateId, preferredCandidateId: selection.PreferredCandidateId));
                 switch2JoyConManualStatusText.Text = result.Succeeded ?
                     "Joy-Con 2 pair connected as one controller." :
                     $"Joy-Con 2 pair could not be joined: {result.Failure}.";

@@ -39,7 +39,7 @@ using Switch2CemuhookYawPolicy =
 
 namespace DS4Windows
 {
-    public class ControlService
+    public partial class ControlService
     {
         private readonly DualSenseAudioPassthrough dualSenseAudioPassthrough = new DualSenseAudioPassthrough();
         private readonly DualShock4AudioPassthrough dualShock4AudioPassthrough = new DualShock4AudioPassthrough();
@@ -322,7 +322,8 @@ namespace DS4Windows
                         AutomaticPairing,
                     switch2MagnetometerCalibrationStore,
                     switch2JoyConHoldModeStore,
-                    switch2GyroCalibrationStore, switch2RawStickCalibrationStore);
+                    switch2GyroCalibrationStore, switch2RawStickCalibrationStore,
+                    BeginJoyConOutputHandoff);
             switch2ProUsbProductionCoordinator =
                 new Switch2ProUsbProductionCoordinator(
                     switch2RuntimeRegistrationService,
@@ -2524,10 +2525,17 @@ namespace DS4Windows
         internal ValueTask<Switch2JoyConPairActivationResult>
             CreateAndActivateSwitch2JoyConPairAsync(int leftCandidateId,
                 int rightCandidateId,
-                CancellationToken cancellationToken = default) =>
+                CancellationToken cancellationToken = default, int preferredCandidateId = 0) =>
             switch2BluetoothProductionCoordinator.
                 CreateAndActivateJoyConPairAsync(leftCandidateId,
-                    rightCandidateId, cancellationToken);
+                    rightCandidateId, cancellationToken, preferredCandidateId);
+
+        internal InputControllerSlotToken GetJoinedJoyConToken(DS4Device device) =>
+            switch2BluetoothProductionCoordinator.GetJoinedJoyConToken(device);
+
+        internal ValueTask<Switch2JoyConPairActivationResult> UnlinkSwitch2JoyConsAsync(
+            InputControllerSlotToken token) =>
+            switch2BluetoothProductionCoordinator.UnlinkJoyConsAsync(token);
 
         internal ValueTask<Switch2JoyConStandaloneActivationResult>
             ActivateSwitch2JoyConSeparatelyAsync(int candidateId,
@@ -3196,6 +3204,7 @@ namespace DS4Windows
                 }
 
                 StartupDiag("ControlService.Stop outputslotMan.Stop begin");
+                joyConOutputHandoff?.Dispose();
                 outputslotMan.Stop(true);
                 StartupDiag("ControlService.Stop outputslotMan.Stop end");
 
@@ -6556,7 +6565,9 @@ namespace DS4Windows
                     lastPrepareDiagnostic = "extra-button-registration";
                     Global.RefreshExtrasButtons(slot,
                         service.GetKnownExtraButtons(device));
-                    bool useAutoProfile = useTempProfile[slot];
+                    JoyConOutputHandoff handoff = service.joyConOutputHandoff;
+                    bool keepsOutput = handoff?.MatchesSuccessor(slot, device) == true;
+                    bool useAutoProfile = useTempProfile[slot] || keepsOutput;
                     bool profileLoaded = useAutoProfile;
                     lastPrepareDiagnostic = "profile-selection";
                     if (!useAutoProfile)
@@ -6583,7 +6594,14 @@ namespace DS4Windows
                     {
                         lastPrepareDiagnostic = "profile-presentation";
                         device.LightBarColor = getMainColor(slot);
-                        if (!getDInputOnly(slot) && device.isSynced())
+                        if (keepsOutput)
+                        {
+                            lastPrepareDiagnostic = "output-handoff";
+                            // Transfer ownership before feedback rebinding: any
+                            // subsequent failure is cleaned by this inverse.
+                            handoff.Adopt(retained, device);
+                        }
+                        else if (!getDInputOnly(slot) && device.isSynced())
                         {
                             lastPrepareDiagnostic = "output-plug";
                             service.PluginOutDev(slot, device);
@@ -6657,6 +6675,7 @@ namespace DS4Windows
             private int outputChangeThread;
             private OutputDevice outputBeforeChange;
             private OutputDevice uncertainProducedOutput;
+            internal JoyConOutputHandoff Handoff { get; set; }
 
             internal Switch2ControlServiceProfileStageInverse(
                 ControlService service,
@@ -6688,6 +6707,8 @@ namespace DS4Windows
             internal OutputDevice PreparedOutput { get; set; }
 
             internal bool Prepared { get; set; }
+            internal bool CanHandoff => Prepared && !consumed && !outputChangeActive &&
+                !outputChangeUncertain && !undoActive && Handoff == null;
 
             private bool IsCurrentOutputOwner(bool completing = false)
             {
@@ -6705,7 +6726,7 @@ namespace DS4Windows
 
             internal bool TryBeginOutputChange(DS4Device source)
             {
-                if (!ReferenceEquals(source, device) || outputChangeActive || outputChangeUncertain ||
+                if (!ReferenceEquals(source, device) || Handoff != null || outputChangeActive || outputChangeUncertain ||
                     !IsCurrentOutputOwner() ||
                     !ReferenceEquals(service.outputDevices[slot], PreparedOutput)) return false;
                 outputChangeActive = true;
@@ -6789,7 +6810,12 @@ namespace DS4Windows
                                 Switch2ControlServiceReversibleStageFailureKind.
                                     SlotChanged);
                     }
-                    if (current != null)
+                    if (Handoff != null)
+                    {
+                        Handoff.HoldAfterNeutral(current);
+                        PreparedOutput = null;
+                    }
+                    else if (current != null)
                     {
                         // Every admitted output replacement transferred this
                         // retained proof to its exact synchronous result.

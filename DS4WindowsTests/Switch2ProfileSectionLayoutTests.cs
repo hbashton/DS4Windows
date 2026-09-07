@@ -8,6 +8,19 @@ namespace DS4WindowsTests;
 [TestClass]
 public sealed class Switch2ProfileSectionLayoutTests
 {
+    [TestMethod]
+    public void ControllerCardHasLabeledLinkCancelUnlinkAction()
+    {
+        var window = Load("MainWindow.xaml");
+        var list = window.Descendants(Wpf + "ListView").Single(node => (string)node.Attribute(Xaml + "Name") == "controllerLV");
+        var button = list.Descendants(Wpf + "Button").Single(node => (string)node.Attribute(Xaml + "Name") == "joyConCardLinkButton");
+        Assert.AreEqual("Switch2JoyConCardLinkBtn_Click", (string)button.Attribute("Click"));
+        Assert.IsTrue(button.Descendants(Wpf + "TextBlock").Any(node => (string)node.Attribute("Text") == "{Binding JoyConLinkAction.Text}"));
+        StringAssert.Contains((string)button.Attribute("Visibility"), "JoyConLinkAction.Visible");
+        Assert.AreEqual("{Binding JoyConLinkAction.Enabled}", (string)button.Attribute("IsEnabled"));
+        Assert.AreEqual("True", (string)button.Attribute("ToolTipService.ShowOnDisabled"));
+    }
+
     private static readonly XNamespace Wpf =
         "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
     private static readonly XNamespace Xaml =

@@ -9,6 +9,86 @@ namespace DS4WindowsTests;
 [DoNotParallelize]
 public sealed class Switch2ProfileOutputOwnershipTests
 {
+    [TestMethod]
+    public void NoVirtualPadProfileSurvivesJoyConHandoffWithoutCreatingOutput()
+    {
+        using var fixture = new Fixture(initialOutput: false);
+        Global.store.dinputOnly[0] = true;
+        fixture.Attach();
+        using var handoff = fixture.Service.BeginJoyConOutputHandoff(fixture.Token);
+        fixture.RetireAndRemove();
+        fixture.AdoptSuccessor(handoff);
+        Assert.IsNull(fixture.Service.outputDevices[0]);
+        Assert.AreEqual(0, fixture.Manager.NumAttachedDevices);
+        Assert.AreEqual(0, fixture.Initial.ConnectCount);
+        Assert.IsTrue(Global.useDInputOnly[0]);
+    }
+
+    [TestMethod]
+    public void JoyConHandoffRetainsExactVirtualPadAndProfileForSuccessor()
+    {
+        using var fixture = new Fixture();
+        fixture.Attach();
+        using var handoff = fixture.Service.BeginJoyConOutputHandoff(fixture.Token);
+        Assert.IsNotNull(handoff);
+        fixture.RetireAndRemove();
+        Assert.AreEqual(0, fixture.Initial.DisconnectCount);
+        Assert.AreEqual(1, fixture.Manager.NumAttachedDevices);
+        Assert.IsNull(fixture.Manager.FindExistUnboundSlotType(fixture.Initial.Type), "A reserved pad cannot be stolen by another input.");
+        Assert.IsNull(fixture.Service.outputDevices[0]);
+        fixture.AdoptSuccessor(handoff);
+        Assert.AreSame(fixture.Initial, fixture.Service.outputDevices[0]);
+        Assert.AreEqual(1, fixture.Initial.ConnectCount, "Adoption must not call Connect again.");
+        Assert.AreEqual(0, fixture.Initial.DisconnectCount);
+        Assert.AreEqual(OutContType.ViiperX360, Global.activeOutDevType[0]);
+        handoff.Dispose();
+        Assert.AreSame(fixture.Initial, fixture.Service.outputDevices[0]);
+    }
+
+    [TestMethod]
+    public void AbandonedJoyConHandoffRetiresOnlyItsReservedOutput()
+    {
+        using var fixture = new Fixture();
+        fixture.Attach();
+        var handoff = fixture.Service.BeginJoyConOutputHandoff(fixture.Token);
+        fixture.RetireAndRemove();
+        Assert.AreEqual(0, fixture.Initial.DisconnectCount);
+        handoff.Dispose();
+        handoff.Dispose();
+        Assert.AreEqual(1, fixture.Initial.DisconnectCount);
+        Assert.AreEqual(0, fixture.Manager.NumAttachedDevices);
+    }
+
+    [TestMethod]
+    public void FailedRetainedOutputCleanupKeepsExactReservationForRetry()
+    {
+        using var fixture = new Fixture();
+        fixture.Attach();
+        var handoff = fixture.Service.BeginJoyConOutputHandoff(fixture.Token);
+        fixture.RetireAndRemove();
+        fixture.Initial.ThrowOnDisconnect = true;
+        Assert.ThrowsException<IOException>(handoff.Dispose);
+        Assert.AreEqual(1, fixture.Manager.NumAttachedDevices);
+        Assert.AreSame(fixture.Initial, fixture.Manager.GetOutSlotDevice(fixture.Initial).OutputDevice);
+        Assert.IsNull(fixture.Manager.FindExistUnboundSlotType(fixture.Initial.Type));
+        fixture.Initial.ThrowOnDisconnect = false;
+        handoff.Dispose();
+        Assert.AreEqual(0, fixture.Manager.NumAttachedDevices);
+        Assert.AreEqual(2, fixture.Initial.DisconnectCount);
+    }
+
+    [TestMethod]
+    public void CancelBeforeRetirementRestoresNormalOutputOwnership()
+    {
+        using var fixture = new Fixture();
+        fixture.Attach();
+        var handoff = fixture.Service.BeginJoyConOutputHandoff(fixture.Token);
+        Assert.ThrowsException<InvalidOperationException>(() => fixture.Service.BeginJoyConOutputHandoff(fixture.Token));
+        handoff.Dispose();
+        fixture.RetireAndRemove();
+        Assert.AreEqual(1, fixture.Initial.DisconnectCount);
+    }
+
     [DataTestMethod]
     [DataRow(false, false)]
     [DataRow(false, true)]
@@ -307,6 +387,25 @@ public sealed class Switch2ProfileOutputOwnershipTests
         {
             var removed = TryRetireAndRemove();
             Assert.IsTrue(removed.Succeeded, $"{removed.Operation}/{removed.Outcome}/{removed.FailureKind}");
+        }
+
+        internal void AdoptSuccessor(ISwitch2JoyConOutputHandoff handoff)
+        {
+            Assert.IsTrue(Switch2RuntimeInputDevice.TryCreatePro(802, 803, Switch2Transport.Usb, out var successor, out _));
+            Assert.IsTrue(InputControllerRegistration.TryCreate(successor, successor.RuntimeGeneration,
+                InputControllerOwnershipKind.Switch2Runtime, false, false, new FakeOwner(successor), out var registration, out _));
+            Assert.IsTrue(Table.TryReserveAndBind(registration, out var successorToken, out _, out _));
+            handoff.PrepareSuccessor(successor);
+            Assert.ThrowsException<InvalidOperationException>(() => handoff.PrepareSuccessor(successor));
+            var stageType = typeof(ControlService).GetNestedType("Switch2ControlServiceProfileStage", BindingFlags.NonPublic);
+            var stage = (ISwitch2ControlServiceReversibleProfileStage)Activator.CreateInstance(stageType,
+                BindingFlags.Instance | BindingFlags.NonPublic, null, new object[] { Service }, null);
+            var successorHost = new Switch2ControlServiceReversibleProfileSlotHost(Table,
+                registrationService.LifecycleGate, Service.DS4Controllers, Service.touchPad, controllers,
+                stage, static (_, _, _) => { });
+            var result = successorHost.TryPrepare(new Switch2ControlServiceSlotLease(new object(), successorToken));
+            Assert.IsTrue(result.Succeeded, result.FailureKind.ToString());
+            successor.ReadWaitEv.Dispose();
         }
 
         internal void BeginRetire()

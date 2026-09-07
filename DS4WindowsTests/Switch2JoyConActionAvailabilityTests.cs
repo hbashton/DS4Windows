@@ -6,6 +6,32 @@ namespace DS4WindowsTests;
 [TestClass]
 public sealed class Switch2JoyConActionAvailabilityTests
 {
+    [TestMethod]
+    public void ControllerCardShowsLinkCancelAndExplainsAutomaticPairingLock()
+    {
+        Assert.IsTrue(Switch2RuntimeInputDevice.TryCreateStandaloneJoyCon(
+            Switch2ControllerModel.JoyCon2Left, 101, 102, out var runtime, out _));
+        var card = new CompositeDeviceModel(runtime, DS4Windows.Global.TEST_PROFILE_INDEX, null, null);
+        var candidate = new Switch2JoyConPairCandidate(10, Switch2ControllerModel.JoyCon2Left, 1);
+        int changes = 0;
+        card.JoyConLinkActionChanged += (_, _) => changes++;
+        card.RefreshJoyConLinkAction(candidate, default, false, true, false);
+        Assert.IsTrue(card.JoyConLinkAction.Visible);
+        Assert.IsTrue(card.JoyConLinkAction.Enabled);
+        Assert.AreEqual("Link", card.JoyConLinkAction.Text);
+        card.RefreshJoyConLinkAction(candidate, default, false, true, false);
+        Assert.AreEqual(1, changes, "Polling must not churn unchanged UI bindings.");
+        card.RefreshJoyConLinkAction(candidate, default, true, true, false);
+        Assert.AreEqual("Cancel", card.JoyConLinkAction.Text);
+        Assert.IsTrue(card.JoyConLinkAction.IsArmed);
+        card.RefreshJoyConLinkAction(candidate, default, false, false, true);
+        Assert.IsFalse(card.JoyConLinkAction.Enabled);
+        StringAssert.Contains(card.JoyConLinkAction.ToolTip, "automatic pairing");
+        card.RefreshJoyConLinkAction(default, default, false, false, false);
+        Assert.IsFalse(card.JoyConLinkAction.Visible);
+        runtime.ReadWaitEv.Dispose();
+    }
+
     [DataTestMethod]
     [DataRow(false, false, false, 1, 2, false, false, false)]
     [DataRow(true, true, false, 1, 2, false, false, false)]

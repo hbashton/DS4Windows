@@ -109,6 +109,31 @@
                                                 <TextBlock Text="{Binding IsExclusiveText}" FontSize="11"
                                                            Foreground="{DynamicResource MutedForegroundColor}" />
                                             </StackPanel>
+                                            <Button x:Name="joyConCardLinkButton" HorizontalAlignment="Left"
+                                                    Margin="0,7,0,0" MinWidth="100" Height="32" Padding="10,3"
+                                                    Visibility="{Binding JoyConLinkAction.Visible, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                    IsEnabled="{Binding JoyConLinkAction.Enabled}"
+                                                    ToolTip="{Binding JoyConLinkAction.ToolTip}" ToolTipService.ShowOnDisabled="True"
+                                                    Click="Switch2JoyConCardLinkBtn_Click">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Border Width="9" Height="18" CornerRadius="4,1,1,4"
+                                                            BorderBrush="{DynamicResource ForegroundColor}" BorderThickness="1.5" />
+                                                    <TextBlock Text="ϟ" Foreground="{DynamicResource AccentColor}" Margin="2,0" />
+                                                    <Border Width="9" Height="18" CornerRadius="1,4,4,1"
+                                                            BorderBrush="{DynamicResource ForegroundColor}" BorderThickness="1.5" Margin="0,0,8,0" />
+                                                    <TextBlock Text="{Binding JoyConLinkAction.Text}" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                                <Button.Style>
+                                                    <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding JoyConLinkAction.IsArmed}" Value="True">
+                                                                <Setter Property="BorderBrush" Value="{DynamicResource AccentColor}" />
+                                                                <Setter Property="BorderThickness" Value="2" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Button.Style>
+                                            </Button>
                                         </StackPanel>
                                     </Grid>
                                     <Border Grid.Column="1" Background="{DynamicResource RaisedBackgroundColor}"
@@ -204,7 +229,7 @@
                                        FontWeight="Bold"
                                        Foreground="{DynamicResource MutedForegroundColor}" />
                             <TextBlock x:Name="switch2JoyConManualStatusText"
-                                       Text="Click the link button on one Joy-Con, then on an opposite-side Joy-Con."
+                                       Text="Click Link on one Joy-Con, then Link on the other. The first controller keeps its profile and virtual pad."
                                        Margin="0,4,0,10" TextWrapping="Wrap" />
                             <ItemsControl x:Name="switch2JoyConManualRows">
                                 <ItemsControl.ItemsPanel>
@@ -226,16 +251,17 @@
                                                 <StackPanel VerticalAlignment="Center">
                                                     <TextBlock Text="{Binding Label}"
                                                                FontWeight="SemiBold" />
-                                                    <TextBlock Text="Waiting to join"
+                                                    <TextBlock Text="{Binding StatusText}"
                                                                Margin="0,2,8,0"
                                                                FontSize="11"
                                                                Foreground="{DynamicResource MutedForegroundColor}" />
                                                 </StackPanel>
-                                                <Button Grid.Column="1" Width="64" Height="36"
+                                                <Button Grid.Column="1" Width="114" Height="36"
                                                         Padding="5" Click="Switch2JoyConManualPairBtn_Click"
                                                         ToolTip="{Binding PairButtonToolTip}">
                                                     <Grid>
                                                         <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="Auto" />
                                                             <ColumnDefinition Width="Auto" />
                                                             <ColumnDefinition Width="Auto" />
                                                             <ColumnDefinition Width="Auto" />
@@ -250,6 +276,7 @@
                                                                 CornerRadius="2,6,6,2"
                                                                 BorderBrush="{DynamicResource ForegroundColor}"
                                                                 BorderThickness="1.5" />
+                                                        <TextBlock Grid.Column="3" Text="{Binding ButtonText}" Margin="8,0,0,0" VerticalAlignment="Center" />
                                                     </Grid>
                                                 </Button>
                                             </Grid>

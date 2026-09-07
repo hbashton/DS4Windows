@@ -45,6 +45,12 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public ObservableCollection<CompositeDeviceModel> ControllerCol
         { get => controllerCol; set => controllerCol = value; }
 
+        internal CompositeDeviceModel[] GetControllerSnapshot()
+        {
+            using ReadLocker locker = new ReadLocker(_colListLocker);
+            return controllerCol.ToArray();
+        }
+
         private ProfileList profileListHolder;
         private ControlService controlService;
         private int currentIndex;
@@ -226,6 +232,28 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         private ProfileEntity selectedEntity;
         private int selectedIndex = -1;
         private int devIndex;
+
+        public JoyConLinkActionView JoyConLinkAction { get; private set; } = new();
+        public event EventHandler JoyConLinkActionChanged;
+
+        internal void RefreshJoyConLinkAction(Switch2JoyConPairCandidate candidate,
+            InputControllerSlotToken joinedToken, bool armed, bool canSelect, bool automatic)
+        {
+            var next = new JoyConLinkActionView
+            {
+                Candidate = candidate, JoinedToken = joinedToken,
+                Visible = candidate.Id > 0 || joinedToken.IsValid,
+                Enabled = canSelect && (candidate.Id > 0 || joinedToken.IsValid),
+                IsArmed = armed,
+                Text = joinedToken.IsValid ? "Unlink" : armed ? "Cancel" : "Link",
+                ToolTip = automatic ? "Turn off automatic pairing in Settings to link or unlink Joy-Cons." :
+                    joinedToken.IsValid ? "Use these Joy-Cons as two separate controllers." :
+                    armed ? "Cancel this selection." : "Select this Joy-Con, then Link on the other one. This controller keeps its profile and virtual pad."
+            };
+            if (next == JoyConLinkAction) return;
+            JoyConLinkAction = next;
+            JoyConLinkActionChanged?.Invoke(this, EventArgs.Empty);
+        }
 
         public bool IsSynchronizingRuntimeProfile { get; private set; }
 

@@ -31,5 +31,6 @@ Validation:
 
 Computer-use inspection of b85 required bringing its elevated window forward;
 its accessibility tree was limited. No profile controls were changed. The b86
-live-view check remains pending until the existing portable session is closed
-and replaced safely. Do not equate the offline render with that live check.
+session was replaced by b86 after the user closed both apps. Its live visual
+check was stopped by user Escape and remains incomplete. Do not equate the
+offline render or successful launch with that live check.

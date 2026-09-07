@@ -36,16 +36,18 @@ internal readonly struct Switch2BluetoothAssociationCandidate
 internal readonly struct Switch2JoyConPairCandidate
 {
     internal Switch2JoyConPairCandidate(int id, Switch2ControllerModel model,
-        ulong arrivalOrdinal)
+        ulong arrivalOrdinal, InputControllerSlotToken slotToken = default)
     {
         Id = id;
         Model = model;
         ArrivalOrdinal = arrivalOrdinal;
+        SlotToken = slotToken;
     }
 
     internal int Id { get; }
     internal Switch2ControllerModel Model { get; }
     internal ulong ArrivalOrdinal { get; }
+    internal InputControllerSlotToken SlotToken { get; }
 }
 
 internal enum Switch2JoyConPairActivationFailure : byte
@@ -139,6 +141,7 @@ internal sealed partial class Switch2BluetoothProductionCoordinator
     private readonly ISwitch2JoyConPairCatalog pairCatalog;
     private readonly Switch2JoyConPairAssociationService pairAssociation;
     private readonly Func<bool> automaticPairingEnabled;
+    private readonly Func<InputControllerSlotToken, ISwitch2JoyConOutputHandoff> beginOutputHandoff;
     private readonly ISwitch2MagnetometerCalibrationStore
         magnetometerCalibrationStore;
     private readonly ISwitch2JoyConHoldModeStore joyConHoldModeStore;
@@ -217,7 +220,8 @@ internal sealed partial class Switch2BluetoothProductionCoordinator
         ISwitch2MagnetometerCalibrationStore magnetometerCalibrationStore,
         ISwitch2JoyConHoldModeStore joyConHoldModeStore = null,
         ISwitch2GyroCalibrationStore gyroCalibrationStore = null,
-        ISwitch2RawStickCalibrationStore rawStickCalibrationStore = null)
+        ISwitch2RawStickCalibrationStore rawStickCalibrationStore = null,
+        Func<InputControllerSlotToken, ISwitch2JoyConOutputHandoff> beginOutputHandoff = null)
     {
         this.adapter = adapter ?? throw new ArgumentNullException(
             nameof(adapter));
@@ -233,6 +237,7 @@ internal sealed partial class Switch2BluetoothProductionCoordinator
         this.joyConHoldModeStore = joyConHoldModeStore;
         this.gyroCalibrationStore = gyroCalibrationStore;
         this.rawStickCalibrationStore = rawStickCalibrationStore;
+        this.beginOutputHandoff = beginOutputHandoff;
         pairAssociation = pairCatalog == null ? null :
             new Switch2JoyConPairAssociationService(pairCatalog);
     }
@@ -395,7 +400,7 @@ internal sealed partial class Switch2BluetoothProductionCoordinator
                         out PendingJoyCon pending))
                 {
                     result[index++] = new Switch2JoyConPairCandidate(item.Key,
-                        pending.Model, pending.ArrivalOrdinal);
+                        pending.Model, pending.ArrivalOrdinal, pending.SlotToken);
                 }
             }
             if (index == result.Length)
@@ -487,7 +492,7 @@ internal sealed partial class Switch2BluetoothProductionCoordinator
     internal async ValueTask<Switch2JoyConPairActivationResult>
         CreateAndActivateJoyConPairAsync(int leftCandidateId,
             int rightCandidateId,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default, int preferredCandidateId = 0)
     {
         if (pairAssociation == null)
         {
@@ -544,7 +549,9 @@ internal sealed partial class Switch2BluetoothProductionCoordinator
                 }
             }
             if (left.Model != Switch2ControllerModel.JoyCon2Left ||
-                right.Model != Switch2ControllerModel.JoyCon2Right)
+                right.Model != Switch2ControllerModel.JoyCon2Right ||
+                preferredCandidateId != 0 && preferredCandidateId != leftCandidateId &&
+                    preferredCandidateId != rightCandidateId)
             {
                 return Switch2JoyConPairActivationResult.Failed(
                     Switch2JoyConPairActivationFailure.InvalidRoles);
@@ -574,7 +581,7 @@ internal sealed partial class Switch2BluetoothProductionCoordinator
                 pairRecords = AppendPairRecord(pairRecords, record);
             }
             return await ActivateJoinedAsync(left, right, record,
-                linked.Token).ConfigureAwait(false);
+                linked.Token, preferredCandidateId).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -1436,9 +1443,22 @@ internal sealed partial class Switch2BluetoothProductionCoordinator
     private async ValueTask<Switch2JoyConPairActivationResult>
         ActivateJoinedAsync(PendingJoyCon left, PendingJoyCon right,
             Switch2JoyConPairRecord record,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken, int preferredCandidateId = 0)
     {
-        try { return await ActivateJoinedCoreAsync(left, right, record, cancellationToken).ConfigureAwait(false); }
+        // Only the first selected (or oldest active automatic) controller may
+        // donate its output. The handle reserves the exact output, never a
+        // merely unbound slot that another controller could steal.
+        PendingJoyCon preferred = preferredCandidateId == right?.CandidateId ? right :
+            preferredCandidateId == left?.CandidateId ? left :
+            left?.SlotToken.IsValid == true && right?.SlotToken.IsValid == true ?
+                (left.ArrivalOrdinal <= right.ArrivalOrdinal ? left : right) :
+            left?.SlotToken.IsValid == true ? left : right;
+        try
+        {
+            using ISwitch2JoyConOutputHandoff handoff = preferred?.SlotToken.IsValid == true ?
+                beginOutputHandoff?.Invoke(preferred.SlotToken) : null;
+            return await ActivateJoinedCoreAsync(left, right, record, cancellationToken, handoff).ConfigureAwait(false);
+        }
         catch (OperationCanceledException)
         {
             await DisposePendingPairAsync(left, right).ConfigureAwait(false);
@@ -1450,11 +1470,31 @@ internal sealed partial class Switch2BluetoothProductionCoordinator
             ReportDiagnostic($"Switch 2 Joy-Con transition failed: {exception.GetType().Name}.");
             return Switch2JoyConPairActivationResult.Failed(Switch2JoyConPairActivationFailure.RuntimeRejected);
         }
+        finally
+        {
+            RestoreClaimedActiveJoyCon(left);
+            RestoreClaimedActiveJoyCon(right);
+        }
+    }
+
+    private void RestoreClaimedActiveJoyCon(PendingJoyCon half)
+    {
+        if (half?.SlotToken.IsValid != true) return;
+        var snapshot = registrationService.Table.GetSnapshot()[half.SlotToken.Slot];
+        if (snapshot.Token != half.SlotToken || snapshot.State != InputControllerSlotState.Attached) return;
+        lock (sync)
+        {
+            if (!running || quarantinedRememberedPeers.Contains(half.PeerToken)) return;
+            half.IsBuffered = true;
+            pendingJoyCons[half.PeerId] = half;
+            joyConPairCandidates[half.CandidateId] = half.PeerId;
+        }
     }
 
     private async ValueTask<Switch2JoyConPairActivationResult>
         ActivateJoinedCoreAsync(PendingJoyCon left, PendingJoyCon right,
-            Switch2JoyConPairRecord record, CancellationToken cancellationToken)
+            Switch2JoyConPairRecord record, CancellationToken cancellationToken,
+            ISwitch2JoyConOutputHandoff handoff)
     {
         // Claiming candidates removes them from the UI, not from the host.
         // Retire exact standalone tokens before issuing fresh pair admissions.
@@ -1551,9 +1591,20 @@ internal sealed partial class Switch2BluetoothProductionCoordinator
                 Switch2JoyConPairActivationFailure.Cancelled);
         }
 
-        if (!registrationService.TryAttachToHost(owner, slotHost,
-                LifecycleTimeoutMilliseconds, out InputControllerSlotToken token,
-                out Switch2RuntimeRegistrationTransactionFailure failure))
+        InputControllerSlotToken token;
+        Switch2RuntimeRegistrationTransactionFailure failure;
+        try { handoff?.PrepareSuccessor(owner.RuntimeDevice); }
+        catch
+        {
+            owner.TryAbortCreated(registration, LifecycleTimeoutMilliseconds, out _);
+            throw;
+        }
+        bool activated = handoff != null ?
+            registrationService.TryAttachExactSlot(handoff.InputSlot, owner, slotHost,
+                LifecycleTimeoutMilliseconds, out token, out failure) :
+            registrationService.TryAttachToHost(owner, slotHost,
+                LifecycleTimeoutMilliseconds, out token, out failure);
+        if (!activated)
         {
             string cleanup = CleanupAfterAttachRejection(owner.State,
                 owner.RequiresQuarantine || failure.RequiresQuarantine);
@@ -1586,7 +1637,7 @@ internal sealed partial class Switch2BluetoothProductionCoordinator
 
     private async ValueTask<Switch2JoyConStandaloneActivationResult>
         ActivateStandaloneAsync(PendingJoyCon pending,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken, ISwitch2JoyConOutputHandoff handoff = null)
     {
         if (pending == null || cancellationToken.IsCancellationRequested)
         {
@@ -1673,9 +1724,20 @@ internal sealed partial class Switch2BluetoothProductionCoordinator
                 Switch2JoyConStandaloneActivationFailure.Cancelled);
         }
 
-        if (!registrationService.TryAttachToHost(owner, slotHost,
-                LifecycleTimeoutMilliseconds, out InputControllerSlotToken token,
-                out Switch2RuntimeRegistrationTransactionFailure failure))
+        InputControllerSlotToken token;
+        Switch2RuntimeRegistrationTransactionFailure failure;
+        try { handoff?.PrepareSuccessor(owner.RuntimeDevice); }
+        catch
+        {
+            owner.TryAbortCreated(registration, LifecycleTimeoutMilliseconds, out _);
+            throw;
+        }
+        bool activated = handoff != null ?
+            registrationService.TryAttachExactSlot(handoff.InputSlot, owner, slotHost,
+                LifecycleTimeoutMilliseconds, out token, out failure) :
+            registrationService.TryAttachToHost(owner, slotHost,
+                LifecycleTimeoutMilliseconds, out token, out failure);
+        if (!activated)
         {
             string cleanup = CleanupAfterAttachRejection(owner.State,
                 owner.RequiresQuarantine || failure.RequiresQuarantine);

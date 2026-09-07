@@ -115,6 +115,7 @@ public sealed class Switch2JoyConPairingPolicyTests
             ready.Disposition);
         Assert.AreEqual(3, ready.LeftCandidateId);
         Assert.AreEqual(8, ready.RightCandidateId);
+        Assert.AreEqual(8, ready.PreferredCandidateId, "The first click, not always the left side, donates its virtual pad.");
         Assert.IsFalse(selection.HasArmedCandidate);
 
         Assert.AreEqual(Switch2JoyConManualPairSelectionDisposition.Armed,

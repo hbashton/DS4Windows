@@ -141,7 +141,7 @@ namespace DS4Windows
         XboxOne,
     }
 
-    public sealed class ViiperOutDevice : OutputDevice
+    public sealed partial class ViiperOutDevice : OutputDevice
     {
         internal enum NativeGameOwnerProcessLiveness
         {
@@ -1084,6 +1084,11 @@ namespace DS4Windows
                 ref lastInputDeviceIndex);
             Disconnect();
             streamRecoveryGate.Reset();
+            lock (joyConFeedbackHandoffGate)
+            {
+                joyConFeedbackPaused = joyConXboxFeedbackRebound = joyConBrokerStopped = false;
+                joyConFeedbackResumeTimestamp = joyConFeedbackDeviceGeneration = joyConFeedbackTransportGeneration = 0;
+            }
             ClearNativeGameOutputProcessLease();
 
             ViiperPrerequisiteStatus status = ViiperSetupManager.GetStatus(tryStartServer: true);
@@ -1974,7 +1979,7 @@ namespace DS4Windows
                 JoinStateWriterThread();
                 Switch2VirtualFeedbackSession switch2Session = Volatile.Read(
                     ref switch2FeedbackSession);
-                if (switch2Session != null && switch2Session.TryRetire() &&
+                if (switch2Session != null && (switch2Session.IsRetired || switch2Session.TryRetire()) &&
                     !switch2Session.WasRetiredDisconnected)
                 {
                     // The physical Switch 2 lifetime has now delivered its
@@ -3919,7 +3924,7 @@ namespace DS4Windows
         {
             lock (feedbackCallbackAdmissionLock)
             {
-                if (!connected || feedbackDispatchStopRequested ||
+                if (!connected || feedbackDispatchStopRequested || joyConFeedbackPaused ||
                     dispatchGeneration != Interlocked.Read(
                         ref feedbackDispatchGeneration) ||
                     streamItemGeneration != Interlocked.Read(
@@ -3944,6 +3949,7 @@ namespace DS4Windows
             lock (feedbackCallbackAdmissionLock)
             {
                 if (!connected || feedbackDispatchStopRequested ||
+                    joyConFeedbackPaused && viiperType != ViiperVirtualDeviceType.XboxOne ||
                     readStreamGeneration != Interlocked.Read(
                         ref streamGeneration) ||
                     !ReferenceEquals(Volatile.Read(ref deviceStream), stream))
@@ -7094,6 +7100,12 @@ namespace DS4Windows
         private bool TryApplyXboxOneFeedback(byte[] feedback,
             int feedbackLength)
         {
+            lock (joyConFeedbackHandoffGate)
+                return TryApplyXboxOneFeedbackCore(feedback, feedbackLength);
+        }
+
+        private bool TryApplyXboxOneFeedbackCore(byte[] feedback, int feedbackLength)
+        {
             if (feedback == null || feedbackLength !=
                     ControllerFeedbackFrame.SerializedLength ||
                 feedbackLength > feedback.Length ||
@@ -7104,11 +7116,31 @@ namespace DS4Windows
                 return false;
             }
 
+            ControllerFeedbackFrame brokerFrame = canonicalFrame;
+            if (Volatile.Read(ref xboxOneSwitch2FeedbackPreRetired) != 1 &&
+                (joyConFeedbackPaused || joyConXboxFeedbackRebound))
+            {
+                if (!TryTranslateRetainedXboxFeedback(canonicalFrame, xboxOneFeedbackBinding,
+                        xboxOneLastFeedbackSequence, joyConFeedbackPaused ? ulong.MaxValue : joyConFeedbackResumeTimestamp,
+                        joyConFeedbackDeviceGeneration, joyConFeedbackTransportGeneration,
+                        Volatile.Read(ref switch2FeedbackSession)?.OwnershipEpoch ?? 0,
+                        out var translated, out bool suppressed)) return false;
+                if (suppressed)
+                {
+                    // The user deliberately muted feedback during the join.
+                    // ACK validated traffic without replaying it on the new pair.
+                    xboxOneLastFeedbackSequence = canonicalFrame.Sequence;
+                    joyConBrokerStopped |= canonicalFrame.IsStop;
+                    return true;
+                }
+                canonicalFrame = translated;
+            }
+
             if (Volatile.Read(ref xboxOneSwitch2FeedbackPreRetired) == 1)
             {
                 bool accepted =
                     IsAuthorizedXboxOneTerminalStopAfterPhysicalRetirement(
-                        canonicalFrame, xboxOneFeedbackBinding,
+                        brokerFrame, xboxOneFeedbackBinding,
                         xboxOneLastFeedbackSequence);
                 if (accepted)
                 {

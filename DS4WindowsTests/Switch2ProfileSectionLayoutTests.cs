@@ -103,17 +103,17 @@ public sealed class Switch2ProfileSectionLayoutTests
         var panel = editor.Descendants(Wpf + "StackPanel").Single(node =>
             (string)node.Attribute(Xaml + "Name") == "switch2SettingsPanel");
         var borders = panel.Elements(Wpf + "Border").ToArray();
-        Assert.AreEqual(8, borders.Length);
+        Assert.AreEqual(9, borders.Length);
         Assert.IsTrue(borders.All(node => (string)node.Attribute("Style") ==
             "{StaticResource Switch2SettingsCardStyle}"));
         var cards = borders.Select(node => node.Descendants(Wpf + "Expander").First()).ToArray();
         CollectionAssert.AreEqual(new[]
         {
             "switch2JoyConCard", "switch2MotionCard", "switch2PairCard",
-            "switch2FeedbackCard", "switch2ButtonLayerCard", "switch2StickCard",
+            "switch2FeedbackCard", "switch2UsbHeadsetCard", "switch2ButtonLayerCard", "switch2StickCard",
             "switch2ConnectionCard", "switch2CalibrationCard",
         }, cards.Select(node => (string)node.Attribute(Xaml + "Name")).ToArray());
-        CollectionAssert.AreEqual(new[] { true, true, false, false, false, false, false, false },
+        CollectionAssert.AreEqual(new[] { true, true, false, false, false, false, false, false, false },
             cards.Select(node => bool.Parse((string)node.Attribute("IsExpanded"))).ToArray());
         foreach (var card in cards)
         {
@@ -127,6 +127,26 @@ public sealed class Switch2ProfileSectionLayoutTests
             Assert.IsTrue(heading.Descendants(Wpf + "TextBlock").All(node =>
                 (string)node.Attribute("TextWrapping") == "Wrap"));
         }
+    }
+
+    [TestMethod]
+    public void UsbHeadsetHelpUsesWindowsWithoutArmingSonyAudioOrAdvertisingBluetooth()
+    {
+        var card = Load("ProfileEditor.xaml").Descendants(Wpf + "Expander")
+            .Single(node => (string)node.Attribute(Xaml + "Name") == "switch2UsbHeadsetCard");
+        StringAssert.Contains((string)card.Ancestors(Wpf + "Border").First()
+            .Attribute("Visibility"), "ShowSwitch2UsbHeadsetHelp");
+        Assert.IsFalse(card.Descendants(Wpf + "CheckBox").Any());
+        Assert.IsFalse(card.Descendants().Attributes().Any(a => a.Value.Contains("{Binding DualSense")));
+        string text = string.Join(" ", card.Descendants(Wpf + "TextBlock")
+            .Select(node => (string)node.Attribute("Text")));
+        StringAssert.Contains(text, "Headphones (Switch 2 Pro Controller)");
+        StringAssert.Contains(text, "Microphone (Switch 2 Pro Controller)");
+        StringAssert.Contains(text, "Bluetooth headset audio is not supported yet");
+        StringAssert.Contains(text, "independently of your chosen virtual controller");
+        var button = card.Descendants(Wpf + "Button").Single();
+        Assert.AreEqual("Switch2OpenSoundSettings_Click", (string)button.Attribute("Click"));
+        Assert.AreEqual("Open Windows Sound settings", (string)button.Attribute("Content"));
     }
 
     [DataTestMethod]

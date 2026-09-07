@@ -15,6 +15,7 @@ namespace DS4WinWPF.DS4Forms
         public static DrawingImage Sticks { get; } = Create(5);
         public static DrawingImage Layout { get; } = Create(6);
         public static DrawingImage Calibration { get; } = Create(7);
+        public static DrawingImage Headset { get; } = Create(8);
 
         private static SolidColorBrush Brush(string color)
         {
@@ -108,6 +109,16 @@ namespace DS4WinWPF.DS4Forms
                         dc.DrawRoundedRectangle(null, new Pen(cyan,2), new Rect(116,28,26,15), 3,3);
                         dc.DrawRectangle(cyan,null,new Rect(120,32,15,7));
                         Line(ink, 144,32,144,39);
+                        break;
+                    case 8:
+                        Path(null, ink, "M 35,60 L 35,42 C 35,12 97,12 97,42 L 97,60");
+                        dc.DrawRoundedRectangle(Brush("#233C51"), new Pen(cyan, 2), new Rect(27,43,18,28), 6,6);
+                        dc.DrawRoundedRectangle(Brush("#233C51"), new Pen(coral, 2), new Rect(87,43,18,28), 6,6);
+                        Path(null, coral, "M 97,70 Q 96,81 75,81");
+                        dc.DrawRoundedRectangle(ink, null, new Rect(64,77,15,7), 3,3);
+                        Line(cyan, 126,76,126,39);
+                        dc.DrawRoundedRectangle(Brush("#233C51"), new Pen(ink, 2), new Rect(119,23,14,20), 4,4);
+                        Line(ink, 123,20,129,20);
                         break;
                     default:
                         dc.DrawEllipse(null,new Pen(dim,2),new Point(52,51),27,27);

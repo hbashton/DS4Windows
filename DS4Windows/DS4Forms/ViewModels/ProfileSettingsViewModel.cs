@@ -131,6 +131,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             controllerUiCapabilities.ShowSwitch2StandaloneJoyConControls;
         public bool ShowSwitch2JoyConControls =>
             controllerUiCapabilities.ShowSwitch2JoyConControls;
+        public bool ShowSwitch2UsbHeadsetHelp =>
+            controllerUiCapabilities.ShowSwitch2UsbHeadsetHelp;
 
         public bool SupportsAdaptiveTriggers =>
             controllerUiCapabilities.SupportsAdaptiveTriggers;

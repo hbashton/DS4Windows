@@ -91,6 +91,12 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         internal bool ShowSwitch2JoyConControls => DeviceType == null ||
             DeviceType is InputDeviceType.Switch2JoyConLeft or
                 InputDeviceType.Switch2JoyConRight or InputDeviceType.Switch2JoyConJoined;
+        // Help for Windows' native USB audio, not an opt-in to Sony's audio
+        // transport. Show it on Bluetooth too so users know to connect USB.
+        internal bool ShowSwitch2UsbHeadsetHelp => DeviceType == null ||
+            DeviceType == InputDeviceType.Switch2Pro ||
+            DeviceType == InputDeviceType.SwitchPro &&
+                VendorId == 0x057E && ProductId == 0x2069;
         // With no physical controller selected, keep the complete profile
         // surface available so offline profile editing never loses features.
         internal bool SupportsAdaptiveTriggers => DeviceType == null || IsDualSense;

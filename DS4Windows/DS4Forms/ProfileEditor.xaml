@@ -2752,6 +2752,27 @@
                                     </StackPanel>
                                 </Expander>
                             </Border>
+                            <Border Style="{StaticResource Switch2SettingsCardStyle}" Visibility="{Binding ShowSwitch2UsbHeadsetHelp, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <Expander x:Name="switch2UsbHeadsetCard" IsExpanded="false" HorizontalContentAlignment="Stretch" AutomationProperties.Name="Use a headset over USB">
+                                    <Expander.Header>
+                                        <DockPanel LastChildFill="True" Margin="4,0,0,0" MaxWidth="760">
+                                            <Image Source="{x:Static local:Switch2FeatureArtwork.Headset}" Width="104" Height="64" Stretch="Uniform" Margin="0,0,18,0" DockPanel.Dock="Left" />
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Text="Use a headset over USB" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                <TextBlock Text="Listen and chat through your Switch 2 Pro's headphone jack." Margin="0,4,0,0" Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </DockPanel>
+                                    </Expander.Header>
+                                    <StackPanel Margin="26,18,4,4">
+                                        <TextBlock Text="1. Connect your Switch 2 Pro to the PC by USB, then plug in headphones or a headset." TextWrapping="Wrap" Margin="0,0,0,10" />
+                                        <TextBlock Text="2. In your game or Windows Sound settings, choose Headphones (Switch 2 Pro Controller) for output." TextWrapping="Wrap" Margin="0,0,0,10" />
+                                        <TextBlock Text="3. For voice chat, plug in a headset with a microphone and choose Microphone (Switch 2 Pro Controller) for input." TextWrapping="Wrap" Margin="0,0,0,10" />
+                                        <TextBlock Text="Audio goes directly through Windows. It works independently of your chosen virtual controller; no DS4Windows audio toggle is needed." TextWrapping="Wrap" Foreground="{DynamicResource MutedForegroundColor}" Margin="0,0,0,10" />
+                                        <TextBlock Text="USB only. Bluetooth headset audio is not supported yet. A regular AUX cable carries sound out, but cannot test the headset microphone." TextWrapping="Wrap" Foreground="{DynamicResource MutedForegroundColor}" Margin="0,0,0,12" />
+                                        <Button x:Name="switch2OpenSoundSettingsButton" Content="Open Windows Sound settings" Click="Switch2OpenSoundSettings_Click" HorizontalAlignment="Left" Padding="12,6" ToolTip="Choose where your game sound and voice chat go." />
+                                    </StackPanel>
+                                </Expander>
+                            </Border>
                             <Border Style="{StaticResource Switch2SettingsCardStyle}">
                                 <Expander x:Name="switch2ButtonLayerCard" IsExpanded="false" HorizontalContentAlignment="Stretch" AutomationProperties.Name="Give buttons a second job">
                                     <Expander.Header>

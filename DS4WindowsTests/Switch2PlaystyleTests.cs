@@ -54,11 +54,12 @@ public sealed class Switch2PlaystyleTests
         RunSta(() =>
         {
             var pictures = typeof(Switch2FeatureArtwork).GetProperties();
+            int height = (pictures.Length + 1) / 2 * 160;
             var visual = new DrawingVisual();
             using (var dc = visual.RenderOpen())
             {
                 dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(9, 17, 26)),
-                    null, new Rect(0, 0, 800, 640));
+                    null, new Rect(0, 0, 800, height));
                 for (int i = 0; i < pictures.Length; i++)
                 {
                     int x = i % 2 * 400, y = i / 2 * 160;
@@ -70,7 +71,7 @@ public sealed class Switch2PlaystyleTests
                         new Point(x + 200, y + 60));
                 }
             }
-            var bitmap = new RenderTargetBitmap(800, 640, 96, 96, PixelFormats.Pbgra32);
+            var bitmap = new RenderTargetBitmap(800, height, 96, 96, PixelFormats.Pbgra32);
             bitmap.Render(visual);
             var encoder = new PngBitmapEncoder();
             encoder.Frames.Add(BitmapFrame.Create(bitmap));
@@ -195,8 +196,8 @@ public sealed class Switch2PlaystyleTests
     {
         var pictures = typeof(Switch2FeatureArtwork).GetProperties()
             .Select(p => (DrawingImage)p.GetValue(null)).ToArray();
-        Assert.AreEqual(8, pictures.Length);
-        Assert.AreEqual(8, pictures.Distinct().Count());
+        Assert.AreEqual(9, pictures.Length);
+        Assert.AreEqual(9, pictures.Distinct().Count());
         foreach (var picture in pictures)
         {
             Assert.IsTrue(picture.IsFrozen);

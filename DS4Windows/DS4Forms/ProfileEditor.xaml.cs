@@ -3108,6 +3108,27 @@ namespace DS4WinWPF.DS4Forms
             }
         }
 
+        private void Switch2OpenSoundSettings_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                // Open only the documented settings page. Do not change the
+                // user's default device, volume, microphone permission or mix.
+                using var process = System.Diagnostics.Process.Start(
+                    new System.Diagnostics.ProcessStartInfo("ms-settings:sound")
+                    {
+                        UseShellExecute = true,
+                    });
+            }
+            catch (Exception exception) when (exception is Win32Exception or
+                InvalidOperationException or System.Security.SecurityException)
+            {
+                AppLogger.LogToGui($"Could not open Windows Sound settings: {exception.Message}", true);
+                MessageBox.Show("Open Windows Settings > System > Sound to choose your Switch 2 Pro headphones or headset microphone.",
+                    "Headset audio", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+        }
+
         private void Switch2StickCalibration_Click(object sender, RoutedEventArgs e)
         {
             var runtime = ResolveControllerContext(deviceNum, profileSettingsVM.FuncDevNum) as Switch2RuntimeInputDevice;

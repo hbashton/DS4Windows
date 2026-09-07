@@ -3,8 +3,10 @@ using DS4Windows.InputDevices;
 namespace DS4Windows;
 
 /// <summary>
-/// Physical speaker/headset and microphone applicability shared by runtime
-/// status and the UI. Saved profile settings and the selected virtual persona
+/// Applicability of DS4Windows-managed speaker/headset and microphone routes,
+/// shared by runtime status and the UI. Native Windows USB audio (such as the
+/// Switch 2 Pro headphone jack) does not need these Sony-specific routes.
+/// Saved profile settings and the selected virtual persona
 /// do not grant audio capabilities to an unrelated physical controller.
 /// </summary>
 internal static class ControllerAudioCapabilityPolicy

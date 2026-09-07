@@ -80,6 +80,37 @@ namespace DS4WindowsTests
                 isDualSenseEdge: false));
         }
 
+        [DataTestMethod]
+        [DataRow(InputDeviceType.Switch2Pro, ConnectionType.USB, 0x057E, 0x2069, true)]
+        [DataRow(InputDeviceType.Switch2Pro, ConnectionType.BT, 0x057E, 0x2069, true)]
+        [DataRow(InputDeviceType.SwitchPro, ConnectionType.USB, 0x057E, 0x2069, true)]
+        [DataRow(InputDeviceType.SwitchPro, ConnectionType.USB, 0x057E, 0x2009, false)]
+        [DataRow(InputDeviceType.SwitchPro, ConnectionType.USB, 0x1234, 0x2069, false)]
+        [DataRow(InputDeviceType.Switch2JoyConLeft, ConnectionType.BT, 0x057E, 0x2067, false)]
+        [DataRow(InputDeviceType.Switch2JoyConRight, ConnectionType.BT, 0x057E, 0x2066, false)]
+        [DataRow(InputDeviceType.Switch2JoyConJoined, ConnectionType.BT, 0x057E, 0x2067, false)]
+        [DataRow(InputDeviceType.DualSense, ConnectionType.USB, 0x054C, 0x0CE6, false)]
+        public void UsbHeadsetHelpBelongsOnlyToProAndDoesNotChangeManagedAudioEligibility(
+            InputDeviceType type, ConnectionType connection, int vid, int pid, bool visible)
+        {
+            var capabilities = ControllerUiCapabilities.For(type, connection, vid, pid);
+            Assert.AreEqual(visible, capabilities.ShowSwitch2UsbHeadsetHelp);
+            if (visible)
+            {
+                Assert.IsFalse(capabilities.SupportsControllerAudio);
+                Assert.IsFalse(capabilities.ShowControllerAudioSettings);
+                Assert.IsFalse(capabilities.ShowLegacyMicrophoneRouting);
+            }
+        }
+
+        [TestMethod]
+        public void OfflineAndNonHidSwitch2ProCanSeeUsbHeadsetInstructions()
+        {
+            Assert.IsTrue(ControllerUiCapabilities.For(null).ShowSwitch2UsbHeadsetHelp);
+            Assert.IsTrue(ControllerUiCapabilities.For(InputDeviceType.Switch2Pro,
+                ConnectionType.USB, null, null).ShowSwitch2UsbHeadsetHelp);
+        }
+
         [TestMethod]
         public void StandaloneHoldControlAppearsOnlyForApplicableJoyCons()
         {

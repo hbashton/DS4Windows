@@ -7,5 +7,9 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="NAudio" Version="2.2.1" />
+    <PackageReference Include="Concentus" Version="2.2.2" />
+    <Compile Include="../../DS4Windows/DS4Control/Switch2/Switch2BluetoothLabCandidate.cs" Link="Switch2BluetoothLabCandidate.cs" />
+    <Compile Include="../../DS4Windows/DS4Control/Switch2/Switch2BluetoothLabTone.cs" Link="Switch2BluetoothLabTone.cs" />
+    <Compile Include="../../DS4Windows/DS4Control/Switch2/Switch2BluetoothLabPlan.cs" Link="Switch2BluetoothLabPlan.cs" />
   </ItemGroup>
 </Project>

@@ -10,9 +10,9 @@ internal static class Switch2BluetoothLabHeadsetHeader
     {
         jack = length = 0;
         opusIdle = false;
-        if (report.Length != 112 || report[14] != 50) return false;
+        if (report.Length != 112 || report[14] is not (0 or 50)) return false;
         jack = report[13]; length = report[14];
-        opusIdle = report[15] == 0xf8 && report[16] == 0xff && report[17] == 0xfe;
+        opusIdle = length == 50 && report[15] == 0xf8 && report[16] == 0xff && report[17] == 0xfe;
         for (int i = 18; i < 65 && opusIdle; i++) opusIdle &= report[i] == 0;
         return true;
     }

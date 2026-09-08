@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
@@ -10,10 +11,12 @@ using System.Threading.Tasks;
 namespace DS4Windows.Switch2;
 
 // Optional surface on the EXACT service already owned by the input lease.
-// No second BluetoothLEDevice/service open, arbitrary UUID, output or CCCD API.
+// No second BluetoothLEDevice/service open, arbitrary UUID, command or CCCD API.
 internal interface ISwitch2BluetoothLabAudioAccess
 {
     Task<string> QueryAudioLabAsync(string command, CancellationToken cancellationToken);
+    Task<string> RunAudioLabPlanAsync(Switch2BluetoothLabPlan plan, CancellationToken cancellationToken) =>
+        Task.FromResult("{\"Error\":\"Packet-plan bridge unavailable\"}");
 }
 
 /// <summary>
@@ -89,7 +92,7 @@ internal sealed class Switch2BluetoothLabProbe
 
     private object Status(string state) => new
     {
-        State = state, ProcessId = Environment.ProcessId, PipeName, TransportGeneration = generation,
+        State = state, ProcessId = Environment.ProcessId, PipeName, TransportGeneration = generation, PacketPlanProtocol = 1,
         Connected = connected(), Reports = Interlocked.Read(ref reports),
         MaximumReportGapMs = 1000.0 * Interlocked.Read(ref maximumReportGap) / Stopwatch.Frequency,
         LastReportAgeMs = Interlocked.Read(ref lastReport) is var last && last > 0
@@ -124,12 +127,14 @@ internal sealed class Switch2BluetoothLabProbe
                         stop = command == "stop-probe";
                         operation = Task.FromResult(JsonSerializer.Serialize(Status(stop ? "stopping" : "active")));
                     }
+                    else if (command == "run-plan")
+                        operation = ReadAndRunPlanAsync(pipe, deadline.Token);
                     else if (!connected())
                         operation = Task.FromResult("{\"Error\":\"Controller lifetime is not active\"}");
                     else if (Switch2BluetoothLabTone.IsTone(command) && !audioSetupAcknowledged)
                         operation = Task.FromResult("{\"Error\":\"Audio setup must be acknowledged in this controller generation before tones\"}");
                     else if (command == "audio-state")
-                        operation = queryAudioState?.Invoke(deadline.Token) ?? Task.FromResult("{\"Error\":\"Audio state query unavailable\"}");
+                        operation = QueryStateAsync(deadline.Token);
                     else
                         operation = command == "configure-audio" ? ConfigureAudioAsync(deadline.Token) :
                             QueryAudioAsync(command, deadline.Token);
@@ -189,6 +194,22 @@ internal sealed class Switch2BluetoothLabProbe
 
     private async Task<string> QueryAudioAsync(string command, CancellationToken token) =>
         await access.QueryAudioLabAsync(command, token).ConfigureAwait(false);
+
+    private async Task<string> QueryStateAsync(CancellationToken token) => queryAudioState == null
+        ? "{\"Error\":\"Audio state query unavailable\"}" : await queryAudioState(token).ConfigureAwait(false);
+
+    private async Task<string> ReadAndRunPlanAsync(Stream pipe, CancellationToken token)
+    {
+        byte[] size = new byte[4];
+        await pipe.ReadExactlyAsync(size, token).ConfigureAwait(false);
+        int length = BinaryPrimitives.ReadInt32LittleEndian(size);
+        if (length is < 1 or > Switch2BluetoothLabPlan.MaximumJsonBytes) throw new InvalidDataException("Plan envelope exceeds limit.");
+        byte[] json = new byte[length];
+        await pipe.ReadExactlyAsync(json, token).ConfigureAwait(false);
+        var plan = Switch2BluetoothLabPlan.Parse(json, generation);
+        if (!connected() || !audioSetupAcknowledged) throw new InvalidOperationException("Same-generation setup and active controller required.");
+        return await access.RunAudioLabPlanAsync(plan, token).ConfigureAwait(false);
+    }
 
     internal static async Task<string> ReadCommandAsync(Stream pipe, CancellationToken token)
     {

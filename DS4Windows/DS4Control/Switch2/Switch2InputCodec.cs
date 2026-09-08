@@ -244,6 +244,24 @@ public static class Switch2InputCodec
         return new Switch2StickRaw(x, y);
     }
 
+    // ndeadly's dedicated 112-byte headset layout plus live b93 zero-length
+    // audio declarations. Reuse the existing basic-input representation; never
+    // feed audio bytes into gyro decoding or disguise this as common05 input.
+    // This decoder does not authorize the alternate characteristic at runtime.
+    internal static bool TryDecodeHeadsetControls(ReadOnlySpan<byte> body, out Switch2BasicInputReport report)
+    {
+        if (body.Length != 112 || body[14] is not (0 or 50) || body[65] is not (0 or 30 or 40))
+        {
+            report = default;
+            return false;
+        }
+        report = new Switch2BasicInputReport(Switch2InputReportKind.ProController2_09,
+            body[0], body[1], ReadUInt24LittleEndian(body.Slice(2, 3)),
+            DecodePackedStick(body.Slice(5, 3)), DecodePackedStick(body.Slice(8, 3)), true,
+            new Switch2OpaqueBodyRegion(66, 40, body[65], false));
+        return true;
+    }
+
     private static bool TryDecodeBody(ReadOnlySpan<byte> body,
         Switch2ControllerModel model, Switch2InputReportKind kind,
         out Switch2DecodedInputReport report)

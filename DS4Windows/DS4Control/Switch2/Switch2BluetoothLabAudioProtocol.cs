@@ -8,7 +8,7 @@ internal static class Switch2BluetoothLabAudioProtocol
     internal static readonly Guid InputUuid = new("7492866c-ec3e-4619-8258-32755ffcc0f9");
 
     internal static bool IsAllowed(string command) => command is
-        "status" or "inventory" or "headset-header" or "headset-observe" or "configure-audio" or "audio-state" or "stop-probe" ||
+        "status" or "inventory" or "headset-header" or "headset-observe" or "configure-audio" or "audio-state" or "run-plan" or "stop-probe" ||
         Switch2BluetoothLabTone.IsTone(command);
 
     // Exact observed volatile 0x17/0x02 request, not a generic command API.

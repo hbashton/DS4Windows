@@ -1,18 +1,28 @@
 using System.IO.Pipes;
+using System.Buffers.Binary;
 using System.Text;
 using System.Text.Json;
+using DS4Windows.Switch2;
 
-bool tone = args.Length >= 2 && args[1] is ("tone-opus5" or "tone-opus20" or "tone-rumble-opus5" or "tone-rumble-opus20" or
-    "tone-length-opus5" or "tone-length-opus20" or "tone-rumble-length-opus5" or "tone-rumble-length-opus20" or
-    "active-opus5" or "active-opus20" or "active-rumble-opus5" or "active-rumble-opus20" or
-    "active-length-opus5" or "active-length-opus20" or "active-rumble-length-opus5" or "active-rumble-length-opus20");
-if (tone ? args.Length != 3 : args.Length != 2 || args[1] is not ("status" or "inventory" or "headset-header" or "headset-observe" or "configure-audio" or "audio-state" or "stop-probe"))
+bool tone = args.Length >= 2 && Switch2BluetoothLabCandidate.TryParse(args[1], out _);
+bool planFile = args.Length >= 2 && args[1] == "run-plan";
+bool createPlan = args.Length == 4 && args[0] == "--create-plan" && tone;
+if (!createPlan && (planFile ? args.Length != 4 : tone ? args.Length != 3 : args.Length != 2 || args[1] is not ("status" or "inventory" or "headset-header" or "headset-observe" or "configure-audio" or "audio-state" or "stop-probe")))
 {
-    Console.Error.WriteLine("Use <session.json> status|inventory|headset-header|headset-observe|configure-audio|stop-probe, or <session.json> tone-opus5|tone-opus20|tone-rumble-opus5|tone-rumble-opus20 <explicit Realtek Line In ID>");
+    Console.Error.WriteLine("Use <session.json> <query>, <session.json> <candidate> <Line In ID>, <session.json> run-plan <Line In ID> <plan.json>, or --create-plan <candidate> <generation> <new-plan.json>. See README.");
     return 2;
 }
 try
 {
+    if (createPlan)
+    {
+        var plan = CreateTonePlan(args[1], ulong.Parse(args[2]));
+        byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(plan);
+        using var destination = new FileStream(args[3], FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        await destination.WriteAsync(bytes);
+        Console.WriteLine(JsonSerializer.Serialize(new { plan.Id, Fingerprint = plan.Fingerprint(), Packets = plan.Packets.Length, HardwareAccessed = false }));
+        return 0;
+    }
     var file = new FileInfo(args[0]);
     if (!file.Exists || file.Length > 4096 || file.Attributes.HasFlag(FileAttributes.ReparsePoint))
         throw new InvalidDataException("Expected a small local probe-session descriptor.");
@@ -22,13 +32,31 @@ try
         pipeName.Any(c => !char.IsAsciiLetterOrDigit(c) && c != '-') ||
         descriptor.RootElement.GetProperty("State").GetString() != "listening")
         throw new InvalidDataException("Expected a live DS4Windows lab probe session.");
+    ulong generation = descriptor.RootElement.GetProperty("TransportGeneration").GetUInt64();
+    if ((tone || planFile) && (!descriptor.RootElement.TryGetProperty("PacketPlanProtocol", out var protocol) || protocol.GetInt32() != 1))
+        throw new InvalidDataException("The running app has no packet-plan bridge. No radio request sent; do not restart automatically.");
+    Switch2BluetoothLabPlan? packetPlan = tone ? CreateTonePlan(args[1], generation) : null;
+    if (planFile)
+    {
+        var planInfo = new FileInfo(args[3]);
+        if (!planInfo.Exists || planInfo.Length > Switch2BluetoothLabPlan.MaximumJsonBytes || planInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
+            throw new InvalidDataException("Expected a bounded local packet plan.");
+        packetPlan = Switch2BluetoothLabPlan.Parse(await File.ReadAllBytesAsync(planInfo.FullName), generation);
+    }
     using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(6));
     using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut,
         PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
     await pipe.ConnectAsync(deadline.Token);
-    using var measurement = tone ? new LineInMeasurement(args[2]) : null;
+    using var measurement = packetPlan != null ? new LineInMeasurement(args[2]) : null;
     if (measurement != null) await measurement.StartAsync();
-    await pipe.WriteAsync(Encoding.ASCII.GetBytes(args[1] + "\n"), deadline.Token);
+    await pipe.WriteAsync(Encoding.ASCII.GetBytes((packetPlan != null ? "run-plan" : args[1]) + "\n"), deadline.Token);
+    if (packetPlan != null)
+    {
+        byte[] body = JsonSerializer.SerializeToUtf8Bytes(packetPlan);
+        byte[] size = new byte[4]; BinaryPrimitives.WriteInt32LittleEndian(size, body.Length);
+        await pipe.WriteAsync(size, deadline.Token);
+        await pipe.WriteAsync(body, deadline.Token);
+    }
     using var response = new MemoryStream();
     byte[] chunk = new byte[1024];
     while (response.Length <= 32 * 1024)
@@ -49,4 +77,18 @@ catch (Exception error)
 {
     Console.Error.WriteLine(JsonSerializer.Serialize(new { Error = error.Message, Type = error.GetType().Name }));
     return 1;
+}
+
+static Switch2BluetoothLabPlan CreateTonePlan(string command, ulong generation)
+{
+    if (!Switch2BluetoothLabCandidate.TryParse(command, out var candidate)) throw new InvalidDataException("Unknown generator candidate.");
+    var tone = Switch2BluetoothLabTone.Create(command);
+    var plan = new Switch2BluetoothLabPlan
+    {
+        Id = command.Replace(':', '-').Replace('.', '_'), Generation = generation,
+        HeadsetNotifications = candidate.Active,
+        Packets = tone.Packets.Select((p, i) => new Switch2BluetoothLabPacket { OffsetMicroseconds = i * candidate.FrameMicroseconds, Payload = p }).ToArray()
+    };
+    plan.Validate(509);
+    return plan;
 }

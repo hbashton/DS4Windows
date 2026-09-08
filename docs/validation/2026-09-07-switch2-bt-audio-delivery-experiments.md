@@ -211,3 +211,66 @@ is not progress. Preserve the connection while auditing new setup/format
 evidence. Do not silently restart the app to expand its command vocabulary,
 open a competing Bluetooth owner, or turn these negatives into a claim that
 the hardware cannot support Bluetooth audio.
+
+## Packet-plan bridge checkpoint: external formats, unchanged live session
+
+The user correctly rejected rebuilding/restarting DS4Windows for each new
+codec or packet hypothesis. The new lab bridge accepts a bounded, versioned
+packet plan from an external generator. Encoding, framing, counters and packet
+offsets are data supplied by that generator, not new cases in DS4Windows.
+Legacy fixed commands remain compatible. A new format within these transport
+bounds does not require an application rebuild after the bridge is loaded.
+
+This is **not a new controller GATT descriptor**. The existing input lease
+writes only the same dedicated headphone-output characteristic. The local pipe
+descriptor advertises `PacketPlanProtocol: 1`; the external client rejects b93
+before radio/capture access because that running app lacks the bridge. No
+arbitrary target UUID, setup command, firmware operation, competing service
+owner or injected code is introduced. Different controller setup requirements
+would still need separate source review; this is not an unrestricted command
+executor or a claim that the protocol has been solved.
+
+Plans are same-generation/setup gated, at most 1 MiB JSON, 1024 packets,
+256 KiB payload and a schedule below one second. Writes respect both 509 bytes
+and negotiated MTU. At most four explicit fragments share a deadline. The
+sender preserves opaque bytes, aborts a missed next-frame deadline rather
+than burst-replaying, and retains each real Windows write through completion.
+Cancellation is reported even when it arrives during the final write. Invalid
+envelopes cannot reach GATT, and a later status query still works.
+
+Offline checks demonstrate two distinct opaque formats using one setup and
+probe lifetime. The standalone generator also created a 30-packet mono Opus
+20 ms / 20 kbps plan without hardware access. Its 50-byte packets and `F8` TOC
+match the observed idle packet's shape only: they are **not evidence of the
+headphone decoder or audible playback**. Other generator tests decode mono,
+stereo and PCM candidates to verify quiet peaks, channels, fades and silence
+tail. Raw external plans must undergo equivalent waveform review; arbitrary
+encoded bytes cannot prove quietness at the transport layer.
+
+Headset-header parsing now admits the observed audio lengths 0 and 50. A
+separate allocation-free parser decodes documented headset buttons/sticks;
+the lab observation explicitly reports `ControlsForwarded: false`. The
+production common05 admission, queue and mapper are unchanged. Headset input
+forwarding and packed-motion handling remain unfinished, so notification-mode
+experiments are still lab-only and not appropriate during gameplay.
+
+Final checks for this source checkpoint:
+
+- `b94-bridge-hardening.trx`: **43 passed, zero failed**.
+- `b94-bridge-final-full.trx`: **3,944 passed, zero failed, 11 opt-in skips**.
+- All **147 allocation-named tests passed**; no allocation or lifetime failure
+  was waived. Skips remain three opt-in process-loopback tests and eight
+  Go-peer interop cases, not Bluetooth playback verification.
+- External client: **zero build warnings, zero errors**.
+- Packet-plan tests retain the admitted operation during stop, reject stale
+  generations and malformed requests, and preserve exact payloads on the same
+  service. They use fakes and do not establish hardware behavior.
+
+DS4Windows PID 23824 (18:27:57 local) and VIIPER PID 30276 (18:27:56 local)
+were still running unchanged at this checkpoint. No app replacement, radio
+probe, Line-In recording, driver/bond/profile change or Program Files write
+was performed in this bridge work. No new portable runtime package is staged
+yet. Loading the bridge will require an initial user-approved app replacement;
+the current no-restart instruction remains in force. Bluetooth AUX playback,
+stereo separation, stopping and simultaneous low-latency input are still open
+physical acceptance gates, not inferred successes from the software tests.

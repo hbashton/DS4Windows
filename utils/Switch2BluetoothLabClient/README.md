@@ -284,7 +284,12 @@ tests. Plan completion, fingerprints and accepted writes are not playback.
 
 The revised headset parser recognizes both observed audio lengths (0 and 50)
 and separately decodes documented buttons/sticks without reading audio bytes
-as motion. `ControlsForwarded: false` explicitly records that these alternate
+as motion. Its dedicated controls-only value maps all 21 documented button bits
+to canonical semantics while retaining the distinct raw 24-bit layout, 8-bit
+counter and 12-bit sticks. It no longer labels a 112-byte headset observation
+as Pro09 or carries an unusable offset-66 motion region into a 63-byte body.
+This source correction does not itself enable controller publication.
+`ControlsForwarded: false` explicitly records that these alternate
 reports are **not yet connected to the runtime mapper**. The characteristic
 admission and 63-byte common05 queue are not weakened or bypassed; input/audio
 coexistence remains unfinished and must be implemented before production use.

@@ -565,3 +565,95 @@ does not define their semantics or a complete headphone sequence. No unknown
 The next useful evidence is the controller's accepted audio enable/routing and
 packet structure, not another repetition of these negative formats. Preserve
 the running apps and connection; do not expand command access by replacing them.
+
+## Source-only follow-up: headset control identity and remaining evidence gaps
+
+The preceding turn was progress: six new hypotheses were measured and the
+external probe/capture validity changes were checkpointed as `f428c73`. This
+follow-up made no radio writes and did not replay negative formats. Revalidated
+live PIDs/start times and the A9A373... app hash remained unchanged. Source test
+builds stayed in the repository; no files were copied into the live runtime.
+
+### Correcting a controls representation hazard
+
+The existing diagnostic decoder returned `Switch2BasicInputReport` labelled
+Pro09, although its source was the dedicated 112-byte headset report. It also
+carried a motion region at offset 66 that cannot fit the canonical 63-byte body.
+No current mapper consumed it, so this was not an established live input bug;
+it was an unsafe starting point for implementing audio/input coexistence.
+
+The source now uses `Switch2ProHeadsetControls`, owning decoded scalars only:
+the native 8-bit counter/power byte, raw 24-bit buttons, explicit canonical
+button semantics, unknown bits and exact 12-bit sticks. The 21 documented bits
+are mapped individually, including GL/GR and physical B/A/Y/X positions. There
+is no report-kind alias, borrowed buffer, retained microphone/motion data or
+implicit lifetime authorization. Existing stick decoding and profile axis math
+are reused. The diagnostic call uses this type; production admission, queues,
+the mapper and the running process are unchanged.
+
+New tests cover all 21 single-bit mappings, unknown combinations, every legal
+audio/motion-length pair, rejected lengths/truncations/oversize, all counter and
+power byte values, stick endpoints, buffer independence and zero allocation.
+Focused `b94-headset-typed-controls.trx`: **88 passed, zero failed**, including
+35 new typed-control cases plus the existing tone/protocol tests.
+Full Release x64 `b94-headset-controls-full.trx`: **4,028 passed, zero failed,
+11 opt-in skips**, including all **148 allocation-related tests**. No test
+runtime was deployed over either running application.
+
+### Why forwarding is not a one-line fix
+
+If headphone output ultimately requires headset notifications, its controls
+must enter the existing serialized publication path through an explicitly
+admitted auxiliary source of the same lease. Common05 has a 32-bit counter,
+different button positions, a fixed 63-byte body and a pinned descriptor. The
+headset's counter requires a separate baseline. Do not fake common05 packets,
+discard ordered button transitions, bypass generation/teardown gates, or call
+the mapper under the lab callback's statistics lock.
+
+`Switch2RuntimeInputDevice.TryPublishProDetailed` currently resets motion
+projection whenever a frame lacks common motion. A controls-only update needs
+an explicit freshness contract: no repeated integration of cached gyro, no
+invented motion sample, and no repeated clearing of calibration/filter state.
+Full runtime wiring has **not** been implemented or represented as complete.
+
+The last measured headset trace (`b94-traced-plan-20260907-204646-189.jsonl`)
+contains 41 reports with **MotionLength=0**, not a captured 30/40-byte motion
+stream. The renewed donor audit found no full packed-motion decoder:
+Switch2Connect/PadForge use common05 raw IMU; switch2mac's packed-field analysis
+is partial. A newer
+[hid-nintendo2-dkms parser](https://github.com/XenuIsWatching/hid-nintendo2-dkms/blob/32a981ea7f916f1792a7e35aa0ecf79063ec4001/hid-nintendo2.c#L871)
+handles accelerometer-only USB Pro09 in one 30-byte configuration; it does not
+establish Bluetooth headset gyro or timestamp units. Its offsets must not be
+applied to absent motion data or the 40-byte variant. Preserving software state
+cannot recreate motion reports that were not delivered.
+
+### Output setup boundary rechecked
+
+The fixed `17/02` bytes exactly match the pinned command reference. The command
+channel awaits the full controller notification separately from the WinRT
+write, so setup acknowledgement is more than host submission. Nevertheless,
+the reference still labels its semantics unknown; no verified route, codec,
+volume or stream-start operation emerged.
+
+Working USB audio uses native `WasapiOut`/`usbaudio`. Its descriptors expose
+USB-class mute/volume and an output streaming alternate setting, but neither
+the physical ledger nor available audio-era captures establish corresponding
+Bluetooth commands. Do not transplant USB control IDs or label `18/01` volume
+without that missing evidence.
+
+Bluetooth playback, channel assignment, physical stopping/clipping and input
+coexistence remain unproven. A known-working Bluetooth audio sequence is still
+needed to distinguish an unknown enable/routing gate from an invalid packet
+format. The user confirmed that a Nintendo Switch 2 console is available. A
+separate capture-method feasibility audit is now warranted; console ownership
+alone does not make encrypted over-air traffic readable. No console pairing,
+advertisement, controller handoff, radio change or restart is authorized by that
+answer. The only currently present USB Bluetooth adapter observed on the PC is
+the RZ616, so a second independent radio must not be assumed.
+
+The [console-capture feasibility plan](2026-09-07-switch2-console-audio-capture-plan.md)
+records the evidenced separate-sniffer route, custom pairing/key handling,
+Windows capture/mock-peripheral limitations and explicit handoff gates. It is
+not executed. The user was asked whether a dedicated BLE sniffer is available;
+there is no reason to repeat the negative audio matrices while that prerequisite
+and the missing positive reference remain unresolved.

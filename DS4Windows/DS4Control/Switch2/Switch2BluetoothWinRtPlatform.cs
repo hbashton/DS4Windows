@@ -653,7 +653,7 @@ internal sealed class Switch2BluetoothWinRtPlatform :
                         audioLengths[audioLength] = audioLengths.GetValueOrDefault(audioLength) + 1;
                         if (opusIdle) idle++;
                     }
-                    if (Switch2InputCodec.TryDecodeHeadsetControls(value, out _)) controlsDecoded++;
+                    if (Switch2ProHeadsetControlsCodec.TryDecode(value, out _)) controlsDecoded++;
                     value.Clear(); // no recorded or returned microphone payload
                 }
             }

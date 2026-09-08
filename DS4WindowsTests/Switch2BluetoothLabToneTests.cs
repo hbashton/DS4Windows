@@ -191,28 +191,28 @@ public class Switch2BluetoothLabToneTests
         body[5] = 0x34; body[6] = 0xA2; body[7] = 0xBC;
         body[8] = 0x78; body[9] = 0xF6; body[10] = 0xDE;
         body[13] = 5; body[14] = 50; body.AsSpan(15, 50).Fill(0xA5); body[65] = 30;
-        Assert.IsTrue(Switch2InputCodec.TryDecodeHeadsetControls(body, out var controls));
-        Assert.AreEqual(0x12AA55u, controls.Buttons);
-        Assert.AreEqual(Switch2InputCodec.DecodePackedStick(body.AsSpan(5, 3)), controls.PrimaryStick);
-        Assert.AreEqual(Switch2InputCodec.DecodePackedStick(body.AsSpan(8, 3)), controls.SecondaryStick);
-        Assert.AreEqual(66, controls.Motion.BodyOffset);
-        Assert.AreEqual(30, controls.Motion.DeclaredLength);
+        Assert.IsTrue(Switch2ProHeadsetControlsCodec.TryDecode(body, out var controls));
+        Assert.AreEqual(0x12AA55u, controls.RawButtonBits);
+        Assert.AreEqual(Switch2InputCodec.DecodePackedStick(body.AsSpan(5, 3)), controls.LeftStick);
+        Assert.AreEqual(Switch2InputCodec.DecodePackedStick(body.AsSpan(8, 3)), controls.RightStick);
+        // The controls-only value must not alias Pro09 or retain microphone
+        // data / an out-of-range opaque-motion offset in a common05 body.
         body[14] = 0;
-        Assert.IsTrue(Switch2InputCodec.TryDecodeHeadsetControls(body, out _));
+        Assert.IsTrue(Switch2ProHeadsetControlsCodec.TryDecode(body, out _));
         Assert.IsTrue(Switch2BluetoothLabHeadsetHeader.TryRead(body, out _, out byte length, out bool idle));
         Assert.AreEqual(0, (int)length); Assert.IsFalse(idle);
-        for (int size = 0; size < 112; size++) Assert.IsFalse(Switch2InputCodec.TryDecodeHeadsetControls(body.AsSpan(0, size), out _));
-        body[65] = 41; Assert.IsFalse(Switch2InputCodec.TryDecodeHeadsetControls(body, out _));
-        body[65] = 0; body[14] = 49; Assert.IsFalse(Switch2InputCodec.TryDecodeHeadsetControls(body, out _));
+        for (int size = 0; size < 112; size++) Assert.IsFalse(Switch2ProHeadsetControlsCodec.TryDecode(body.AsSpan(0, size), out _));
+        body[65] = 41; Assert.IsFalse(Switch2ProHeadsetControlsCodec.TryDecode(body, out _));
+        body[65] = 0; body[14] = 49; Assert.IsFalse(Switch2ProHeadsetControlsCodec.TryDecode(body, out _));
     }
 
     [TestMethod]
     public void HeadsetControlsDecoderAllocatesNothing()
     {
         byte[] body = new byte[112]; body[14] = 50;
-        for (int i = 0; i < 100; i++) Switch2InputCodec.TryDecodeHeadsetControls(body, out _);
+        for (int i = 0; i < 100; i++) Switch2ProHeadsetControlsCodec.TryDecode(body, out _);
         long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 10000; i++) Switch2InputCodec.TryDecodeHeadsetControls(body, out _);
+        for (int i = 0; i < 10000; i++) Switch2ProHeadsetControlsCodec.TryDecode(body, out _);
         Assert.AreEqual(0L, GC.GetAllocatedBytesForCurrentThread() - before);
     }
 }

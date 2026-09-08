@@ -130,8 +130,11 @@ internal sealed class Switch2GyroCalibrationFileStore :
         }
         try
         {
-            return File.Exists(path) && TryDecode(File.ReadAllBytes(path),
-                peerId, out calibration);
+            using FileStream stream = OpenCalibrationRead(path);
+            if (stream.Length != RecordLength) return false;
+            Span<byte> record = stackalloc byte[RecordLength];
+            stream.ReadExactly(record);
+            return TryDecode(record, peerId, out calibration);
         }
         catch
         {
@@ -139,6 +142,13 @@ internal sealed class Switch2GyroCalibrationFileStore :
             return false;
         }
     }
+
+    internal static FileStream OpenCalibrationRead(string path) =>
+        // Writers publish a complete replacement, never edit a live record.
+        // Keep in-place writes denied but let that replacement proceed while
+        // this handle reads the previous generation; otherwise all bounded
+        // save attempts can fail behind our own reader and lose the update.
+        new(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
 
     public bool TryQueueStore(Switch2PersistentPeerId peerId,
         in Switch2GyroCalibrationRecord calibration)
@@ -223,7 +233,7 @@ internal sealed class Switch2GyroCalibrationFileStore :
                 stream.Write(record);
                 stream.Flush(flushToDisk: true);
             }
-            File.Move(temporary, path, overwrite: true);
+            CommitCalibrationFile(temporary, path);
             return true;
         }
         catch
@@ -231,6 +241,19 @@ internal sealed class Switch2GyroCalibrationFileStore :
             try { File.Delete(temporary); } catch { }
             return false;
         }
+    }
+
+    internal static void CommitCalibrationFile(string temporary, string path)
+    {
+        // MoveFileEx's overwrite path cannot replace an open destination even
+        // when its readers share deletion. ReplaceFile preserves existing
+        // readers' old generation and publishes the complete new record.
+        if (File.Exists(path))
+            File.Replace(temporary, path, destinationBackupFileName: null);
+        else
+            File.Move(temporary, path, overwrite: false);
+        // An existence race is handled by the existing bounded write retry.
+        // Never delete the destination first or fall back to in-place writes.
     }
 
     private bool TryPath(Switch2PersistentPeerId peerId, out string path)

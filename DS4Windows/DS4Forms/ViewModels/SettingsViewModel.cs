@@ -71,14 +71,19 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         }
 
         private bool runAtStartup;
+        private bool changingStartupRegistration;
+        private StartupRegistrationState startupRegistration;
+        private readonly Func<StartupRegistrationState> readStartupRegistration;
+        private readonly Action<StartupRegistrationMode> changeStartupRegistration;
+        private readonly Action refreshViiperStartup;
+        private readonly Action<string> reportStartupError;
         public bool RunAtStartup
         {
             get => runAtStartup;
             set
             {
-                if (!SystemIntegrationEnabled) return;
-                runAtStartup = value;
-                RunAtStartupChanged?.Invoke(this, EventArgs.Empty);
+                if (!SystemIntegrationEnabled || changingStartupRegistration || runAtStartup == value) return;
+                ApplyStartupRegistration(value ? StartupRegistrationMode.Program : StartupRegistrationMode.Disabled);
             }
         }
         public event EventHandler RunAtStartupChanged;
@@ -89,9 +94,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             get => runStartProg;
             set
             {
-                if (!SystemIntegrationEnabled) return;
-                runStartProg = value;
-                RunStartProgChanged?.Invoke(this, EventArgs.Empty);
+                if (!SystemIntegrationEnabled || changingStartupRegistration || !runAtStartup || !value || runStartProg) return;
+                ApplyStartupRegistration(StartupRegistrationMode.Program);
             }
         }
         public event EventHandler RunStartProgChanged;
@@ -102,9 +106,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             get => runStartTask;
             set
             {
-                if (!SystemIntegrationEnabled) return;
-                runStartTask = value;
-                RunStartTaskChanged?.Invoke(this, EventArgs.Empty);
+                if (!SystemIntegrationEnabled || changingStartupRegistration || !runAtStartup || !value || runStartTask) return;
+                ApplyStartupRegistration(StartupRegistrationMode.Task);
             }
         }
         public event EventHandler RunStartTaskChanged;
@@ -430,7 +433,31 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             {
                 string temp = DS4Windows.Global.FakeExeName;
                 if (temp == value) return;
+                try
+                {
+                    if (!string.IsNullOrEmpty(value)) CreateFakeExe(value);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+                {
+                    AppLogger.LogToGui("Could not create the executable alias: " + ex.Message, true);
+                    MessageBox.Show("The executable name was not changed. " + ex.Message,
+                        "Executable name", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    FakeExeNameChanged?.Invoke(this, EventArgs.Empty);
+                    return;
+                }
                 DS4Windows.Global.FakeExeName = value;
+                if (!PortableLabContext.IsActive && !string.IsNullOrEmpty(temp))
+                {
+                    try
+                    {
+                        if (!ExecutableAliasFiles.RemoveOwned(DS4Windows.Global.exelocation, temp))
+                            AppLogger.LogToGui("Previous executable alias was left in place because it is in use or no longer matches this build.", false);
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+                    {
+                        AppLogger.LogToGui("Previous executable alias was left in place: " + ex.Message, false);
+                    }
+                }
                 FakeExeNameChanged?.Invoke(this, EventArgs.Empty);
                 FakeExeNameChangeCompare?.Invoke(this, temp, value);
             }
@@ -479,6 +506,10 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public SettingsViewModel()
         {
+            readStartupRegistration = StartupMethods.ReadRegistrationState;
+            changeStartupRegistration = StartupMethods.SetRegistrationMode;
+            refreshViiperStartup = ViiperSetupManager.RefreshSelectedStartupTaskAfterRunAtStartupChange;
+            reportStartupError = ReportStartupChangeFailure;
             checkEveryUnitIdx = 1;
             IsProfileChangedCheckVisible = Global.Notifications == 2 ? Visibility.Visible : Visibility.Collapsed;
 
@@ -487,8 +518,6 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             {
                 checkEveryUnitIdx = 0;
             }
-
-            CheckStartupOptions();
 
             Icon img = SystemIcons.Shield;
             Bitmap bitmap = img.ToBitmap();
@@ -507,70 +536,19 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                       BitmapSizeOptions.FromEmptyOptions());
             questionMarkSource = wpfBitmap;
 
-            runStartProg = StartupMethods.HasStartProgEntry();
+            canWriteTask = DS4Windows.Global.IsAdministrator();
             try
             {
-                runStartTask = StartupMethods.HasTaskEntry();
+                SetStartupDisplay(readStartupRegistration());
             }
-            catch (COMException ex)
+            catch (Exception ex)
             {
-                DS4Windows.AppLogger.LogToGui(string.Format("Error in TaskService. Check WinOS TaskScheduler service functionality. {0}", ex.Message), true);
-            }
-
-            runAtStartup = runStartProg || runStartTask;
-            canWriteTask = DS4Windows.Global.IsAdministrator();
-
-            if (!runAtStartup)
-            {
-                runStartProg = true;
-            }
-            else if (runStartProg && runStartTask)
-            {
-                runStartProg = false;
-                if (StartupMethods.CanWriteStartEntry())
-                {
-                    StartupMethods.DeleteStartProgEntry();
-                }
-            }
-
-            if (runAtStartup && runStartProg)
-            {
-                bool locChange = StartupMethods.CheckStartupExeLocation();
-                if (locChange)
-                {
-                    if (StartupMethods.CanWriteStartEntry())
-                    {
-                        StartupMethods.DeleteStartProgEntry();
-                        StartupMethods.WriteStartProgEntry();
-                    }
-                    else
-                    {
-                        runAtStartup = false;
-                        showRunStartPanel = Visibility.Collapsed;
-                    }
-                }
-            }
-            else if (runAtStartup && runStartTask)
-            {
-                if (canWriteTask)
-                {
-                    StartupMethods.DeleteOldTaskEntry();
-                    StartupMethods.WriteTaskEntry();
-                }
-            }
-
-            if (runAtStartup)
-            {
-                showRunStartPanel = Visibility.Visible;
+                SetStartupDisplay(default);
+                DS4Windows.AppLogger.LogToGui("Could not read Windows startup settings: " + ex.Message, true);
             }
 
             RefreshMonitorChoices();
 
-            RunAtStartupChanged += SettingsViewModel_RunAtStartupChanged;
-            RunStartProgChanged += SettingsViewModel_RunStartProgChanged;
-            RunStartTaskChanged += SettingsViewModel_RunStartTaskChanged;
-            FakeExeNameChanged += SettingsViewModel_FakeExeNameChanged;
-            FakeExeNameChangeCompare += SettingsViewModel_FakeExeNameChangeCompare;
             UseUdpSmoothingChanged += SettingsViewModel_UseUdpSmoothingChanged;
             UseUDPServerChanged += SettingsViewModel_UseUDPServerChanged;
             SystemEvents.DisplaySettingsChanged += SystemEvents_DisplaySettingsChanged;
@@ -593,84 +571,56 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             UdpServerOneEuroPanelVisibilityChanged?.Invoke(this, EventArgs.Empty);
         }
 
-        private void SettingsViewModel_FakeExeNameChangeCompare(SettingsViewModel sender,
-            string oldvalue, string newvalue)
+        // The isolated constructor exercises the same setters with no Windows
+        // discovery, monitor enumeration, icons, or real startup registrations.
+        internal SettingsViewModel(Func<StartupRegistrationState> read,
+            Action<StartupRegistrationMode> change, Action refresh,
+            Action<string> reportError)
         {
-            if (PortableLabContext.IsActive) return;
-            string old_exefile = Path.Combine(DS4Windows.Global.exedirpath, $"{oldvalue}.exe");
-            string old_conf_file = Path.Combine(DS4Windows.Global.exedirpath, $"{oldvalue}.runtimeconfig.json");
-            string old_deps_file = Path.Combine(DS4Windows.Global.exedirpath, $"{oldvalue}.deps.json");
+            readStartupRegistration = read ?? throw new ArgumentNullException(nameof(read));
+            changeStartupRegistration = change ?? throw new ArgumentNullException(nameof(change));
+            refreshViiperStartup = refresh ?? throw new ArgumentNullException(nameof(refresh));
+            reportStartupError = reportError ?? throw new ArgumentNullException(nameof(reportError));
+            canWriteTask = true;
+            SetStartupDisplay(readStartupRegistration());
+        }
 
-            if (!string.IsNullOrEmpty(oldvalue))
+        private void ApplyStartupRegistration(StartupRegistrationMode mode)
+        {
+            changingStartupRegistration = true;
+            try
             {
-                if (File.Exists(old_exefile))
+                StartupRegistrationChangeResult result = StartupRegistrationChange.Apply(
+                    mode, startupRegistration, readStartupRegistration, changeStartupRegistration);
+                SetStartupDisplay(result.State);
+                if (!result.Success)
                 {
-                    File.Delete(old_exefile);
+                    reportStartupError(result.Error);
+                    return;
                 }
-
-                if (File.Exists(old_conf_file))
-                {
-                    File.Delete(old_conf_file);
-                }
-
-                if (File.Exists(old_deps_file))
-                {
-                    File.Delete(old_deps_file);
-                }
+                try { refreshViiperStartup(); }
+                catch (Exception error) { reportStartupError(error.Message); }
             }
+            finally { changingStartupRegistration = false; }
         }
 
-        private void SettingsViewModel_FakeExeNameChanged(object sender, EventArgs e)
+        private void SetStartupDisplay(StartupRegistrationState state)
         {
-            string temp = FakeExeName;
-            if (!string.IsNullOrEmpty(temp))
-            {
-                CreateFakeExe(FakeExeName);
-            }
+            startupRegistration = state;
+            runAtStartup = state.Enabled;
+            runStartTask = state.Task;
+            runStartProg = !state.Task;
+            ShowRunStartPanel = state.Enabled ? Visibility.Visible : Visibility.Collapsed;
+            RunAtStartupChanged?.Invoke(this, EventArgs.Empty);
+            RunStartProgChanged?.Invoke(this, EventArgs.Empty);
+            RunStartTaskChanged?.Invoke(this, EventArgs.Empty);
         }
 
-        private void SettingsViewModel_RunStartTaskChanged(object sender, EventArgs e)
+        private static void ReportStartupChangeFailure(string error)
         {
-            if (runStartTask)
-            {
-                StartupMethods.WriteTaskEntry();
-                ViiperSetupManager.
-                    RefreshSelectedStartupTaskAfterRunAtStartupChange();
-            }
-            else
-            {
-                StartupMethods.DeleteTaskEntry();
-            }
-        }
-
-        private void SettingsViewModel_RunStartProgChanged(object sender, EventArgs e)
-        {
-            if (runStartProg)
-            {
-                StartupMethods.WriteStartProgEntry();
-                ViiperSetupManager.
-                    RefreshSelectedStartupTaskAfterRunAtStartupChange();
-            }
-            else
-            {
-                StartupMethods.DeleteStartProgEntry();
-            }
-        }
-
-        private void SettingsViewModel_RunAtStartupChanged(object sender, EventArgs e)
-        {
-            if (runAtStartup)
-            {
-                RunStartProg = true;
-                RunStartTask = false;
-            }
-            else
-            {
-                StartupMethods.DeleteStartProgEntry();
-                StartupMethods.DeleteTaskEntry();
-                ViiperSetupManager.
-                    RefreshSelectedStartupTaskAfterRunAtStartupChange();
-            }
+            string message = "The startup change could not be completed. " + error;
+            DS4Windows.AppLogger.LogToGui(message, true);
+            MessageBox.Show(message, "Run at startup", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
 
         private void SettingsViewModel_CheckForUpdatesChanged(object sender, EventArgs e)
@@ -679,20 +629,6 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             {
                 CheckEveryChanged?.Invoke(this, EventArgs.Empty);
                 CheckEveryUnitChanged?.Invoke(this, EventArgs.Empty);
-            }
-        }
-
-        private void CheckStartupOptions()
-        {
-            if (PortableLabContext.IsActive) return;
-            bool lnkExists = File.Exists(Environment.GetFolderPath(Environment.SpecialFolder.Startup) + "\\DS4Windows.lnk");
-            if (lnkExists)
-            {
-                runAtStartup = true;
-            }
-            else
-            {
-                runAtStartup = false;
             }
         }
 
@@ -711,18 +647,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public void CreateFakeExe(string filename)
         {
             if (PortableLabContext.IsActive) return;
-            string exefile = Path.Combine(DS4Windows.Global.exedirpath, $"{filename}.exe");
-            string current_conf_file_path = $"{DS4Windows.Global.exelocation}.runtimeconfig.json";
-            string current_deps_file_path = $"{DS4Windows.Global.exelocation}.deps.json";
-
-            string fake_conf_file = Path.Combine(DS4Windows.Global.exedirpath, $"{filename}.runtimeconfig.json");
-            string fake_deps_file = Path.Combine(DS4Windows.Global.exedirpath, $"{filename}.deps.json");
-
-            File.Copy(DS4Windows.Global.exelocation, exefile); // Copy exe
-
-            // Copy needed app config and deps files
-            File.Copy(current_conf_file_path, fake_conf_file);
-            File.Copy(current_deps_file_path, fake_deps_file);
+            ExecutableAliasFiles.Create(DS4Windows.Global.exelocation, filename);
         }
 
         public void DriverCheckRefresh()

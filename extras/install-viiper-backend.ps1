@@ -1082,12 +1082,24 @@ function Test-UsbipRuntime([string]$usbipPath) {
     }
 }
 
-function Stop-Ds4WindowsProcesses([string]$operation) {
-    $processes = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+function Get-Ds4WindowsProcessesForSetup {
+    $expectedAlias = if ($TargetDs4WindowsPath) {
+        [IO.Path]::GetFullPath($TargetDs4WindowsPath)
+    } else { $null }
+    return @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
         Where-Object {
-            $_.Name -ieq "DS4Windows.exe" -and
-            $_.ProcessId -ne $script:InstallerHostPid
+            $_.ProcessId -ne $script:InstallerHostPid -and (
+                $_.Name -ieq "DS4Windows.exe" -or
+                ($expectedAlias -and
+                    $_.Name -ieq [IO.Path]::GetFileName($expectedAlias) -and
+                    (-not $_.ExecutablePath -or [string]::Equals(
+                        [IO.Path]::GetFullPath([string]$_.ExecutablePath),
+                        $expectedAlias, [StringComparison]::OrdinalIgnoreCase))))
         })
+}
+
+function Stop-Ds4WindowsProcesses([string]$operation) {
+    $processes = @(Get-Ds4WindowsProcessesForSetup)
     if ($processes.Count -eq 0) { return $true }
 
     $unverified = @($processes | Where-Object {
@@ -1099,8 +1111,8 @@ function Stop-Ds4WindowsProcesses([string]$operation) {
             "PID=$($_.ProcessId) path=$($_.ExecutablePath)"
         }) -join "; "
         Write-SetupLog (
-            "Refusing to terminate an unverified process named " +
-            "DS4Windows.exe: $details. Close it manually before setup."
+            "Refusing to terminate an unverified DS4Windows setup candidate: " +
+            "$details. Close it manually before setup."
         ) Red
         return $false
     }
@@ -1138,10 +1150,7 @@ function Stop-Ds4WindowsProcesses([string]$operation) {
     }
     Start-Sleep -Milliseconds 750
 
-    $remaining = @(Get-Process -Name "DS4Windows" `
-        -ErrorAction SilentlyContinue | Where-Object {
-            $_.Id -ne $script:InstallerHostPid
-        })
+    $remaining = @(Get-Ds4WindowsProcessesForSetup)
     if ($remaining.Count -eq 0) { return $true }
 
     Write-SetupLog (
@@ -1484,10 +1493,11 @@ function Stop-InstallerHostForStandardMigration {
         [IO.Path]::GetFullPath([string]$hostProcess.ExecutablePath)
     }
     else { $null }
-    if ($hostProcess.Name -ine "DS4Windows.exe" -or
+    if ($hostProcess.Name -ine [IO.Path]::GetFileName($expectedPath) -or
             -not $actualPath -or
             -not [string]::Equals($actualPath, $expectedPath,
-                [StringComparison]::OrdinalIgnoreCase)) {
+                [StringComparison]::OrdinalIgnoreCase) -or
+            -not (Test-RecognizedProductExecutable $actualPath "DS4Windows")) {
         throw "Refusing to terminate an unverified installer-host process."
     }
 

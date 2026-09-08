@@ -93,3 +93,8 @@ Parallel audio research is recorded in
 [the public-source audio ledger](2026-09-08-switch2-public-audio-research.md).
 It adds genuine historical console capture evidence and an emulator logger lead,
 not a verified Bluetooth headphone implementation.
+
+Subsequent work on #94, #80, #69, and #82 is recorded separately in the
+[reported-issue follow-up](2026-09-08-reported-issues-follow-up.md). That later
+pass also investigated and corrected a gyro-calibration persistence race found
+by integration testing; it does not rewrite the historical results above.

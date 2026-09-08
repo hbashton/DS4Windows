@@ -45,6 +45,100 @@ public sealed class Switch2GyroCalibrationFileStoreTests
     }
 
     [TestMethod]
+    public void ExternalNonSharingReaderRejectsReplacementWithoutDeletingEitherRecord()
+    {
+        string root = NewTemporaryRoot();
+        try
+        {
+            string path = Path.Combine(root, "current.gyro");
+            string temporary = Path.Combine(root, "next.tmp");
+            byte[] oldBytes = Enumerable.Repeat((byte)7, 49).ToArray();
+            byte[] newBytes = Enumerable.Repeat((byte)8, 49).ToArray();
+            File.WriteAllBytes(path, oldBytes);
+            File.WriteAllBytes(temporary, newBytes);
+            using (FileStream reader = new(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                Exception failure = null;
+                try { Switch2GyroCalibrationFileStore.CommitCalibrationFile(temporary, path); }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException) { failure = error; }
+                Assert.IsNotNull(failure, "An external non-sharing handle must not be bypassed.");
+            }
+            CollectionAssert.AreEqual(oldBytes, File.ReadAllBytes(path));
+            CollectionAssert.AreEqual(newBytes, File.ReadAllBytes(temporary));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [DataTestMethod]
+    [DataRow(0)]
+    [DataRow(48)]
+    [DataRow(50)]
+    [DataRow(1_048_576)]
+    public void WrongSizedRecordsAreRejectedBeforeDecode(int length)
+    {
+        string root = NewTemporaryRoot();
+        try
+        {
+            Assert.IsTrue(Switch2GyroCalibrationFileStore.TryOpen(root, out var store));
+            Switch2PersistentPeerId peer = Peer(31, Switch2ControllerModel.ProController2,
+                Switch2AdvertisementCodec.ProController2ProductId);
+            Span<byte> encoded = stackalloc byte[Switch2PersistentPeerId.EncodedLength];
+            Assert.IsTrue(peer.TryWrite(encoded));
+            string path = Path.Combine(root, "GyroCalibration", Convert.ToHexString(encoded) + ".gyro");
+            File.WriteAllBytes(path, new byte[length]);
+            Assert.IsFalse(store.TryLoad(peer, out _));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [TestMethod]
+    public void OpenReaderAllowsDirectAtomicReplacement()
+    {
+        string root = NewTemporaryRoot();
+        try
+        {
+            string path = Path.Combine(root, "current.gyro");
+            string temporary = Path.Combine(root, "next.tmp");
+            File.WriteAllBytes(path, new byte[49]);
+            File.WriteAllBytes(temporary, new byte[49]);
+            using FileStream reader = Switch2GyroCalibrationFileStore.OpenCalibrationRead(path);
+            Switch2GyroCalibrationFileStore.CommitCalibrationFile(temporary, path);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [TestMethod]
+    public void CalibrationReaderDoesNotBlockTheNextAtomicCommit()
+    {
+        string root = NewTemporaryRoot();
+        try
+        {
+            Assert.IsTrue(Switch2GyroCalibrationFileStore.TryOpen(root, out var store));
+            Switch2PersistentPeerId peer = Peer(29, Switch2ControllerModel.ProController2,
+                Switch2AdvertisementCodec.ProController2ProductId);
+            Assert.IsTrue(Switch2GyroCalibrationRecord.TryCreate(new Vector3(0.1f), out var first));
+            Assert.IsTrue(Switch2GyroCalibrationRecord.TryCreate(new Vector3(0.2f), out var second));
+            Assert.IsTrue(store.TryQueueStore(peer, first));
+            Assert.IsTrue(SpinWait.SpinUntil(() => store.TryLoad(peer, out _), 3_000));
+            string path = Directory.GetFiles(Path.Combine(root, "GyroCalibration"), "*.gyro").Single();
+            // Hold the exact production read handle across the next queued
+            // replacement. Scheduling cannot hide a missing FileShare.Delete.
+            using FileStream heldReader = Switch2GyroCalibrationFileStore.OpenCalibrationRead(path);
+            byte[] previousGeneration = new byte[49];
+            heldReader.ReadExactly(previousGeneration);
+            Assert.IsTrue(store.TryQueueStore(peer, second));
+            Assert.IsTrue(SpinWait.SpinUntil(() => store.TryLoad(peer, out var loaded) && loaded.Equals(second), 3_000),
+                "A calibration reader blocked atomic replacement and exhausted all queued write attempts.");
+            heldReader.Position = 0;
+            byte[] retainedGeneration = new byte[49];
+            heldReader.ReadExactly(retainedGeneration);
+            CollectionAssert.AreEqual(previousGeneration, retainedGeneration,
+                "Existing readers must retain the old complete record while new readers see the new one.");
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [TestMethod]
     public void CorruptDigestDifferentPeerAndUnsafeBiasAreRejected()
     {
         string root = NewTemporaryRoot();

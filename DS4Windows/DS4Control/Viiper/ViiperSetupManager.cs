@@ -508,7 +508,8 @@ namespace DS4Windows
 
             if (!DS4WinWPF.StartupMethods.IsRunAtStartupEnabled())
             {
-                RemoveViiperStartupTask(requestElevation: true);
+                // Observed disabled state may belong to a pending installer
+                // transaction. Passive startup must not erase that state.
                 return;
             }
 
@@ -528,6 +529,13 @@ namespace DS4Windows
 
         public static void RefreshSelectedStartupTaskAfterRunAtStartupChange()
         {
+            if (PortableLabContext.IsActive) return;
+            if (!DS4WinWPF.StartupMethods.IsRunAtStartupEnabled())
+            {
+                if (!RemoveViiperStartupTask(requestElevation: true))
+                    throw new IOException("DS4Windows startup is off, but Windows could not turn off VIIPER startup. Try again as administrator.");
+                return;
+            }
             RefreshSelectedStartupTaskOnLaunch();
         }
 
@@ -900,7 +908,7 @@ namespace DS4Windows
                     progress.SetPhase(
                         "Verifying every packaged DS4Windows file...");
                     string stagedPackageRoot = StageInstallerPackage(
-                        packageExtras, setupDirectory);
+                        packageExtras, setupDirectory, hostPath);
                     string stagedExtras = Path.Combine(stagedPackageRoot,
                         "extras");
                     progress.SetPhase(
@@ -1024,8 +1032,8 @@ namespace DS4Windows
             }
         }
 
-        private static string StageInstallerPackage(string packageExtras,
-            string setupDirectory)
+        internal static string StageInstallerPackageFiles(string packageExtras,
+            string setupDirectory, string hostExecutablePath)
         {
             string sourceRoot = Directory.GetParent(packageExtras)?.FullName;
             if (string.IsNullOrWhiteSpace(sourceRoot) ||
@@ -1035,6 +1043,18 @@ namespace DS4Windows
                     "The DS4Windows release package root is missing.");
             }
             EnsurePathDoesNotTraverseReparsePoints(sourceRoot,
+                requireExisting: true);
+            string exactHostPath = Path.GetFullPath(hostExecutablePath);
+            if (!string.Equals(Path.GetDirectoryName(exactHostPath),
+                    Path.GetFullPath(sourceRoot).TrimEnd(Path.DirectorySeparatorChar),
+                    StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(Path.GetExtension(exactHostPath), ".exe",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "The setup host must be an executable in this exact package.");
+            }
+            EnsurePathDoesNotTraverseReparsePoints(exactHostPath,
                 requireExisting: true);
 
             string manifestPath = Path.Combine(sourceRoot,
@@ -1101,6 +1121,15 @@ namespace DS4Windows
                     throw new InvalidOperationException(
                         $"Invalid package file: {relativePath}");
                 }
+                if (!File.Exists(sourcePath) && string.Equals(relativePath,
+                        "DS4Windows.exe", StringComparison.OrdinalIgnoreCase))
+                {
+                    // The elevated entry point already verified this exact
+                    // running host and adjacent package. A renamed apphost is
+                    // copied under the manifest's canonical destination only;
+                    // never scan for or substitute another executable/DLL.
+                    sourcePath = exactHostPath;
+                }
                 if (!File.Exists(sourcePath))
                 {
                     if (IsOptionalSatelliteResourcePath(relativePath))
@@ -1149,6 +1178,14 @@ namespace DS4Windows
                 target.Flush(flushToDisk: true);
             }
 
+            return stagedRoot;
+        }
+
+        private static string StageInstallerPackage(string packageExtras,
+            string setupDirectory, string hostExecutablePath)
+        {
+            string stagedRoot = StageInstallerPackageFiles(packageExtras,
+                setupDirectory, hostExecutablePath);
             string stagedExtras = Path.Combine(stagedRoot, "extras");
             string[] requiredOfflineFiles =
             {

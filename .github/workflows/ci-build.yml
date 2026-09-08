@@ -40,6 +40,14 @@ jobs:
         # Remove the --filter once the upstream snapshot fixtures are regenerated.
         run: dotnet test .\DS4WindowsTests\DS4WindowsTests.csproj -c Release -p:Platform=x64 --verbosity normal --filter "Name!=CheckSettingsSave&Name!=CheckWriteProfile&Name!=CheckJaysProfileRead"
 
+      - name: Test renamed executable setup process guards
+        shell: powershell
+        run: .\utils\test-renamed-executable-setup.ps1
+
+      - name: Test read-only legacy joystick diagnostics
+        shell: pwsh
+        run: .\utils\test-legacy-joystick-exposure.ps1
+
   build:
     runs-on: windows-2022
     needs: test

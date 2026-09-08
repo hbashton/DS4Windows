@@ -1961,6 +1961,7 @@ internal sealed class Switch2BluetoothWindowsInputLease :
     internal Switch2BluetoothSensorInitializationFailure SensorInitializationFailure
         { get; private set; }
     internal bool JoyConSensorsInitialized { get; private set; }
+    internal bool ProFeaturesInitialized { get; private set; }
 
     internal Switch2BluetoothWindowsInputLease(
         Switch2BluetoothConnectionAdmission admission,
@@ -2514,6 +2515,19 @@ internal sealed class Switch2BluetoothWindowsInputLease :
                     return false;
                 }
                 JoyConSensorsInitialized = true;
+            }
+            else if (playerLedChannel != null && Admission.Model == Switch2ControllerModel.ProController2)
+            {
+                using var featureTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                featureTimeout.CancelAfter(PlayerLedCommandTimeoutMilliseconds);
+                SensorInitializationFailure = await playerLedChannel.
+                    InitializeProFeaturesAsync(featureTimeout.Token).ConfigureAwait(false);
+                if (SensorInitializationFailure != Switch2BluetoothSensorInitializationFailure.None)
+                {
+                    BeginTeardown();
+                    return false;
+                }
+                ProFeaturesInitialized = true;
             }
 
             Task<bool> enableTask = characteristic.

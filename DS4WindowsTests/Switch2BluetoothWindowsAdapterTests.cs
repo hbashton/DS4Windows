@@ -121,10 +121,13 @@ public sealed partial class Switch2BluetoothWindowsAdapterTests
             }
             else if (bytes[0] == Switch2BluetoothSensorCodec.CommandId)
             {
-                CollectionAssert.AreEqual(Switch2BluetoothSensorCodec.CreateRequest(
-                    enable: bytes[3] == 0x04), bytes);
-                device.Service.ResponseCharacteristic.Emit(
-                    Convert.FromHexString("0C01000000000000"), 1);
+                if (!AcknowledgeProFeatureRequest(device.Service, request))
+                {
+                    CollectionAssert.AreEqual(Switch2BluetoothSensorCodec.CreateRequest(
+                        enable: bytes[3] == 0x04), bytes);
+                    device.Service.ResponseCharacteristic.Emit(
+                        Convert.FromHexString("0C01000000000000"), 1);
+                }
             }
             else
             {
@@ -1738,7 +1741,11 @@ public sealed partial class Switch2BluetoothWindowsAdapterTests
         device.Service.CommandCharacteristic.WriteOverride = (request, _, _) =>
         {
             byte[] detachedRequest = request.ToArray();
-            if (detachedRequest[0] ==
+            if (AcknowledgeProFeatureRequest(device.Service, request))
+            {
+                Assert.AreEqual(0, device.Service.Characteristic.EnableCalls);
+            }
+            else if (detachedRequest[0] ==
                     Switch2BluetoothMemoryReadCodec.CommandId)
             {
                 byte length = detachedRequest[8];
@@ -1800,7 +1807,7 @@ public sealed partial class Switch2BluetoothWindowsAdapterTests
             Switch2CalibrationCodec.PrimaryUserStickAddress,
             Switch2CalibrationCodec.SecondaryUserStickAddress,
         }, calibrationAddresses);
-        Assert.AreEqual(4,
+        Assert.AreEqual(6,
             device.Service.CommandCharacteristic.WriteCalls);
         Assert.IsTrue(result.Lease.TrySubscribeCccdNotify(23,
             (_, _, _, _, _) => { }, _ => { }));
@@ -1833,7 +1840,7 @@ public sealed partial class Switch2BluetoothWindowsAdapterTests
         CollectionAssert.AreEqual(Convert.FromHexString(
             "099101070004000007000000"),
             device.Service.CommandCharacteristic.LastWrite);
-        Assert.AreEqual(5,
+        Assert.AreEqual(7,
             device.Service.CommandCharacteristic.WriteCalls);
 
         Assert.IsTrue(result.Lease.TryUnsubscribeCccdNone(23));
@@ -2176,6 +2183,11 @@ public sealed partial class Switch2BluetoothWindowsAdapterTests
                     ProController2CharacteristicUuid);
             service.CommandCharacteristic = FakeCharacteristic.Command();
             service.ResponseCharacteristic = FakeCharacteristic.Response();
+            service.CommandCharacteristic.WriteOverride = (request, _, _) =>
+            {
+                AcknowledgeProFeatureRequest(service, request);
+                return ValueTask.FromResult(true);
+            };
             return new FakeDevice(service)
             {
                 ThroughputRequestSucceeds = true,
@@ -2320,6 +2332,15 @@ public sealed partial class Switch2BluetoothWindowsAdapterTests
             }
             Disposed = true;
         }
+    }
+
+    private static bool AcknowledgeProFeatureRequest(FakeService service, ReadOnlyMemory<byte> request)
+    {
+        if (request.Length != 12 || request.Span[0] != 0x0C || request.Span[8] != 0x2F) return false;
+        bool enable = request.Span[3] == 0x04;
+        CollectionAssert.AreEqual(Convert.FromHexString(enable ? "0C910104000400002F000000" : "0C910102000400002F000000"), request.ToArray());
+        service.ResponseCharacteristic.Emit(Convert.FromHexString(enable ? "0C0101041078000000000000" : "0C0101021078000000000000"), 1);
+        return true;
     }
 
     private sealed class FakeService : ISwitch2BluetoothWindowsGattService

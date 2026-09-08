@@ -102,11 +102,13 @@ internal sealed class Switch2BluetoothPlayerLedCommandChannel
     private readonly Switch2BluetoothWindowsValueChangedHandler valueChanged;
     private TaskCompletionSource<byte[]> pendingResponse;
     private byte pendingCommandId;
+    private byte pendingProFeatureSubcommand;
     private TaskCompletionSource<bool> operationsDrained = CompletedDrain();
     private bool attachAttempted;
     private bool prepared;
     private bool terminal;
     private int activeOperations;
+    private Task retainedProFeatureWriteDrain = Task.CompletedTask;
 
     internal Switch2BluetoothPlayerLedCommandChannel(
         ISwitch2BluetoothWindowsGattCharacteristic command,
@@ -293,8 +295,16 @@ internal sealed class Switch2BluetoothPlayerLedCommandChannel
     /// ambiguous exchange fences the channel before a successor may write.
     /// Called before input publication, never from the report hot path.
     /// </summary>
-    internal async ValueTask<Switch2BluetoothSensorInitializationFailure>
-        InitializeJoyConSensorsAsync(CancellationToken cancellationToken)
+    internal ValueTask<Switch2BluetoothSensorInitializationFailure>
+        InitializeJoyConSensorsAsync(CancellationToken cancellationToken) =>
+        InitializeFeaturesAsync(proFeatures: false, cancellationToken);
+
+    internal ValueTask<Switch2BluetoothSensorInitializationFailure>
+        InitializeProFeaturesAsync(CancellationToken cancellationToken) =>
+        InitializeFeaturesAsync(proFeatures: true, cancellationToken);
+
+    private async ValueTask<Switch2BluetoothSensorInitializationFailure>
+        InitializeFeaturesAsync(bool proFeatures, CancellationToken cancellationToken)
     {
         TaskCompletionSource<byte[]> completion;
         lock (sync)
@@ -310,12 +320,14 @@ internal sealed class Switch2BluetoothPlayerLedCommandChannel
                 TaskCreationOptions.RunContinuationsAsynchronously);
             pendingResponse = completion;
             pendingCommandId = Switch2BluetoothSensorCodec.CommandId;
+            pendingProFeatureSubcommand = proFeatures ? (byte)0x02 : (byte)0;
             activeOperations = 1;
             operationsDrained = new TaskCompletionSource<bool>(
                 TaskCreationOptions.RunContinuationsAsynchronously);
         }
 
         bool terminalFailure = true;
+        Task<bool> retainedWrite = null;
         try
         {
             for (int step = 0; step < 2; step++)
@@ -331,17 +343,35 @@ internal sealed class Switch2BluetoothPlayerLedCommandChannel
                             TaskCreationOptions.RunContinuationsAsynchronously);
                         pendingResponse = completion;
                         pendingCommandId = Switch2BluetoothSensorCodec.CommandId;
+                        pendingProFeatureSubcommand = proFeatures ? (byte)0x04 : (byte)0;
                     }
                 }
-                byte[] request = Switch2BluetoothSensorCodec.CreateRequest(
-                    enable: step == 1);
-                if (!await command.WriteValueAsync(request, writeWithoutResponse,
-                        cancellationToken).ConfigureAwait(false))
+                byte[] request = proFeatures ? Switch2BluetoothProFeatureCodec.CreateRequest(enable: step == 1) :
+                    Switch2BluetoothSensorCodec.CreateRequest(enable: step == 1);
+                bool written;
+                if (proFeatures)
+                {
+                    // Cancel the wait, never the admitted Windows operation.
+                    // The finally below retains ownership until actual completion.
+                    retainedWrite = command.WriteValueAsync(request, writeWithoutResponse,
+                        CancellationToken.None).AsTask();
+                    written = await retainedWrite.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+                else
+                {
+                    // Preserve the existing Joy-Con transport and reply contract.
+                    written = await command.WriteValueAsync(request, writeWithoutResponse,
+                        cancellationToken).ConfigureAwait(false);
+                }
+                if (!written)
                     return Switch2BluetoothSensorInitializationFailure.WriteRejected;
 
                 byte[] value = await completion.Task.WaitAsync(cancellationToken).
                     ConfigureAwait(false);
-                if (value == null || !Switch2BluetoothSensorCodec.IsAccepted(value))
+                if (proFeatures) cancellationToken.ThrowIfCancellationRequested();
+                if (value == null || !(proFeatures ? Switch2BluetoothProFeatureCodec.IsAccepted(value, enable: step == 1) :
+                        Switch2BluetoothSensorCodec.IsAccepted(value)))
                     return Switch2BluetoothSensorInitializationFailure.ResponseRejected;
             }
             terminalFailure = false;
@@ -357,8 +387,37 @@ internal sealed class Switch2BluetoothPlayerLedCommandChannel
         }
         finally
         {
-            CompleteOperation(completion, terminalFailure);
+            if (proFeatures && retainedWrite is { IsCompleted: false })
+            {
+                // The caller's deadline must not become an unbounded startup
+                // wait. Fence immediately, but keep operationsDrained owned by
+                // the actual write so teardown cannot dispose beneath it.
+                lock (sync)
+                {
+                    terminal = true;
+                    prepared = false;
+                    if (ReferenceEquals(pendingResponse, completion))
+                    {
+                        pendingResponse = null;
+                        pendingCommandId = 0;
+                        pendingProFeatureSubcommand = 0;
+                    }
+                }
+                completion.TrySetResult(null);
+                retainedProFeatureWriteDrain = DrainRetainedProFeatureWriteAsync(retainedWrite, completion);
+            }
+            else
+            {
+                if (retainedWrite != null) try { await retainedWrite.ConfigureAwait(false); } catch { }
+                CompleteOperation(completion, terminalFailure);
+            }
         }
+    }
+
+    private async Task DrainRetainedProFeatureWriteAsync(Task<bool> write, TaskCompletionSource<byte[]> completion)
+    {
+        try { await write.ConfigureAwait(false); } catch { }
+        finally { CompleteOperation(completion, terminalFailure: true); }
     }
 
     internal async ValueTask<Switch2BluetoothMemoryReadChannelResult>
@@ -510,6 +569,7 @@ internal sealed class Switch2BluetoothPlayerLedCommandChannel
         try
         {
             await operations.WaitAsync(cancellationToken).ConfigureAwait(false);
+            await retainedProFeatureWriteDrain.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
         catch
         {
@@ -557,10 +617,20 @@ internal sealed class Switch2BluetoothPlayerLedCommandChannel
             {
                 return;
             }
+            // A duplicate fully valid Pro mask acknowledgement cannot
+            // complete the enable step. Ignore only that already-accepted step;
+            // malformed same-command replies reject and fence normally.
+            if (pendingProFeatureSubcommand == 0x04 &&
+                Switch2BluetoothProFeatureCodec.IsAccepted(value, enable: false))
+                return;
             completion = pendingResponse;
             pendingResponse = null;
             pendingCommandId = 0;
-            detachedValue = value.ToArray();
+            // The Pro command-only contract is exactly 12 bytes. Reject an
+            // oversized same-command response without copying arbitrary data.
+            detachedValue = pendingProFeatureSubcommand != 0 && value.Length != Switch2BluetoothProFeatureCodec.ResponseLength
+                ? Array.Empty<byte>() : value.ToArray();
+            pendingProFeatureSubcommand = 0;
         }
         completion.TrySetResult(detachedValue);
     }
@@ -575,6 +645,7 @@ internal sealed class Switch2BluetoothPlayerLedCommandChannel
             {
                 pendingResponse = null;
                 pendingCommandId = 0;
+                pendingProFeatureSubcommand = 0;
             }
             if (terminalFailure)
             {

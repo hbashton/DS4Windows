@@ -953,6 +953,8 @@ internal sealed partial class Switch2BluetoothProductionCoordinator
             lease = open.Lease;
             if (lease.JoyConSensorsInitialized)
                 ReportDiagnostic($"Switch 2 {observation.Model} Bluetooth motion and optical mouse sensor startup acknowledged.");
+            else if (lease.ProFeaturesInitialized)
+                ReportDiagnostic($"Switch 2 {observation.Model} Bluetooth button, stick and motion feature startup acknowledged.");
             ReportDiagnostic(lease.ThroughputOptimizedRequested ?
                 "Switch 2 Bluetooth throughput preference accepted by Windows; " +
                 "negotiated report interval is measured separately." :

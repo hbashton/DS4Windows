@@ -672,3 +672,75 @@ updates do not add hardware validation. Bluetooth AUX playback remains silent
 in the completed measurements. A verified implementation or suitable existing
 capture could still supply the missing setup/framing without new hardware;
 the unavailable sniffer is not proof that Bluetooth audio cannot be implemented.
+
+## Source-only Pro report-feature startup correction
+
+The preceding no-sniffer follow-up recorded a constraint but did not advance
+playback. This audit identified an actual source omission relevant to input
+coexistence: Bluetooth Pro preparation skipped the feature-mask/enable sequence
+that the Joy-Con path already performs. The documented IMU feature bit gates
+both common05 motion and the dedicated headset report's motion region. Thus the
+previously observed `MotionLength=0` is consistent with missing initialization;
+it must not be used to conclude that the controller cannot supply motion there.
+It does not prove that this omission caused the silent headphone output.
+
+The pinned
+[Pro Bluetooth initialization sequence](https://github.com/ndeadly/switch2_controller_research/blob/d1c5a7f7ba298f83017fae84952a4e6d2ef8fc92/bluetooth_interface.md#pro-controller-2)
+sets and then enables `0x2F` with `0C/02` and `0C/04`. This is distinct from the
+existing USB `0x27` mask and Joy-Con `0x94` mask. Feature selection does not
+change the selected report UUID or its parser. The source correction keeps
+common05, its 63-byte body, the canonical mapper and the input hot path intact.
+
+Seven feature responses in the existing Pro donor PCAPs contain the documented
+12-byte command replies (`0C0101021078000000000000` for mask and
+`0C0101041078000000000000` for enable). The raw captured ATT values are 26 bytes
+on the combined lane, with a 14-zero-byte prefix; they are not direct 12-byte
+captures of our command-only response UUID. The closed codec uses the documented
+command-only format without opportunistic prefix stripping. The mask replies
+take about 105 ms in pairing/reconnect/wake captures; no artificial delay or
+20 ms deadline is justified. The existing 2,000 ms startup deadline is retained.
+
+Both exchanges share command ownership. Pro acceptance validates the complete
+expected-step response, not the legacy Joy-Con success-byte predicate. An exact
+duplicate mask acknowledgement cannot satisfy the enable step. Failure prevents
+input subscription/publication. Cancellation must return without waiting forever
+for a noncooperative Windows write, while retaining ownership and deferring
+resource disposal until that actual operation drains. Joy-Con behavior remains
+unchanged. The new diagnostic describes feature readiness, not audio readiness.
+
+Source verification: Release x64 build passed (existing warnings only).
+`b94-pro-feature-startup-focused.trx`: **116 passed, zero failed**, including
+24 new cases for exact requests/replies, subscription order, malformed/future
+and duplicate replies, ownership exclusion, both-step cancellation with a held
+write, and bounded adapter failure without premature disposal.
+`b94-pro-feature-startup-full.trx`: **4,052 passed, zero failed, 11 opt-in
+skips**, including all **148 allocation-related tests**. Shared fakes now
+acknowledge the exact Pro startup before exercising calibration/output behavior;
+the legacy Joy-Con predicate and startup remain covered and unchanged.
+
+No runtime deployment or new radio probe is authorized by this source change.
+The loaded bridge still cannot issue these feature commands, and no second
+Bluetooth owner was opened. Direct command-only Pro acknowledgement and actual
+motion availability after startup remain hardware acceptance gates; source
+tests and normalized donor captures are not substitutes for them.
+
+The separate new donor check of
+[Pico-NS2-Waker](https://github.com/david419kr/Pico-NS2-Waker/tree/c4b45b6ff55b69c8a819abde7a4c91f20ae44972)
+does not supply Pro Bluetooth audio: its implemented audio route is console USB
+Audio Class to Sony Bluetooth reports for a DualSense. Its physical Pro BLE
+path is HID-only. Its `18/01` reply reproduces the same already-known bytes,
+without establishing volume/routing semantics. No new headphone format was
+justified for a live trial.
+
+The unchanged live process was queried at 21:28:42 local: PID 32636, generation
+2, connected, 473,266 reports and 1.1593 ms current report age. The lifetime
+2,505.3441 ms maximum remains historical. The status-only helper exited zero;
+it performed no radio I/O. Headphone playback, correct channels, clean stopping,
+clipping checks and full input/audio coexistence remain unproven.
+
+After the test suite, status at 21:47:02 local still reports PID 32636,
+generation 2, connected, 545,908 reports and 10.4155 ms current report age.
+The historical maximum is unchanged. Both app PIDs/start times and the loaded
+A9A373... DLL hash remain unchanged. The status-only helper exited zero and no
+test/trace session remains running. This turn made source progress on an input
+prerequisite, not physical headphone playback.

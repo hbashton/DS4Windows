@@ -3,7 +3,7 @@ using DS4Windows.Switch2;
 namespace DS4WindowsTests;
 
 [TestClass]
-public sealed class Switch2BluetoothPlayerLedCommandChannelTests
+public sealed partial class Switch2BluetoothPlayerLedCommandChannelTests
 {
     [TestMethod]
     public async Task LabAudioSetupSharesTheExistingResponseOwnerAndPreservesLeds()

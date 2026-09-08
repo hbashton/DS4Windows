@@ -6,10 +6,10 @@ using DS4Windows.Switch2;
 
 bool tone = args.Length >= 2 && Switch2BluetoothLabCandidate.TryParse(args[1], out _);
 bool planFile = args.Length >= 2 && args[1] == "run-plan";
-bool createPlan = args.Length == 4 && args[0] == "--create-plan" && tone;
+bool createPlan = args.Length is 4 or 5 && args[0] == "--create-plan" && tone;
 if (!createPlan && (planFile ? args.Length != 4 : tone ? args.Length != 3 : args.Length != 2 || args[1] is not ("status" or "inventory" or "headset-header" or "headset-observe" or "configure-audio" or "audio-state" or "stop-probe")))
 {
-    Console.Error.WriteLine("Use <session.json> <query>, <session.json> <candidate> <Line In ID>, <session.json> run-plan <Line In ID> <plan.json>, or --create-plan <candidate> <generation> <new-plan.json>. See README.");
+    Console.Error.WriteLine("Use <session.json> <query>, <session.json> <candidate> <Line In ID>, <session.json> run-plan <Line In ID> <plan.json>, or --create-plan <candidate> <generation> <new-plan.json> [offline-framing]. See README.");
     return 2;
 }
 try
@@ -17,6 +17,7 @@ try
     if (createPlan)
     {
         var plan = CreateTonePlan(args[1], ulong.Parse(args[2]));
+        if (args.Length == 5) plan = PlanFramer.Apply(plan, args[4]);
         byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(plan);
         using var destination = new FileStream(args[3], FileMode.CreateNew, FileAccess.Write, FileShare.None);
         await destination.WriteAsync(bytes);

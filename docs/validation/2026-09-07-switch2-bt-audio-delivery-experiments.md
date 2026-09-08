@@ -274,3 +274,91 @@ yet. Loading the bridge will require an initial user-approved app replacement;
 the current no-restart instruction remains in force. Bluetooth AUX playback,
 stereo separation, stopping and simultaneous low-latency input are still open
 physical acceptance gates, not inferred successes from the software tests.
+
+## b94 bridge loaded with approval; 28 further measured combinations
+
+The user explicitly approved the restart. At 19:30 local, only portable
+DS4Windows was closed and its managed DLL replaced. The old DLL and launcher
+were backed up under Desktop lab `tools/b93-before-packet-bridge`. The existing
+runtime folder was reused to retain its exact, pinned broker path. VIIPER
+**PID 30276, started 18:27:56**, was not stopped or replaced. Installed software,
+drivers, bonds, Windows sound settings and saved profiles were not changed.
+
+The new app is **PID 32636**, started **19:30:06**, managed version **5.0.4.94**,
+DLL SHA-256 `A9A373A61A3FE6E7C0E0B06E8466C79170698CF668D4E3D94AF748AC4442AF72`.
+The existing native apphost/dependency files were retained; the non-app NuGet
+dependency sets matched. The release marker and launcher hash were updated.
+The early startup line still printed the old marker before that update; the
+live pipe's `PacketPlanProtocol: 1` independently proves the new bridge loaded.
+`Start-Portable.ps1 -VerifyOnly` passes without launching anything.
+
+After the user woke the Pro, it reconnected at 19:30:30 on transport generation
+2, with Xbox 360 virtual output. The fresh exact `17/02` setup was acknowledged
+at 19:31:50. All experiments below retained this process, generation and broker.
+
+### First new codec/cadence trials
+
+| Candidate | Completed writes | Line-In result |
+| --- | ---: | --- |
+| Mono Opus, 20 ms / 20 kbps, raw, common input | 30 | No source-correlated tone |
+| Same mono Opus, headset notifications | 30 | No source-correlated tone |
+| Mono Opus + one-byte length, headset notifications | 30 | No source-correlated tone |
+| Stereo PCM16LE, 2.5 ms, 480 bytes, common input | 240 | No source-correlated tone |
+| Same high-rate PCM with headset notifications | Inconclusive | Probe deadline; not counted as a delivered negative |
+
+The first four capture peaks were 0.000664–0.000764; expected-channel tone
+amplitudes stayed near background, below 0.000015. No ADC clipping occurred.
+The fifth test hit the three-second probe deadline and stopped the batch. The
+bridge retained the underlying operation; it was not replayed or abandoned.
+A subsequent actual status query succeeded in the same generation with 12,927
+reports and a 12.48 ms current report age. An explicit inventory query also
+succeeded, showing negotiated MTU 512 / 509-byte single-write capacity. This
+proves the lab worker drained and its cleanup fence was not set; it does not
+identify which underlying operation consumed the deadline. Historical maximum
+input gap rose to **2,505.34 ms** during that deliberate lab-only headset trial.
+Do not describe this test as simultaneous low-latency input/audio success.
+
+### External framing trials without rebuilding or restarting DS4Windows
+
+The external generator was extended after b94 was already running. Six
+additional envelope hypotheses were tested for **stereo 5 ms / 80 kbps Opus**
+and **mono 20 ms / 20 kbps Opus**, each with common input and headset
+notifications: 24 distinct combinations in two short batches.
+
+- Leading zero byte (`id0`).
+- Incrementing byte counter (`seq8`).
+- Zero byte then counter (`id0-seq8`).
+- Little-endian 16-bit encoded length (`len16le`).
+- Zero byte then 8-bit encoded length (`id0-len8`).
+- Counter then 8-bit encoded length (`seq8-len8`).
+
+These are explicitly hypotheses motivated by adjacent report-ID/counter/length
+conventions, not captured headphone framing. Offline tests verify the exact
+prefixes, unchanged payloads/schedules, no source-buffer aliasing, and length
+overflow rejection. The quiet waveform and silence-tail checks still apply.
+Only the external client changed; **the app DLL and live connection did not**.
+
+All 24 completed: **1,800 writes total**, 120 per stereo trial or 30 per mono
+trial. No source-correlated Line-In signal was detected; largest ADC peak was
+below **0.000855**, with no clipping. All headset cleanup results were Success,
+and ordinary input resumed before the next trial. Final recorded status had
+47,215 reports and 1.10 ms current report age in the same generation. Active
+headset reports still have `ControlsForwarded: false`: normal input pauses
+during those finite trials. This remains a production coexistence defect.
+
+Desktop numeric evidence (no raw audio recordings):
+
+- `tools/b94-batch-20260907-193305-273.jsonl`: first codec/cadence batch.
+- `tools/b94-batch-20260907-193850-723.jsonl`: first framing batch.
+- `tools/b94-batch-20260907-194153-234.jsonl`: remaining framing batch.
+- Corresponding `b94-audio-*.jsonl` files contain plan fingerprints, write-start
+  timing, exact setup response, cleanup metadata and Line-In block metrics.
+
+The external framer/codec focused suite passed **34 tests, zero failures**.
+The full Release x64 run `b94-external-framer-full.trx` passed **3,951 tests,
+zero failures, 11 opt-in skips**, including all **147 allocation-named tests**.
+Bluetooth headphone playback is **not fixed**. These negatives reject the
+measured combinations only. The proper output setup/enable/stop semantics,
+framing and codec remain unresolved; the `18/01` bytes are not proven volume
+or mute values, and the documented-but-unknown `18/03` was not sent. No new
+restart is authorized by these completed experiments.

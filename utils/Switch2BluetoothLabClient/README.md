@@ -161,6 +161,18 @@ Switch2BluetoothLabClient.exe session.json run-plan "<explicit Line In ID>" new-
 
 `--create-plan` is offline, creates a new file without overwriting, and never
 opens a controller or capture endpoint. The session generation must match.
+An optional fifth argument applies an external framing hypothesis: `id0`,
+`seq8`, `id0-seq8`, `len16le`, `id0-len8`, or `seq8-len8`. These prepend an
+explicit zero report-ID candidate, frame counter and/or encoded-byte length;
+they are **not confirmed Nintendo envelopes**. Lengths and MTU are checked,
+and the already-reviewed audio payload and schedule remain byte-for-byte
+unchanged. `PlanFramer.cs` is compiled into this tool and its tests, not the
+DS4Windows app. Adding these hypotheses therefore required no live app update.
+
+```text
+Switch2BluetoothLabClient.exe --create-plan t:opus:1:20:20:raw 2 new-framed-plan.json id0-seq8
+```
+
 For a built-in generator choice, the client can generate and submit directly:
 
 ```text

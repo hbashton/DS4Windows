@@ -17,6 +17,9 @@ internal interface ISwitch2BluetoothLabAudioAccess
     Task<string> QueryAudioLabAsync(string command, CancellationToken cancellationToken);
     Task<string> RunAudioLabPlanAsync(Switch2BluetoothLabPlan plan, CancellationToken cancellationToken) =>
         Task.FromResult("{\"Error\":\"Packet-plan bridge unavailable\"}");
+    Task<string> RunAudioLabReceiverWindowAsync(Switch2BluetoothLabReceiverPlan plan,
+        Func<CancellationToken, Task<string>> action, CancellationToken cancellationToken) =>
+        plan.HeadsetNotifications ? Task.FromResult("{\"Error\":\"Receiver notification window unavailable\"}") : action(cancellationToken);
 }
 
 /// <summary>
@@ -30,6 +33,7 @@ internal sealed class Switch2BluetoothLabProbe
     private readonly ISwitch2BluetoothLabAudioAccess access;
     private readonly Func<CancellationToken, Task<string>> configure;
     private readonly Func<CancellationToken, Task<string>> queryAudioState;
+    private readonly Func<Switch2BluetoothLabReceiverPlan, CancellationToken, Task<string>> runReceiver;
     private readonly Func<bool> connected;
     private readonly string directory;
     private readonly ulong generation;
@@ -43,26 +47,29 @@ internal sealed class Switch2BluetoothLabProbe
     internal static Switch2BluetoothLabProbe TryCreate(Switch2ControllerModel model,
         ISwitch2BluetoothWindowsGattService service, ulong generation,
         Func<bool> connected, Func<CancellationToken, Task<string>> configure,
-        Func<CancellationToken, Task<string>> queryAudioState = null)
+        Func<CancellationToken, Task<string>> queryAudioState = null,
+        Func<Switch2BluetoothLabReceiverPlan, CancellationToken, Task<string>> runReceiver = null)
     {
         if (!IsEnabled || PortableLabContext.Current is not { } lab ||
             model != Switch2ControllerModel.ProController2 ||
             service is not ISwitch2BluetoothLabAudioAccess access)
             return null;
         return new Switch2BluetoothLabProbe(Path.Combine(lab.DataPath, "Switch2AudioProbe"),
-            access, connected, configure, generation, queryAudioState);
+            access, connected, configure, generation, queryAudioState, runReceiver);
     }
 
     // Internal injection seam for pipe/lifetime tests; production uses TryCreate.
     internal Switch2BluetoothLabProbe(string directory, ISwitch2BluetoothLabAudioAccess access,
         Func<bool> connected, Func<CancellationToken, Task<string>> configure, ulong generation,
-        Func<CancellationToken, Task<string>> queryAudioState = null)
+        Func<CancellationToken, Task<string>> queryAudioState = null,
+        Func<Switch2BluetoothLabReceiverPlan, CancellationToken, Task<string>> runReceiver = null)
     {
         this.directory = directory;
         this.access = access;
         this.connected = connected;
         this.configure = configure;
         this.queryAudioState = queryAudioState;
+        this.runReceiver = runReceiver;
         this.generation = generation;
         PipeName = $"ds4w-s2audio-{Environment.ProcessId}-{Guid.NewGuid():N}";
         worker = Task.Run(RunAsync);
@@ -93,6 +100,7 @@ internal sealed class Switch2BluetoothLabProbe
     private object Status(string state) => new
     {
         State = state, ProcessId = Environment.ProcessId, PipeName, TransportGeneration = generation, PacketPlanProtocol = 1,
+        ReceiverPlanProtocol = runReceiver != null ? 1 : 0,
         Connected = connected(), Reports = Interlocked.Read(ref reports),
         MaximumReportGapMs = 1000.0 * Interlocked.Read(ref maximumReportGap) / Stopwatch.Frequency,
         LastReportAgeMs = Interlocked.Read(ref lastReport) is var last && last > 0
@@ -129,6 +137,8 @@ internal sealed class Switch2BluetoothLabProbe
                     }
                     else if (command == "run-plan")
                         operation = ReadAndRunPlanAsync(pipe, deadline.Token);
+                    else if (command == "run-receiver-plan")
+                        operation = ReadAndRunReceiverPlanAsync(pipe, deadline.Token);
                     else if (!connected())
                         operation = Task.FromResult("{\"Error\":\"Controller lifetime is not active\"}");
                     else if (Switch2BluetoothLabTone.IsTone(command) && !audioSetupAcknowledged)
@@ -209,6 +219,36 @@ internal sealed class Switch2BluetoothLabProbe
         var plan = Switch2BluetoothLabPlan.Parse(json, generation);
         if (!connected() || !audioSetupAcknowledged) throw new InvalidOperationException("Same-generation setup and active controller required.");
         return await access.RunAudioLabPlanAsync(plan, token).ConfigureAwait(false);
+    }
+
+    private async Task<string> ReadAndRunReceiverPlanAsync(Stream pipe, CancellationToken token)
+    {
+        byte[] size = new byte[4];
+        await pipe.ReadExactlyAsync(size, token).ConfigureAwait(false);
+        int length = BinaryPrimitives.ReadInt32LittleEndian(size);
+        if (length is < 1 or > Switch2BluetoothLabReceiverPlan.MaximumJsonBytes)
+            throw new InvalidDataException("Receiver plan envelope exceeds limit.");
+        byte[] json = new byte[length];
+        await pipe.ReadExactlyAsync(json, token).ConfigureAwait(false);
+        var plan = Switch2BluetoothLabReceiverPlan.Parse(json, generation);
+        if (!connected() || runReceiver == null)
+            throw new InvalidOperationException("Active receiver-plan capability required.");
+        bool setupInPlan = Array.Exists(plan.Commands, request => request[0] == 0x17);
+        bool previousSetup = audioSetupAcknowledged;
+        if (plan.Audio != null && !previousSetup && !setupInPlan)
+            throw new InvalidOperationException("Audio requires same-generation setup or an acknowledged setup in this plan.");
+        audioSetupAcknowledged = false;
+        string result = await runReceiver(plan, token).ConfigureAwait(false);
+        using var parsed = JsonDocument.Parse(result);
+        JsonElement root = parsed.RootElement;
+        bool accepted = !token.IsCancellationRequested && connected() &&
+            Switch2BluetoothLabReceiverResult.IsCompleted(root, plan);
+        if (!accepted)
+            return JsonSerializer.Serialize(new { Error = "Receiver plan did not complete cleanly", Details = root, BluetoothPlaybackConfirmed = false });
+        Switch2BluetoothLabReceiverResult.TryGetReceiverOperation(root, plan, out JsonElement operation);
+        audioSetupAcknowledged = previousSetup ||
+            operation.TryGetProperty("SetupAcknowledged", out var setup) && setup.ValueKind == JsonValueKind.True;
+        return result;
     }
 
     internal static async Task<string> ReadCommandAsync(Stream pipe, CancellationToken token)

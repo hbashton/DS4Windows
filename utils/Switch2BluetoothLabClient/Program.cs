@@ -13,12 +13,13 @@ if (args.Length >= 2 && args[^2] == "--capture-tail-ms")
 }
 bool tone = args.Length >= 2 && Switch2BluetoothLabCandidate.TryParse(args[1], out _);
 bool planFile = args.Length >= 2 && args[1] == "run-plan";
+bool receiverPlanFile = args.Length >= 2 && args[1] == "run-receiver-plan";
 bool createPlan = args.Length is 4 or 5 && args[0] == "--create-plan" && tone;
 bool createDualMono = args.Length == 6 && args[0] == "--create-dual-mono-plan";
 bool createHwOpus = args.Length == 4 && args[0] == "--create-hwopus-plan";
-if (!createPlan && !createDualMono && !createHwOpus && (planFile ? args.Length != 4 : tone ? args.Length != 3 : args.Length != 2 || args[1] is not ("status" or "inventory" or "headset-header" or "headset-observe" or "configure-audio" or "audio-state" or "stop-probe")))
+if (!createPlan && !createDualMono && !createHwOpus && (planFile || receiverPlanFile ? args.Length != 4 : tone ? args.Length != 3 : args.Length != 2 || args[1] is not ("status" or "inventory" or "headset-header" or "headset-observe" or "configure-audio" or "audio-state" or "stop-probe")))
 {
-    Console.Error.WriteLine("Use <session.json> <query>, <session.json> <candidate> <Line In ID>, <session.json> run-plan <Line In ID> <plan.json>, or --create-plan <candidate> <generation> <new-plan.json> [offline-framing]. See README.");
+    Console.Error.WriteLine("Use <session.json> <query>, <session.json> <candidate> <Line In ID>, <session.json> run-plan|run-receiver-plan <Line In ID> <plan.json>, or --create-plan <candidate> <generation> <new-plan.json> [offline-framing]. See README.");
     return 2;
 }
 try
@@ -61,7 +62,11 @@ try
     ulong generation = descriptor.RootElement.GetProperty("TransportGeneration").GetUInt64();
     if ((tone || planFile) && (!descriptor.RootElement.TryGetProperty("PacketPlanProtocol", out var protocol) || protocol.GetInt32() != 1))
         throw new InvalidDataException("The running app has no packet-plan bridge. No radio request sent; do not restart automatically.");
+    if (receiverPlanFile && (!descriptor.RootElement.TryGetProperty("ReceiverPlanProtocol", out var receiverProtocol) ||
+        receiverProtocol.ValueKind != JsonValueKind.Number || !receiverProtocol.TryGetInt32(out int receiverVersion) || receiverVersion != 1))
+        throw new InvalidDataException("The running app has no receiver-plan bridge. No radio request sent.");
     Switch2BluetoothLabPlan? packetPlan = tone ? CreateTonePlan(args[1], generation) : null;
+    Switch2BluetoothLabReceiverPlan? receiverPlan = null;
     if (planFile)
     {
         var planInfo = new FileInfo(args[3]);
@@ -69,43 +74,67 @@ try
             throw new InvalidDataException("Expected a bounded local packet plan.");
         packetPlan = Switch2BluetoothLabPlan.Parse(await File.ReadAllBytesAsync(planInfo.FullName), generation);
     }
+    if (receiverPlanFile)
+    {
+        var planInfo = new FileInfo(args[3]);
+        if (!planInfo.Exists || planInfo.Length > Switch2BluetoothLabReceiverPlan.MaximumJsonBytes || planInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
+            throw new InvalidDataException("Expected a bounded local receiver plan.");
+        receiverPlan = Switch2BluetoothLabReceiverPlan.Parse(await File.ReadAllBytesAsync(planInfo.FullName), generation);
+    }
+    byte[]? requestBody = receiverPlan != null ? JsonSerializer.SerializeToUtf8Bytes(receiverPlan) :
+        packetPlan != null ? JsonSerializer.SerializeToUtf8Bytes(packetPlan) : null;
     using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(6));
     using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut,
         PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
     await pipe.ConnectAsync(deadline.Token);
-    using var measurement = packetPlan != null ? new LineInMeasurement(args[2], captureTailMs) : null;
+    // Receiver commands can activate a previously primed audio path even when
+    // the plan has no audio packets. Every receiver trial therefore measures.
+    using var measurement = packetPlan != null || receiverPlan != null ? new LineInMeasurement(args[2], captureTailMs) : null;
     if (measurement != null) await measurement.StartAsync();
-    await pipe.WriteAsync(Encoding.ASCII.GetBytes((packetPlan != null ? "run-plan" : args[1]) + "\n"), deadline.Token);
-    if (packetPlan != null)
-    {
-        byte[] body = JsonSerializer.SerializeToUtf8Bytes(packetPlan);
-        byte[] size = new byte[4]; BinaryPrimitives.WriteInt32LittleEndian(size, body.Length);
-        await pipe.WriteAsync(size, deadline.Token);
-        await pipe.WriteAsync(body, deadline.Token);
-    }
-    using var response = new MemoryStream();
-    byte[] chunk = new byte[1024];
-    while (response.Length <= 32 * 1024)
-    {
-        int count = await pipe.ReadAsync(chunk, deadline.Token);
-        if (count == 0) break;
-        response.Write(chunk, 0, count);
-        if (Array.IndexOf(chunk, (byte)'\n', 0, count) >= 0) break;
-    }
-    if (response.Length == 0 || response.Length > 32 * 1024) throw new InvalidDataException("Invalid probe reply length.");
-    string json = Encoding.UTF8.GetString(response.ToArray()).TrimEnd();
-    using var validated = JsonDocument.Parse(json);
-    Console.WriteLine(json);
+    bool responseFailed = true;
     bool captureValid = true;
-    if (measurement != null)
+    try
     {
-        JsonElement captureResult = JsonSerializer.SerializeToElement(await measurement.StopAsync());
-        Console.WriteLine(captureResult.GetRawText());
-        captureValid = captureResult.ValueKind == JsonValueKind.Object &&
-            captureResult.TryGetProperty("CaptureValid", out var validCapture) &&
-            validCapture.ValueKind == JsonValueKind.True;
+        string command = receiverPlan != null ? "run-receiver-plan" : packetPlan != null ? "run-plan" : args[1];
+        await pipe.WriteAsync(Encoding.ASCII.GetBytes(command + "\n"), deadline.Token);
+        if (requestBody != null)
+        {
+            byte[] size = new byte[4]; BinaryPrimitives.WriteInt32LittleEndian(size, requestBody.Length);
+            await pipe.WriteAsync(size, deadline.Token);
+            await pipe.WriteAsync(requestBody, deadline.Token);
+        }
+        using var response = new MemoryStream();
+        byte[] chunk = new byte[1024];
+        while (response.Length <= 32 * 1024)
+        {
+            int count = await pipe.ReadAsync(chunk, deadline.Token);
+            if (count == 0) break;
+            response.Write(chunk, 0, count);
+            if (Array.IndexOf(chunk, (byte)'\n', 0, count) >= 0) break;
+        }
+        if (response.Length == 0 || response.Length > 32 * 1024) throw new InvalidDataException("Invalid probe reply length.");
+        string json = Encoding.UTF8.GetString(response.ToArray()).TrimEnd();
+        using var validated = JsonDocument.Parse(json);
+        Console.WriteLine(json);
+        JsonElement result = validated.RootElement;
+        responseFailed = receiverPlan != null
+            ? !Switch2BluetoothLabReceiverResult.IsCompleted(result, receiverPlan)
+            : result.ValueKind != JsonValueKind.Object || Switch2BluetoothLabReceiverResult.HasError(result);
     }
-    return validated.RootElement.TryGetProperty("Error", out _) || !captureValid ? 1 : 0;
+    finally
+    {
+        // Preserve the bounded observation tail even if a submitted operation
+        // times out or returns malformed JSON. Never classify it as success.
+        if (measurement != null)
+        {
+            JsonElement captureResult = JsonSerializer.SerializeToElement(await measurement.StopAsync());
+            Console.WriteLine(captureResult.GetRawText());
+            captureValid = captureResult.ValueKind == JsonValueKind.Object &&
+                captureResult.TryGetProperty("CaptureValid", out var validCapture) &&
+                validCapture.ValueKind == JsonValueKind.True;
+        }
+    }
+    return responseFailed || !captureValid ? 1 : 0;
 }
 catch (Exception error)
 {

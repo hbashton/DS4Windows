@@ -282,6 +282,62 @@ hardware use; use only the user-confirmed controller-to-Line-In test wiring.
 Line-In measurements and actual controller continuity remain the acceptance
 tests. Plan completion, fingerprints and accepted writes are not playback.
 
+## Receiver-plan bridge: bounded setup and routing research
+
+This separate capability requires `ReceiverPlanProtocol: 1` in the live session
+descriptor. A packet-plan-only build is not sufficient. The client rejects
+missing/unsupported capabilities and stale generations before sending a pipe
+request; it never starts, replaces, or reconnects DS4Windows itself.
+
+```text
+Switch2BluetoothLabClient.exe session.json run-receiver-plan "<explicit Line In ID>" receiver-plan.json --capture-tail-ms 2000
+```
+
+Author and review the JSON offline. Fields are `Id`, `Generation`,
+`HeadsetNotifications`, `Commands` (an array of base64-encoded full request
+byte strings), optional `Audio` (an existing packet-plan object), and optional
+`AllowExperimentalParameters` (defaults to `false`). There is no matrix runner
+or automatic retry. Pick one justified intervention at a time.
+
+The shared parser enforces a 1 MiB JSON limit, 1–8 commands, a bounded ID and
+the exact active generation. The command vocabulary is closed:
+
+- `0C/02` and `0C/04`: only the exact four-byte `2F 00 00 00` feature mask;
+  selection must precede enable within the same plan.
+- `17/02`: by default only the observed `80 BB 00 00 02 F0 00` payload.
+  With the explicit experimental gate, the bounded alternatives are channel
+  bytes 1/2 and final 16-bit values 120/240/480/960. Their interpretation as
+  48 kHz, channels and frame samples is a hypothesis, not established semantics.
+- `18/01`: only the exact header-only query. Its response bytes are not assigned
+  invented volume/mute meanings.
+- `18/03`: by default only the observed one-byte `07` payload. Values 0–7 are
+  admitted only with `AllowExperimentalParameters: true`; they are research
+  hypotheses, not documented valid routing flags. State persistence is unknown.
+
+`Audio`, when present, must use the same generation and set its own
+`HeadsetNotifications` to `false`: the enclosing receiver plan owns that window.
+The app additionally requires an acknowledged `17/02` in this plan or an earlier
+operation in the same generation. Failed commands prevent streaming. Audio
+retains the existing packet-plan size/MTU/schedule bounds and fixed headphone
+UUID. The envelope is `run-receiver-plan\n`, four-byte little-endian JSON length,
+then the JSON. The existing DS4Windows command/input lease remains the only
+GATT owner; this does not expose arbitrary commands or targets.
+
+**Every receiver plan requires the explicit Line In, including command-only
+plans:** a routing command might activate previously primed output. Baseline,
+level checks, RAM-only capture and actual post-response sample requirements are
+unchanged. The tail is 350 ms by default, or exactly 2,000 ms when requested.
+The bounded tail is also collected after a submitted request fails or times out.
+Do not treat a timeout as proof that the controller operation has drained.
+
+Exit 1 includes root/nested errors, missing or false command acknowledgement,
+failed reported GATT/restore status, a fenced audio lease, incomplete optional
+audio packet count, or missing/false `CaptureValid`. `SetupAcknowledged: false`
+alone is legitimate for a query-only plan. Exit 0 means only successful bounded
+diagnostic completion with valid capture—not audible output or production audio
+support. Stop on a signal candidate, invalid capture, or cleanup/continuity error;
+do not automatically sweep the experimental parameter space.
+
 The revised headset parser recognizes both observed audio lengths (0 and 50)
 and separately decodes documented buttons/sticks without reading audio bytes
 as motion. Its dedicated controls-only value maps all 21 documented button bits

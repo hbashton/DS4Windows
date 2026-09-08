@@ -8,7 +8,7 @@ using DS4Windows.Switch2;
 namespace DS4WindowsTests;
 
 [TestClass]
-public class Switch2BluetoothLabProbeTests
+public partial class Switch2BluetoothLabProbeTests
 {
     [TestMethod]
     public async Task RepeatedQueriesReuseAccessAndLeaveInputCountersActive()
@@ -264,14 +264,14 @@ public class Switch2BluetoothLabProbeTests
         return SendPlanEnvelope(probe, body.Length, body);
     }
 
-    private static async Task<string> SendPlanEnvelope(Switch2BluetoothLabProbe probe, int envelopeLength, byte[] body)
+    private static async Task<string> SendPlanEnvelope(Switch2BluetoothLabProbe probe, int envelopeLength, byte[] body, string command = "run-plan")
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         using var pipe = new NamedPipeClientStream(".", probe.PipeName, PipeDirection.InOut,
             PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
         await pipe.ConnectAsync(deadline.Token);
         byte[] length = new byte[4]; System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(length, envelopeLength);
-        await pipe.WriteAsync("run-plan\n"u8.ToArray(), deadline.Token);
+        await pipe.WriteAsync(Encoding.ASCII.GetBytes(command + "\n"), deadline.Token);
         await pipe.WriteAsync(length, deadline.Token);
         await pipe.WriteAsync(body, deadline.Token);
         using var reader = new StreamReader(pipe);

@@ -11,6 +11,8 @@
     <Compile Include="../../DS4Windows/DS4Control/Switch2/Switch2BluetoothLabCandidate.cs" Link="Switch2BluetoothLabCandidate.cs" />
     <Compile Include="../../DS4Windows/DS4Control/Switch2/Switch2BluetoothLabTone.cs" Link="Switch2BluetoothLabTone.cs" />
     <Compile Include="../../DS4Windows/DS4Control/Switch2/Switch2BluetoothLabPlan.cs" Link="Switch2BluetoothLabPlan.cs" />
+    <Compile Include="../../DS4Windows/DS4Control/Switch2/Switch2BluetoothLabReceiverPlan.cs" Link="Switch2BluetoothLabReceiverPlan.cs" />
+    <Compile Include="../../DS4Windows/DS4Control/Switch2/Switch2BluetoothLabReceiverResult.cs" Link="Switch2BluetoothLabReceiverResult.cs" />
     <Compile Include="../../DS4Windows/DS4Control/Switch2/Switch2HdRumbleCodec.cs" Link="Switch2HdRumbleCodec.cs" />
   </ItemGroup>
 </Project>

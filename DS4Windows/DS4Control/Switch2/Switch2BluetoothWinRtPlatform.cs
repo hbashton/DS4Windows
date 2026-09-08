@@ -597,8 +597,21 @@ internal sealed class Switch2BluetoothWinRtPlatform :
             return JsonSerializer.Serialize(result);
         }
 
+        public async Task<string> RunAudioLabReceiverWindowAsync(Switch2BluetoothLabReceiverPlan plan,
+            Func<CancellationToken, Task<string>> action, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            ObjectDisposedException.ThrowIf(disposed, this);
+            if (labAudioFenced) throw new InvalidOperationException("Lab audio notification cleanup is ambiguous.");
+            plan.Validate();
+            plan.Audio?.Validate(Math.Max(0, service.Session.MaxPduSize - 3));
+            return plan.HeadsetNotifications
+                ? await ObserveLabHeadsetAsync(cancellationToken, receiverAction: action).ConfigureAwait(false)
+                : await action(cancellationToken).ConfigureAwait(false);
+        }
+
         private async Task<string> ObserveLabHeadsetAsync(CancellationToken cancellationToken, string toneCommand = null,
-            Switch2BluetoothLabPlan plan = null)
+            Switch2BluetoothLabPlan plan = null, Func<CancellationToken, Task<string>> receiverAction = null)
         {
             var query = await service.GetCharacteristicsForUuidAsync(Switch2BluetoothLabAudioProtocol.InputUuid,
                 BluetoothCacheMode.Cached).AsTask().ConfigureAwait(false);
@@ -633,6 +646,7 @@ internal sealed class Switch2BluetoothWinRtPlatform :
             int reports = 0, valid = 0, idle = 0, controlsDecoded = 0;
             var jackCounts = new Dictionary<byte, int>();
             var audioLengths = new Dictionary<byte, int>();
+            var motionLengths = new Dictionary<byte, int>();
             var lengths = new Dictionary<uint, int>();
             bool accepting = true;
             void OnHeadset(GattCharacteristic sender, GattValueChangedEventArgs args)
@@ -654,12 +668,16 @@ internal sealed class Switch2BluetoothWinRtPlatform :
                         if (opusIdle) idle++;
                     }
                     if (Switch2ProHeadsetControlsCodec.TryDecode(value, out _)) controlsDecoded++;
+                    byte motionLength = value[65];
+                    if (motionLengths.Count < 8 || motionLengths.ContainsKey(motionLength))
+                        motionLengths[motionLength] = motionLengths.GetValueOrDefault(motionLength) + 1;
                     value.Clear(); // no recorded or returned microphone payload
                 }
             }
             bool attached = false, attempted = false;
             string restored = null, inputRestored = null;
             JsonElement? toneResult = null;
+            JsonElement? receiverResult = null;
             GattCommunicationStatus enabled;
             try
             {
@@ -671,7 +689,8 @@ internal sealed class Switch2BluetoothWinRtPlatform :
                     GattClientCharacteristicConfigurationDescriptorValue.Notify).AsTask().ConfigureAwait(false);
                 if (enabled == GattCommunicationStatus.Success)
                 {
-                    if (plan != null) toneResult = JsonSerializer.Deserialize<JsonElement>(await SendPlanAsync(plan, cancellationToken).ConfigureAwait(false));
+                    if (receiverAction != null) receiverResult = JsonSerializer.Deserialize<JsonElement>(await receiverAction(cancellationToken).ConfigureAwait(false));
+                    else if (plan != null) toneResult = JsonSerializer.Deserialize<JsonElement>(await SendPlanAsync(plan, cancellationToken).ConfigureAwait(false));
                     else if (toneCommand == null) await Task.Delay(250, cancellationToken).ConfigureAwait(false);
                     else toneResult = JsonSerializer.Deserialize<JsonElement>(await QueryAudioLabAsync(toneCommand, cancellationToken).ConfigureAwait(false));
                 }
@@ -682,15 +701,18 @@ internal sealed class Switch2BluetoothWinRtPlatform :
                 {
                     if (attempted)
                     {
-                        var restore = await headset.WriteClientCharacteristicConfigurationDescriptorAsync(
-                            GattClientCharacteristicConfigurationDescriptorValue.None).AsTask().ConfigureAwait(false);
-                        restored = restore.ToString();
                         // Donor reports headset notifications can replace normal
-                        // input. Reassert the exact original common05 CCCD state.
-                        var resume = await commonInput.WriteClientCharacteristicConfigurationDescriptorAsync(
-                            GattClientCharacteristicConfigurationDescriptorValue.Notify).AsTask().ConfigureAwait(false);
-                        inputRestored = resume.ToString();
-                        labAudioFenced = restore != GattCommunicationStatus.Success || resume != GattCommunicationStatus.Success;
+                        // input. Reassert common05 even if headset disable faults,
+                        // but never overlap the actual Windows operations.
+                        var cleanup = await Switch2BluetoothLabNotificationCleanup.RunAsync(
+                            async () => (await headset.WriteClientCharacteristicConfigurationDescriptorAsync(
+                                GattClientCharacteristicConfigurationDescriptorValue.None).AsTask().ConfigureAwait(false)).ToString(),
+                            async () => (await commonInput.WriteClientCharacteristicConfigurationDescriptorAsync(
+                                GattClientCharacteristicConfigurationDescriptorValue.Notify).AsTask().ConfigureAwait(false)).ToString()).ConfigureAwait(false);
+                        restored = cleanup.HeadsetStatus;
+                        inputRestored = cleanup.CommonInputStatus;
+                        labAudioFenced = cleanup.Fenced;
+                        cleanup.ThrowIfFailed();
                     }
                 }
                 catch { labAudioFenced = true; throw; }
@@ -703,10 +725,11 @@ internal sealed class Switch2BluetoothWinRtPlatform :
             lock (gate)
                 return JsonSerializer.Serialize(new { Status = enabled.ToString(), Reports = reports, ValidHeaders = valid,
                     PublishedOpusIdleMatches = idle, JackStates = jackCounts, Lengths = lengths,
-                    AudioLengths = audioLengths, ControlsDecoded = controlsDecoded, ControlsForwarded = false,
+                    AudioLengths = audioLengths, MotionLengths = motionLengths, ControlsDecoded = controlsDecoded, ControlsForwarded = false,
                     RestoreHeadset = restored, RestoreCommonInput = inputRestored, LabAudioFenced = labAudioFenced,
                     Before = beforeDetails,
                     Tone = toneResult,
+                    Receiver = receiverResult,
                     StoredAudio = false, BluetoothPlaybackConfirmed = false });
         }
 

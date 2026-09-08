@@ -9,6 +9,7 @@ the Free Software Foundation, either version 3 of the License, or
 */
 
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Text.Json;
@@ -103,12 +104,13 @@ internal sealed class Switch2BluetoothPlayerLedCommandChannel
     private TaskCompletionSource<byte[]> pendingResponse;
     private byte pendingCommandId;
     private byte pendingProFeatureSubcommand;
+    private bool pendingLabReceiverResponse;
     private TaskCompletionSource<bool> operationsDrained = CompletedDrain();
     private bool attachAttempted;
     private bool prepared;
     private bool terminal;
     private int activeOperations;
-    private Task retainedProFeatureWriteDrain = Task.CompletedTask;
+    private Task retainedCommandWriteDrain = Task.CompletedTask;
 
     internal Switch2BluetoothPlayerLedCommandChannel(
         ISwitch2BluetoothWindowsGattCharacteristic command,
@@ -387,37 +389,148 @@ internal sealed class Switch2BluetoothPlayerLedCommandChannel
         }
         finally
         {
-            if (proFeatures && retainedWrite is { IsCompleted: false })
-            {
-                // The caller's deadline must not become an unbounded startup
-                // wait. Fence immediately, but keep operationsDrained owned by
-                // the actual write so teardown cannot dispose beneath it.
-                lock (sync)
-                {
-                    terminal = true;
-                    prepared = false;
-                    if (ReferenceEquals(pendingResponse, completion))
-                    {
-                        pendingResponse = null;
-                        pendingCommandId = 0;
-                        pendingProFeatureSubcommand = 0;
-                    }
-                }
-                completion.TrySetResult(null);
-                retainedProFeatureWriteDrain = DrainRetainedProFeatureWriteAsync(retainedWrite, completion);
-            }
-            else
-            {
-                if (retainedWrite != null) try { await retainedWrite.ConfigureAwait(false); } catch { }
-                CompleteOperation(completion, terminalFailure);
-            }
+            await CompleteOrRetainWriteAsync(retainedWrite, completion, terminalFailure).ConfigureAwait(false);
         }
     }
 
-    private async Task DrainRetainedProFeatureWriteAsync(Task<bool> write, TaskCompletionSource<byte[]> completion)
+    private async Task CompleteOrRetainWriteAsync(Task<bool> retainedWrite,
+        TaskCompletionSource<byte[]> completion, bool terminalFailure, bool awaitDrain = false)
+    {
+        if (retainedWrite is { IsCompleted: false })
+        {
+            // Fence immediately; only actual write completion may release
+            // operation ownership. Startup returns promptly, while lab windows
+            // retain the inner operation through their cleanup boundary.
+            lock (sync)
+            {
+                terminal = true;
+                prepared = false;
+                if (ReferenceEquals(pendingResponse, completion))
+                {
+                    pendingResponse = null;
+                    pendingCommandId = 0;
+                    pendingProFeatureSubcommand = 0;
+                    pendingLabReceiverResponse = false;
+                }
+            }
+            completion.TrySetResult(null);
+            retainedCommandWriteDrain = DrainRetainedCommandWriteAsync(retainedWrite, completion);
+            if (awaitDrain) await retainedCommandWriteDrain.ConfigureAwait(false);
+        }
+        else
+        {
+            if (retainedWrite != null) try { await retainedWrite.ConfigureAwait(false); } catch { }
+            CompleteOperation(completion, terminalFailure);
+        }
+    }
+
+    private async Task DrainRetainedCommandWriteAsync(Task<bool> write, TaskCompletionSource<byte[]> completion)
     {
         try { await write.ConfigureAwait(false); } catch { }
         finally { CompleteOperation(completion, terminalFailure: true); }
+    }
+
+    // Only the explicitly enabled portable-lab lease invokes this method.
+    // Full validation and immutable request snapshots precede all writes;
+    // the one existing command owner remains reserved for the entire plan.
+    internal async Task<string> RunLabReceiverCommandsAsync(Switch2BluetoothLabReceiverPlan plan,
+        CancellationToken cancellationToken)
+    {
+        var responses = new List<object>();
+        bool setupAcknowledged = false;
+        string Result(string error = null) => error == null
+            ? JsonSerializer.Serialize(new { CommandsAcknowledged = true, SetupAcknowledged = setupAcknowledged,
+                Responses = responses, BluetoothPlaybackConfirmed = false })
+            : JsonSerializer.Serialize(new { CommandsAcknowledged = false, SetupAcknowledged = setupAcknowledged,
+                Responses = responses, Error = error, BluetoothPlaybackConfirmed = false });
+
+        byte[][] requests;
+        try
+        {
+            if (plan == null) return Result("Invalid receiver plan.");
+            plan.Validate();
+            requests = Array.ConvertAll(plan.Commands, request => (byte[])request.Clone());
+            new Switch2BluetoothLabReceiverPlan { Id = plan.Id, Generation = plan.Generation,
+                HeadsetNotifications = plan.HeadsetNotifications, AllowExperimentalParameters = plan.AllowExperimentalParameters,
+                Commands = requests, Audio = plan.Audio }.Validate();
+        }
+        catch (Exception error) { return Result("Invalid receiver plan: " + error.GetType().Name); }
+
+        TaskCompletionSource<byte[]> completion;
+        lock (sync)
+        {
+            if (terminal || !prepared) return Result("Command channel unavailable.");
+            if (pendingResponse != null || activeOperations != 0) return Result("Command lane busy; no receiver commands sent.");
+            completion = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
+            pendingResponse = completion;
+            pendingCommandId = requests[0][0];
+            pendingProFeatureSubcommand = requests[0][0] == 0x0C ? requests[0][3] : (byte)0;
+            pendingLabReceiverResponse = true;
+            activeOperations = 1;
+            operationsDrained = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+
+        bool terminalFailure = true;
+        Task<bool> retainedWrite = null;
+        byte[] currentRequest = null;
+        bool currentRecorded = false;
+        void RecordAttempt(byte[] reply, bool acknowledged)
+        {
+            responses.Add(new { Request = Convert.ToHexString(currentRequest),
+                Response = reply == null ? "" : Convert.ToHexString(reply), Acknowledged = acknowledged });
+            currentRecorded = true;
+        }
+        void RecordUncompletedAttempt()
+        {
+            if (currentRequest == null || currentRecorded) return;
+            // Preserve an already captured bounded reply even if the Windows
+            // write is still unresolved; the exchange itself is not accepted.
+            RecordAttempt(completion.Task.IsCompletedSuccessfully ? completion.Task.Result : null, false);
+        }
+        try
+        {
+            for (int index = 0; index < requests.Length; index++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                byte[] request = requests[index];
+                if (index != 0)
+                {
+                    lock (sync)
+                    {
+                        if (terminal) return Result("Command channel retired.");
+                        completion = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
+                        pendingResponse = completion;
+                        pendingCommandId = request[0];
+                        pendingProFeatureSubcommand = request[0] == 0x0C ? request[3] : (byte)0;
+                        pendingLabReceiverResponse = true;
+                    }
+                }
+                currentRequest = request;
+                currentRecorded = false;
+                retainedWrite = command.WriteValueAsync(request, writeWithoutResponse, CancellationToken.None).AsTask();
+                bool written = await retainedWrite.WaitAsync(cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!written)
+                {
+                    RecordUncompletedAttempt();
+                    return Result("Receiver command write rejected.");
+                }
+                byte[] reply = await completion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+                bool acknowledged = reply != null && Switch2BluetoothLabReceiverPlan.IsAcknowledged(request, reply);
+                RecordAttempt(reply, acknowledged);
+                if (!acknowledged) return Result("Receiver command response rejected.");
+                setupAcknowledged |= request[0] == 0x17;
+            }
+            terminalFailure = false;
+            return Result();
+        }
+        catch (OperationCanceledException) { RecordUncompletedAttempt(); return Result("Receiver command deadline; command lane fenced."); }
+        catch (Exception error) { RecordUncompletedAttempt(); return Result("Receiver command failed: " + error.GetType().Name); }
+        finally
+        {
+            await CompleteOrRetainWriteAsync(retainedWrite, completion, terminalFailure, awaitDrain: true).ConfigureAwait(false);
+        }
     }
 
     internal async ValueTask<Switch2BluetoothMemoryReadChannelResult>
@@ -569,7 +682,7 @@ internal sealed class Switch2BluetoothPlayerLedCommandChannel
         try
         {
             await operations.WaitAsync(cancellationToken).ConfigureAwait(false);
-            await retainedProFeatureWriteDrain.WaitAsync(cancellationToken).ConfigureAwait(false);
+            await retainedCommandWriteDrain.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
         catch
         {
@@ -628,9 +741,12 @@ internal sealed class Switch2BluetoothPlayerLedCommandChannel
             pendingCommandId = 0;
             // The Pro command-only contract is exactly 12 bytes. Reject an
             // oversized same-command response without copying arbitrary data.
-            detachedValue = pendingProFeatureSubcommand != 0 && value.Length != Switch2BluetoothProFeatureCodec.ResponseLength
-                ? Array.Empty<byte>() : value.ToArray();
+            detachedValue = pendingLabReceiverResponse
+                ? value.Length > Switch2BluetoothLabReceiverPlan.MaximumResponseBytes ? Array.Empty<byte>() : value.ToArray()
+                : pendingProFeatureSubcommand != 0 && value.Length != Switch2BluetoothProFeatureCodec.ResponseLength
+                    ? Array.Empty<byte>() : value.ToArray();
             pendingProFeatureSubcommand = 0;
+            pendingLabReceiverResponse = false;
         }
         completion.TrySetResult(detachedValue);
     }
@@ -646,6 +762,7 @@ internal sealed class Switch2BluetoothPlayerLedCommandChannel
                 pendingResponse = null;
                 pendingCommandId = 0;
                 pendingProFeatureSubcommand = 0;
+                pendingLabReceiverResponse = false;
             }
             if (terminalFailure)
             {

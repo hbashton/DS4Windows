@@ -11,6 +11,7 @@ the Free Software Foundation, either version 3 of the License, or
 using System;
 using System.Collections.Generic;
 using System.Security.Cryptography;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -2403,6 +2404,60 @@ internal sealed class Switch2BluetoothWindowsInputLease :
     private Task<string> RequestLabAudioSetupAsync(CancellationToken cancellationToken) => RequestLabAudioCommandAsync(cancellationToken, false);
     private Task<string> RequestLabAudioStateAsync(CancellationToken cancellationToken) => RequestLabAudioCommandAsync(cancellationToken, true);
 
+    private Task<string> RequestLabReceiverPlanAsync(Switch2BluetoothLabReceiverPlan plan, CancellationToken cancellationToken)
+    {
+        plan.Validate();
+        lock (sync)
+        {
+            if (state != LeaseState.Active || disconnectObserved || playerLedChannel == null ||
+                service is not ISwitch2BluetoothLabAudioAccess access || plan.Generation != transportGeneration)
+                return Task.FromResult("{\"Error\":\"Inactive receiver-plan lifetime\"}");
+            if (playerLedOperationActive)
+                return Task.FromResult("{\"Error\":\"Command lane busy; no receiver plan sent\"}");
+            // Reserve the normal command owner through setup, optional audio,
+            // and notification compensation. Queued LEDs resume only afterwards.
+            playerLedOperationActive = true;
+            Task<string> operation = Task.Run(async () =>
+            {
+                try
+                {
+                    return await access.RunAudioLabReceiverWindowAsync(plan, async token =>
+                    {
+                        string commands = await playerLedChannel.RunLabReceiverCommandsAsync(plan, token).ConfigureAwait(false);
+                        using var parsed = JsonDocument.Parse(commands);
+                        if (parsed.RootElement.TryGetProperty("Error", out _) ||
+                            !parsed.RootElement.TryGetProperty("CommandsAcknowledged", out var accepted) ||
+                            accepted.ValueKind != JsonValueKind.True) return commands;
+                        token.ThrowIfCancellationRequested();
+                        bool setupAccepted = parsed.RootElement.TryGetProperty("SetupAcknowledged", out var setup) &&
+                            setup.ValueKind == JsonValueKind.True;
+                        JsonElement? audio = null;
+                        if (plan.Audio != null)
+                            audio = JsonSerializer.Deserialize<JsonElement>(await access.RunAudioLabPlanAsync(plan.Audio, token).ConfigureAwait(false));
+                        return JsonSerializer.Serialize(new { CommandsAcknowledged = true, SetupAcknowledged = setupAccepted,
+                            Receiver = parsed.RootElement, Audio = audio, BluetoothPlaybackConfirmed = false });
+                    }, cancellationToken).ConfigureAwait(false);
+                }
+                finally
+                {
+                    lock (sync)
+                    {
+                        playerLedOperationActive = false;
+                        if (state == LeaseState.Active && playerLedRequestPending)
+                        {
+                            byte pattern = pendingPlayerLedPattern;
+                            playerLedRequestPending = false;
+                            playerLedOperationActive = true;
+                            playerLedOperation = CompletePlayerLedRequestsAsync(pattern);
+                        }
+                    }
+                }
+            });
+            playerLedOperation = operation;
+            return operation;
+        }
+    }
+
     private Task<string> RequestLabAudioCommandAsync(CancellationToken cancellationToken, bool queryState)
     {
         lock (sync)
@@ -2632,7 +2687,7 @@ internal sealed class Switch2BluetoothWindowsInputLease :
                 this.transportGeneration == transportGeneration;
             if (active && labProbe == null)
                 labProbe = Switch2BluetoothLabProbe.TryCreate(Admission.Model, service,
-                    transportGeneration, IsLabLifetimeActive, RequestLabAudioSetupAsync, RequestLabAudioStateAsync);
+                    transportGeneration, IsLabLifetimeActive, RequestLabAudioSetupAsync, RequestLabAudioStateAsync, RequestLabReceiverPlanAsync);
             return active;
         }
     }

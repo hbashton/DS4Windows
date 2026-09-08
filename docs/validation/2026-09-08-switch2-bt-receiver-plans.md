@@ -96,8 +96,8 @@ Exact `17/02` ACK was `1701010210780000`; `18/03` echoed 07 or 05 as sent.
 Unchanged query bytes do not prove unchanged routing.
 
 The new feature initialization has a separate verified effect: headset reports
-now contain motion lengths **30/40/4**, instead of the former all-zero motion
-region. Headset notifications temporarily replace common05 input in this lab
+now contain motion lengths **30/40/4**, instead of the previously observed
+`MotionLength=0`. Headset notifications temporarily replace common05 input in this lab
 mode. All restores succeeded and reports advanced afterward; the largest
 accumulated report gap was **765.2614 ms** during a deliberate headset window.
 At 00:00:06 the same Pro had 28,889 reports and current report age 3.3277 ms.
@@ -105,8 +105,10 @@ This is **not production input/audio coexistence**: `ControlsForwarded=false`.
 
 The motion-length-4 reports are rejected by the current controls-only diagnostic
 parser, exactly explaining e.g. 14 missing controls decodes out of 127 otherwise
-valid headers. Independent donor research records the same four-byte no-new-record
-marker: [pinned switch2mac capture analysis](https://github.com/Peterksharma/switch2mac/blob/ea6719f0a1d6b6986c00aca9ed4169a85c8cc9ae/research/capture-format-analysis.md#L36).
+valid headers. This length is consistent with the variant in independent donor
+research: [pinned switch2mac capture analysis](https://github.com/Peterksharma/switch2mac/blob/ea6719f0a1d6b6986c00aca9ed4169a85c8cc9ae/research/capture-format-analysis.md#L36).
+The donor interprets it as a no-new-record marker; our length-only observations
+do not independently verify its payload, counters or flag semantics.
 A narrowly scoped future parser correction can admit 4 while leaving the packed
 motion opaque. It is not necessary to reload this probe or evidence of playback.
 
@@ -164,3 +166,36 @@ The remaining discriminator is a working controller-origin/output protocol
 reference or a measurement that identifies the missing receiver/codec/envelope
 requirement. Ten valid negative trials under corrected feature startup do not
 establish impossibility, and they do not justify calling this production audio.
+
+## New reference-capture option, not executed
+
+Authenticated GitHub code search of the exact headphone UUID found four files
+in three repositories; the headset UUID found sixteen files in eight repositories.
+The exact spaced `17/02` request and payload produced no hits. No working physical
+Pro Bluetooth headphone decoder emerged. A newly found
+[ESP32 controller emulator](https://github.com/zhantss/ESP32-BLE5-NSController-Emulator/tree/0ea0c62aeab2440c7f9c77f29cf87ffa3b4c192f)
+offers a plausible alternative **capture endpoint**, not a ready audio solution.
+
+Its source implements Nintendo's address/key exchange and NimBLE security-store
+integration. A successful emulator endpoint could therefore observe decrypted
+console-origin application packets without a passive Bluetooth sniffer. This
+requires a separate compatible development board and the user's Switch 2 console;
+it cannot run on this Windows PC alone. The author reports C61 fully tested, C6
+basic-tested and patched S3 basic-tested, using ESP-IDF 5.5.2+ (tested 5.5.3).
+Those are upstream claims, not our verified hardware results; see its
+[hardware requirements](https://github.com/zhantss/ESP32-BLE5-NSController-Emulator/blob/0ea0c62aeab2440c7f9c77f29cf87ffa3b4c192f/README.en.md#hardware-support).
+
+As shipped it reports no headset, produces no dedicated headset notifications,
+rejects headphone handle 002c writes, and returns an empty `18/03` reply instead
+of the documented echo. `17/02` receives a generic empty success ACK. A capture
+prototype would need documented headset prerequisites plus bounded headphone/
+17/18 request logging and USB/UART export. Existing key-debug logging must be
+disabled; pairing keys, unrelated traffic and voice payloads must be excluded.
+Instrumenting its current write callback alone is not enough to establish that
+the console will start or sustain audio.
+
+No emulator board is known to be available, and no matching connected Espressif/
+common USB-serial development-board device was found in the limited read-only
+inventory. No emulator was built/flashed, console pairing changed, hardware
+purchased, or current controller connection handed off. Hardware availability is
+the next user-dependent input for this reference-capture path.

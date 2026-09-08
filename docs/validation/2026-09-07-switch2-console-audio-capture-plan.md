@@ -1,6 +1,7 @@
 # Switch 2 console headphone reference capture: feasibility and gates
 
-Status: **not executed**. The user confirmed owning a Switch 2 console.
+Status: **not executed; dedicated sniffer unavailable**. The user confirmed
+owning a Switch 2 console and explicitly confirmed having no BLE sniffer.
 The live DS4Windows/VIIPER session and physical Pro connection remain untouched.
 This plan is for obtaining missing protocol evidence, not a claim that Bluetooth
 audio works or that a capture alone will finish implementation.
@@ -11,8 +12,18 @@ A separate Nordic nRF52840 sniffer is supported by
 [Nordic's setup instructions](https://academy.nordicsemi.com/courses/bluetooth-low-energy-fundamentals/lessons/lesson-6-bluetooth-le-sniffer/topic/nrf-sniffer-for-bluetooth-le/)
 and demonstrated by the pinned Nintendo research's encrypted/decrypted Pro
 pairing captures. The PC currently exposes only an RZ616 Bluetooth adapter;
-no attached Nordic/J-Link USB device was found. Unplugged hardware has not been
-inventoried; the user was asked whether a suitable sniffer is available.
+no attached Nordic/J-Link USB device was found. The user subsequently confirmed
+that no BLE sniffer is available. This capture route cannot be executed with the
+currently established equipment. Do not repeat the hardware-availability
+question or treat console ownership as permission for a controller handoff.
+
+A sniffer is a prerequisite of this particular reference-capture route, not a
+requirement for controller audio itself or proof that software implementation
+is impossible. An existing decoded audio capture or a verified implementation
+could supply the missing evidence without new hardware. Neither has been found
+in the audited references. An analog-only console comparison would confirm
+playback through the physical cable but would not reveal Bluetooth setup or
+packet framing; it also requires a separately approved controller handoff.
 
 Windows local HCI/ETW tracing cannot capture a link exchanged exclusively
 between the console and controller. This is an explicit limitation in

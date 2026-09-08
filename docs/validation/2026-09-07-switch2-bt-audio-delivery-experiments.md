@@ -654,6 +654,21 @@ the RZ616, so a second independent radio must not be assumed.
 The [console-capture feasibility plan](2026-09-07-switch2-console-audio-capture-plan.md)
 records the evidenced separate-sniffer route, custom pairing/key handling,
 Windows capture/mock-peripheral limitations and explicit handoff gates. It is
-not executed. The user was asked whether a dedicated BLE sniffer is available;
-there is no reason to repeat the negative audio matrices while that prerequisite
-and the missing positive reference remain unresolved.
+not executed. The user explicitly confirmed that no BLE sniffer is available.
+The proposed separate-sniffer route is therefore unavailable with the established
+equipment; console ownership does not remove that prerequisite. No acquisition,
+radio repurposing, controller handoff or restart was performed.
+
+The additional `german77/JoyconDriver` Switch 2 dissector audit at commit
+`6238c941078b224df7130dc0ba78a4d09a7cac68` also supplied no usable audio setup:
+`command_handler.lua` has no specialized `17` decoder and labels `18` unknown;
+the input decoder leaves AudioStatus undecoded and does not decode the dedicated
+headphone/headset stream. Its existence is not evidence of implemented
+Bluetooth headphone playback.
+
+No new radio probes were run in this follow-up. The last source-test result
+remains **4,028 passed, zero failed, 11 opt-in skips**; these documentation
+updates do not add hardware validation. Bluetooth AUX playback remains silent
+in the completed measurements. A verified implementation or suitable existing
+capture could still supply the missing setup/framing without new hardware;
+the unavailable sniffer is not proof that Bluetooth audio cannot be implemented.

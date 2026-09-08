@@ -1163,21 +1163,7 @@ namespace DS4Windows
         {
             lock (bluetoothOutputWriteLock)
             {
-                if (conType == ConnectionType.BT)
-                {
-                    if (IsGenuineBluetoothDualShock4())
-                        return hDevice.WriteOutputReportViaSharedOverlapped(
-                            outputBuffer, READ_STREAM_TIMEOUT);
-
-                    if (nativeOptionsStore != null && nativeOptionsStore.IsCopyCat)
-                        return hDevice.WriteOutputReportViaInterrupt(outputBuffer, READ_STREAM_TIMEOUT);
-
-                    return hDevice.WriteOutputReportViaControl(outputBuffer);
-                }
-                else
-                {
-                    return hDevice.WriteOutputReportViaInterrupt(outputBuffer, READ_STREAM_TIMEOUT);
-                }
+                return WriteEffectOutput(outputBuffer);
             }
         }
 
@@ -1185,23 +1171,26 @@ namespace DS4Windows
         {
             lock (bluetoothOutputWriteLock)
             {
-                if (conType == ConnectionType.BT)
-                {
-                    if (IsGenuineBluetoothDualShock4())
-                        return hDevice.WriteOutputReportViaSharedOverlapped(
-                            outputReport, READ_STREAM_TIMEOUT);
-
-                    if (nativeOptionsStore != null && nativeOptionsStore.IsCopyCat)
-                        return hDevice.WriteOutputReportViaInterrupt(outputReport, READ_STREAM_TIMEOUT);
-
-                    return hDevice.WriteOutputReportViaControl(outputReport);
-                }
-                else
-                {
-                    return hDevice.WriteOutputReportViaInterrupt(outReportBuffer,
-                        READ_STREAM_TIMEOUT);
-                }
+                return WriteEffectOutput(conType == ConnectionType.BT
+                    ? outputReport : outReportBuffer);
             }
+        }
+
+        private bool WriteEffectOutput(byte[] report)
+        {
+            // Ordinary Bluetooth rumble/lightbar reports need the control pipe
+            // unless CopyCat explicitly selects interrupt output (#84). Audio
+            // streaming has a separate writer and must not change this route.
+            return UsesControlPipeForEffectOutput(conType,
+                    nativeOptionsStore?.IsCopyCat == true)
+                ? hDevice.WriteOutputReportViaControl(report)
+                : hDevice.WriteOutputReportViaInterrupt(report, READ_STREAM_TIMEOUT);
+        }
+
+        internal static bool UsesControlPipeForEffectOutput(
+            ConnectionType connectionType, bool isCopyCat)
+        {
+            return connectionType == ConnectionType.BT && !isCopyCat;
         }
 
         public bool SetBluetoothAudioStreaming(bool speakerEnabled, bool microphoneEnabled,

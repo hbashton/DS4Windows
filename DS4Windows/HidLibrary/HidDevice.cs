@@ -355,8 +355,21 @@ namespace DS4Windows
             }
         }
 
-        public unsafe ReadStatus ReadFile(Span<byte> inputBuffer, uint timeout = uint.MaxValue)
+        public ReadStatus ReadFile(Span<byte> inputBuffer, uint timeout = uint.MaxValue)
         {
+            return ReadFileCore(inputBuffer, timeout, false, out _);
+        }
+
+        public ReadStatus ReadFile(Span<byte> inputBuffer, out int bytesRead,
+            uint timeout = uint.MaxValue)
+        {
+            return ReadFileCore(inputBuffer, timeout, true, out bytesRead);
+        }
+
+        private unsafe ReadStatus ReadFileCore(Span<byte> inputBuffer, uint timeout,
+            bool captureByteCount, out int bytesRead)
+        {
+            bytesRead = 0;
             lock (readTransferLock)
             {
                 SafeFileHandle transferHandle = AcquireTransferHandle(
@@ -382,6 +395,21 @@ namespace DS4Windows
                         if (NativeMethods.ReadFilePinned(nativeHandle, buffer,
                             (uint)inputBuffer.Length, null, &ov))
                         {
+                            // The existing hot-path overload does not need an
+                            // extra native call. Protocol transactions need the
+                            // actual length, including synchronous completions.
+                            if (captureByteCount)
+                            {
+                                if (!NativeMethods.GetOverlappedResultPinned(
+                                        nativeHandle, &ov, out uint transferred, false) ||
+                                    transferred > inputBuffer.Length ||
+                                    !IsTransferEpochCurrent(capturedTransferEpoch) ||
+                                    transferHandle.IsClosed)
+                                    return ReadStatus.ReadError;
+
+                                bytesRead = (int)transferred;
+                            }
+
                             return !IsTransferEpochCurrent(
                                     capturedTransferEpoch) ||
                                 transferHandle.IsClosed ?
@@ -405,7 +433,7 @@ namespace DS4Windows
                         }
 
                         if (!NativeMethods.GetOverlappedResultExPinned(
-                            nativeHandle, &ov, out _, timeout, false))
+                            nativeHandle, &ov, out uint completedBytes, timeout, false))
                         {
                             uint error = (uint)Marshal.GetLastWin32Error();
                             if (error == NativeMethods.WAIT_TIMEOUT)
@@ -421,6 +449,16 @@ namespace DS4Windows
                             }
 
                             return ReadStatus.ReadError;
+                        }
+
+                        if (captureByteCount)
+                        {
+                            if (completedBytes > inputBuffer.Length ||
+                                !IsTransferEpochCurrent(capturedTransferEpoch) ||
+                                transferHandle.IsClosed)
+                                return ReadStatus.ReadError;
+
+                            bytesRead = (int)completedBytes;
                         }
 
                         return ReadStatus.Success;

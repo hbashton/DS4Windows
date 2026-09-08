@@ -12,6 +12,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Management;
 using System.Net.Sockets;
@@ -1187,7 +1188,7 @@ namespace DS4Windows
         internal static bool IsOptionalSatelliteResourcePath(
             string relativePath)
         {
-            if (string.IsNullOrWhiteSpace(relativePath))
+            if (!IsSafeRelativePackagePath(relativePath))
             {
                 return false;
             }
@@ -1197,12 +1198,25 @@ namespace DS4Windows
                 Path.DirectorySeparatorChar);
             string[] components = normalized.Split(
                 Path.DirectorySeparatorChar);
-            return components.Length == 3 &&
-                string.Equals(components[0], "Lang",
-                    StringComparison.OrdinalIgnoreCase) &&
-                !string.IsNullOrWhiteSpace(components[1]) &&
-                components[2].EndsWith(".resources.dll",
+            if (components.Length == 3 &&
+                string.Equals(components[0], "Lang", StringComparison.OrdinalIgnoreCase))
+            {
+                // Older managed manifests used Lang/<culture>/. Keep those
+                // readable while new packages use .NET's standard layout.
+                return components[2].EndsWith(".resources.dll",
                     StringComparison.OrdinalIgnoreCase);
+            }
+
+            if (components.Length != 2 ||
+                !components[1].EndsWith(".resources.dll", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            // A top-level folder must actually be a known culture, not an
+            // arbitrary plugin/driver directory with a resource-like name.
+            foreach (CultureInfo culture in CultureInfo.GetCultures(CultureTypes.AllCultures))
+                if (string.Equals(culture.Name, components[0], StringComparison.OrdinalIgnoreCase))
+                    return true;
+            return false;
         }
 
         private static bool IsSafeRelativePackagePath(string relativePath)

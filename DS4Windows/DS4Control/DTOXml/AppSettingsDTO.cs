@@ -20,6 +20,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel.Design;
 using System.Diagnostics;
+using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -249,10 +250,18 @@ namespace DS4WinWPF.DS4Control.DTOXml
         [XmlElement("LastChecked")]
         public string LastCheckString
         {
-            get => LastChecked.ToString("MM/dd/yyyy HH:mm:ss");
+            get => LastChecked.ToString("MM/dd/yyyy HH:mm:ss",
+                CultureInfo.InvariantCulture);
             set
             {
-                if (DateTime.TryParse(value, out DateTime temp))
+                // The DTO writes a fixed month/day format, regardless of the
+                // user's locale. Older settings used DateTime.ToString(), so
+                // keep the local-format fallback after the canonical format.
+                if (DateTime.TryParseExact(value, "MM/dd/yyyy HH:mm:ss",
+                        CultureInfo.InvariantCulture, DateTimeStyles.None,
+                        out DateTime temp) ||
+                    DateTime.TryParse(value, CultureInfo.CurrentCulture,
+                        DateTimeStyles.None, out temp))
                 {
                     LastChecked = temp;
                 }

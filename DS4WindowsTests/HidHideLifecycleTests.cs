@@ -197,16 +197,32 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void ActiveWiredControllerIsNeverRestartedForSteamReclaim()
+        public void ActiveUsbOrBluetoothControllerIsNeverRestartedForSteamReclaim()
         {
             Assert.IsFalse(ControlService.ShouldRestartDeviceForSteamReclaim(
                 ConnectionType.USB));
-            Assert.IsTrue(ControlService.ShouldRestartDeviceForSteamReclaim(
+            Assert.IsFalse(ControlService.ShouldRestartDeviceForSteamReclaim(
                 ConnectionType.BT));
         }
 
         [TestMethod]
-        public void WiredRestartGuardDominatesTaskAndPnputilCallSite()
+        public void BluetoothReconnectionsCannotRearmDestructiveSteamReclaim()
+        {
+            HidHideManagedDeviceRegistry<object> registry = new();
+            for (int generation = 0; generation < 20; generation++)
+            {
+                object device = new();
+                var claim = registry.BeginConnection(device, new[] { OldHid });
+                registry.CompleteConnection(claim, Array.Empty<string>(), new[] { OldHid });
+                Assert.IsFalse(ControlService.ShouldRestartDeviceForSteamReclaim(ConnectionType.BT),
+                    "Reconnect must not trigger another physical PnP restart, even after reclaim history is cleared.");
+                var disconnect = registry.Disconnect(device);
+                registry.CompletePersistentRelease(disconnect.PersistentReleaseIds);
+            }
+        }
+
+        [TestMethod]
+        public void ActiveControllerRestartGuardDominatesTaskAndPnputilCallSite()
         {
             string source = File.ReadAllText(FindRepositoryFile(
                 "DS4Windows", "DS4Control", "ControlService.cs"));
@@ -221,7 +237,7 @@ namespace DS4WindowsTests
             int pnputil = queue.IndexOf("pnputil.exe",
                 StringComparison.Ordinal);
             Assert.IsTrue(guard >= 0 && task > guard && pnputil > guard,
-                "The wired safety decision must happen before any async restart owner or pnputil invocation is created.");
+                "The active-controller safety decision must happen before any async restart owner or pnputil invocation is created.");
         }
 
         [TestMethod]

@@ -610,17 +610,11 @@ namespace DS4Windows.Bootstrapper
 
         private void OnPlanPackageBegin(object sender, PlanPackageBeginEventArgs e)
         {
-            if (string.Equals(e.PackageId, "PostUninstallCleanup",
-                    StringComparison.OrdinalIgnoreCase))
+            if (UninstallHelperPackagePlan.TryGetState(e.PackageId,
+                    plannedAction, command.Relation, infrastructureRecoveryPass,
+                    out RequestState helperState))
             {
-                // Burn unwinds in reverse chain order. The package is first
-                // in the chain so this direct-uninstall cleanup runs after
-                // MSI, and never during an outgoing upgrade bundle.
-                e.State = !infrastructureRecoveryPass &&
-                    plannedAction == LaunchAction.Uninstall &&
-                    command.Relation != RelationType.Upgrade
-                    ? RequestState.Present
-                    : RequestState.None;
+                e.State = helperState;
                 return;
             }
 
@@ -633,37 +627,6 @@ namespace DS4Windows.Bootstrapper
                 e.State = !infrastructureRecoveryPass &&
                     (plannedAction == LaunchAction.Install ||
                      plannedAction == LaunchAction.Repair)
-                    ? RequestState.Present
-                    : RequestState.None;
-                return;
-            }
-
-            if (string.Equals(e.PackageId,
-                    "CloseRunningApplicationsForUninstall",
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                // Burn uninstalls in reverse chain order. This tail package
-                // is therefore the first executable action during direct or
-                // related-bundle uninstall, before infrastructure or MSI
-                // ownership is removed.
-                e.State = !infrastructureRecoveryPass &&
-                    plannedAction == LaunchAction.Uninstall
-                    ? RequestState.Present
-                    : RequestState.None;
-                return;
-            }
-
-            if (string.Equals(e.PackageId,
-                    "ViiperUsbipUninstall",
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                // Shared infrastructure is permanent in the normal package
-                // chain so an outgoing related bundle can unregister without
-                // deleting the incoming backend. Only a direct Add/Remove
-                // Programs uninstall explicitly runs this dedicated action.
-                e.State = !infrastructureRecoveryPass &&
-                    plannedAction == LaunchAction.Uninstall &&
-                    command.Relation != RelationType.Upgrade
                     ? RequestState.Present
                     : RequestState.None;
                 return;

@@ -2,7 +2,6 @@
 from pathlib import Path
 import sys
 import shutil
-import subprocess
 import hashlib
 import re
 import stat
@@ -70,34 +69,10 @@ viiper_hash_path.write_text(
     encoding="ascii",
 )
 
-# move l18n assemblies to a separate directory
-lang_dir = target_dir / "Lang"
-if not lang_dir.exists():
-    Path.mkdir(lang_dir)
-
-langs = ["ar", "cs", "de", "el", "es", "fi", "fr", "he", "hu-HU", "idn", "it", "ja", "ms",
-         "nl", "pl", "pt", "pt-BR", "ru", "se", "tr", "uk-UA", "vi", "zh-Hans", "zh-Hant", "zh-CN"]
-for lang in langs:
-    current_lang_dir = target_dir / lang
-    target_lang_dir = lang_dir / lang
-    if not target_lang_dir.exists():
-        target_lang_dir.mkdir()
-
-    if current_lang_dir.exists():
-        for file in current_lang_dir.iterdir():
-            if file.is_file():
-                shutil.move(file, target_lang_dir / file.name)
-        current_lang_dir.rmdir()
-
-
-# Resolve companion tooling from this script, not from the caller's checkout
-# layout. CI passes the repository root as project_dir; the historical parent
-# lookup escaped that checkout and failed only on a clean runner.
-lang_script = Path(__file__).resolve().with_name("inject_deps_path.py")
-if not lang_script.is_file():
-    raise FileNotFoundError(f"Dependency-path helper is missing: {lang_script}")
-deps_json_path = target_dir / "DS4Windows.deps.json"
-subprocess.run([sys.executable, str(lang_script), str(deps_json_path)], check=True)
+# Keep the SDK's <culture>/*.resources.dll layout and generated deps.json.
+# .NET resolves these satellites relative to the application, regardless of
+# the launch directory. Moving them into Lang required CWD-relative probing,
+# which silently lost translations for logon tasks and outside-directory starts.
 
 # Preserve the exact GitHub release channel in both portable and managed
 # packages. The numeric Windows file version cannot distinguish an RC from a

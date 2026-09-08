@@ -112,7 +112,7 @@ def main() -> None:
 
     require(
         bootstrapper,
-        'e.PackageId, "PostUninstallCleanup"',
+        'UninstallHelperPackagePlan.TryGetState(e.PackageId,',
         'e.PackageId, "CloseRunningApplications"',
         "plannedAction == LaunchAction.Uninstall",
         "deferInfrastructureUntilUpgradeCompletes",
@@ -129,8 +129,11 @@ def main() -> None:
         "packageStates.ContainsKey",
         "managedRelatedBundles",
         "ManagedBundleTag",
-        '"ViiperUsbipUninstall"',
     )
+    helper_plan = (ROOT / "installer/DS4Windows.Bootstrapper/UninstallHelperPackagePlan.cs").read_text(encoding="utf-8")
+    require(helper_plan, '"PostUninstallCleanup"', '"ViiperUsbipUninstall"',
+            '"CloseRunningApplicationsForUninstall"', "RequestState.Cache",
+            "relation != RelationType.Upgrade", "infrastructureRecoveryPass")
     require(
         bundle,
         'Tag="DS4WindowsManagedV2"',

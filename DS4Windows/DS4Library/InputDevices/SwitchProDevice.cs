@@ -313,9 +313,9 @@ namespace DS4Windows.InputDevices
             {
                 SetOperational();
             }
-            catch (System.IO.IOException)
+            catch (System.IO.IOException ex)
             {
-                AppLogger.LogToGui($"Controller {MacAddress} failed to initialize. Closing device", true);
+                AppLogger.LogToGui($"Controller {MacAddress} failed to initialize: {ex.Message} Closing device", true);
             }
 
             if (!connectionOpened)
@@ -739,6 +739,7 @@ namespace DS4Windows.InputDevices
 
         public void SetOperational()
         {
+            connectionOpened = false;
             if (conType == ConnectionType.USB)
             {
                 RunUSBSetup();
@@ -825,7 +826,7 @@ namespace DS4Windows.InputDevices
             byte[] data = new byte[64];
             data[0] = 0x80; data[1] = 0x01;
             //result = hidDevice.WriteAsyncOutputReportViaInterrupt(data);
-            result = hDevice.WriteOutputReportViaInterrupt(data, 0);
+            result = SubmitSetupReport(data);
             //Array.Clear(tmpReport, 0 , 64);
             //res = hidDevice.ReadWithFileStream(tmpReport);
             //Console.WriteLine("TEST BYTE: {0}", tmpReport[2]);
@@ -834,21 +835,21 @@ namespace DS4Windows.InputDevices
             //result = hidDevice.WriteOutputReportViaControl(data);
             //Thread.Sleep(2000);
             //Thread.Sleep(1000);
-            result = hDevice.WriteOutputReportViaInterrupt(data, 0);
+            result = SubmitSetupReport(data);
 
             data[0] = 0x80; data[1] = 0x03; // 3Mbit baud rate
             //result = hidDevice.WriteAsyncOutputReportViaInterrupt(data);
-            result = hDevice.WriteOutputReportViaInterrupt(data, 0);
+            result = SubmitSetupReport(data);
             //Thread.Sleep(2000);
 
             data[0] = 0x80; data[1] = 0x02; // Handshake at new baud rate
-            result = hDevice.WriteOutputReportViaInterrupt(data, 0);
+            result = SubmitSetupReport(data);
             //Thread.Sleep(1000);
             //result = hidDevice.WriteOutputReportViaInterrupt(command, 500);
             //Thread.Sleep(2000);
 
             data[0] = 0x80; data[1] = 0x4; // Prevent HID timeout
-            result = hDevice.WriteOutputReportViaInterrupt(data, 0);
+            result = SubmitSetupReport(data);
             //result = hidDevice.WriteOutputReportViaInterrupt(command, 500);
         }
 
@@ -888,7 +889,15 @@ namespace DS4Windows.InputDevices
             {
                 tmpRumble[1] = frameCount;
                 frameCount = (byte)(++frameCount & 0x0F);
-                result = hDevice.WriteOutputReportViaInterrupt(tmpRumble, 0);
+                try
+                {
+                    result = WriteRumbleReport(tmpRumble);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    // Includes ObjectDisposedException from a retiring HID owner.
+                    throw new System.IO.IOException("Switch Pro setup rumble transport is unavailable.", ex);
+                }
             }
             //res = hidDevice.ReadWithFileStream(tmpReport, 500);
             //res = hidDevice.ReadFile(tmpReport);
@@ -897,72 +906,87 @@ namespace DS4Windows.InputDevices
         public byte[] Subcommand(byte subcommand, byte[] tmpBuffer, uint bufLen,
             bool checkResponse = false)
         {
-            int retryLimit = 100;
-            byte[] tmpReport;
+            if (tmpBuffer == null || bufLen > tmpBuffer.Length ||
+                bufLen > SUBCOMMAND_BUFFER_LEN - 11)
+                throw new ArgumentException("Invalid Switch Pro subcommand payload.", nameof(tmpBuffer));
 
-            do
+            byte[] commandBuffer = new byte[SUBCOMMAND_BUFFER_LEN];
+            Array.Copy(commandBuffHeader, 0, commandBuffer, 2, SUBCOMMAND_HEADER_LEN);
+            Array.Copy(tmpBuffer, 0, commandBuffer, 11, bufLen);
+            commandBuffer[0] = 0x01;
+            commandBuffer[10] = subcommand;
+            lock (nintendoOutputLock)
             {
-                bool result;
-                byte[] commandBuffer = new byte[SUBCOMMAND_BUFFER_LEN];
-                Array.Copy(commandBuffHeader, 0, commandBuffer, 2, SUBCOMMAND_HEADER_LEN);
-                Array.Copy(tmpBuffer, 0, commandBuffer, 11, bufLen);
+                commandBuffer[1] = frameCount;
+                frameCount = (byte)(++frameCount & 0x0F);
+                if (!SubmitSetupReport(commandBuffer) || !checkResponse)
+                    return null;
+            }
 
-                commandBuffer[0] = 0x01;
-                commandBuffer[10] = subcommand;
-                lock (nintendoOutputLock)
+            long started = SubcommandTimestampMilliseconds;
+            byte[] report = new byte[INPUT_REPORT_LEN];
+            // One deadline for the entire receive transaction, not 500 ms for
+            // each unrelated input report. Also cap immediate report floods.
+            for (int attempt = 0; attempt < 64; attempt++)
+            {
+                long remaining = SUBCOMMAND_RESPONSE_TIMEOUT - (SubcommandTimestampMilliseconds - started);
+                if (remaining <= 0)
+                    break;
+
+                Array.Clear(report);
+                int count;
+                try
                 {
-                    commandBuffer[1] = frameCount;
-                    frameCount = (byte)(++frameCount & 0x0F);
-                    result = hDevice.WriteOutputReportViaInterrupt(commandBuffer, 0);
+                    count = ReadSubcommandReport(report, (uint)remaining);
                 }
-
-                tmpReport = null;
-                if (result && checkResponse)
+                catch (InvalidOperationException ex)
                 {
-                    tmpReport = new byte[INPUT_REPORT_LEN];
-                    HidDevice.ReadStatus res;
-                    res = hDevice.ReadFile(tmpReport, SUBCOMMAND_RESPONSE_TIMEOUT);
-                    int tries = 1;
-                    while (res == HidDevice.ReadStatus.Success &&
-                        tmpReport[0] != 0x21 && tmpReport[14] != subcommand && tries < 100)
-                    {
-                        //Console.WriteLine("TRY AGAIN: {0}", tmpReport[0]);
-                        res = hDevice.ReadFile(tmpReport, SUBCOMMAND_RESPONSE_TIMEOUT);
-                        tries++;
-                    }
-
-                    //Console.WriteLine("END GAME: {0} {1} {2}", subcommand, tmpReport[0], tries);
+                    throw new System.IO.IOException("Switch Pro subcommand read transport is unavailable.", ex);
                 }
-            } while (ReloadStickCalib(subcommand, tmpBuffer, tmpReport, ref retryLimit));
+                if (count <= 0 || count > report.Length)
+                    break;
 
-            return tmpReport;
+                if (SwitchProCalibrationProtocol.IsMatchingReply(subcommand,
+                        tmpBuffer.AsSpan(0, (int)bufLen), report.AsSpan(0, count)))
+                    return report.AsSpan(0, count).ToArray();
+            }
+
+            return null;
         }
 
-        private bool ReloadStickCalib(byte subcommand, ReadOnlySpan<byte> tmpBuffer, ReadOnlySpan<byte> tmpReport, ref int retryLimit)
+        protected virtual bool SubmitSubcommandReport(byte[] report)
         {
-            if (subcommand != 0x10) { return false; }
-            if (retryLimit-- <= 0) { return false; }
+            // Zero is an immediate native timeout, not an infinite wait: a
+            // pending write would be cancelled before its reply could arrive.
+            return hDevice.WriteOutputReportViaInterrupt(report, SUBCOMMAND_RESPONSE_TIMEOUT);
+        }
 
-            if (tmpBuffer.SequenceEqual<byte>([0x3D, 0x60, 0x00, 0x00, 0x09]) || // LEFT  STICK FACTORY CALIB
-                tmpBuffer.SequenceEqual<byte>([0x46, 0x60, 0x00, 0x00, 0x09]) || // RIGHT STICK FACTORY CALIB
-                tmpBuffer.SequenceEqual<byte>([0x12, 0x80, 0x00, 0x00, 0x09]) || // LEFT  STICK USER    CALIB
-                tmpBuffer.SequenceEqual<byte>([0x1D, 0x80, 0x00, 0x00, 0x09]))   // RIGHT STICK USER    CALIB
+        private bool SubmitSetupReport(byte[] report)
+        {
+            try
             {
-                var SPI_RESP_OFFSET = 20;
-                var stickCalib = new ushort[6];
-                stickCalib[0] = (ushort)(((tmpReport[1 + SPI_RESP_OFFSET] << 8) & 0xF00) | tmpReport[0 + SPI_RESP_OFFSET]); // X Axis Max above center
-                stickCalib[1] = (ushort)((tmpReport[2 + SPI_RESP_OFFSET] << 4) | (tmpReport[1 + SPI_RESP_OFFSET] >> 4)); // Y Axis Max above center
-                stickCalib[2] = (ushort)(((tmpReport[4 + SPI_RESP_OFFSET] << 8) & 0xF00) | tmpReport[3 + SPI_RESP_OFFSET]); // X Axis Center
-                stickCalib[3] = (ushort)((tmpReport[5 + SPI_RESP_OFFSET] << 4) | (tmpReport[4 + SPI_RESP_OFFSET] >> 4)); // Y Axis Center
-                stickCalib[4] = (ushort)(((tmpReport[7 + SPI_RESP_OFFSET] << 8) & 0xF00) | tmpReport[6 + SPI_RESP_OFFSET]); // X Axis Min below center
-                stickCalib[5] = (ushort)((tmpReport[8 + SPI_RESP_OFFSET] << 4) | (tmpReport[7 + SPI_RESP_OFFSET] >> 4)); // Y Axis Min below center
+                return SubmitSubcommandReport(report);
+            }
+            catch (InvalidOperationException ex)
+            {
+                // Normalize only the native owner's closed/unopenable state;
+                // programming errors outside this boundary remain visible.
+                throw new System.IO.IOException("Switch Pro subcommand write transport is unavailable.", ex);
+            }
+        }
 
-                return stickCalib.Any(item => item == 0);
-            }
-            else
-            {
-                return false;
-            }
+        protected virtual int ReadSubcommandReport(byte[] report, uint timeout)
+        {
+            return hDevice.ReadFile(report, out int bytesRead, timeout) == HidDevice.ReadStatus.Success ?
+                bytesRead : -1;
+        }
+
+        protected virtual long SubcommandTimestampMilliseconds => Environment.TickCount64;
+
+        private byte[] ReadCalibrationSpi(ushort address, byte count)
+        {
+            byte[] request = SwitchProCalibrationProtocol.CreateSpiRequest(address, count);
+            return Subcommand(SwitchProSubCmd.SPI_FLASH_READ, request, (uint)request.Length, true);
         }
 
         public double currentLeftAmpRatio;
@@ -1032,7 +1056,6 @@ namespace DS4Windows.InputDevices
         public void CalibrationData()
         {
             const int SPI_RESP_OFFSET = 20;
-            byte[] command;
             byte[] tmpBuffer;
 
             //command = new byte[] { 0x00, 0x50, 0x00, 0x00, 0x01 };
@@ -1042,26 +1065,10 @@ namespace DS4Windows.InputDevices
             //Console.WriteLine(tmpBuffer[SPI_RESP_OFFSET]);
             //Console.WriteLine();
 
-            bool foundUserCalib = false;
-            command = new byte[] { 0x10, 0x80, 0x00, 0x00, 0x02 };
-            tmpBuffer = Subcommand(0x10, command, 5, checkResponse: true);
-            if (tmpBuffer[SPI_RESP_OFFSET] == 0xB2 && tmpBuffer[SPI_RESP_OFFSET + 1] == 0xA1)
-            {
-                foundUserCalib = true;
-            }
-
-            if (foundUserCalib)
-            {
-                command = new byte[] { 0x12, 0x80, 0x00, 0x00, 0x09 };
-                tmpBuffer = Subcommand(0x10, command, 5, checkResponse: true);
-                //Console.WriteLine("FOUND USER CALIB");
-            }
-            else
-            {
-                command = new byte[] { 0x3D, 0x60, 0x00, 0x00, 0x09 };
-                tmpBuffer = Subcommand(0x10, command, 5, checkResponse: true);
-                //Console.WriteLine("CHECK FACTORY CALIB");
-            }
+            tmpBuffer = SwitchProCalibrationProtocol.ReadCalibration(ReadCalibrationSpi,
+                0x8010, 0x8012, 0x603D, 9,
+                (reply, user) => SwitchProCalibrationProtocol.IsValidStick(reply, false, user),
+                out bool foundUserCalib);
 
             leftStickCalib[0] = (ushort)(((tmpBuffer[1 + SPI_RESP_OFFSET] << 8) & 0xF00) | tmpBuffer[0 + SPI_RESP_OFFSET]); // X Axis Max above center
             leftStickCalib[1] = (ushort)((tmpBuffer[2 + SPI_RESP_OFFSET] << 4) | (tmpBuffer[1 + SPI_RESP_OFFSET] >> 4)); // Y Axis Max above center
@@ -1104,26 +1111,10 @@ namespace DS4Windows.InputDevices
             //Console.WriteLine();
             //Console.WriteLine(string.Join(",", leftStickCalib));
 
-            foundUserCalib = false;
-            command = new byte[] { 0x1B, 0x80, 0x00, 0x00, 0x02 };
-            tmpBuffer = Subcommand(0x10, command, 5, checkResponse: true);
-            if (tmpBuffer[SPI_RESP_OFFSET] == 0xB2 && tmpBuffer[SPI_RESP_OFFSET + 1] == 0xA1)
-            {
-                foundUserCalib = true;
-            }
-
-            if (foundUserCalib)
-            {
-                command = new byte[] { 0x1D, 0x80, 0x00, 0x00, 0x09 };
-                tmpBuffer = Subcommand(0x10, command, 5, checkResponse: true);
-                //Console.WriteLine("FOUND RIGHT USER CALIB");
-            }
-            else
-            {
-                command = new byte[] { 0x46, 0x60, 0x00, 0x00, 0x09 };
-                tmpBuffer = Subcommand(0x10, command, 5, checkResponse: true);
-                //Console.WriteLine("CHECK RIGHT FACTORY CALIB");
-            }
+            tmpBuffer = SwitchProCalibrationProtocol.ReadCalibration(ReadCalibrationSpi,
+                0x801B, 0x801D, 0x6046, 9,
+                (reply, user) => SwitchProCalibrationProtocol.IsValidStick(reply, true, user),
+                out foundUserCalib);
 
             rightStickCalib[2] = (ushort)(((tmpBuffer[1 + SPI_RESP_OFFSET] << 8) & 0xF00) | tmpBuffer[0 + SPI_RESP_OFFSET]); // X Axis Center
             rightStickCalib[3] = (ushort)((tmpBuffer[2 + SPI_RESP_OFFSET] << 4) | (tmpBuffer[1 + SPI_RESP_OFFSET] >> 4)); // Y Axis Center
@@ -1178,27 +1169,9 @@ namespace DS4Windows.InputDevices
             //Console.WriteLine("DZ Right: {0}", deadzoneRS);
             //Console.WriteLine(string.Join(",", deadZoneBuffer));*/
 
-            foundUserCalib = false;
-            command = new byte[] { 0x26, 0x80, 0x00, 0x00, 0x02 };
-            tmpBuffer = Subcommand(0x10, command, 5, checkResponse: true);
-            if (tmpBuffer[SPI_RESP_OFFSET] == 0xB2 && tmpBuffer[SPI_RESP_OFFSET + 1] == 0xA1)
-            {
-                foundUserCalib = true;
-            }
-
-            //Console.WriteLine("{0}", string.Join(",", tmpBuffer.Skip(offset).ToArray()));
-            if (foundUserCalib)
-            {
-                command = new byte[] { 0x28, 0x80, 0x00, 0x00, 0x18 };
-                tmpBuffer = Subcommand(0x10, command, 5, checkResponse: true);
-                //Console.WriteLine("FOUND USER CALIB");
-            }
-            else
-            {
-                command = new byte[] { 0x20, 0x60, 0x00, 0x00, 0x18 };
-                tmpBuffer = Subcommand(0x10, command, 5, checkResponse: true);
-                //Console.WriteLine("CHECK FACTORY CALIB");
-            }
+            tmpBuffer = SwitchProCalibrationProtocol.ReadCalibration(ReadCalibrationSpi,
+                0x8026, 0x8028, 0x6020, 24,
+                (reply, _) => SwitchProCalibrationProtocol.IsValidImu(reply), out _);
 
             accelNeutral[IMU_XAXIS_IDX] = (short)((tmpBuffer[3 + SPI_RESP_OFFSET] << 8) & 0xFF00 | tmpBuffer[2 + SPI_RESP_OFFSET]); // Accel X Offset
             accelNeutral[IMU_YAXIS_IDX] = (short)((tmpBuffer[1 + SPI_RESP_OFFSET] << 8) & 0xFF00 | tmpBuffer[0 + SPI_RESP_OFFSET]); // Accel Y Offset

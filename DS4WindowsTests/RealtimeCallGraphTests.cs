@@ -166,13 +166,27 @@ namespace DS4WindowsTests
         {
             string source = File.ReadAllText(FindRepositoryFile(
                 "DS4Windows", "HidLibrary", "HidDevice.cs"));
+            string legacyRead = Extract(source,
+                "public ReadStatus ReadFile(Span<byte> inputBuffer, uint timeout",
+                "public ReadStatus ReadFile(Span<byte> inputBuffer, out int bytesRead");
+            string lengthAwareRead = Extract(source,
+                "public ReadStatus ReadFile(Span<byte> inputBuffer, out int bytesRead",
+                "private unsafe ReadStatus ReadFileCore(");
             string read = Extract(source,
-                "public unsafe ReadStatus ReadFile(",
+                "private unsafe ReadStatus ReadFileCore(",
                 "private EventWaitHandle GetOrCreateReadCompletionEvent");
             string write = Extract(source,
                 "public unsafe bool WriteOutputReportViaInterrupt(byte[] outputBuffer,",
                 "private EventWaitHandle GetOrCreateInterruptWriteCompletionEvent");
 
+            StringAssert.Contains(legacyRead,
+                "ReadFileCore(inputBuffer, timeout, false, out _)");
+            StringAssert.Contains(lengthAwareRead,
+                "ReadFileCore(inputBuffer, timeout, true, out bytesRead)");
+            AssertDoesNotContain(legacyRead, "new ");
+            AssertDoesNotContain(lengthAwareRead, "new ");
+            AssertDoesNotContain(legacyRead, "NativeMethods.");
+            AssertDoesNotContain(lengthAwareRead, "NativeMethods.");
             AssertDoesNotContain(read, "new AutoResetEvent");
             AssertDoesNotContain(read, "new EventWaitHandle");
             StringAssert.Contains(read, "GetOrCreateReadCompletionEvent");

@@ -427,9 +427,8 @@ def main() -> int:
         / "InstallerApplication.cs"
     ).read_text(encoding="utf-8")
     for contract in [
-        'e.PackageId, "PostUninstallCleanup"',
+        'UninstallHelperPackagePlan.TryGetState(e.PackageId,',
         'e.PackageId, "CloseRunningApplications"',
-        '"CloseRunningApplicationsForUninstall"',
         "plannedAction == LaunchAction.Install",
         "plannedAction == LaunchAction.Repair",
         "plannedAction == LaunchAction.Uninstall",
@@ -445,6 +444,13 @@ def main() -> int:
                 "Bootstrapper process-quiescence contract missing: " +
                 contract
             )
+
+    helper_plan = (installer_root / "DS4Windows.Bootstrapper" / "UninstallHelperPackagePlan.cs").read_text(encoding="utf-8")
+    for contract in ['"PostUninstallCleanup"', '"ViiperUsbipUninstall"',
+                     '"CloseRunningApplicationsForUninstall"', 'RequestState.Cache',
+                     'relation != RelationType.Upgrade', 'infrastructureRecoveryPass']:
+        if contract not in helper_plan:
+            raise SystemExit("Uninstall helper caching contract missing: " + contract)
 
     setup_actions = (installer_root / "DS4Windows.SetupActions" / "Program.cs").read_text(encoding="utf-8")
     for contract in [
@@ -719,13 +725,45 @@ def main() -> int:
         "is_reparse_point",
         "Refusing to replace output containing a reparse point",
         ".ds4windows-managed-files.txt",
-        'Path(__file__).resolve().with_name("inject_deps_path.py")',
     ]:
         if contract not in post_build:
             raise SystemExit(
                 "Portable package ownership contract missing: " + contract
             )
+    validate_localization_package(args.publish_root)
     return 0
+
+
+def validate_localization_package(publish_root: Path) -> None:
+    """Keep both application and dependency satellites in .NET's standard layout."""
+    runtime = json.loads(
+        (publish_root / "DS4Windows.runtimeconfig.json").read_text(encoding="utf-8-sig")
+    )
+    if runtime.get("runtimeOptions", {}).get("additionalProbingPaths"):
+        raise SystemExit("Published localization must not depend on additional probing paths.")
+
+    deps = json.loads(
+        (publish_root / "DS4Windows.deps.json").read_text(encoding="utf-8-sig")
+    )
+    validated: set[str] = set()
+    for target in deps.get("targets", {}).values():
+        for library_name, library in target.items():
+            owner = library_name.split("/", 1)[0]
+            if owner not in {"DS4Windows", "TaskScheduler"}:
+                continue
+            expected_name = ("DS4Windows.resources.dll" if owner == "DS4Windows"
+                             else "Microsoft.Win32.TaskScheduler.resources.dll")
+            for asset, metadata in library.get("resources", {}).items():
+                culture = metadata.get("locale", "")
+                if not re.fullmatch(r"[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*", culture):
+                    raise SystemExit("Invalid satellite locale: " + repr(culture))
+                if PurePosixPath(asset).name != expected_name:
+                    raise SystemExit("Unexpected satellite assembly: " + asset)
+                if not (publish_root / culture / expected_name).is_file():
+                    raise SystemExit("Missing standard-layout satellite: " + culture + "/" + expected_name)
+                validated.add(owner)
+    if validated != {"DS4Windows", "TaskScheduler"}:
+        raise SystemExit("Package dependency metadata omits application or TaskScheduler satellites.")
 
 
 if __name__ == "__main__":

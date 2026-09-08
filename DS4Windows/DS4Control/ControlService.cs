@@ -1496,17 +1496,20 @@ namespace DS4Windows
                 return;
             }
 
-            // Restarting a wired HID collection after StartUpdate has taken
+            // Restarting a USB or Bluetooth HID collection after StartUpdate has taken
             // input/output ownership tears down the live PnP generation.  On
             // some DS4 stacks it comes back as a generic HID collection and
             // races both the captured HidHide identity and DS4Devices' path /
             // serial registries.  HidHide containment is already active here;
             // require a physical reconnect (or Steam restart) instead of
-            // restarting an owned wired controller underneath the reader.
+            // restarting an owned controller underneath the reader. Bluetooth
+            // restarts also clear the reclaim marker during normal removal,
+            // creating a restart/reconnect loop (#83). Keep the existing cloak
+            // without performing a destructive reclaim on either transport.
             if (!ShouldRestartDeviceForSteamReclaim(
                     device.getConnectionType()))
             {
-                LogDebug("Automatic Steam Input reclaim skipped for a wired controller because restarting an active HID collection can strand its reconnect. Reconnect the controller after enabling HidHide if Steam already held it.", true);
+                LogDebug("Automatic Steam Input reclaim skipped because restarting this active controller can cause repeated disconnects. Reconnect the controller or restart Steam after enabling HidHide if Steam already held it.", true);
                 return;
             }
 
@@ -1619,7 +1622,8 @@ namespace DS4Windows
         internal static bool ShouldRestartDeviceForSteamReclaim(
             ConnectionType connectionType)
         {
-            return connectionType != ConnectionType.USB;
+            return connectionType != ConnectionType.USB &&
+                connectionType != ConnectionType.BT;
         }
 
         private static bool IsSteamClientRunning()
@@ -3360,7 +3364,7 @@ namespace DS4Windows
                             PrepareConnectedInputControllerAtSlot(
                                 numControllers, device, Index);
 
-                            HotplugController?.Invoke(this, device, Index);
+                            PublishPreparedHotplug(device, Index);
                             break;
                         }
                     }
@@ -3370,6 +3374,16 @@ namespace DS4Windows
             }
 
             return true;
+        }
+
+        internal void PublishPreparedHotplug(DS4Device device, int index)
+        {
+            // HotPlugCore holds serviceLifecycleLock. StartUpdate may raise
+            // Removal synchronously (for example, failed Switch Pro calibration)
+            // and clear this slot before preparation returns. Do not announce
+            // that retired object to consumers after its removal notification.
+            if (device != null && ReferenceEquals(DS4Controllers[index], device))
+                HotplugController?.Invoke(this, device, index);
         }
 
         private void PrepareConnectedInputControllerAtSlot(int numControllers,

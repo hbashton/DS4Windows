@@ -52,4 +52,85 @@ public class Switch2ExternalPlanFramerTests
             Packets = new[] { new Switch2BluetoothLabPacket { Payload = new byte[256] } } };
         Assert.ThrowsException<InvalidDataException>(() => PlanFramer.Apply(source, "seq8-len8"));
     }
+
+    [DataTestMethod]
+    [DataRow(64)]
+    [DataRow(112)]
+    [DataRow(128)]
+    [DataRow(256)]
+    [DataRow(480)]
+    [DataRow(509)]
+    public void FixedLengthHypothesesKeepExplicitAudioLengthAndZeroPadding(int size)
+    {
+        var tone = Switch2BluetoothLabTone.Create("t:opus:2:5:80:raw");
+        var source = new Switch2BluetoothLabPlan { Id = "stereo", Generation = 2,
+            Packets = tone.Packets.Select((p, i) => new Switch2BluetoothLabPacket { OffsetMicroseconds = i * 5000, Payload = p }).ToArray() };
+        foreach (string envelope in new[] { "len16le", "id0-len8", "seq8-len8" })
+        {
+            var result = PlanFramer.Apply(source, envelope + "-pad" + size);
+            for (int i = 0; i < result.Packets.Length; i++)
+            {
+                var wire = result.Packets[i].Payload;
+                Assert.AreEqual(size, wire.Length);
+                int encodedLength = envelope == "len16le" ? wire[0] | (wire[1] << 8) : wire[1];
+                Assert.AreEqual(50, encodedLength);
+                CollectionAssert.AreEqual(source.Packets[i].Payload, wire.AsSpan(2, encodedLength).ToArray());
+                Assert.IsTrue(wire.Skip(2 + encodedLength).All(b => b == 0));
+            }
+        }
+        foreach (string invalid in new[] { "raw-pad64", "id0-pad64", "len16le-pad512", "seq8-len8-pad63" })
+            Assert.ThrowsException<ArgumentException>(() => PlanFramer.Apply(source, invalid));
+    }
+
+    [TestMethod]
+    public void GroupedPcmPreservesEverySampleAndUsesExplicitPairedDeadlines()
+    {
+        var tone = Switch2BluetoothLabTone.Create("t:pcm:2:2.5:0:raw");
+        var source = new Switch2BluetoothLabPlan { Id = "t-pcm-2-2_5-0-raw", Generation = 2,
+            Packets = tone.Packets.Select((p, i) => new Switch2BluetoothLabPacket { OffsetMicroseconds = i * 2500, Payload = p }).ToArray() };
+        var grouped = PlanFramer.Apply(source, "pcm-pair5");
+        Assert.AreEqual(240, grouped.Packets.Length);
+        for (int i = 0; i < 240; i++)
+        {
+            Assert.AreEqual((i / 2) * 5000, grouped.Packets[i].OffsetMicroseconds);
+            CollectionAssert.AreEqual(source.Packets[i].Payload, grouped.Packets[i].Payload);
+        }
+        Assert.IsFalse(grouped.HeadsetNotifications);
+        var unsupported = new Switch2BluetoothLabPlan { Id = source.Id, Generation = 2, HeadsetNotifications = true, Packets = source.Packets };
+        Assert.ThrowsException<InvalidDataException>(() => PlanFramer.Apply(unsupported, "pcm-pair5"));
+        source.Packets[1].Payload[0] = 10;
+        Assert.AreNotEqual(source.Packets[1].Payload[0], grouped.Packets[1].Payload[0]);
+    }
+
+    [DataTestMethod]
+    [DataRow("pro-raw", 33, false)]
+    [DataRow("pro-len8", 34, false)]
+    [DataRow("proseq-raw", 33, true)]
+    [DataRow("proseq-len8", 34, true)]
+    [DataRow("proseq-len8-pad112", 34, true)]
+    public void AdjacentProEnvelopeUsesLeadingByteAndSilentGroups(string framing, int prefix, bool counters)
+    {
+        var tone = Switch2BluetoothLabTone.Create("t:opus:2:5:80:raw");
+        var source = new Switch2BluetoothLabPlan { Id = "stereo", Generation = 2,
+            Packets = tone.Packets.Select((p, i) => new Switch2BluetoothLabPacket { OffsetMicroseconds = i * 5000, Payload = p }).ToArray() };
+        var result = PlanFramer.Apply(source, framing);
+        for (int i = 0; i < result.Packets.Length; i++)
+        {
+            var wire = result.Packets[i].Payload;
+            Assert.AreEqual((byte)0, wire[0]);
+            if (counters)
+            {
+                Assert.IsTrue(Switch2BluetoothHdRumbleCodec.TryDecodeProController(wire.AsSpan(0, 33), out var sequence,
+                    out var left, out var right, out var failure));
+                Assert.AreEqual((byte)(i & 15), sequence);
+                Assert.AreEqual(default(Switch2HdRumbleGroup), left);
+                Assert.AreEqual(default(Switch2HdRumbleGroup), right);
+            }
+            else Assert.IsTrue(wire.Take(33).All(b => b == 0));
+            if (prefix == 34) Assert.AreEqual((byte)50, wire[33]);
+            CollectionAssert.AreEqual(source.Packets[i].Payload, wire.AsSpan(prefix, 50).ToArray());
+            Assert.IsTrue(wire.Skip(prefix + 50).All(b => b == 0));
+            Assert.AreEqual(source.Packets[i].OffsetMicroseconds, result.Packets[i].OffsetMicroseconds);
+        }
+    }
 }

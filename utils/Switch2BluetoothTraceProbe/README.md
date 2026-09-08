@@ -1,6 +1,6 @@
 # Bounded, no-restart Switch 2 Bluetooth header observer
 
-Research utility, **not production audio**. It observes a live b93 portable
+Research utility, **not production audio**. It observes a live portable
 DS4Windows session using real-time Windows ETW. It never opens a Bluetooth
 service, restarts either app, toggles the radio, changes pairing or loads a
 driver. It invokes the existing, current-user-only lab client for all probes.
@@ -8,13 +8,18 @@ driver. It invokes the existing, current-user-only lab client for all probes.
 ```text
 Switch2BluetoothTraceProbe.exe --self-test
 Switch2BluetoothTraceProbe.exe <lab-client.exe> <live-session.json> <explicit-Line-In-ID> active-opus5
+Switch2BluetoothTraceProbe.exe <lab-client.exe> <live-session.json> <explicit-Line-In-ID> run-plan <reviewed-plan.json>
 ```
 
-The last argument is limited to `headset-observe`, `active-opus5`, or
-`active-opus20`. The application must already have acknowledged audio setup.
+The command is limited to `headset-observe`, `active-opus5`, `active-opus20`,
+or `run-plan` with its plan path. The application must already have acknowledged audio setup.
 Run with the same user's elevation as the lab app. The sequence is status,
 read-only audio-state query, one finite observation, status. Exit 0 establishes
-one trace-bound link and zero reported ETW losses, **not playback**. Inspect
+one trace-bound link and zero reported ETW losses, **not playback**. For packet
+plans it additionally requires all app-reported writes to be observed as complete
+host ATT writes, with no pending fragments. It extends the explicit Line-In
+capture tail to two seconds because accepted writes may remain queued below
+WinRT. This is a bounded observation window, not a promise of radio drain. Inspect
 the client replies for connection continuity, successful cleanup and Line-In
 measurements. Never infer a successful hardware probe from a trace count alone.
 
@@ -40,11 +45,24 @@ measurements. Never infer a successful hardware probe from a trace count alone.
   length/motion length histograms. It never persists raw ETL/HCI, microphone
   payloads, buttons, motion, pairing keys or audio recordings. Unselected events
   are discarded in RAM; the temporary copied event buffer is cleared.
-- Fragmented/incomplete packets are counted and skipped, not guessed or
-  reassembled. Finite test packets observed so far fit single HCI transfers.
+- Reassembles only structurally valid ATT packets on the already bound link,
+  using two independent 512-byte RAM buffers for the observed BIP directions.
+  PB0/2 begins a packet; PB1 continues it. CID, declared/actual sizes and
+  remaining capacity are validated before copying. Other links cannot disrupt
+  a selected assembly. Replacement starts discard incomplete predecessors;
+  orphan/oversized continuations and broadcast-shaped ACL are rejected. Buffers
+  are scrubbed after completion, rejection, ambiguous binding and disposal.
+- Records only ACL size/PB/type histograms and first/completion timestamps.
+  This host split each 480-byte value into 251/236-byte ACL data fragments;
+  the earlier complete-packet-only observer missed those writes. The corrected
+  trace found 240 app-queued PCM writes taking 1.704 seconds to leave the host,
+  despite the app finishing submissions in about 0.6 seconds. That is a measured
+  downstream backlog, not proof of codec validity, radio reception or playback.
 - Self-test sweeps all truncated input lengths, requires prior binding, checks
   both zero/50-byte audio declarations, and rejects other links/attributes,
-  continuation fragments and ambiguous binding.
+  malformed fragments and ambiguous binding. It also tests two/three-fragment
+  480/509-byte values, direction interleaving, exact timestamps, replacement,
+  overflow, orphan continuations and memory scrubbing.
 
 Sources: [Microsoft Bluetooth tracing guidance](https://github.com/microsoft/busiotools/blob/master/bluetooth/tracing/readme.md),
 [Microsoft TraceEvent lifecycle examples](https://github.com/microsoft/perfview/tree/main/src/TraceEvent/Samples),

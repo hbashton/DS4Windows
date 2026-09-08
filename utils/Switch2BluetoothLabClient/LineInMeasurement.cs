@@ -12,9 +12,12 @@ internal sealed class LineInMeasurement : IDisposable
     private readonly object gate = new();
     private readonly TaskCompletionSource<Exception?> stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int count;
+    private readonly int tailMilliseconds;
 
-    internal LineInMeasurement(string id)
+    internal LineInMeasurement(string id, int tailMilliseconds = 350)
     {
+        if (tailMilliseconds is not (350 or 2000)) throw new ArgumentOutOfRangeException(nameof(tailMilliseconds));
+        this.tailMilliseconds = tailMilliseconds;
         device = enumerator.GetDevice(id);
         if (device.ID != id || device.DataFlow != DataFlow.Capture || device.State != DeviceState.Active ||
             device.FriendlyName != "Line In (Realtek(R) Audio)" || device.AudioEndpointVolume.Mute)
@@ -41,7 +44,7 @@ internal sealed class LineInMeasurement : IDisposable
 
     internal async Task<object> StopAsync()
     {
-        await Task.Delay(350); // post-stimulus tail
+        await Task.Delay(tailMilliseconds); // explicit bounded post-submit observation, not proof of radio drain
         capture.StopRecording();
         var error = await stopped.Task.WaitAsync(TimeSpan.FromSeconds(5));
         if (error != null) throw error;
@@ -79,7 +82,7 @@ internal sealed class LineInMeasurement : IDisposable
                 }
                 blocks.Add(new { StartMs = start / 48, Channels = channels });
             }
-            return new { Capture = device.ID, CapturedFrames = count / 2, StoredAudio = false,
+            return new { Capture = device.ID, CapturedFrames = count / 2, CaptureTailMs = tailMilliseconds, StoredAudio = false,
                 CaptureEndpointVolume = device.AudioEndpointVolume.MasterVolumeLevelScalar, Blocks = blocks };
         }
     }

@@ -362,3 +362,120 @@ measured combinations only. The proper output setup/enable/stop semantics,
 framing and codec remain unresolved; the `18/01` bytes are not proven volume
 or mute values, and the documented-but-unknown `18/03` was not sent. No new
 restart is authorized by these completed experiments.
+
+## No-restart follow-up: downstream backlog established, 44 new compressed trials
+
+The user reinforced that neither DS4Windows nor VIIPER may be restarted or
+replaced. All work below is in **external utilities, tests and documentation**.
+No application source or loaded DLL was changed. DS4Windows remains PID 32636
+(19:30:06), VIIPER PID 30276 (18:27:56), controller generation 2. The existing
+packet-plan bridge carried every new hypothesis without a runtime replacement.
+
+### Correcting incomplete transport observation
+
+An external `pcm-pair5` plan preserves the reviewed 48 kHz stereo PCM sample
+sequence but groups two 480-byte pieces on each 5 ms deadline. Its fingerprint
+is `3AEED9C9299EBBD2FABC2D184468F4B1E9D10025F6A92933E3D80719F5877F41`.
+The first trace at 19:55 reported zero headphone writes and 337 ignored
+fragments/shapes although the app reported 240 submissions. That was an
+observer limitation, **not proof of absent delivery or valid wire pacing**.
+
+The external observer now reassembles bounded ATT traffic on only its selected
+link. Two independent 512-byte buffers separate the observed BIP directions.
+It validates actual/declared lengths, CID, PB0/2 first fragments and PB1
+continuations, rejects broadcast-shaped ACL and ambiguous peers, and scrubs
+retained payload after completion/rejection/stop. Its self-test covers two-
+and three-fragment 480/509-byte values, interleaving, timestamps, orphan and
+oversized continuations, replacement starts, binding and zeroed buffers. It
+still persists no raw HCI, keys, microphone data or audio recordings.
+
+The 20:06 trace established actual fragmentation on this host: each 480-byte
+ATT value became **251-byte PB0 + 236-byte PB1 ACL data**. The short observation
+ended at 169 completed writes plus one pending fragment, with zero ETW losses.
+WinRT had already reported 240 completed submissions. This exposed a downstream
+queue that outlived the prior Line-In capture tail.
+
+The client gained an explicit, bounded 2-second capture tail (default remains
+350 ms), and the observer uses that tail for packet plans. At 20:08 it measured:
+
+- **240/240** complete host ATT writes, zero pending fragments, zero ETW losses.
+- **1,704.03 ms** between first observed write start and final fragment completion,
+  versus approximately 600 ms for the app to submit 600 ms of PCM.
+- 142,560 Line-In frames; peak 0.00087095, maximum 440/660 amplitudes below
+  0.0000124, zero ADC clipping. No source-correlated AUX playback.
+- Same connected generation; 152,818 input reports and 2.70 ms current report age.
+
+This establishes that the tested raw-PCM stream overloads the current path.
+Successful WinRT writes do not provide downstream backpressure. The trace is
+at the **host HCI boundary**, not proof of over-air receipt, valid decoding or
+DAC playback. Do not use the previous app-only timing as a real-time PCM claim,
+and do not repeat this high-bandwidth format as a production strategy.
+
+### Lower-bandwidth framing and separate-channel hypotheses
+
+All sources retain peak 0.005, fades and a silent tail. The external framer
+preserves the encoded source, generation and schedule, validates byte lengths,
+and rejects overflow. A separate dual-mono factory reuses the canonical quiet
+stereo PCM generator and encodes each side independently. Its tests decode both
+streams and verify frequencies, channel isolation, duration, peaks and silence.
+
+| New hypothesis family | Completed combinations | Writes | Highest Line-In peak | Correlated AUX signal |
+| --- | ---: | ---: | ---: | --- |
+| Adjacent Pro envelope, raw/length, zero/counter-bearing silent groups | 16 | 1,200 | 0.00086713 | Not detected |
+| 16-bit encoded length, fixed 64/112/128-byte envelopes | 12 | 900 | 0.00094442 | Not detected |
+| Independent 50-byte left/right Opus streams, four packings | 16 | 1,200 | 0.00091135 | Not detected |
+
+The Pro-envelope tests include the documented leading zero before its two
+16-byte groups (33 bytes, not the earlier 32-byte zero-prefix hypothesis).
+Counter-bearing groups reuse the existing production rumble encoder with
+**zero force**. That envelope is established on the adjacent vibration lane;
+its use on the headphone lane is explicitly unproven. These were not writes
+to the vibration or command characteristic.
+
+The first two families tested stereo 5 ms/80 kbps and mono 20 ms/20 kbps in
+ordinary-input and temporary-headset modes. Dual-mono used independent 50-byte
+frames at 5 ms/80 kbps per side and 20 ms/20 kbps per side, with `L R`,
+`50 L 50 R`, `50 50 L R`, and `0 50 L 50 R` packing in both notification modes.
+No batch reported an error or signal candidate. Every headset restore succeeded;
+normal reports advanced between probes. This does **not** resolve the known
+temporary input pause while headset notifications are enabled.
+
+A final independently traced 20 ms dual-mono/length trial at 20:18 observed all
+**30 writes over 580.62 ms**, zero pending fragments/lost events, and 40 headset
+reports split equally between jack 05/0D, all with 50 audio bytes. Its extended
+Line-In capture was still negative (peak 0.00092854, tone amplitudes below
+0.0000143). This particular compressed trial did not have the raw-PCM backlog;
+queueing alone therefore cannot explain all playback failures. Input resumed
+at 193,370 reports, current age 13.30 ms, same process/generation.
+
+The observer now requires a packet plan's app-reported write count to match
+complete observed host writes, with no pending fragments, before returning
+success. Even that result remains explicitly **not playback**.
+
+### Evidence and regression checkpoint
+
+Desktop numeric evidence:
+
+- `tools/b94-traced-plan-20260907-200610-254.jsonl`: first reassembled PCM trace.
+- `tools/b94-traced-plan-20260907-200822-561.jsonl`: full PCM queue drain.
+- `tools/b94-batch-20260907-201145-080.jsonl`: 16 Pro-envelope combinations.
+- `tools/b94-batch-20260907-201336-400.jsonl`: 12 padded combinations.
+- `tools/b94-batch-20260907-201704-902.jsonl`: 16 dual-mono combinations.
+- `tools/b94-traced-plan-20260907-201831-527.jsonl`: compressed delivery/tail trace.
+
+Focused tests: `b94-pro-envelope.trx` **46 passed**; `b94-dualmono.trx`
+**28 passed**. Full Release x64 `b94-no-restart-probe-full.trx`:
+**3,972 passed, zero failed, 11 opt-in skips**. All 147 allocation-named
+tests passed. Observer self-tests pass. All owned ETW sessions stopped.
+
+Bluetooth AUX playback remains **unsolved**. These negatives do not rule out
+Opus, other codecs, or headphone capability. The output enable/routing/stop
+sequence and accepted packet format remain unresolved. No semantics were
+invented for `18/01`, no unknown `18/03` command was sent, and no alternate
+Bluetooth owner, DLL injection, restart or installed-software change was used.
+The current [primary audio investigation](https://github.com/Peterksharma/switch2mac/blob/main/research/audio-investigation.md)
+still does not provide verified Bluetooth headphone playback; its motion-blob
+codec exclusions must not be misapplied to the separate 50-byte audio region.
+Do not rerun these completed matrices without a concrete new variable or a
+measurement defect. Prefer evidence for the enable sequence/packet structure
+over another arbitrary prefix expansion.

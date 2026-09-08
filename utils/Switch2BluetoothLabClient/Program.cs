@@ -4,16 +4,32 @@ using System.Text;
 using System.Text.Json;
 using DS4Windows.Switch2;
 
+int captureTailMs = 350;
+if (args.Length >= 2 && args[^2] == "--capture-tail-ms")
+{
+    captureTailMs = args[^1] switch { "350" => 350, "2000" => 2000, _ => 0 };
+    if (captureTailMs == 0) { Console.Error.WriteLine("Capture tail must be 350 or 2000 ms."); return 2; }
+    args = args[..^2];
+}
 bool tone = args.Length >= 2 && Switch2BluetoothLabCandidate.TryParse(args[1], out _);
 bool planFile = args.Length >= 2 && args[1] == "run-plan";
 bool createPlan = args.Length is 4 or 5 && args[0] == "--create-plan" && tone;
-if (!createPlan && (planFile ? args.Length != 4 : tone ? args.Length != 3 : args.Length != 2 || args[1] is not ("status" or "inventory" or "headset-header" or "headset-observe" or "configure-audio" or "audio-state" or "stop-probe")))
+bool createDualMono = args.Length == 6 && args[0] == "--create-dual-mono-plan";
+if (!createPlan && !createDualMono && (planFile ? args.Length != 4 : tone ? args.Length != 3 : args.Length != 2 || args[1] is not ("status" or "inventory" or "headset-header" or "headset-observe" or "configure-audio" or "audio-state" or "stop-probe")))
 {
     Console.Error.WriteLine("Use <session.json> <query>, <session.json> <candidate> <Line In ID>, <session.json> run-plan <Line In ID> <plan.json>, or --create-plan <candidate> <generation> <new-plan.json> [offline-framing]. See README.");
     return 2;
 }
 try
 {
+    if (createDualMono)
+    {
+        var plan = DualMonoPlanFactory.Create(args[1], int.Parse(args[2]), ulong.Parse(args[3]), args[5]);
+        using var destination = new FileStream(args[4], FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        await destination.WriteAsync(JsonSerializer.SerializeToUtf8Bytes(plan));
+        Console.WriteLine(JsonSerializer.Serialize(new { plan.Id, Fingerprint = plan.Fingerprint(), Packets = plan.Packets.Length, HardwareAccessed = false }));
+        return 0;
+    }
     if (createPlan)
     {
         var plan = CreateTonePlan(args[1], ulong.Parse(args[2]));
@@ -48,7 +64,7 @@ try
     using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut,
         PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
     await pipe.ConnectAsync(deadline.Token);
-    using var measurement = packetPlan != null ? new LineInMeasurement(args[2]) : null;
+    using var measurement = packetPlan != null ? new LineInMeasurement(args[2], captureTailMs) : null;
     if (measurement != null) await measurement.StartAsync();
     await pipe.WriteAsync(Encoding.ASCII.GetBytes((packetPlan != null ? "run-plan" : args[1]) + "\n"), deadline.Token);
     if (packetPlan != null)

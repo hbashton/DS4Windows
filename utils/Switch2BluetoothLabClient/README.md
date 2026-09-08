@@ -169,9 +169,48 @@ and the already-reviewed audio payload and schedule remain byte-for-byte
 unchanged. `PlanFramer.cs` is compiled into this tool and its tests, not the
 DS4Windows app. Adding these hypotheses therefore required no live app update.
 
+Additional offline hypotheses:
+
+- `len16le-pad64`, `len16le-pad112`, etc.: fixed-size zero-padded envelopes,
+  preserving an explicit encoded length. Supported sizes are 64, 112, 128,
+  256, 480 and 509; too-small envelopes fail. Padding also supports `id0-len8`,
+  `seq8-len8`, `pro-len8` and `proseq-len8`. Larger sizes are not assumed to
+  be sustainable simply because ATT accepts them.
+- `pro-raw` / `pro-len8`: the adjacent Pro report's leading zero plus two
+  zero 16-byte groups before raw/length-prefixed audio. This corrects the
+  32-vs-33-byte distinction in that *hypothesis*, not a proven output defect.
+- `proseq-raw` / `proseq-len8`: use the existing production rumble encoder
+  for counter-bearing, zero-force groups. Reusing that envelope on the
+  headphone characteristic is still unproven. No nonzero rumble is generated.
+- `pcm-pair5`: groups two 480-byte stereo PCM pieces at each 5 ms deadline,
+  preserving every sample. Restricted to the reviewed ordinary-input
+  `t:pcm:2:2.5:0:raw` source. Hardware tracing showed this overloaded the
+  current connection; do not repeat it as a production transport strategy.
+
+For a specifically traced trial, append `--capture-tail-ms 2000` to a tone or
+`run-plan` invocation. The default is 350 ms; those are the only admitted tail
+lengths. This extends RAM-only Line-In observation after the app's response,
+not the audio duration or gain, and does not change the live application.
+
 ```text
 Switch2BluetoothLabClient.exe --create-plan t:opus:1:20:20:raw 2 new-framed-plan.json id0-seq8
 ```
+
+The separately tested dual-mono factory reuses the same reviewed stereo PCM
+source, deinterleaves it, then runs independent mono encoders. Both streams
+have 50-byte CBR frames: 5 ms / 80 kbps per side, or 20 ms / 20 kbps per side.
+The observed mono-compatible input region motivates this hypothesis; it is
+not evidence that headphone output uses dual-mono Opus.
+
+```text
+Switch2BluetoothLabClient.exe --create-dual-mono-plan t 5 2 new-dual-plan.json len8
+```
+
+Arguments are mode `t`/`a`, frame milliseconds `5`/`20`, generation, new path,
+and packing: `raw` (`L R`), `len8` (`50 L 50 R`), `lengths` (`50 50 L R`),
+or `id0-len8` (`0 50 L 50 R`). Tests independently decode both sides, verify
+440/660 Hz separation, quiet peaks, exact duration and trailing silence. This
+also creates files offline without overwriting or touching either running app.
 
 For a built-in generator choice, the client can generate and submit directly:
 

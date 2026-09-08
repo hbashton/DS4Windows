@@ -123,3 +123,44 @@ measured before the new Pro feature startup and `18/03` intervention, so they
 cannot conclusively eliminate those formats in this newly established state.
 No gain increase, arbitrary command sweep or additional app restart followed
 these negative results.
+
+## Two additional host-traced, current-setup trials
+
+The input idle prefix `F8 FF FE` describes a standard Opus fullband mono 20 ms
+packet, not 5 ms stereo; see [RFC 6716 section 3.1](https://www.rfc-editor.org/rfc/rfc6716.html#section-3.1).
+The existing generator test checks that its mono 20 ms / 20 kbps source has a
+50-byte packet with TOC F8, retains a quiet decoded 440 Hz signal and ends in
+silence. This motivates two candidates but does not prove that the controller's
+headphone output shares its input codec or envelope.
+
+With the same active generation, `17/02` returned to its documented 2/240 bytes,
+`18/03` explicitly at 07, and temporary headset notifications:
+
+| Local time | Payload | Exact host payload matches | Host output span | Line In |
+| --- | --- | --- | --- | --- |
+| 00:04:39 | Mono 20 ms / 20 kbps Opus, raw 50 bytes | 30/30 | 580.6489 ms | Valid quiet negative; peak 0.00084618 |
+| 00:05:12 | Identical source with 33-zero-byte + length prefix, 84 bytes | 30/30 | 580.4294 ms | Valid quiet negative; peak 0.00083387 |
+
+Both traces bound only controller link 512 through its exact `18/01` request on
+command attribute 20. No ETW loss, mismatched payload, or pending reassembly was
+reported. Both complete host-delivery flags were true; **these are host HCI
+observations, not proof of radio reception, codec acceptance or DAC playback**.
+Both headset/common05 restores succeeded. The capture tail contained 96,000 and
+96,480 actual frames respectively, with zero clipping or invalid capture reasons.
+The two trace sessions stopped normally; no raw trace or PCM file was recorded.
+
+Evidence: Desktop lab tools `b95-trace-mono20-raw-20260908-000439-893.jsonl` and
+`b95-trace-mono20-prolen-20260908-000512-747.jsonl`. The first audio-plan fingerprint
+is `38C4258D08120B528FB8F2C949353F6F00C2EB005A6A6D81BDA8233BAFCD6262`; the second is
+`8258C41BD7DE5CA417CC5BE17B14D2E4D01DE99CFA6C6E246210E9AF0D9F087E`.
+
+At 00:07:36, the same app and Pro generation remained connected: **58,786 reports**,
+11.5949 ms current report age, unchanged historical 765.2614 ms maximum from the
+deliberate lab headset windows. VIIPER remained untouched. The source checkpoint
+for the reusable receiver bridge is `a34df03`; there was no further app rebuild
+or reload during the ten hardware trials.
+
+The remaining discriminator is a working controller-origin/output protocol
+reference or a measurement that identifies the missing receiver/codec/envelope
+requirement. Ten valid negative trials under corrected feature startup do not
+establish impossibility, and they do not justify calling this production audio.

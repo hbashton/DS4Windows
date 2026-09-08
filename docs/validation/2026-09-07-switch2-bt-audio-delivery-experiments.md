@@ -479,3 +479,89 @@ codec exclusions must not be misapplied to the separate 50-byte audio region.
 Do not rerun these completed matrices without a concrete new variable or a
 measurement defect. Prefer evidence for the enable sequence/packet structure
 over another arbitrary prefix expansion.
+
+## No-restart follow-up: exact payload matching, valid capture, six new negatives
+
+At 20:43–20:46, six additional source-motivated framing trials used the existing
+packet-plan bridge. Only external utilities/tests/docs changed; neither app was
+replaced or restarted. DS4Windows remained PID 32636, VIIPER PID 30276, and the
+controller remained in transport generation 2. The live DS4Windows DLL remained
+SHA-256 `A9A373A61A3FE6E7C0E0B06E8466C79170698CF668D4E3D94AF748AC4442AF72`.
+
+### Stronger measurement admission
+
+The host observer now compares every complete headphone ATT payload, in order,
+against SHA-256 digests of the validated external plan. It exports counts and a
+first-mismatch index, not digests or raw payloads. Exact matches, count agreement,
+one bound link, no lost events and no pending fragments are all required.
+Self-tests exercise fragmented exact matches, corruption/extra packets and RAM
+scrubbing. This still observes the host boundary, not over-air receipt or DAC
+acceptance.
+
+The Line-In client now waits for at least 16,800 actual baseline frames before
+submission and the requested actual tail frames after the response. Missing
+samples, early capture termination, errors, overflow, nonfinite/unaligned data,
+or changed/unusable read-only endpoint levels invalidate the trial and return
+nonzero. Final partial windows are included. All six trials were valid, with
+139,680–145,920 captured frames, at least 96,000 measured tail frames, unchanged
+endpoint levels and no clipped samples. No audio recordings or settings changes
+were made.
+
+### Two concrete framing hypotheses
+
+The first four trials use genuine
+[Opus self-delimited multistream framing](https://www.rfc-editor.org/rfc/rfc6716.html#appendix-B),
+not the already tested outer packet-length prefixes. A real two-stream decoder
+verifies the complete 101-byte packet against independent left/right decoders.
+The final two use the
+[libnx hwopus header](https://github.com/switchbrew/libnx/blob/master/nx/include/switch/services/hwopus.h)
+with actual encoder/decoder-verified final range and the unchanged quiet 20 ms
+stereo source. That header is also an
+[upstream Opus test-stream format](https://github.com/xiph/opus/blob/main/src/opus_demo.c).
+Neither source establishes Nintendo Bluetooth adoption; these are hypotheses,
+not implementations copied from a working headphone transport.
+
+| Trial | Matched packets | Host span, ms | Highest Line-In peak | Source tone detected |
+| --- | ---: | ---: | ---: | --- |
+| Self-delimited dual mono, ordinary input, 20 ms | 30 | 580.36 | 0.00088591 | No |
+| Self-delimited dual mono, headset mode, 20 ms | 30 | 580.04 | 0.00082631 | No |
+| Self-delimited dual mono, ordinary input, 5 ms | 120 | 595.02 | 0.00081627 | No |
+| Self-delimited dual mono, headset mode, 5 ms | 120 | 596.48 | 0.00085171 | No |
+| Hwopus wrapper, ordinary input, 20 ms | 30 | 580.38 | 0.00079148 | No |
+| Hwopus wrapper, headset mode, 20 ms | 30 | 580.41 | 0.00077865 | No |
+
+All 360 payloads matched exactly; no trace losses or incomplete packets were
+reported. All temporary headset restores succeeded. Normal input advanced after
+each trial. The known `ControlsForwarded: false` limitation during headset mode
+is unchanged, not a production coexistence success. These compressed trials did
+not exhibit the earlier PCM backlog. They do not establish a correct codec or
+enable/routing sequence and must not be repeated without a new concrete variable.
+
+Desktop evidence:
+
+- `tools/b94-self-delimited-plans-20260907-204329-608/results.jsonl`, with four
+  corresponding `b94-traced-plan-*` numeric captures starting at 20:43:30.
+- `tools/b94-hwopus-plans-20260907-204641-320/results.jsonl`, with traces
+  `b94-traced-plan-20260907-204641-880.jsonl` and
+  `b94-traced-plan-20260907-204646-189.jsonl`.
+- `tools/b94-audio-status-20260907-205011-803.jsonl`: still connected in generation
+  2, 319,781 reports, 4.92 ms current report age. The 2,505.34 ms lifetime maximum
+  is unchanged historical evidence from the earlier high-rate active-headset
+  trial, not a new gap in this tranche. All owned ETW sessions stopped.
+
+Focused `b94-source-framing-and-capture.trx`: **30 passed**. Full Release x64
+`b94-source-framing-capture-full.trx`: **3,993 passed, zero failed, 11 opt-in
+skips**, including all **147 allocation-related tests**. The full run's logger
+filename argument was initially split by PowerShell after testing completed;
+the generated TRX was renamed without altering it. Counts are verified from that
+TRX, not inferred from the shell's overall exit code. Observer self-tests and an
+independent code review also passed.
+
+Bluetooth AUX playback remains **unresolved**. The source audit found no new
+verified enable/mute bytes. The original
+[17/02 and 18/03 documentation patch](https://github.com/ndeadly/switch2_controller_research/commit/85a8b54eaf5d0c1ccb24b6feacba938edff7b9b0)
+does not define their semantics or a complete headphone sequence. No unknown
+18/03 command, alternate GATT owner, DLL injection or new app image was used.
+The next useful evidence is the controller's accepted audio enable/routing and
+packet structure, not another repetition of these negative formats. Preserve
+the running apps and connection; do not expand command access by replacing them.

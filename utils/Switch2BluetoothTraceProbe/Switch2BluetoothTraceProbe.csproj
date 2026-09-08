@@ -7,5 +7,6 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="3.2.6" />
+    <Compile Include="../../DS4Windows/DS4Control/Switch2/Switch2BluetoothLabPlan.cs" Link="Switch2BluetoothLabPlan.cs" />
   </ItemGroup>
 </Project>

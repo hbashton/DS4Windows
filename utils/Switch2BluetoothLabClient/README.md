@@ -58,6 +58,17 @@ Exit 0 means a valid non-error diagnostic reply, **not audio support**; 1 means
 an error/failure and 2 invalid usage. Oversized/unrecognized raw pipe requests
 are rejected without radio operations and may have their connection closed.
 
+Audio trials additionally require `CaptureValid: true`. The client waits for
+at least 16,800 actual Line-In frames before submitting a plan, then measures
+the requested 350 ms or 2,000 ms of samples after the app response. Wall-clock
+waiting alone is not capture readiness. Missing baseline/tail, early stop,
+capture errors, nonfinite/unaligned samples or the bounded eight-second buffer
+overflow invalidate the trial. Read-only mute/master/channel levels must be
+usable and unchanged before/after. The final partial measurement window is
+included. Only this explicit Realtek Line In is used; no endpoint or volume
+settings are changed and no PCM is saved. Invalid capture returns exit 1 and
+must not be counted as a playback-negative result.
+
 ## Validation
 
 Unit tests use fake GATT access and real local pipes, not physical controllers.
@@ -208,9 +219,30 @@ Switch2BluetoothLabClient.exe --create-dual-mono-plan t 5 2 new-dual-plan.json l
 
 Arguments are mode `t`/`a`, frame milliseconds `5`/`20`, generation, new path,
 and packing: `raw` (`L R`), `len8` (`50 L 50 R`), `lengths` (`50 50 L R`),
-or `id0-len8` (`0 50 L 50 R`). Tests independently decode both sides, verify
+`id0-len8` (`0 50 L 50 R`), or `self-delimited`. The latter uses the real
+[RFC 6716 Appendix B](https://www.rfc-editor.org/rfc/rfc6716.html#appendix-B)
+multistream syntax: `TOC_L 49 L[1..49] R[0..49]` for these mono code-0 frames,
+not an outer packet-length prefix. Tests feed the complete 101-byte packet to
+an actual two-stream Opus multistream decoder and compare both channels with
+independent decoding. Standard Opus framing does not establish its adoption by
+Nintendo. Tests independently decode both sides, verify
 440/660 Hz separation, quiet peaks, exact duration and trailing silence. This
 also creates files offline without overwriting or touching either running app.
+
+One additional, fixed adjacent-protocol hypothesis is available offline:
+
+```text
+Switch2BluetoothLabClient.exe --create-hwopus-plan t 2 new-hwopus-plan.json
+```
+
+Modes `t`/`a` wrap the unchanged 20 ms stereo 80 kbps source in the
+[libnx hwopus IPC header](https://github.com/switchbrew/libnx/blob/master/nx/include/switch/services/hwopus.h):
+big-endian 32-bit encoded length, big-endian 32-bit actual final range, then
+the 200-byte Opus packet. This is also an
+[upstream Opus test-stream envelope](https://github.com/xiph/opus/blob/main/src/opus_demo.c),
+not a discovered Bluetooth controller format. Tests cross-check the range
+against the real source encoder and decoder and preserve the same quiet source.
+No additional app build is needed for either external framing hypothesis.
 
 For a built-in generator choice, the client can generate and submit directly:
 

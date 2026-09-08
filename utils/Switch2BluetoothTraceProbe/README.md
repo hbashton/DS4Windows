@@ -17,7 +17,8 @@ Run with the same user's elevation as the lab app. The sequence is status,
 read-only audio-state query, one finite observation, status. Exit 0 establishes
 one trace-bound link and zero reported ETW losses, **not playback**. For packet
 plans it additionally requires all app-reported writes to be observed as complete
-host ATT writes, with no pending fragments. It extends the explicit Line-In
+host ATT writes, with no pending fragments, and every observed payload to match
+the reviewed plan in sequence. Counts alone are insufficient. It extends the explicit Line-In
 capture tail to two seconds because accepted writes may remain queued below
 WinRT. This is a bounded observation window, not a promise of radio drain. Inspect
 the client replies for connection continuity, successful cleanup and Line-In
@@ -58,11 +59,19 @@ measurements. Never infer a successful hardware probe from a trace count alone.
   trace found 240 app-queued PCM writes taking 1.704 seconds to leave the host,
   despite the app finishing submissions in about 0.6 seconds. That is a measured
   downstream backlog, not proof of codec validity, radio reception or playback.
+- Reads a bounded, validated, non-reparse packet plan before observation and
+  retains only per-packet SHA-256 digests in RAM. Complete headphone ATT payloads
+  must match those digests in order; missing, extra, corrupted or reordered
+  packets prevent complete-delivery success. Only match counts and the first
+  mismatch index are exported, not digests or payloads. Buffers/digests are
+  scrubbed when no longer needed. The client also rejects invalid measured
+  Line-In capture; matched host packets remain **not physical playback**.
 - Self-test sweeps all truncated input lengths, requires prior binding, checks
   both zero/50-byte audio declarations, and rejects other links/attributes,
   malformed fragments and ambiguous binding. It also tests two/three-fragment
   480/509-byte values, direction interleaving, exact timestamps, replacement,
-  overflow, orphan continuations and memory scrubbing.
+  overflow, orphan continuations and memory scrubbing. Exact fragmented payload
+  matching, corrupted/extra payload rejection and digest scrubbing are covered.
 
 Sources: [Microsoft Bluetooth tracing guidance](https://github.com/microsoft/busiotools/blob/master/bluetooth/tracing/readme.md),
 [Microsoft TraceEvent lifecycle examples](https://github.com/microsoft/perfview/tree/main/src/TraceEvent/Samples),

@@ -1,6 +1,8 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text.Json;
+using DS4Windows.Switch2;
 using Microsoft.Diagnostics.Tracing;
 using Microsoft.Diagnostics.Tracing.Session;
 
@@ -22,6 +24,7 @@ using var summary = new PacketSummary();
 var provider = new Guid("8a1f9517-3a8c-4a9e-a018-4f17a200f277");
 try
 {
+    if (packetPlan) summary.ExpectPlan(args[4]);
     using var session = new TraceEventSession(sessionName, null, TraceEventSessionOptions.Create | TraceEventSessionOptions.NoRestartOnCreate);
     session.StopOnDispose = true;
     session.BufferSizeMB = 8;
@@ -58,7 +61,9 @@ try
             }
             using var client = Process.Start(start) ?? throw new InvalidOperationException("Client failed to start.");
             Task<string> output = client.StandardOutput.ReadToEndAsync(), error = client.StandardError.ReadToEndAsync();
-            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(7));
+            // Cover bounded baseline, submission, measured tail and capture-stop
+            // deadlines without orphaning an otherwise still-valid capture.
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
             await client.WaitForExitAsync(deadline.Token);
             string reply = await output;
             Console.WriteLine(JsonSerializer.Serialize(new { Command = command, client.ExitCode, Response = reply, Error = await error }));
@@ -75,7 +80,8 @@ try
     }
     finally { session.Stop(); await consuming; }
     bool deliveryObserved = summary.BoundLinks.Count == 1 && source.EventsLost == 0 &&
-        expectedOutputWrites is > 0 && expectedOutputWrites == summary.OutputTimesMs.Count && summary.PendingAssemblies == 0;
+        expectedOutputWrites is > 0 && expectedOutputWrites == summary.OutputTimesMs.Count && summary.PendingAssemblies == 0 &&
+        expectedOutputWrites == summary.ExpectedPayloadCount && summary.MatchedPayloads == expectedOutputWrites && summary.FirstPayloadMismatch == null;
     Console.WriteLine(JsonSerializer.Serialize(new { Session = sessionName, Summary = summary, source.EventsLost,
         ExpectedOutputWrites = expectedOutputWrites, CompleteHostDeliveryObserved = deliveryObserved, StoredAudio = false, StoredRawTrace = false }));
     return summary.BoundLinks.Count == 1 && source.EventsLost == 0 && (!packetPlan || deliveryObserved) ? 0 : 1;
@@ -92,6 +98,7 @@ sealed class PacketSummary : IDisposable
         internal void Clear() { Array.Clear(Bytes); Expected = Count = 0; Started = 0; }
     }
     private readonly AssemblyLane[] lanes = { new(), new() };
+    private byte[][]? expectedPayloadHashes;
     static readonly byte[] StateRequest = Convert.FromHexString("1891010100000000");
     public int Events { get; private set; }
     public int CompleteAtt { get; private set; }
@@ -108,6 +115,31 @@ sealed class PacketSummary : IDisposable
     public List<double> HeadsetTimesMs { get; } = new();
     public List<double> OutputTimesMs { get; } = new();
     public List<double> OutputCompleteTimesMs { get; } = new();
+    public int? ExpectedPayloadCount => expectedPayloadHashes?.Length;
+    public int CheckedPayloads { get; private set; }
+    public int MatchedPayloads { get; private set; }
+    public int? FirstPayloadMismatch { get; private set; }
+
+    internal void ExpectPlan(string path)
+    {
+        var file = new FileInfo(path);
+        if (!file.Exists || file.Attributes.HasFlag(FileAttributes.ReparsePoint))
+            throw new InvalidDataException("Expected a reviewed local packet plan.");
+        using var input = new FileStream(file.FullName, FileMode.Open, FileAccess.Read, FileShare.Read);
+        if (input.Length is < 1 or > Switch2BluetoothLabPlan.MaximumJsonBytes)
+            throw new InvalidDataException("Expected a bounded packet plan.");
+        byte[] json = new byte[input.Length];
+        try
+        {
+            input.ReadExactly(json);
+            if (input.ReadByte() != -1) throw new InvalidDataException("Packet plan changed during read.");
+            using var document = JsonDocument.Parse(json);
+            var plan = Switch2BluetoothLabPlan.Parse(json, document.RootElement.GetProperty("Generation").GetUInt64());
+            try { expectedPayloadHashes = plan.Packets.Select(p => SHA256.HashData(p.Payload)).ToArray(); }
+            finally { foreach (var packet in plan.Packets) Array.Clear(packet.Payload); }
+        }
+        finally { Array.Clear(json); }
+    }
 
     public void Accept(ReadOnlySpan<byte> data, double timestamp)
     {
@@ -177,15 +209,30 @@ sealed class PacketSummary : IDisposable
         if (AttCounts.Count < 64 || AttCounts.ContainsKey(key)) AttCounts[key] = AttCounts.GetValueOrDefault(key) + 1;
         // Live ATT trace resolved value handles 44/46. WinRT inventory reports
         // their preceding declaration handles 43/45; do not conflate the two.
-        if (att[0] == 0x52 && handle == 44 && OutputTimesMs.Count < 1024)
-        { OutputTimesMs.Add(timestamp); OutputCompleteTimesMs.Add(completed); }
+        if (att[0] == 0x52 && handle == 44)
+        {
+            if (OutputTimesMs.Count < 1024) { OutputTimesMs.Add(timestamp); OutputCompleteTimesMs.Add(completed); }
+            if (expectedPayloadHashes != null)
+            {
+                int index = CheckedPayloads++;
+                Span<byte> digest = stackalloc byte[32];
+                SHA256.HashData(att[3..], digest);
+                if (index < expectedPayloadHashes.Length && CryptographicOperations.FixedTimeEquals(digest, expectedPayloadHashes[index])) MatchedPayloads++;
+                else FirstPayloadMismatch ??= index;
+                digest.Clear();
+            }
+        }
         if (att[0] != 0x1b || handle != 46 || att.Length != 115) return;
         var header = att[3..];
         key = $"Jack={header[13]:X2},AudioLength={header[14]},MotionLength={header[65]}";
         if (HeadsetHeaders.Count < 64 || HeadsetHeaders.ContainsKey(key)) HeadsetHeaders[key] = HeadsetHeaders.GetValueOrDefault(key) + 1;
         if (HeadsetTimesMs.Count < 256) HeadsetTimesMs.Add(timestamp);
     }
-    public void Dispose() { foreach (var lane in lanes) lane.Clear(); }
+    public void Dispose()
+    {
+        foreach (var lane in lanes) lane.Clear();
+        if (expectedPayloadHashes != null) foreach (var hash in expectedPayloadHashes) Array.Clear(hash);
+    }
     static int U16(ReadOnlySpan<byte> value, int offset) => BinaryPrimitives.ReadUInt16LittleEndian(value[offset..]);
 
     public static void SelfTest()
@@ -270,6 +317,20 @@ sealed class PacketSummary : IDisposable
         byte[] broadcast = Frame(5, 44, 0x52, new byte[50]); broadcast[9] |= 0x40;
         two.Accept(broadcast, 3);
         Require(two.OutputTimesMs.Count == 1, "Broadcast-shaped ACL accepted.");
+        using var matching = new PacketSummary();
+        byte[] expected = Enumerable.Repeat((byte)0x5a, 480).ToArray();
+        matching.expectedPayloadHashes = new[] { SHA256.HashData(expected), SHA256.HashData(new byte[] { 1, 2, 3 }) };
+        matching.Accept(Frame(5, 20, 0x52, StateRequest), 0);
+        byte[] matchedFrame = Frame(5, 44, 0x52, expected);
+        matching.Accept(Fragment(matchedFrame, 0, 251), 1); matching.Accept(Fragment(matchedFrame, 251, 236), 2);
+        Require(matching.CheckedPayloads == 1 && matching.MatchedPayloads == 1 && matching.FirstPayloadMismatch == null,
+            "Exact reassembled payload not matched.");
+        matching.Accept(Frame(5, 44, 0x52, new byte[] { 1, 2, 4 }), 3);
+        Require(matching.MatchedPayloads == 1 && matching.FirstPayloadMismatch == 1, "Payload corruption accepted.");
+        matching.Accept(Frame(5, 44, 0x52, new byte[] { 1, 2, 3 }), 4);
+        Require(matching.MatchedPayloads == 1 && matching.CheckedPayloads == 3, "Unexpected extra payload accepted.");
+        matching.Dispose();
+        Require(matching.expectedPayloadHashes.All(h => h.All(b => b == 0)), "Plan hashes retained after disposal.");
         Console.WriteLine("Passed: truncation sweep, binding, header filters, 480/509-byte two/three-fragment reassembly, PB0/2 starts, interleaved directions, timestamps, wrong peers, orphan/oversized continuations, replacement starts, broadcast rejection, ambiguity and RAM scrubbing.");
     }
 }

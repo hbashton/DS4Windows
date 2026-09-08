@@ -15,13 +15,22 @@ bool tone = args.Length >= 2 && Switch2BluetoothLabCandidate.TryParse(args[1], o
 bool planFile = args.Length >= 2 && args[1] == "run-plan";
 bool createPlan = args.Length is 4 or 5 && args[0] == "--create-plan" && tone;
 bool createDualMono = args.Length == 6 && args[0] == "--create-dual-mono-plan";
-if (!createPlan && !createDualMono && (planFile ? args.Length != 4 : tone ? args.Length != 3 : args.Length != 2 || args[1] is not ("status" or "inventory" or "headset-header" or "headset-observe" or "configure-audio" or "audio-state" or "stop-probe")))
+bool createHwOpus = args.Length == 4 && args[0] == "--create-hwopus-plan";
+if (!createPlan && !createDualMono && !createHwOpus && (planFile ? args.Length != 4 : tone ? args.Length != 3 : args.Length != 2 || args[1] is not ("status" or "inventory" or "headset-header" or "headset-observe" or "configure-audio" or "audio-state" or "stop-probe")))
 {
     Console.Error.WriteLine("Use <session.json> <query>, <session.json> <candidate> <Line In ID>, <session.json> run-plan <Line In ID> <plan.json>, or --create-plan <candidate> <generation> <new-plan.json> [offline-framing]. See README.");
     return 2;
 }
 try
 {
+    if (createHwOpus)
+    {
+        var plan = HwOpusPlanFactory.Create(args[1], ulong.Parse(args[2]));
+        using var destination = new FileStream(args[3], FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        await destination.WriteAsync(JsonSerializer.SerializeToUtf8Bytes(plan));
+        Console.WriteLine(JsonSerializer.Serialize(new { plan.Id, Fingerprint = plan.Fingerprint(), Packets = plan.Packets.Length, HardwareAccessed = false }));
+        return 0;
+    }
     if (createDualMono)
     {
         var plan = DualMonoPlanFactory.Create(args[1], int.Parse(args[2]), ulong.Parse(args[3]), args[5]);
@@ -87,8 +96,16 @@ try
     string json = Encoding.UTF8.GetString(response.ToArray()).TrimEnd();
     using var validated = JsonDocument.Parse(json);
     Console.WriteLine(json);
-    if (measurement != null) Console.WriteLine(JsonSerializer.Serialize(await measurement.StopAsync()));
-    return validated.RootElement.TryGetProperty("Error", out _) ? 1 : 0;
+    bool captureValid = true;
+    if (measurement != null)
+    {
+        JsonElement captureResult = JsonSerializer.SerializeToElement(await measurement.StopAsync());
+        Console.WriteLine(captureResult.GetRawText());
+        captureValid = captureResult.ValueKind == JsonValueKind.Object &&
+            captureResult.TryGetProperty("CaptureValid", out var validCapture) &&
+            validCapture.ValueKind == JsonValueKind.True;
+    }
+    return validated.RootElement.TryGetProperty("Error", out _) || !captureValid ? 1 : 0;
 }
 catch (Exception error)
 {

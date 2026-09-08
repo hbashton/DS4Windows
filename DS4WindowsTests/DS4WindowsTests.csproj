@@ -22,6 +22,8 @@
     <Compile Include="..\utils\Switch2BluetoothAudioProbe\ProbeProtocol.cs" Link="ProbeProtocol.cs" />
     <Compile Include="..\utils\Switch2BluetoothLabClient\PlanFramer.cs" Link="PlanFramer.cs" />
     <Compile Include="..\utils\Switch2BluetoothLabClient\DualMonoPlanFactory.cs" Link="DualMonoPlanFactory.cs" />
+    <Compile Include="..\utils\Switch2BluetoothLabClient\LineInMeasurementBuffer.cs" Link="LineInMeasurementBuffer.cs" />
+    <Compile Include="..\utils\Switch2BluetoothLabClient\HwOpusPlanFactory.cs" Link="HwOpusPlanFactory.cs" />
   </ItemGroup>
 
   <ItemGroup>

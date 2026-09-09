@@ -2041,13 +2041,7 @@ namespace DS4Windows
                                 AppLogger.LogToGui(Mac.ToString() + " disconnected due to read failure: " + winError, true);
                             }
 
-                            readWaitEv.Reset();
-                            sendOutputReport(true, true); // Kick Windows into noticing the disconnection.
-                            StopOutputUpdate();
-                            isDisconnecting = true;
-                            ResetBluetoothControllerClock();
-                            Removal?.Invoke(this, EventArgs.Empty);
-
+                            RetireAfterTerminalBluetoothReadFailure();
                             return;
                         }
                     }
@@ -2427,6 +2421,20 @@ namespace DS4Windows
             }
 
             timeoutExecuted = true;
+        }
+
+        internal void RetireAfterTerminalBluetoothReadFailure()
+        {
+            readWaitEv.Reset();
+            // The failed read has already selected terminal retirement and
+            // emitted its diagnostic. Do not put another synchronous HID write
+            // (or fresh audio-lane effect) ahead of the removal notification:
+            // a wedged output request would strand this failed input worker.
+            // Ordinary effects retain their established transport routing.
+            StopOutputUpdate();
+            isDisconnecting = true;
+            ResetBluetoothControllerClock();
+            Removal?.Invoke(this, EventArgs.Empty);
         }
 
         protected Debouncer SetupDebouncer()

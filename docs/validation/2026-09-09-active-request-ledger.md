@@ -115,6 +115,58 @@ Release publication is authorized as **VIIPERRC4.5.2 — Joy-Con 1 & Nintendo Op
   evidence that the stutter is fixed. The Stop report takes priority in this
   pass; running apps and controllers are left untouched.
 
+## RC4.5.3 publication and corrected report scope
+
+This update supersedes the earlier pending-publication status snapshots above.
+
+- [VIIPERRC4.5.3](https://github.com/hbashton/DS4Windows/releases/tag/VIIPERRC4.5.3)
+  is published as an unsigned prerelease: release ID `385874559`, 13 assets,
+  source `d2e743a2d871910d2e4733c6875ab87d47096286`, Windows version `5.0.5.3`.
+  The complete portable package retains VIIPER `0.1.3-rc4.5`.
+  [Post-publication workflow 34412155943](https://github.com/hbashton/DS4Windows/actions/runs/34412155943)
+  completed successfully from that exact source.
+- [DS4Updater 2.0.6](https://github.com/hbashton/DS4Updater/releases/tag/v2.0.6)
+  is stable and published. The existing compiled RC4.5.2 bootstrap successfully
+  downloaded it into an initially updater-free isolated fixture, verified its
+  origin, size, SHA-256 and PE identity, and reached a capture-only launch boundary
+  with the safe RC4.5.3 arguments. The compiled 2.0.6 resolver also accepted the
+  **unmodified public** RC4.5.3 metadata and verified the actual release receipt,
+  ZIP, EXE/DLL identity and package marker; no simulated publication envelope was
+  used. Inputs were unchanged and no updater worker, application or broker was
+  launched. Local proof files in the sibling updater repository are
+  `isolated_results/updater-2.0.6/PUBLIC-RELEASE-METADATA.json`,
+  `PUBLIC-RC453-UPDATER-VERIFICATION.json` in that same directory, and
+  `bootstrap/PUBLIC-BOOTSTRAP-VERIFICATION.json`. This is bootstrap/package
+  acceptance, not launched-worker end-to-end or controller hardware acceptance.
+- The reporter clarified that **read failure 995 occurred before pressing Stop**
+  and that RC4.3 works while RC4.5 fails. The earlier explanation treating the
+  initial failure as cancellation caused by Stop was not established and does
+  not fit that order. RC4.5.3 fixes the reproduced Stop/removal deadlock and exact
+  reconnect-ownership faults; it does **not** establish or claim a fix for the
+  reporter's initiating read failure. Controller model/transport and the initial
+  cancellation source remain unconfirmed. The user explicitly authorized this
+  release while that separate RC4.3-to-RC4.5 investigation continues; a further
+  correction belongs in a later release if reproduced. Joy-Con rumble stutter
+  also remains open, without a hardware-fix claim.
+
+## RC4.5.4 recovery correction
+
+- The corrected failure-before-Stop chronology now has a failing-first integration
+  regression through the actual reader, DualSense lifecycle logger, removal
+  handler and public service Stop boundary. The old synchronous handler deadlocks;
+  the queued RC4.5.3 handler passes. This does not attribute the initial 995 to Stop.
+- A separate DS4 Bluetooth terminal-failure defect was reproduced: a new forced
+  output could block removal after the failure log. RC4.5.4 removes that terminal
+  send, while retaining ordinary issue #84 control-pipe routing and all unexpected
+  error diagnostics. Five new tests include blocked-output and audio-lane cases.
+- Versioned Release/x64 validation: **4,927 passed, zero failed, 11 existing
+  opt-in skips**, unfiltered and including allocation assertions. Exact-source CI
+  and complete release artifact checks are still required before publication.
+- Windows binary version is `5.0.5.4`, release tag `VIIPERRC4.5.4`. Published
+  RC4.5.3 and updater 2.0.6 remain immutable; no broker change is needed. The
+  initiating native cancellation and Joy-Con rumble stutter remain unconfirmed.
+  See [corrected chronology and recovery evidence](2026-09-09-read-failure-recovery.md).
+
 ## Current execution boundaries
 
 - Preserve the earlier source and live-preview changes, now checkpointed in the

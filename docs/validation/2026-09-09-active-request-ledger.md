@@ -79,6 +79,27 @@ Release publication is authorized as **VIIPERRC4.5.2 — Joy-Con 1 & Nintendo Op
   the verified public updater executable, then formed the safe RC4.5.2 launch
   request. Its injected process boundary did not start a worker. This extends
   bootstrap verification, not launched-worker end-to-end update acceptance.
+- A separate initially updater-free Desktop fixture also exercised the
+  production bootstrap's actual fresh download of public 2.0.5. Origin, size,
+  hash, PE identity, staging cleanup and safe launch arguments passed. An extra
+  PowerShell post-check initially needed a typed-string correction; it was
+  completed against the same downloaded bytes without a second asset download.
+  No updater worker or controller app was launched by this check.
+- The next exact-source CI run `34380417498` at
+  `6e99c44bef78dddd0c1ba440e62a1e9066f71643` passed shutdown tests but failed
+  the first registered Joy-Con allocation case: 4,752 bytes versus zero.
+  Publication remained held. A new native-profiler capture of the same warmed
+  writer reproduced counter-only jumps during background-GC preparation with
+  zero objects and a valid deliberate-allocation control. The test-only
+  measurement correction and limits of attribution are documented in
+  [Nintendo allocation release gate](2026-09-09-nintendo-allocation-gate.md).
+  No production GC policy, writer code or zero-allocation tolerance was changed.
+- After that correction, the ordinary no-profiler/no-diagnostic run passed
+  **144 focused tests** and **4,886 unfiltered full-suite tests**, with zero
+  failures and the same 11 opt-in skips (4,897 total). Same-writer positive
+  controls prove real allocations still fail the zero-byte gate; the separate
+  native pressure control covered 1,280 strictly zero measurement windows.
+  Final source must still pass its independent CI before release tagging.
 
 ## Current execution boundaries
 

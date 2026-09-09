@@ -10,6 +10,8 @@ namespace DS4WindowsTests;
 [DoNotParallelize] // The real connection authority consumes the profile output setting.
 public sealed class LegacyNintendoRumbleDeliveryTests
 {
+    public TestContext TestContext { get; set; }
+
     [DataTestMethod]
     [DataRow(0)] // Pro, 64-byte reports
     [DataRow(1)] // Left Joy-Con, Bluetooth
@@ -248,10 +250,162 @@ public sealed class LegacyNintendoRumbleDeliveryTests
         using var target = new Target(kind);
         target.Sink.Capture = false;
         target.Publish(180, 100);
+        string traceMode = Environment.GetEnvironmentVariable("DS4W_NINTENDO_ALLOCATION_TRACE");
+        if (!string.IsNullOrEmpty(traceMode))
+        {
+            if (Environment.GetEnvironmentVariable("DS4W_NINTENDO_ALLOCATION_PRESSURE") == "1")
+            {
+                // Diagnostic-only rooted reference graph and pre-window LOH
+                // pressure. The 2,000/20,000-call measured workload is unchanged.
+                // Stop on the first strict-zero failure; never average or retry it.
+                var graph = new object[250_000][];
+                for (int node = 0; node < graph.Length; ++node)
+                    graph[node] = [new object(), node == 0 ? graph : graph[node - 1]];
+                for (int batch = 0; batch < 256; ++batch)
+                {
+                    var first = new long[24_576];
+                    var second = new long[24_576];
+                    var padding = new byte[512];
+                    TraceAllocationWindow(target, kind, traceMode, batch);
+                    GC.KeepAlive(first); GC.KeepAlive(second); GC.KeepAlive(padding);
+                }
+                GC.KeepAlive(graph);
+            }
+            else TraceAllocationWindow(target, kind, traceMode);
+            return;
+        }
         for (int i = 0; i < 2000; ++i) target.Write();
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 20000; ++i) target.Write();
-        Assert.AreEqual(0L, GC.GetAllocatedBytesForCurrentThread() - before);
+        long allocated;
+        // Background-GC allocation-context repair can advance this counter
+        // without an object allocation. Isolate only the warmed synchronous
+        // measurement, with the existing fail-closed entry/exit contract.
+        using (StrictAllocationMeasurementScope.Begin())
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 20000; ++i) target.Write();
+            allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        }
+        Assert.AreEqual(0L, allocated);
+    }
+
+    [DataTestMethod]
+    [DataRow(0)]
+    [DataRow(1)]
+    [DataRow(2)]
+    [DataRow(3)]
+    [DataRow(4)]
+    public void RealReportRecordingRemainsVisibleToStrictAllocationGate(int kind)
+    {
+        using var target = new Target(kind);
+        target.Sink.Capture = false;
+        target.Sink.Reports.Capacity = 1;
+        target.Publish(180, 100);
+        for (int i = 0; i < 2000; ++i) target.Write();
+        // Same real encoder, authority admission and submit delegate. Only the
+        // recording sink now retains its actual cloned physical report.
+        target.Sink.Capture = true;
+        long allocated;
+        using (StrictAllocationMeasurementScope.Begin())
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            target.Write();
+            allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        }
+        Assert.AreEqual(1, target.Sink.Reports.Count);
+        target.AssertActive(target.Sink.Reports[0]);
+        Assert.IsTrue(allocated >= target.Sink.Reports[0].Length,
+            "The measurement isolation must retain the real report allocation.");
+        Assert.ThrowsException<AssertFailedException>(() => Assert.AreEqual(0L, allocated));
+    }
+
+    private void TraceAllocationWindow(Target target, int kind, string mode, int batch = 0)
+    {
+        if (mode is not ("whole" or "phases" or "boundary"))
+            throw new ArgumentException("Unknown Nintendo allocation trace mode.");
+        var records = new (int Iteration, int Phase, long Before, long After,
+            int Gen0, int Gen1, int Gen2)[1024];
+        var phaseBytes = new long[5];
+        string[] phaseNames = ["BetweenCalls", "PublishReport", "PumpOnce", "WholeWrite", "LoopTail"];
+        int iteration = 0, count = 0, omitted = 0;
+        bool collecting = false;
+        long lastCounter = 0;
+        int initialThread = Environment.CurrentManagedThreadId;
+        bool nativeCapture = NativeAllocationMeasurement.IsEnabled;
+        bool isolate = Environment.GetEnvironmentVariable("DS4W_NINTENDO_ALLOCATION_ISOLATE") == "1";
+        if (nativeCapture)
+        {
+            NativeAllocationMeasurement.Begin();
+            NativeAllocationMeasurement.End(0);
+        }
+        if (mode == "phases") target.AllocationProbe = Probe;
+        for (int i = 0; i < 2000; ++i) target.Write();
+        int initialGen0 = GC.CollectionCount(0), initialGen1 = GC.CollectionCount(1), initialGen2 = GC.CollectionCount(2);
+        long before, rawEnd, total;
+        int finalGen0, finalGen1, finalGen2, finalThread;
+        uint nativeObjects;
+        using (isolate ? StrictAllocationMeasurementScope.Begin() : null)
+        {
+            if (nativeCapture) NativeAllocationMeasurement.Begin();
+            collecting = true;
+            before = GC.GetAllocatedBytesForCurrentThread();
+            lastCounter = before;
+            for (iteration = 0; iteration < 20000; ++iteration)
+            {
+                if (mode == "whole") Probe(0);
+                target.Write(); // Never substitute an alternate encoder/authority/writer path.
+                if (mode == "whole") Probe(3);
+            }
+            rawEnd = GC.GetAllocatedBytesForCurrentThread();
+            total = rawEnd - before;
+            if (mode != "boundary")
+            {
+                phaseBytes[4] += rawEnd - lastCounter;
+                lastCounter = rawEnd;
+            }
+            collecting = false;
+            finalGen0 = GC.CollectionCount(0); finalGen1 = GC.CollectionCount(1); finalGen2 = GC.CollectionCount(2);
+            finalThread = Environment.CurrentManagedThreadId;
+            nativeObjects = nativeCapture ? NativeAllocationMeasurement.End(total) : 0;
+        }
+        target.AllocationProbe = null;
+        var report = new System.Text.StringBuilder();
+        report.Append("Nintendo allocation trace kind=").Append(kind).Append(" mode=").Append(mode).Append(" batch=").Append(batch)
+            .Append(" warm=2000 measured=20000 total=").Append(total)
+            .Append(" before=").Append(before).Append(" rawEnd=").Append(rawEnd)
+            .Append(" thread=").Append(initialThread).Append("->").Append(finalThread)
+            .Append(" gcStart=").Append(initialGen0).Append(',').Append(initialGen1).Append(',').Append(initialGen2)
+            .Append(" gcEnd=").Append(finalGen0).Append(',').Append(finalGen1).Append(',').Append(finalGen2)
+            .Append(" nativeCapture=").Append(nativeCapture).Append(" nativeObjects=").Append(nativeObjects)
+            .Append(" isolated=").Append(isolate)
+            .Append(" omitted=").Append(omitted).AppendLine();
+        for (int phase = 0; phase < phaseBytes.Length; ++phase)
+            report.Append(phaseNames[phase]).Append('=').Append(phaseBytes[phase]).AppendLine();
+        for (int i = 0; i < count; ++i)
+        {
+            var record = records[i];
+            report.Append("iteration=").Append(record.Iteration).Append(" phase=").Append(phaseNames[record.Phase])
+                .Append(" delta=").Append(record.After - record.Before)
+                .Append(" gc=").Append(record.Gen0).Append(',').Append(record.Gen1).Append(',').Append(record.Gen2).AppendLine();
+        }
+        string details = report.ToString();
+        TestContext?.WriteLine(details); // Formatting and test-host output are outside all counters.
+        Assert.AreEqual(initialThread, finalThread, details);
+        Assert.IsNull(target.Output.LastWriteException, details);
+        Assert.AreEqual(0L, total, details);
+
+        void Probe(int phase)
+        {
+            if (!collecting) return;
+            long current = GC.GetAllocatedBytesForCurrentThread();
+            long prior = lastCounter;
+            lastCounter = current;
+            phaseBytes[phase] += current - prior;
+            if (current == prior) return;
+            if (count < records.Length)
+                records[count++] = (iteration, phase, prior, current,
+                    GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2));
+            else ++omitted;
+        }
     }
 
     [DataTestMethod]
@@ -288,6 +442,7 @@ public sealed class LegacyNintendoRumbleDeliveryTests
         internal readonly Action PublishReport;
         internal readonly LegacyNintendoRumbleOutput Output;
         internal readonly Action Stop;
+        internal Action<int> AllocationProbe;
 
         internal Target(int kind, bool registerConnection = true)
         {
@@ -334,7 +489,14 @@ public sealed class LegacyNintendoRumbleDeliveryTests
             }
             // The same pump is normally run by the device's dedicated worker.
             // Manual scheduling makes retry order deterministic without HID.
-            Write = () => { PublishReport(); Output.PumpOnce(); };
+            Write = () =>
+            {
+                AllocationProbe?.Invoke(0);
+                PublishReport();
+                AllocationProbe?.Invoke(1);
+                Output.PumpOnce();
+                AllocationProbe?.Invoke(2);
+            };
         }
 
         internal void Publish(byte heavy, byte light) =>

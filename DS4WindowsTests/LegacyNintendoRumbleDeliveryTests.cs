@@ -7,6 +7,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 namespace DS4WindowsTests;
 
 [TestClass]
+[DoNotParallelize] // The real connection authority consumes the profile output setting.
 public sealed class LegacyNintendoRumbleDeliveryTests
 {
     [DataTestMethod]
@@ -17,7 +18,7 @@ public sealed class LegacyNintendoRumbleDeliveryTests
     [DataRow(4)] // Right Joy-Con, USB
     public void FailedNeutralIsRetriedUntilAccepted(int kind)
     {
-        var target = new Target(kind);
+        using var target = new Target(kind);
         target.Publish(180, 100);
         target.Write();
         target.Publish(0, 0);
@@ -45,7 +46,7 @@ public sealed class LegacyNintendoRumbleDeliveryTests
     [DataRow(4)]
     public void FailedNonzeroThenFailedNeutralDoesNotAssumeHardwareWasIdle(int kind)
     {
-        var target = new Target(kind);
+        using var target = new Target(kind);
         target.Sink.Accept = false;
         target.Publish(180, 100);
         target.Write();
@@ -68,7 +69,7 @@ public sealed class LegacyNintendoRumbleDeliveryTests
     [DataRow(4)]
     public void ThrowingNeutralWriteDoesNotAcknowledgeIt(int kind)
     {
-        var target = new Target(kind);
+        using var target = new Target(kind);
         target.Publish(180, 100);
         target.Write();
         target.Publish(0, 0);
@@ -88,7 +89,7 @@ public sealed class LegacyNintendoRumbleDeliveryTests
     [DataRow(4)]
     public void RetryUsesNewestMailboxRatherThanReplayingFailedPayload(int kind)
     {
-        var target = new Target(kind);
+        using var target = new Target(kind);
         target.Publish(180, 100);
         target.Write();
         target.Publish(0, 0);
@@ -111,13 +112,15 @@ public sealed class LegacyNintendoRumbleDeliveryTests
     [DataRow(4)]
     public void HealthyPathRetainsIdleSuppressionAndActiveRefresh(int kind)
     {
-        var target = new Target(kind);
+        using var target = new Target(kind);
         target.Write();
         Assert.AreEqual(0, target.Sink.Reports.Count);
         target.Publish(180, 100);
         target.Write();
         target.Write();
         Assert.AreEqual(2, target.Sink.Reports.Count);
+        target.AssertActive(target.Sink.Reports[0]);
+        target.AssertActive(target.Sink.Reports[1]);
         CollectionAssert.AreEqual(target.Sink.Reports[0][2..],
             target.Sink.Reports[1][2..]);
         target.Publish(0, 0);
@@ -136,7 +139,7 @@ public sealed class LegacyNintendoRumbleDeliveryTests
     [DataRow(4)]
     public void ZeroPublishedDuringActiveWriteIsDeliveredOnNextPass(int kind)
     {
-        var target = new Target(kind);
+        using var target = new Target(kind);
         target.Publish(180, 100);
         target.Sink.DuringWrite = () => target.Publish(0, 0);
         target.Write();
@@ -156,7 +159,7 @@ public sealed class LegacyNintendoRumbleDeliveryTests
     [DataRow(4)]
     public async Task InputPublicationDoesNotWaitForBlockedNativeRumble(int kind)
     {
-        var target = new Target(kind);
+        using var target = new Target(kind);
         using var entered = new ManualResetEventSlim();
         using var release = new ManualResetEventSlim();
         target.Sink.DuringWrite = () => { entered.Set(); release.Wait(); };
@@ -189,7 +192,7 @@ public sealed class LegacyNintendoRumbleDeliveryTests
     [DataRow(4)]
     public async Task RealOutputWorkerDrainsNeutralBeforeDeviceStopReturns(int kind)
     {
-        var target = new Target(kind);
+        using var target = new Target(kind);
         using var entered = new ManualResetEventSlim();
         using var release = new ManualResetEventSlim();
         int calls = 0;
@@ -197,13 +200,18 @@ public sealed class LegacyNintendoRumbleDeliveryTests
         {
             if (Interlocked.Increment(ref calls) == 1) { entered.Set(); release.Wait(); }
         };
-        target.Output.Start("Recording Nintendo output");
         Task stopped = null;
         try
         {
+            // Classic takeover first clears any HD-rumble source and may
+            // publish a neutral. Finish preparing the initial active mailbox
+            // before starting the worker, so the blocked write below is the
+            // active write whose retirement this test is exercising.
             target.Publish(180, 100);
             target.PublishReport();
+            target.Output.Start("Recording Nintendo output");
             Assert.IsTrue(entered.Wait(TimeSpan.FromSeconds(2)));
+            target.AssertActive(target.Sink.Reports[0]);
             stopped = Task.Run(target.Stop);
             // Publication can proceed even while the retiring native writer is
             // blocked; whether it wins Stop or loses, final output must be zero.
@@ -237,7 +245,7 @@ public sealed class LegacyNintendoRumbleDeliveryTests
     [DataRow(4)]
     public void WarmInputPublicationAndNativeAdmissionAllocateNothing(int kind)
     {
-        var target = new Target(kind);
+        using var target = new Target(kind);
         target.Sink.Capture = false;
         target.Publish(180, 100);
         for (int i = 0; i < 2000; ++i) target.Write();
@@ -246,17 +254,42 @@ public sealed class LegacyNintendoRumbleDeliveryTests
         Assert.AreEqual(0L, GC.GetAllocatedBytesForCurrentThread() - before);
     }
 
-    private sealed class Target
+    [DataTestMethod]
+    [DataRow(1)]
+    [DataRow(2)]
+    [DataRow(3)]
+    [DataRow(4)]
+    public void MissingJoyConAuthoritySubmitsNeutralWithoutInventingActiveStopObligation(int kind)
+    {
+        using var target = new Target(kind, registerConnection: false);
+        target.Publish(180, 100);
+        target.Write();
+        Assert.AreEqual(1, target.Sink.Reports.Count);
+        target.AssertNeutral(target.Sink.Reports[0]);
+
+        // A successfully delivered rejected-effect neutral is already idle.
+        // This was accidentally the precondition of the active-drain fixture.
+        // Keep this case manually scheduled: device disposal can publish its
+        // own redundant neutral before sealing, which a live worker may claim.
+        // The active-drain test above separately exercises the real worker.
+        target.Stop();
+        Assert.IsTrue(target.Output.StopDelivered);
+        Assert.AreEqual(1, target.Sink.Reports.Count);
+        Assert.IsFalse(target.Output.PumpOnce());
+    }
+
+    private sealed class Target : IDisposable
     {
         private readonly int kind;
         private readonly DS4Device device;
+        private readonly bool oldOutputEnabled = Global.EnableOutputDataToDS4[0];
         internal readonly RecordingSink Sink = new();
         internal readonly Action Write;
         internal readonly Action PublishReport;
         internal readonly LegacyNintendoRumbleOutput Output;
         internal readonly Action Stop;
 
-        internal Target(int kind)
+        internal Target(int kind, bool registerConnection = true)
         {
             this.kind = kind;
             // Run the actual device constructors, rumble mailbox, merge and
@@ -276,14 +309,25 @@ public sealed class LegacyNintendoRumbleDeliveryTests
             }
             else
             {
-                var joyCon = new RecordingJoyCon(hid, Sink);
+                bool left = kind is 1 or 3;
+                var joyCon = new RecordingJoyCon(hid, Sink, left);
                 SetField(typeof(JoyConDevice), joyCon, "sideType",
-                    kind is 1 or 3 ? JoyConDevice.JoyConSide.Left :
+                    left ? JoyConDevice.JoyConSide.Left :
                         JoyConDevice.JoyConSide.Right);
                 SetField(typeof(JoyConDevice), joyCon, "rumbleReportBuffer",
                     new byte[kind <= 2 ? JoyConDevice.RUMBLE_REPORT_LEN_BT :
                         JoyConDevice.RUMBLE_REPORT_LEN_USB]);
                 device = joyCon;
+                Global.EnableOutputDataToDS4[0] = true;
+                if (registerConnection)
+                {
+                    // Use the production coordinator's current standalone
+                    // credential, just as controller registration does. An
+                    // unregistered active packet is intentionally neutralized.
+                    var links = new LegacyJoyConLinkCoordinator(
+                        () => new Projection(), (_, _, _) => { });
+                    joyCon.ProfileConnection = links.Register(joyCon, 0);
+                }
                 PublishReport = joyCon.WriteReport;
                 Output = joyCon.InitializeRumbleOutput();
                 Stop = joyCon.StopRumble;
@@ -296,6 +340,21 @@ public sealed class LegacyNintendoRumbleDeliveryTests
         internal void Publish(byte heavy, byte light) =>
             device.setRumble(light, heavy);
 
+        public void Dispose()
+        {
+            try
+            {
+                Sink.DuringWrite = null;
+                Sink.Accept = true;
+                Sink.Throw = false;
+                Publish(0, 0);
+                PublishReport();
+                Output.PumpOnce();
+                Stop();
+            }
+            finally { Global.EnableOutputDataToDS4[0] = oldOutputEnabled; }
+        }
+
         internal void AssertNeutral(byte[] report)
         {
             Assert.AreEqual((byte)0x10, report[0]);
@@ -304,6 +363,14 @@ public sealed class LegacyNintendoRumbleDeliveryTests
                 CollectionAssert.AreEqual(neutral, report[2..6]);
             if (kind is 0 or 2 or 4)
                 CollectionAssert.AreEqual(neutral, report[6..10]);
+        }
+
+        internal void AssertActive(byte[] report)
+        {
+            byte[] neutral = [0x00, 0x01, 0x60, 0x40];
+            int offset = kind is 2 or 4 ? 6 : 2;
+            Assert.IsFalse(report.AsSpan(offset, 4).SequenceEqual(neutral),
+                "The retirement test must first admit real nonzero output, not an authority-rejected neutral.");
         }
 
         internal void AssertConsecutiveCounters()
@@ -338,9 +405,20 @@ public sealed class LegacyNintendoRumbleDeliveryTests
             sink.Write(report);
     }
 
-    private sealed class RecordingJoyCon(HidDevice hid, RecordingSink sink)
-        : JoyConDevice(hid, "Recording Joy-Con")
+    private sealed class Projection : ILegacyJoyConProfileProjection
     {
+        public bool TryApply(in LegacyJoyConProjectionInput input, DS4State destination) => true;
+    }
+
+    private sealed class RecordingJoyCon : JoyConDevice
+    {
+        private readonly RecordingSink sink;
+        internal RecordingJoyCon(HidDevice hid, RecordingSink sink, bool left)
+            : base(hid, "Recording Joy-Con")
+        {
+            this.sink = sink;
+            deviceType = left ? InputDeviceType.JoyConL : InputDeviceType.JoyConR;
+        }
         internal void StopRumble() => StopOutputUpdate();
         protected override bool WriteRumbleReport(byte[] report) =>
             sink.Write(report);

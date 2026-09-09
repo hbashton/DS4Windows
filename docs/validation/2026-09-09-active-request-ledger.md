@@ -30,11 +30,11 @@ or that the published RC4.5.1 assets were replaced.
 
 Release publication is authorized as **VIIPERRC4.5.2 — Joy-Con 1 & Nintendo Options**. The final source corrections are implemented and verified below; complete package/hardware acceptance and the exact-source GitHub release workflow remain separate delivery gates.
 
-- DS4Windows Release x64 complete suite: **4,797 passed, 0 failed, 11 opt-in skipped** (4,808 total). Result: `DS4WindowsTests/TestResults/2026-09-09-nintendo-updater-actions-full-final.trx`.
+- Local DS4Windows Release x64 complete suite: **4,797 passed, 0 failed, 11 opt-in skipped** (4,808 total). Result: `DS4WindowsTests/TestResults/2026-09-09-nintendo-updater-actions-full-final.trx`.
 - Final suite after the rumble fixes, universal impulse routing, and disabled-state styling: **4,877 passed, 0 failed, 11 opt-in skipped** (4,888 total). Result: `DS4WindowsTests/TestResults/2026-09-09-rc452-release-source-final.trx`. The immediately preceding full run also passed 4,877 tests. Actual dark/light WPF renders were inspected; the route option fits narrow layouts and visibly dims when unavailable. All allocation assertions remained enabled.
 - The preceding run found one stale upright-right stick-assist test expectation. The producer routes upright-right to RX/RY and sideways-right to LX/LY; the fixture now tests both orientations, fractional precision, unused-axis isolation, and orientation-change baselining. No production change was made to satisfy that stale expectation.
 - The 11 opt-in cases require live process audio capture or real Go/DS4 retirement end-to-end setup. Allocation assertions remained enabled and passed.
-- Updater's full 245-test result and actual release ZIP fixture are documented separately in `DS4Updater/docs/portable-update-2.0.5-validation.md` in the sibling repository. Updater publication is recorded below. The current DS4Windows batch has not been installed or published.
+- Updater's full 245-test result and actual release ZIP fixture are documented separately in `DS4Updater/docs/portable-update-2.0.5-validation.md` in the sibling repository. Updater publication is recorded below. The DS4Windows batch has not been installed into Program Files or publicly released; the later portable handoff is recorded below.
 
 ## Additional release gates
 
@@ -42,13 +42,48 @@ Release publication is authorized as **VIIPERRC4.5.2 — Joy-Con 1 & Nintendo Op
 - Updater now recognizes `VIIPERRC4.5.2` as binary `5.0.5.2`. Full updater validation: **245 passed, no skips**, including the immutable released ZIP. Both compressed x64/x86 publish checks passed. **Version 2.0.5 is published** at `https://github.com/hbashton/DS4Updater/releases/tag/v2.0.5`; the latest-release API returns `v2.0.5`.
 - Updater source is committed and pushed to `master` at `d2e9b3ae316c52b8320055e2acc063da42d05905`. Exact-source GitHub Actions run `34374372375` passed the full test job and both platform builds. This is CI evidence, not publication or launched-worker end-to-end acceptance.
 - Updater release run `34376111898` succeeded from that exact tagged commit. Both public assets were downloaded and matched the pre-release CI artifacts, PE version `2.0.5`, and ProductVersion commit. SHA-256: x64 `F1A38ED7C958A7837259812094B9E816B6478EC76E8FEC2B1D998756A44093DB`; x86 `B8369CDB38519845A94E89B6B56C1F361EFA1278C5605CEF85AD9CAA836D806D`. The DS4Windows safe bootstrap still needs delivery in RC4.5.2; this does not retroactively enable old portable callers.
-- Hades II hands-off pulsing, Switch 2 Pro Bluetooth / virtual DualSense: the running installed RC4.5.1 binary hash matches the published release. User-authorized heap dump captured at 10:56:55 local time shows retained compact motors `[43,0]`, native report ID `0x02`, flags `0x0c/0x57/0x00`, zero native motors, both physical trigger gates false, and an active canonical BodyLow value `11051` with sustained refresh. The full dump shows **no PCM carrier or media callbacks**, not an active silent PCM stream. Four consumed ordered-control slots retained the same stale compact motor value. No backlog, write failure, or observed write past TTL was found. This is direct evidence of stale compact rumble being admitted by the Nintendo translation. Fresh native source-selector admission now suppresses that value and prevents accumulated media snapshots from restoring it; **48 focused tests passed**. Original Joy-Con integration and final regression checks remain in progress. Dump and private diagnostic logs remain local on Desktop and must not be included in release/source assets.
+- Hades II hands-off pulsing, Switch 2 Pro Bluetooth / virtual DualSense: the installed RC4.5.1 binary running at dump capture matched the published release. User-authorized heap dump captured at 10:56:55 local time shows retained compact motors `[43,0]`, native report ID `0x02`, flags `0x0c/0x57/0x00`, zero native motors, both physical trigger gates false, and an active canonical BodyLow value `11051` with sustained refresh. The full dump shows **no PCM carrier or media callbacks**, not an active silent PCM stream. Four consumed ordered-control slots retained the same stale compact motor value. No backlog, write failure, or observed write past TTL was found. This is direct evidence of stale compact rumble being admitted by the Nintendo translation. Fresh native source-selector admission now suppresses that value and prevents accumulated media snapshots from restoring it; **48 focused tests passed**. The later 86- and 126-test integration batches below supersede that initial verification. Dump and private diagnostic logs remain local on Desktop and must not be included in release/source assets.
 - The bounded loopback packet-monitor attempt produced **zero packets**, so it is not evidence about sender behavior or rumble contents. Its trace/filter were stopped and removed; the memory dump supplied the useful evidence instead.
 - Follow-up review identified two additional replay cases before release: stale media must not restore a nonzero motor after a fresh zero-motor stop that retains compatibility mode; mixed PCM/adaptive output must not repeat old PCM samples as a sustained adaptive effect. Both production fixes passed **126 focused tests**, including the actual original Joy-Con handler and physical maintenance writer. Original Joy-Con source selection integration previously passed **86 focused checks**. Existing compatibility hold semantics remain documented and unchanged: media can maintain source liveness, but cannot create new motor intent or undo a stop.
 
+## Independent CI and portable handoff
+
+- Source checkpoint `554914381794c467afcf8ea63a52a8ce78317100` was pushed to
+  `main`. Independent CI run `34378088514` found three failing variants of
+  `RealOutputWorkerDrainsNeutralBeforeDeviceStopReturns`. Publication was held.
+  Their stop-delivered assertion passed, but the expected second packet did not:
+  the fixture had no current Joy-Con registration, so the production authority
+  guard had already substituted a neutral first packet. A new explicit
+  first-packet-active assertion reproduced the invalid precondition for all four
+  Joy-Con variants. The fixture now uses a real current coordinator registration
+  and scoped output settings; the original active-drain assertions remain.
+  Four separate tests cover unregistered-output neutralization. No production
+  code was changed for this correction. Initial active publication is prepared
+  before starting the worker, excluding the legitimate takeover-neutral setup
+  from the blocked-active-write race. The already-idle test uses deterministic
+  manual scheduling, since shutdown may legitimately enqueue another neutral.
+  Focused lifecycle/feedback checks: **128 passed**. The real active-drain test
+  passed **100 repeated cases** (20 runs across five transport variants).
+  Final reviewed, unfiltered local full suite: **4,881 passed, 0 failed,
+  11 existing opt-in skips** (4,892 total), including allocation assertions.
+  Result: `isolated_results/rc452-ci-rumble-fixture/rc452-ci-rumble-fixture-reviewed-full.trx`.
+  The final source commit still requires its own successful GitHub CI before
+  tagging; these local results are not a substitute for that gate.
+- The complete portable candidate built from that checkpoint was verified before
+  launch: 551 files, 296 dependency assets, 23 language satellites, matching
+  VIIPER aliases and the authorized Xbox persona. It started from its Desktop
+  folder with separate lab data at 11:46 local time. The backend became ready;
+  this alone does not establish controller or Hades II acceptance. Installed
+  files and released RC4.5.1 assets were not replaced.
+- The candidate's compiled updater bootstrap accepted live `v2.0.5` metadata and
+  the verified public updater executable, then formed the safe RC4.5.2 launch
+  request. Its injected process boundary did not start a worker. This extends
+  bootstrap verification, not launched-worker end-to-end update acceptance.
+
 ## Current execution boundaries
 
-- Preserve existing dirty source and the earlier live-preview changes.
+- Preserve the earlier source and live-preview changes, now checkpointed in the
+  release source commit; later test corrections do not replace unrelated work.
 - Source and fixture tests did not restart the user's apps. The user then
   closed DS4Windows cleanly at 11:33:46 local time and quit VIIPER for the
   separately requested portable hardware handoff. Neither process nor its

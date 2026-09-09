@@ -1,6 +1,6 @@
 # Release Candidate 4.5.2 Hotfix — Joy-Con 1 & Nintendo Options
 
-Original Joy-Cons join the new Nintendo experience, with easier linking, clearer settings, and live feedback while you remap. This hotfix also fixes the persistent pulsing rumble reported in Hades II with a Switch 2 Pro emulating a DualSense.
+Original Joy-Cons join the new Nintendo experience, with easier linking, clearer settings, and live feedback while you remap. This hotfix also corrects stale DualSense compatibility-rumble state associated with the reported Hades II pulsing on a Switch 2 Pro.
 
 ## Original Joy-Cons, familiar controls
 
@@ -20,7 +20,7 @@ Original Joy-Cons join the new Nintendo experience, with easier linking, clearer
 
 ## Rumble and reliability fixes
 
-- Fixed stale DualSense compatibility rumble being restarted by later non-rumble control reports on Nintendo controllers. This caused the hands-off pulsing reported in Hades II.
+- Fixed stale DualSense compatibility rumble being restarted by later non-rumble control reports on Nintendo controllers. This corrects the stale-state path identified in the Hades II diagnostic dump.
 - Fresh control commands select the appropriate rumble source; cached audio snapshots cannot bring an old compatibility effect back.
 - A fresh zero-motor stop remains stopped even when later audio packets carry an older motor snapshot. Mixed audio/adaptive effects no longer replay old audio samples as sustained vibration.
 - **Translate Xbox impulse-trigger vibration** is a separate Advanced option for every controller, independent of Trigger Lab. The Nintendo Options checkbox controls the same saved setting.
@@ -41,3 +41,5 @@ Close DS4Windows before installing or replacing files, and keep a backup of your
 Original Joy-Cons do not gain Joy-Con 2's optical mouse or extra hardware. Pairing is within the same generation; mixed original/Joy-Con 2 pairs are not supported. Original holding-style changes save to the current profile; Joy-Con 2 retains its per-controller choice. Original HD rumble approximates translated effects within its packet format, and the new raw-stick calibration wizard is not supported for original Joy-Cons.
 
 This is an **unsigned release candidate**, not a signed stable release. It uses Windows file version **5.0.5.2**. VIIPER remains the matching **0.1.3-rc4.5** build; a new broker installation is not required solely for this rumble correction.
+
+Automated regression and packet/lifecycle tests cover these changes. Fresh physical Hades II rumble acceptance, original Joy-Con feedback feel, and a launched-worker end-to-end portable update have not yet been confirmed; please report any problems with the connection type, virtual controller type, and logs.

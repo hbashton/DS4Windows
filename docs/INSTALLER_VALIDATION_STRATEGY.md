@@ -106,9 +106,12 @@ build host.
   uninstall, downgrade, cancellation, concurrency, failure, and reboot/resume.
 - Atomic publication of the completed installer only after every gate passes.
   The verified manifest is committed first and the installer EXE last.
-- Mandatory Authenticode verification for public release artifacts; release
-  composition is blocked when signing material or a first-party signature is
-  missing.
+- Mandatory Authenticode verification for stable and other signed release
+  artifacts; their composition is blocked when signing material or a
+  first-party signature is missing. Only an API-verified named `VIIPERRC`
+  prerelease may use the explicitly unsigned, draft-first
+  [release policy](validation/2026-09-09-release-publication-policy.md);
+  it retains the other package integrity gates.
 - WiX Burn's two-part signature sequence: detach/sign the cached engine,
   reattach it, then sign the whole bundle. Composition verifies the detached
   engine's signature before reattachment, then extracts/hash-checks the final

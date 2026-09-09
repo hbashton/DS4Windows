@@ -169,6 +169,14 @@ the app explains the safe manual update path instead of launching it. Normal
 managed-install update behavior is preserved, including recognition of an
 installed folder if an older ZIP updater copied a portable marker into it.
 
+For managed installs, prefer the full installer. The existing standalone
+DS4Updater v2.0.4 has a pre-existing final verification mismatch: it compares
+the RC tag number with the Windows file version, so `4.5` and `5.0.5.0` can
+produce a false replacement-failure message after a successful copy. Its normal
+auto-launch path can still reopen the updated application. This external updater
+limitation is not fixed by RC4.5; it does not justify changing either version
+scheme or pointing an exact-tag download at a nonexistent numeric release.
+
 ## USB headset output: verified, with clear limits
 
 The Switch 2 Pro's native Windows USB headphone output was physically verified
@@ -183,7 +191,7 @@ and experimental packet writes did not establish audible output.
 
 ## What the testing does—and does not—say
 
-The final RC4.5 source passed **4,516 tests twice**, with zero failures and
+The earlier local portable RC4.5 checkpoint passed **4,516 tests twice**, with zero failures and
 11 existing opt-in skips each time. A separate run passed all **152
 allocation-named tests**. Existing CI exclusions remained unchanged; failed
 intermediate runs led to investigated fixes, not relaxed assertions. The

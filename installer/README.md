@@ -45,13 +45,20 @@ query while genuine enumeration failures remain fatal.
 Set `DS4W_SIGN_CERT_PATH` plus `DS4W_SIGN_CERT_PASSWORD`, or use
 `DS4W_SIGN_CERT_THUMBPRINT` for a protected certificate-store identity. Set
 `DS4W_SIGN_EXPECTED_THUMBPRINT` to the independently approved signer and,
-optionally, set `DS4W_SIGN_TIMESTAMP_URL`. Public release builds pass
-`-RequireSigning`; they fail closed unless the first-party DS4Windows
+optionally, set `DS4W_SIGN_TIMESTAMP_URL`. Stable and other signed release
+builds pass `-RequireSigning`; they fail closed unless the first-party DS4Windows
 application, setup hosts, MSI, and final EXE have that valid timestamped
 signature. The bundled upstream VIIPER executable remains byte-identical and
 unsigned; its fixed SHA-256 and complete source/build provenance are validated
-instead. GitHub release jobs require the `DS4W_SIGN_CERT_BASE64`,
+instead. Signed GitHub release jobs require the `DS4W_SIGN_CERT_BASE64`,
 `DS4W_SIGN_CERT_PASSWORD`, and `DS4W_SIGN_EXPECTED_THUMBPRINT` secrets.
+
+The user-authorized exception is an actual GitHub prerelease with an exact
+named `VIIPERRC` ordinal tag. Its draft-first workflow explicitly records an
+unsigned build, retains the other integrity gates, and verifies those same
+assets after publication without rebuilding them. Numeric prereleases,
+unknown tags and stable releases cannot use that exception. See the
+[publication policy](../docs/validation/2026-09-09-release-publication-policy.md).
 
 Signed Burn bundles use WiX's required two-part flow: detach and sign the
 cached engine, reattach that engine to the original bundle, then sign the

@@ -3,19 +3,78 @@ name: .NET Release
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing named VIIPERRC prerelease draft to build without publishing
+        required: true
+        type: string
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
-  release:
+  identity:
     runs-on: windows-2022
-    #this makes it not run if tests failed.
-    #needs: test
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      release_id: ${{ steps.release.outputs.release_id }}
+      unsigned_rc: ${{ steps.release.outputs.unsigned_rc }}
+      verify_existing: ${{ steps.release.outputs.verify_existing }}
+    steps:
+    - name: Verify release identity and signing policy
+      id: release
+      shell: pwsh
+      env:
+        GITHUB_TOKEN: ${{ github.TOKEN }}
+        INPUT_TAG: ${{ inputs.tag }}
+        EVENT_TAG: ${{ github.event.release.tag_name }}
+        EVENT_RELEASE_ID: ${{ github.event.release.id }}
+        EVENT_PRERELEASE: ${{ github.event.release.prerelease }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $PSNativeCommandUseErrorActionPreference = $true
+        $dispatch = $env:GITHUB_EVENT_NAME -ceq 'workflow_dispatch'
+        $tag = if ($dispatch) { $env:INPUT_TAG } else { $env:EVENT_TAG }
+        if ($tag -cnotmatch '^[0-9A-Za-z][0-9A-Za-z._-]{0,79}\z') { throw 'Invalid release tag.' }
+        $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" | ConvertFrom-Json
+        if ($release.tag_name -cne $tag -or $release.id -le 0) { throw 'Release identity mismatch.' }
+        if ($dispatch -and -not $release.draft) { throw 'Dispatch builds require an existing draft release.' }
+        if (-not $dispatch -and ($release.draft -or "$($release.id)" -cne $env:EVENT_RELEASE_ID -or
+            $release.prerelease.ToString().ToLowerInvariant() -cne $env:EVENT_PRERELEASE)) {
+          throw 'Published event no longer matches the same-repository release.'
+        }
+        $isPrerelease = $release.prerelease.ToString().ToLowerInvariant()
+        $unsignedRc = $isPrerelease -ceq 'true' -and
+          $tag -cmatch '^VIIPERRC[0-9]+(\.[0-9]+){0,3}\z'
+        if ($dispatch -and -not $unsignedRc) {
+          throw 'Draft dispatch is limited to named RC prereleases; other releases retain the signed published-event path.'
+        }
+        "tag=$tag" >> $env:GITHUB_OUTPUT
+        "release_id=$($release.id)" >> $env:GITHUB_OUTPUT
+        "unsigned_rc=$($unsignedRc.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+        "verify_existing=$(((-not $dispatch) -and $unsignedRc).ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+        if ($unsignedRc) {
+          Write-Warning 'Unsigned named release candidate; not a signed stable release.'
+          'Unsigned named release candidate; Authenticode signing intentionally omitted.' >> $env:GITHUB_STEP_SUMMARY
+        } else {
+          Write-Host 'Approved certificate, identity and timestamp gates remain mandatory.'
+        }
+  release:
+    needs: identity
+    if: needs.identity.outputs.verify_existing != 'true'
+    runs-on: windows-2022
+    env:
+      RELEASE_TAG: ${{ needs.identity.outputs.tag }}
+      UNSIGNED_RC_RELEASE: ${{ needs.identity.outputs.unsigned_rc }}
+      RELEASE_ID: ${{ needs.identity.outputs.release_id }}
+    # Release publication follows independently checked CI. Named RC prereleases
+    # may be unsigned; stable and all other releases still require signing.
     steps:
     - uses: actions/checkout@v4
       with:
-           ref: ${{ github.event.release.tag_name }}
+           ref: ${{ needs.identity.outputs.tag }}
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
@@ -27,8 +86,6 @@ jobs:
     - name: Restore dependencies
       run: dotnet restore
     - name: Set envars for versions
-      env:
-        RELEASE_TAG: ${{ github.event.release.tag_name }}
       run: | 
         TAG="$RELEASE_TAG"
         VERSION="${TAG#v}"
@@ -61,6 +118,7 @@ jobs:
           "-p:InformationalVersion=$env:VERSION" `
           -o .\bin\x64\Release\output
     - name: Sign and verify release binaries
+      if: env.UNSIGNED_RC_RELEASE != 'true'
       shell: pwsh
       env:
         DS4W_SIGN_CERT_BASE64: ${{ secrets.DS4W_SIGN_CERT_BASE64 }}
@@ -101,8 +159,8 @@ jobs:
     - name: Build standard installer X64
       shell: pwsh
       env:
-        DS4W_SIGN_CERT_PASSWORD: ${{ secrets.DS4W_SIGN_CERT_PASSWORD }}
-        DS4W_SIGN_EXPECTED_THUMBPRINT: ${{ secrets.DS4W_SIGN_EXPECTED_THUMBPRINT }}
+        DS4W_SIGN_CERT_PASSWORD: ${{ env.UNSIGNED_RC_RELEASE != 'true' && secrets.DS4W_SIGN_CERT_PASSWORD || '' }}
+        DS4W_SIGN_EXPECTED_THUMBPRINT: ${{ env.UNSIGNED_RC_RELEASE != 'true' && secrets.DS4W_SIGN_EXPECTED_THUMBPRINT || '' }}
       run: |
         $parameters = @{
           PublishRoot = ".\bin\x64\Release\DS4Windows"
@@ -111,7 +169,7 @@ jobs:
           DisplayVersion = $env:VERSION
           OutputDirectory = ".\bin\x64\Release\installer"
           SkipApplicationPublish = $true
-          RequireSigning = $true
+          RequireSigning = $env:UNSIGNED_RC_RELEASE -ne 'true'
         }
         .\installer\build-installer.ps1 @parameters
     - name: Name release asset
@@ -133,12 +191,132 @@ jobs:
         }
         "RELEASE_ASSET=$asset" >> $env:GITHUB_ENV
         "INSTALLER_ASSET=$installerAsset" >> $env:GITHUB_ENV
-    - name: Publish release Build X64
+    - name: Prepare verified release records
       shell: pwsh
-      run: gh release upload "$env:RELEASE_TAG" "$env:RELEASE_ASSET" "$env:INSTALLER_ASSET" --clobber
       env:
         GITHUB_TOKEN: ${{ github.TOKEN }}
-        RELEASE_TAG: ${{ github.event.release.tag_name }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $PSNativeCommandUseErrorActionPreference = $true
+        $records = Join-Path $env:RUNNER_TEMP 'ds4windows-release-records'
+        New-Item -ItemType Directory -Path $records | Out-Null
+        $publish = (Resolve-Path '.\bin\x64\Release\DS4Windows').Path
+        $provenance = Get-Content -LiteralPath (Join-Path $publish 'extras\VIIPER-0.1.3-rc4.5-PROVENANCE.txt') -Raw
+        $buildNotes = Get-Content -LiteralPath (Join-Path $publish 'extras\VIIPER-0.1.3-rc4.5-BUILD-NOTES.txt') -Raw
+        function Read-RecordField([string]$text, [string]$name, [string]$pattern) {
+          $match = [regex]::Match($text, '(?m)^' + [regex]::Escape($name) + ': (' + $pattern + ')\r?$')
+          if (-not $match.Success) { throw "Missing or invalid provenance field: $name" }
+          return $match.Groups[1].Value
+        }
+        $brokerName = Read-RecordField $provenance 'Binary' '[0-9A-Za-z._-]+\.exe'
+        $brokerHash = Read-RecordField $provenance 'Binary SHA-256' '[A-F0-9]{64}'
+        $brokerCommit = Read-RecordField $provenance 'Source commit' '[a-f0-9]{40}'
+        $brokerVersion = Read-RecordField $provenance 'Version' 'v[0-9A-Za-z._-]+'
+        $brokerSourceName = Read-RecordField $buildNotes 'Source archive' '[0-9A-Za-z._-]+\.zip'
+        $brokerSourceHash = Read-RecordField $buildNotes 'Source archive SHA-256' '[A-F0-9]{64}'
+        $brokerPath = Join-Path $publish "extras\$brokerName"
+        if ((Get-FileHash -LiteralPath $brokerPath -Algorithm SHA256).Hash -cne $brokerHash) {
+          throw 'Bundled VIIPER does not match its immutable provenance.'
+        }
+        # The portable alias is an additional path for the SAME pinned binary.
+        $zip = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $env:RELEASE_ASSET).Path)
+        try {
+          foreach ($name in @('DS4Windows/viiper.exe', "DS4Windows/extras/$brokerName")) {
+            $entry = $zip.GetEntry($name)
+            if (-not $entry) { throw "Missing portable broker entry: $name" }
+            $stream = $entry.Open()
+            try { $hash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($stream)) }
+            finally { $stream.Dispose() }
+            if ($hash -cne $brokerHash) { throw "Portable broker identity mismatch: $name" }
+          }
+        } finally { $zip.Dispose() }
+        $sourceCommit = (git rev-parse HEAD).Trim()
+        $tagCommit = (git rev-parse "$($env:RELEASE_TAG)^{commit}").Trim()
+        if ($sourceCommit -cne $tagCommit) { throw 'Release source does not match its tag.' }
+        $ds4Source = Join-Path $records "DS4Windows-$($env:VERSION)-SOURCE.zip"
+        git archive --format=zip --prefix=DS4Windows/ --output=$ds4Source HEAD
+        # Publish VIIPER first. Download its exact named, hash-pinned source
+        # asset, never a latest release or a source archive rebuilt by another Git.
+        $brokerRelease = gh api "repos/hbashton/VIIPER/releases/tags/$brokerVersion" | ConvertFrom-Json
+        if ($brokerRelease.draft -or $brokerRelease.tag_name -cne $brokerVersion) { throw 'Pinned VIIPER release is not published.' }
+        $brokerTagCommit = gh api "repos/hbashton/VIIPER/commits/$brokerVersion" --jq '.sha'
+        if ($brokerTagCommit.Trim() -cne $brokerCommit) { throw 'Pinned VIIPER tag differs from binary source.' }
+        $brokerSource = Join-Path $records $brokerSourceName
+        gh release download $brokerVersion --repo hbashton/VIIPER --pattern $brokerSourceName --dir $records
+        if ((Get-FileHash -LiteralPath $brokerSource -Algorithm SHA256).Hash -cne $brokerSourceHash) {
+          throw 'VIIPER source archive differs from the recorded corresponding-source archive.'
+        }
+        $noticeNames = @('VIIPER-0.1.3-rc4.5-LICENSES.txt', 'VIIPER-0.1.3-rc4.5-PROVENANCE.txt',
+          'VIIPER-0.1.3-rc4.5-BUILD-NOTES.txt', 'VIIPER-SYSTRAY-LICENSE.txt', 'VIIPER-SYSTRAY-NOTICE.md', 'LICENSE.txt')
+        foreach ($name in $noticeNames) { Copy-Item -LiteralPath (Join-Path $publish "extras\$name") -Destination $records }
+        $signing = if ($env:UNSIGNED_RC_RELEASE -ceq 'true') { 'Unsigned named release candidate' } else { 'Required Authenticode signing verified' }
+        @("DS4Windows release: $env:RELEASE_TAG", "DS4Windows source commit: $sourceCommit",
+          "VIIPER source commit: $brokerCommit", "VIIPER binary SHA-256: $brokerHash",
+          "Signing: $signing", "GitHub Actions run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID") |
+          Set-Content -LiteralPath (Join-Path $records 'SOURCE-REVISIONS.txt') -Encoding utf8
+        $assets = @((Resolve-Path $env:RELEASE_ASSET).Path, (Resolve-Path $env:INSTALLER_ASSET).Path) +
+          @(Get-ChildItem -LiteralPath $records -File | Sort-Object Name | Select-Object -ExpandProperty FullName)
+        $checksums = @($assets | ForEach-Object { "$( (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash ) *$([IO.Path]::GetFileName($_))" })
+        $checksumPath = Join-Path $records 'SHA256SUMS.txt'
+        $checksums | Set-Content -LiteralPath $checksumPath -Encoding ascii
+        $assets += $checksumPath
+        $receipt = @{
+          schema = 1; repository = $env:GITHUB_REPOSITORY; tag = $env:RELEASE_TAG
+          sourceCommit = $sourceCommit; releaseId = $env:RELEASE_ID; runId = $env:GITHUB_RUN_ID
+          unsignedRc = ($env:UNSIGNED_RC_RELEASE -ceq 'true'); binaryVersion = $env:BINARY_VERSION
+          brokerSourceName = $brokerSourceName; brokerCommit = $brokerCommit
+          assets = @($assets | ForEach-Object { @{ name = [IO.Path]::GetFileName($_); sha256 = (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash } })
+        }
+        $receiptPath = Join-Path $records 'RELEASE-BUILD.json'
+        $receipt | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $receiptPath -Encoding utf8
+        "RELEASE_RECEIPT_SHA256=$((Get-FileHash -LiteralPath $receiptPath -Algorithm SHA256).Hash)" >> $env:GITHUB_ENV
+        $assets += $receiptPath
+        $assets | ConvertTo-Json -AsArray | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'ds4windows-release-assets.json') -Encoding utf8
+    - name: Verify and publish exact release assets
+      shell: pwsh
+      env:
+        GITHUB_TOKEN: ${{ github.TOKEN }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $PSNativeCommandUseErrorActionPreference = $true
+        $assets = @(Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'ds4windows-release-assets.json') -Raw | ConvertFrom-Json)
+        $names = @($assets | ForEach-Object { [IO.Path]::GetFileName($_) })
+        if (@($names | Sort-Object -Unique).Count -ne $names.Count) { throw 'Duplicate release asset names.' }
+        $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG" | ConvertFrom-Json
+        if ("$($release.id)" -cne $env:RELEASE_ID -or $release.tag_name -cne $env:RELEASE_TAG -or
+            ($env:GITHUB_EVENT_NAME -ceq 'workflow_dispatch' -and -not $release.draft)) {
+          throw 'Release identity/draft state changed before upload.'
+        }
+        $existing = @($release.assets.name)
+        foreach ($name in $names) {
+          if ($existing -contains $name) { throw "Refusing to overwrite existing release asset: $name" }
+        }
+        $checksumPath = $assets | Where-Object { [IO.Path]::GetFileName($_) -ceq 'SHA256SUMS.txt' }
+        $expected = @{}
+        foreach ($line in Get-Content -LiteralPath $checksumPath) {
+          if ($line -cnotmatch '^([A-F0-9]{64}) \*([^/\\]+)$') { throw 'Invalid generated checksum record.' }
+          $expected[$Matches[2]] = $Matches[1]
+        }
+        foreach ($asset in $assets) {
+          if ($asset -ceq $checksumPath -or [IO.Path]::GetFileName($asset) -ceq 'RELEASE-BUILD.json') { continue }
+          $name = [IO.Path]::GetFileName($asset)
+          if ((Get-FileHash -LiteralPath $asset -Algorithm SHA256).Hash -cne $expected[$name]) {
+            throw "Release asset changed after verification: $name"
+          }
+        }
+        $receiptPath = $assets | Where-Object { [IO.Path]::GetFileName($_) -ceq 'RELEASE-BUILD.json' }
+        if ((Get-FileHash -LiteralPath $receiptPath -Algorithm SHA256).Hash -cne $env:RELEASE_RECEIPT_SHA256) {
+          throw 'Release receipt changed after verification.'
+        }
+        $receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+        foreach ($record in $receipt.assets) {
+          $matching = @($assets | Where-Object { [IO.Path]::GetFileName($_) -ceq $record.name })
+          if ($matching.Count -ne 1 -or (Get-FileHash -LiteralPath $matching[0] -Algorithm SHA256).Hash -cne $record.sha256) {
+            throw 'Release receipt does not match the final upload set.'
+          }
+        }
+        # Fresh assets only: never clobber manually prepared bytes or provenance.
+        gh release upload $env:RELEASE_TAG @assets --repo $env:GITHUB_REPOSITORY
     - name: Remove signing material
       if: always()
       shell: pwsh
@@ -147,3 +325,54 @@ jobs:
         if (Test-Path -LiteralPath $certificatePath -PathType Leaf) {
           Remove-Item -LiteralPath $certificatePath -Force
         }
+  verify_published_rc:
+    needs: identity
+    if: needs.identity.outputs.verify_existing == 'true'
+    runs-on: windows-2022
+    steps:
+    - name: Verify published RC bytes from the successful draft build
+      shell: pwsh
+      env:
+        GITHUB_TOKEN: ${{ github.TOKEN }}
+        RELEASE_TAG: ${{ needs.identity.outputs.tag }}
+        RELEASE_ID: ${{ needs.identity.outputs.release_id }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $PSNativeCommandUseErrorActionPreference = $true
+        $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG" | ConvertFrom-Json
+        $records = Join-Path $env:RUNNER_TEMP 'verify-published-rc'
+        New-Item -ItemType Directory -Path $records | Out-Null
+        $receiptAsset = @($release.assets | Where-Object { $_.name -ceq 'RELEASE-BUILD.json' })
+        if ($receiptAsset.Count -ne 1 -or $receiptAsset[0].uploader.login -cne 'github-actions[bot]') {
+          throw 'Published RC has no unique workflow-produced build receipt.'
+        }
+        gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --pattern RELEASE-BUILD.json --dir $records
+        $receipt = Get-Content -LiteralPath (Join-Path $records 'RELEASE-BUILD.json') -Raw | ConvertFrom-Json
+        $tagCommit = (gh api "repos/$env:GITHUB_REPOSITORY/commits/$env:RELEASE_TAG" --jq '.sha').Trim()
+        if ($receipt.schema -ne 1 -or $receipt.repository -cne $env:GITHUB_REPOSITORY -or
+            $receipt.tag -cne $env:RELEASE_TAG -or "$($receipt.releaseId)" -cne $env:RELEASE_ID -or
+            $receipt.sourceCommit -cne $tagCommit -or $receipt.unsignedRc -ne $true -or
+            $receipt.brokerSourceName -cnotmatch '^[0-9A-Za-z][0-9A-Za-z._-]+-SOURCE\.zip\z' -or
+            "$($receipt.runId)" -cnotmatch '^[0-9]+\z') { throw 'RC receipt identity mismatch.' }
+        $run = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$($receipt.runId)" | ConvertFrom-Json
+        if ($run.event -cne 'workflow_dispatch' -or $run.status -cne 'completed' -or
+            $run.conclusion -cne 'success' -or $run.head_sha -cne $tagCommit -or
+            $run.path -cne '.github/workflows/release.yml') { throw 'RC draft build was not a successful exact-source release workflow.' }
+        $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($asset in $receipt.assets) {
+          if ($asset.name -cnotmatch '^[0-9A-Za-z][0-9A-Za-z._-]{0,159}\z' -or
+              $asset.sha256 -cnotmatch '^[A-F0-9]{64}\z' -or -not $seen.Add($asset.name)) { throw 'Invalid RC asset receipt.' }
+          $published = @($release.assets | Where-Object { $_.name -ceq $asset.name })
+          if ($published.Count -ne 1 -or $published[0].uploader.login -cne 'github-actions[bot]') { throw 'Missing workflow-produced RC asset.' }
+          gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --pattern $asset.name --dir $records
+          if ((Get-FileHash -LiteralPath (Join-Path $records $asset.name) -Algorithm SHA256).Hash -cne $asset.sha256) {
+            throw "Published RC asset hash mismatch: $($asset.name)"
+          }
+        }
+        foreach ($required in @('DS4Windows_VIIPER_x64.zip', "DS4Windows_$($receipt.binaryVersion)_Setup_x64.exe",
+          "DS4Windows-$($env:RELEASE_TAG)-SOURCE.zip", $receipt.brokerSourceName, 'SHA256SUMS.txt', 'SOURCE-REVISIONS.txt',
+          'VIIPER-0.1.3-rc4.5-LICENSES.txt', 'VIIPER-0.1.3-rc4.5-PROVENANCE.txt',
+          'VIIPER-0.1.3-rc4.5-BUILD-NOTES.txt', 'VIIPER-SYSTRAY-LICENSE.txt', 'VIIPER-SYSTRAY-NOTICE.md', 'LICENSE.txt')) {
+          if (-not $seen.Contains($required)) { throw "Incomplete RC receipt: $required" }
+        }
+        Write-Host 'Published unsigned RC matches its successful draft build; no assets rebuilt or overwritten.'

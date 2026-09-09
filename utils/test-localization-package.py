@@ -234,5 +234,92 @@ class LocalizationPackageTests(unittest.TestCase):
                 VALIDATOR.validate_localization_package(package)
 
 
+class ReleaseWorkflowValidationTests(unittest.TestCase):
+    @staticmethod
+    def workflow():
+        return (REPOSITORY / ".github/workflows/release.yml").read_text(encoding="utf-8")
+
+    def assert_policy_mutations_rejected(self, replacements):
+        source = self.workflow()
+        for original, replacement in replacements:
+            with self.subTest(contract=original):
+                self.assertIn(original, source)
+                mutated = source.replace(original, replacement)
+                self.assertNotEqual(source, mutated)
+                with self.assertRaises(SystemExit):
+                    VALIDATOR.validate_release_workflow(mutated)
+
+    def test_actual_verified_release_policy_passes_installer_validation(self):
+        VALIDATOR.validate_release_workflow(self.workflow())
+
+    def test_installer_uses_the_validated_policy_entrypoint(self):
+        source = (REPOSITORY / "utils/validate-installer.py").read_text(encoding="utf-8")
+        self.assertIn("    validate_release_workflow(release_workflow)", source[source.index("def main() -> int:"):])
+
+    def test_release_identity_cannot_bypass_the_verified_job(self):
+        self.assert_policy_mutations_rejected([
+            ('RELEASE_TAG: ${{ needs.identity.outputs.tag }}', 'RELEASE_TAG: ${{ github.event.release.tag_name }}'),
+            ('UNSIGNED_RC_RELEASE: ${{ needs.identity.outputs.unsigned_rc }}', 'UNSIGNED_RC_RELEASE: true'),
+            ('$release.tag_name -cne $tag -or $release.id -le 0', '$false'),
+            ('$dispatch -and -not $release.draft', '$false'),
+        ])
+
+    def test_unsigned_exception_cannot_expand_to_stable_or_unknown_tags(self):
+        self.assert_policy_mutations_rejected([
+            ("$unsignedRc = $isPrerelease -ceq 'true' -and", '$unsignedRc = $true -and'),
+            ("$tag -cmatch '^VIIPERRC[0-9]+(\\.[0-9]+){0,3}\\z'", "$tag -match '^VIIPER'"),
+            ('if ($dispatch -and -not $unsignedRc)', 'if ($false)'),
+            ("RequireSigning = $env:UNSIGNED_RC_RELEASE -ne 'true'", 'RequireSigning = $false'),
+        ])
+
+    def test_signed_releases_keep_all_certificate_gates(self):
+        self.assert_policy_mutations_rejected([
+            ("if: env.UNSIGNED_RC_RELEASE != 'true'", 'if: false'),
+            ('DS4W_SIGN_CERT_PASSWORD: ${{ secrets.DS4W_SIGN_CERT_PASSWORD }}', 'DS4W_SIGN_CERT_PASSWORD: ignored'),
+            ("'^[0-9A-Fa-f]{40}$'", "'.*'"),
+            ('$signature.Status -ne "Valid"', '$false'),
+            ('$signature.SignerCertificate.Thumbprint -ne $approvedThumbprint', '$false'),
+            ('-not $signature.TimeStamperCertificate', '$false'),
+        ])
+
+    def test_actual_asset_and_corresponding_source_checks_are_required(self):
+        self.assert_policy_mutations_rejected([
+            ('if ($sourceCommit -cne $tagCommit)', 'if ($false)'),
+            ('$brokerTagCommit.Trim() -cne $brokerCommit', '$false'),
+            ('Hash -cne $brokerSourceHash', 'Hash -cne $ignored'),
+            ('Hash -cne $brokerHash', 'Hash -cne $ignored'),
+            ('Hash -cne $expected[$name]', 'Hash -cne $ignored'),
+            ('Hash -cne $env:RELEASE_RECEIPT_SHA256', 'Hash -cne $ignored'),
+            ('Hash -cne $record.sha256', 'Hash -cne $ignored'),
+        ])
+
+    def test_upload_cannot_precede_hash_checks_or_overwrite_assets(self):
+        command = '        gh release upload $env:RELEASE_TAG @assets --repo $env:GITHUB_REPOSITORY\n'
+        source = self.workflow()
+        self.assertIn(command, source)
+        source = source.replace(command, '').replace('        $existing = @($release.assets.name)', command + '        $existing = @($release.assets.name)')
+        with self.assertRaisesRegex(SystemExit, 'before upload'):
+            VALIDATOR.validate_release_workflow(source)
+        self.assert_policy_mutations_rejected([
+            ('Refusing to overwrite existing release asset:', 'Overwrite existing asset:'),
+            ('gh release upload $env:RELEASE_TAG @assets', 'gh release upload $env:RELEASE_TAG @assets --clobber'),
+        ])
+
+    def test_published_receipt_requires_successful_exact_run_and_bytes(self):
+        self.assert_policy_mutations_rejected([
+            ('$receipt.sourceCommit -cne $tagCommit', '$false'),
+            ("$run.event -cne 'workflow_dispatch'", '$false'),
+            ("$run.conclusion -cne 'success'", '$false'),
+            ('$run.head_sha -cne $tagCommit', '$false'),
+            ("$published[0].uploader.login -cne 'github-actions[bot]'", '$false'),
+            ('Hash -cne $asset.sha256', 'Hash -cne $ignored'),
+        ])
+
+    def test_published_verification_cannot_rebuild_or_read_release_body_policy(self):
+        for injected in ('dotnet publish', 'gh release upload', '${{ github.event.release.body }}'):
+            with self.subTest(injected=injected), self.assertRaises(SystemExit):
+                VALIDATOR.validate_release_workflow(self.workflow() + '\n        ' + injected + '\n')
+
+
 if __name__ == "__main__":
     unittest.main()

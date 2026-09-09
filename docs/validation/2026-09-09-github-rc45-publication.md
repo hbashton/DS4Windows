@@ -72,6 +72,25 @@ test. These were not covered by the earlier CGO-disabled Linux-target lint.
 The first run is a failure, not release evidence; publication remains gated on
 their correction and a fresh successful run.
 
+The next broker main run at `324349c` passed lint and all four generated-client
+builds, then exposed Windows-QPC integration tests being run exclusively on
+Linux. The production CFBK v1 clock intentionally returns unavailable outside
+Windows; changing it to a different epoch would violate the cross-process
+contract. The identical full coverage suite passed locally on Windows. The
+correction requires a Windows CI test job for those real-clock integration
+cases while retaining Linux's portable tests, CGO coverage, and clock rejection.
+It does not raise deadlines or substitute a fake production clock.
+
+DS4Windows main run `34337631663` at `9af6a74` passed 4,536 tests and the
+native-free setup checks, and built MSI/Burn with zero warnings or errors. Its
+packaging validator still required the old workflow's direct event tag and
+unconditional signing tokens. The validator now checks the verified identity
+outputs, exact RC exception, retained stable signing, source/hash gates and
+no-overwrite publication. All 19 Python package/policy tests pass, including
+33 negative workflow mutations. Full validation of the existing packaged tree
+against the corrected source policy also passes. Real MSI lifecycle CI still
+requires the next complete run; successful compilation alone is not that gate.
+
 The external published DS4Updater v2.0.4 (source
 `ae7ac56a3f3496b13aeed3f0ca1897d18f0fe702`) compares the selected RC tag number
 with the installed PE version in its final check. That older mismatch already

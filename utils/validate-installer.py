@@ -117,6 +117,128 @@ def validate_named_xaml_resources(source_root: Path) -> None:
         raise SystemExit("Unresolved named WPF resource reference(s): " + details)
 
 
+def validate_release_workflow(release_workflow: str) -> None:
+    """Keep installer composition bound to the first-party release policy."""
+    def require(section: str, contracts: list[str]) -> None:
+        for contract in contracts:
+            if contract not in section:
+                raise SystemExit("First-party release signing contract missing: " + contract)
+
+    def between(start: str, end: str | None) -> str:
+        first = release_workflow.find(start)
+        last = release_workflow.find(end, first + len(start)) if end else len(release_workflow)
+        if first < 0 or last < 0:
+            raise SystemExit("Release workflow policy section missing: " + start)
+        return release_workflow[first:last]
+
+    # Validate the actual signing step, not identical text in another job.
+    signing = between("    - name: Sign and verify release binaries", "    - name: Post-Build script X64")
+    require(signing, [
+        "if: env.UNSIGNED_RC_RELEASE != 'true'",
+        'DS4W_SIGN_CERT_BASE64: ${{ secrets.DS4W_SIGN_CERT_BASE64 }}',
+        'DS4W_SIGN_CERT_PASSWORD: ${{ secrets.DS4W_SIGN_CERT_PASSWORD }}',
+        'DS4W_SIGN_EXPECTED_THUMBPRINT: ${{ secrets.DS4W_SIGN_EXPECTED_THUMBPRINT }}',
+        "'^[0-9A-Fa-f]{40}$'",
+        '$signature.Status -ne "Valid"',
+    ])
+    for contract in [
+        'DS4W_SIGN_CERT_BASE64: ${{ secrets.DS4W_SIGN_CERT_BASE64 }}',
+        'DS4W_SIGN_EXPECTED_THUMBPRINT: ${{ secrets.DS4W_SIGN_EXPECTED_THUMBPRINT }}',
+        'RELEASE_TAG: ${{ needs.identity.outputs.tag }}',
+        'TAG="$RELEASE_TAG"',
+        "Public release signing material or approved signer identity is missing.",
+        '$firstPartyBinaries = @(".\\bin\\x64\\Release\\output\\DS4Windows.exe")',
+        "First-party release signing failed for $path.",
+        "RequireSigning = $env:UNSIGNED_RC_RELEASE -ne 'true'",
+        '$signature.SignerCertificate.Thumbprint -ne $approvedThumbprint',
+        '-not $signature.TimeStamperCertificate',
+        'if: always()',
+        '$certificatePath = Join-Path $env:RUNNER_TEMP "ds4windows-release.pfx"',
+        'Remove-Item -LiteralPath $certificatePath -Force',
+        "VIIPER is an immutable release input",
+    ]:
+        if contract not in release_workflow:
+            raise SystemExit("First-party release signing contract missing: " + contract)
+    identity = between("  identity:", "  release:")
+    require(identity, [
+        'EVENT_TAG: ${{ github.event.release.tag_name }}',
+        'EVENT_RELEASE_ID: ${{ github.event.release.id }}',
+        'EVENT_PRERELEASE: ${{ github.event.release.prerelease }}',
+        'gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag"',
+        '$release.tag_name -cne $tag -or $release.id -le 0',
+        '$dispatch -and -not $release.draft',
+        '$release.prerelease.ToString().ToLowerInvariant() -cne $env:EVENT_PRERELEASE',
+        '$isPrerelease = $release.prerelease.ToString().ToLowerInvariant()',
+        "$unsignedRc = $isPrerelease -ceq 'true' -and\n          $tag -cmatch '^VIIPERRC[0-9]+(\\.[0-9]+){0,3}\\z'",
+        "if ($dispatch -and -not $unsignedRc) {\n          throw 'Draft dispatch is limited to named RC prereleases;",
+        '"unsigned_rc=$($unsignedRc.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT',
+        '"verify_existing=$(((-not $dispatch) -and $unsignedRc).ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT',
+        'Unsigned named release candidate; not a signed stable release.',
+    ])
+    if identity.index('if ($dispatch -and -not $unsignedRc)') > identity.index('"tag=$tag" >> $env:GITHUB_OUTPUT'):
+        raise SystemExit("Release identity must be verified before publishing job outputs.")
+    require(between("  release:", "    - name: Setup .NET"), [
+        'needs: identity',
+        "if: needs.identity.outputs.verify_existing != 'true'",
+        'UNSIGNED_RC_RELEASE: ${{ needs.identity.outputs.unsigned_rc }}',
+        'ref: ${{ needs.identity.outputs.tag }}',
+    ])
+    require(between("    - name: Build standard installer X64", "    - name: Name release asset"), [
+        "RequireSigning = $env:UNSIGNED_RC_RELEASE -ne 'true'",
+        "env.UNSIGNED_RC_RELEASE != 'true' && secrets.DS4W_SIGN_CERT_PASSWORD || ''",
+        "env.UNSIGNED_RC_RELEASE != 'true' && secrets.DS4W_SIGN_EXPECTED_THUMBPRINT || ''",
+    ])
+    require(between("    - name: Prepare verified release records", "    - name: Verify and publish exact release assets"), [
+        'if ($sourceCommit -cne $tagCommit)',
+        'git archive --format=zip --prefix=DS4Windows/',
+        '$brokerTagCommit.Trim() -cne $brokerCommit',
+        'Hash -cne $brokerSourceHash',
+        'Hash -cne $brokerHash',
+        "'SOURCE-REVISIONS.txt'", "'SHA256SUMS.txt'", "'RELEASE-BUILD.json'",
+    ])
+    upload = between("    - name: Verify and publish exact release assets", "    - name: Remove signing material")
+    require(upload, [
+        'Release identity/draft state changed before upload.',
+        'Refusing to overwrite existing release asset:',
+        'Hash -cne $expected[$name]',
+        'Hash -cne $env:RELEASE_RECEIPT_SHA256',
+        'Hash -cne $record.sha256',
+        'gh release upload $env:RELEASE_TAG @assets --repo $env:GITHUB_REPOSITORY',
+    ])
+    upload_index = upload.index('gh release upload ')
+    if any(upload.index(check) > upload_index for check in (
+        'Hash -cne $expected[$name]', 'Hash -cne $env:RELEASE_RECEIPT_SHA256', 'Hash -cne $record.sha256'
+    )):
+        raise SystemExit("Release asset hashes must be verified before upload.")
+    verification = between("  verify_published_rc:", None)
+    require(verification, [
+        "if: needs.identity.outputs.verify_existing == 'true'",
+        '$receipt.sourceCommit -cne $tagCommit',
+        "$run.event -cne 'workflow_dispatch'",
+        "$run.conclusion -cne 'success'",
+        '$run.head_sha -cne $tagCommit',
+        "$run.path -cne '.github/workflows/release.yml'",
+        "$published[0].uploader.login -cne 'github-actions[bot]'",
+        'Hash -cne $asset.sha256',
+    ])
+    if 'dotnet publish' in verification or 'gh release upload' in verification:
+        raise SystemExit("Published RC verification must not rebuild or upload assets.")
+    for contract in [
+        "TAG=${{ github.event.release.tag_name }}",
+        "/p:AssemblyVersion=${{ env.BINARY_VERSION }}",
+        "post-build.py .\\bin\\x64\\Release\\output . ${{env.VERSION}}",
+        "gh release upload ${{github.event.release.tag_name}}",
+        "DS4W_SIGNING_ENABLED=false",
+        '--clobber',
+        'github.event.release.body',
+    ]:
+        if contract in release_workflow:
+            raise SystemExit(
+                "Release workflow embeds untrusted context or permits unsigned publication: "
+                + contract
+            )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--publish-root", type=Path, required=True)
@@ -377,39 +499,7 @@ def main() -> int:
         / "workflows"
         / "release.yml"
     ).read_text(encoding="utf-8")
-    for contract in [
-        'DS4W_SIGN_CERT_BASE64: ${{ secrets.DS4W_SIGN_CERT_BASE64 }}',
-        'DS4W_SIGN_EXPECTED_THUMBPRINT: ${{ secrets.DS4W_SIGN_EXPECTED_THUMBPRINT }}',
-        'RELEASE_TAG: ${{ github.event.release.tag_name }}',
-        'TAG="$RELEASE_TAG"',
-        "Public release signing material or approved signer identity is missing.",
-        '$firstPartyBinaries = @(".\\bin\\x64\\Release\\output\\DS4Windows.exe")',
-        "First-party release signing failed for $path.",
-        'RequireSigning = $true',
-        '$signature.SignerCertificate.Thumbprint -ne $approvedThumbprint',
-        '-not $signature.TimeStamperCertificate',
-        'if: always()',
-        '$certificatePath = Join-Path $env:RUNNER_TEMP "ds4windows-release.pfx"',
-        'Remove-Item -LiteralPath $certificatePath -Force',
-        "VIIPER is an immutable release input",
-    ]:
-        if contract not in release_workflow:
-            raise SystemExit(
-                "First-party release signing contract missing: " + contract
-            )
-    forbidden_release_interpolation = [
-        "TAG=${{ github.event.release.tag_name }}",
-        "/p:AssemblyVersion=${{ env.BINARY_VERSION }}",
-        "post-build.py .\\bin\\x64\\Release\\output . ${{env.VERSION}}",
-        "gh release upload ${{github.event.release.tag_name}}",
-        "DS4W_SIGNING_ENABLED=false",
-    ]
-    for contract in forbidden_release_interpolation:
-        if contract in release_workflow:
-            raise SystemExit(
-                "Release workflow embeds untrusted context or permits unsigned publication: "
-                + contract
-            )
+    validate_release_workflow(release_workflow)
     if "Portable" in bundle or "InstallFolder" in bundle or "destination" in bundle.lower():
         raise SystemExit("The standard installer must not expose a portable or destination-selection path.")
     for contract in [

@@ -2668,15 +2668,15 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
         Volatile.Read(ref pendingProfileRumble.Apply) || Volatile.Read(ref pendingPreviewRumble.Withdraw) ||
         Volatile.Read(ref pendingPreviewRumble.Apply);
 
-    private bool ServiceRumbleMaintenance(ulong nowMicroseconds)
+    private Switch2RumbleMaintenanceResult ServiceRumbleMaintenance(ulong nowMicroseconds)
     {
         Switch2BluetoothFeedbackLifetime bluetooth;
         Switch2ProUsbOwnedFeedbackActivationLifetime usb;
-        if (!Monitor.TryEnter(publicationGate)) return true;
+        if (!Monitor.TryEnter(publicationGate)) return Switch2RumbleMaintenanceResult.Contended;
         try
         {
             if (runtimeState != Switch2RuntimeInputDeviceState.Active || terminalNeutralReserved)
-                return false;
+                return Switch2RumbleMaintenanceResult.Idle;
             bluetooth = bluetoothFeedbackLifetime;
             usb = usbFeedbackLifetime;
         }
@@ -2684,16 +2684,20 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
         if (bluetooth != null)
         {
             var disposition = bluetooth.TryServiceRumbleMaintenance(nowMicroseconds, renewLocalRumbleLeases);
-            return disposition is ControllerFeedbackPumpDisposition.Busy or ControllerFeedbackPumpDisposition.RetryPending ||
-                bluetooth.RequiresRumbleMaintenance || bluetooth.CanServiceRumbleMaintenance && HasPendingLocalRumble;
+            if (disposition == ControllerFeedbackPumpDisposition.Busy) return Switch2RumbleMaintenanceResult.Contended;
+            if (disposition == ControllerFeedbackPumpDisposition.RetryPending) return Switch2RumbleMaintenanceResult.RetryPending;
+            return bluetooth.RequiresRumbleMaintenance || bluetooth.CanServiceRumbleMaintenance && HasPendingLocalRumble ?
+                Switch2RumbleMaintenanceResult.Active(bluetooth.NextRumbleMaintenanceDueMicroseconds) : Switch2RumbleMaintenanceResult.Idle;
         }
         if (usb != null)
         {
             var disposition = usb.TryServiceRumbleMaintenance(nowMicroseconds, renewLocalRumbleLeases);
-            return disposition is ControllerFeedbackPumpDisposition.Busy or ControllerFeedbackPumpDisposition.RetryPending ||
-                usb.RequiresRumbleMaintenance || usb.CanServiceRumbleMaintenance && HasPendingLocalRumble;
+            if (disposition == ControllerFeedbackPumpDisposition.Busy) return Switch2RumbleMaintenanceResult.Contended;
+            if (disposition == ControllerFeedbackPumpDisposition.RetryPending) return Switch2RumbleMaintenanceResult.RetryPending;
+            return usb.RequiresRumbleMaintenance || usb.CanServiceRumbleMaintenance && HasPendingLocalRumble ?
+                Switch2RumbleMaintenanceResult.Active(usb.NextRumbleMaintenanceDueMicroseconds) : Switch2RumbleMaintenanceResult.Idle;
         }
-        return false;
+        return Switch2RumbleMaintenanceResult.Idle;
     }
 
     /// <summary>
@@ -2835,10 +2839,10 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
             profileRumbleHeld = false;
             bool published = bluetoothFeedback != null ?
                 bluetoothFeedback.TryPublishNativeProfileEffectAndPump(
-                    lane, marker, group, group) :
+                    lane, marker, group, group, Switch2HdRumbleRepeatPolicy.OneShot) :
                 usbFeedback != null &&
                 usbFeedback.TryPublishNativeProfileEffectAndPump(
-                    lane, marker, group, group);
+                    lane, marker, group, group, Switch2HdRumbleRepeatPolicy.OneShot);
             connectionHapticOwnsProfileLane = published;
             return published;
         }
@@ -3009,10 +3013,10 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
             previewRumbleHeld = false;
             bool published = bluetoothFeedback != null ?
                 bluetoothFeedback.TryPublishNativePreviewAndPump(lane,
-                    marker, group, group) :
+                    marker, group, group, Switch2HdRumbleRepeatPolicy.OneShot) :
                 usbFeedback != null &&
                 usbFeedback.TryPublishNativePreviewAndPump(lane,
-                    marker, group, group);
+                    marker, group, group, Switch2HdRumbleRepeatPolicy.OneShot);
             identificationHapticOwnsPreviewLane = published;
             return published;
         }

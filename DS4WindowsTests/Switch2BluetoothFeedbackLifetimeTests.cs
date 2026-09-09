@@ -617,6 +617,114 @@ public class Switch2BluetoothFeedbackLifetimeTests
         Assert.IsTrue(feedback.TryStopAndRetire(maxAttempts: 3));
     }
 
+    [DataTestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void UncertainNativeBluetoothCueIsAcceptedForExactRetryNotRepublished(bool preview)
+    {
+        RecordingLease lease = new() { UncertainWrites = true };
+        Assert.IsTrue(Switch2BluetoothFeedbackLifetime.TryCreate(lease,
+            Switch2ControllerModel.ProController2, DeviceGeneration, TransportGeneration, out var feedback));
+        Assert.IsTrue(feedback.TryActivate());
+        Assert.IsTrue(feedback.TryCreateLane(preview ? ControllerFeedbackPublicationOrigin.TestPreview :
+            ControllerFeedbackPublicationOrigin.ProfileEffect, ControllerFeedbackSource.Xbox360VirtualDevice,
+            1, 250_000, 100_000, out var lane));
+        var group = preview ? Switch2IdentificationHaptic.ProPulseGroup : Switch2ConnectionHaptic.ProBassGroup;
+        int wakes = 0;
+        feedback.SetRumbleMaintenanceWake(() => wakes++);
+        try
+        {
+            bool accepted = preview ? feedback.TryPublishNativePreviewAndPump(lane, new(1, 1, 0, 0),
+                group, group, Switch2HdRumbleRepeatPolicy.OneShot) :
+                feedback.TryPublishNativeProfileEffectAndPump(lane, new(1, 1, 0, 0),
+                    group, group, Switch2HdRumbleRepeatPolicy.OneShot);
+            Assert.IsTrue(accepted,
+                "A retained canonical cue is queued acceptance, not a reason to enqueue a fresh cue frame.");
+            Assert.AreEqual(1, lease.WriteAttempts);
+            Assert.IsTrue(feedback.RequiresRumbleMaintenance, "Queued acceptance is not physical completion.");
+            Assert.AreNotEqual(Switch2HdRumblePhysicalWriteFailure.None, feedback.LastPhysicalWriteFailure);
+            Assert.IsTrue(wakes > 0);
+            byte[] uncertainAttempt = lease.PayloadAt(0);
+            lease.UncertainWrites = false;
+            Assert.IsTrue(ControllerFeedbackClock.TryGetTimestampMicroseconds(out ulong now));
+            Assert.AreEqual(ControllerFeedbackPumpDisposition.Delivered,
+                feedback.TryServiceRumbleMaintenance(now, null));
+            Assert.AreEqual(2, lease.WriteAttempts);
+            CollectionAssert.AreEqual(uncertainAttempt, lease.PayloadAt(1),
+                "The retry must retain its exact packet counter and rich groups.");
+            Assert.AreEqual(Switch2HdRumblePhysicalWriteFailure.None, feedback.LastPhysicalWriteFailure);
+            Assert.IsFalse(feedback.RequiresRumbleMaintenance);
+            _ = feedback.TryServiceRumbleMaintenance(now + 15_000, null);
+            Assert.AreEqual(2, lease.WriteAttempts, "Successful retry must not become a new one-shot or held repeat.");
+            Assert.IsTrue(lane.TryWithdraw(now + 16_000));
+            Assert.AreEqual(ControllerFeedbackPumpDisposition.Delivered, feedback.TryPumpOnce(now + 16_000, out _));
+            Assert.AreEqual(3, lease.WriteAttempts);
+            AssertNeutral(lease.PayloadAt(2));
+            _ = feedback.TryServiceRumbleMaintenance(now + 30_000, null);
+            Assert.AreEqual(3, lease.WriteAttempts);
+        }
+        finally
+        {
+            lease.UncertainWrites = false;
+            feedback.SetRumbleMaintenanceWake(null);
+            Assert.IsTrue(feedback.TryStopAndRetireUntil(Environment.TickCount64 + 1_000, 3));
+        }
+    }
+
+    [DataTestMethod]
+    [DataRow(false, false)]
+    [DataRow(false, true)]
+    [DataRow(true, false)]
+    [DataRow(true, true)]
+    public void NativeBluetoothLocalRepeatPolicyKeepsExpiryAndRejectsInvalidBeforePublication(bool preview, bool oneShot)
+    {
+        ulong hostNow = 1000;
+        RecordingLease lease = new();
+        Assert.IsTrue(Switch2BluetoothFeedbackLifetime.TryCreate(lease,
+            Switch2ControllerModel.ProController2, DeviceGeneration, TransportGeneration, out var feedback,
+            hostWriteStartClock: () => hostNow));
+        Assert.IsTrue(feedback.TryActivate());
+        Assert.IsTrue(feedback.TryCreateLane(preview ? ControllerFeedbackPublicationOrigin.TestPreview :
+            ControllerFeedbackPublicationOrigin.ProfileEffect, ControllerFeedbackSource.Xbox360VirtualDevice,
+            1, 250_000, 100_000, out var lane));
+        var left = Switch2ConnectionHaptic.ProBassGroup;
+        var right = Switch2IdentificationHaptic.ProPulseGroup;
+        bool Publish(Switch2HdRumbleRepeatPolicy policy) => preview ?
+            feedback.TryPublishNativePreviewAndPump(lane, new(1, 1, 0, 0), left, right, policy) :
+            feedback.TryPublishNativeProfileEffectAndPump(lane, new(1, 1, 0, 0), left, right, policy);
+        try
+        {
+            Assert.IsFalse(Publish((Switch2HdRumbleRepeatPolicy)255));
+            Assert.IsTrue(ControllerFeedbackClock.TryGetTimestampMicroseconds(out ulong now));
+            Assert.AreEqual(ControllerFeedbackPumpDisposition.None, feedback.TryPumpOnce(now, out _));
+            Assert.AreEqual(0, lease.PayloadCount);
+            Assert.IsTrue(Publish(oneShot ? Switch2HdRumbleRepeatPolicy.OneShot :
+                Switch2HdRumbleRepeatPolicy.SustainWhileFresh));
+            Assert.IsTrue(ControllerFeedbackClock.TryGetTimestampMicroseconds(out now));
+            hostNow += 15_000;
+            _ = feedback.TryServiceRumbleMaintenance(now + 15_000, null);
+            hostNow += 15_000;
+            _ = feedback.TryServiceRumbleMaintenance(now + 30_000, null);
+            int activeCount = oneShot ? 1 : 3;
+            Assert.AreEqual(activeCount, lease.PayloadCount);
+            Assert.AreEqual(!oneShot, feedback.RequiresRumbleMaintenance);
+            for (int index = 0; index < activeCount; index++)
+            {
+                Assert.IsTrue(Switch2BluetoothHdRumbleCodec.TryDecodeProController(lease.PayloadAt(index),
+                    out byte counter, out var actualLeft, out var actualRight, out _));
+                Assert.AreEqual((byte)index, counter);
+                Assert.AreEqual(left, actualLeft);
+                Assert.AreEqual(right, actualRight);
+            }
+            _ = feedback.TryServiceRumbleMaintenance(now + 300_000, null);
+            Assert.AreEqual(activeCount + 1, lease.PayloadCount, "One-shot policy must not suppress expiry Stop.");
+            AssertNeutral(lease.PayloadAt(activeCount));
+            _ = feedback.TryServiceRumbleMaintenance(now + 320_000, null);
+            Assert.AreEqual(activeCount + 1, lease.PayloadCount);
+        }
+        finally { Assert.IsTrue(feedback.TryStopAndRetireUntil(Environment.TickCount64 + 1_000, 3)); }
+    }
+
     [TestMethod]
     [DoNotParallelize]
     public void CommittedRuntimeSchedulesExactConnectionSignatureOffHotPath()
@@ -658,6 +766,8 @@ public class Switch2BluetoothFeedbackLifetimeTests
             AssertGroup(transitions[2],
                 Switch2ConnectionHaptic.ProSharpClickGroup);
             AssertNeutral(transitions[3]);
+            Assert.AreEqual(2, ActivePayloadCount(lease),
+                "Connection feedback is two one-shot packets, not a repeated attack during each cue delay.");
 
             Assert.IsTrue(runtime.TryPublishTerminalNeutral());
             Assert.IsTrue(feedback.TryStopAndRetireUntil(Environment.TickCount64 + 1_000, maxAttempts: 3));
@@ -752,6 +862,8 @@ public class Switch2BluetoothFeedbackLifetimeTests
         AssertGroup(transitions[2],
             Switch2IdentificationHaptic.ProPulseGroup);
         AssertNeutral(transitions[3]);
+        Assert.AreEqual(2, ActivePayloadCount(lease),
+            "Identification feedback must not turn each finite pulse into held rumble.");
 
         Assert.IsTrue(runtime.TryPublishTerminalNeutral());
         Assert.IsTrue(feedback.TryStopAndRetireUntil(Environment.TickCount64 + 1_000, maxAttempts: 3));
@@ -791,6 +903,7 @@ public class Switch2BluetoothFeedbackLifetimeTests
             AssertJoyConGroup(transitions[2],
                 Switch2ConnectionHaptic.JoyConSharpClickGroup);
             AssertJoyConNeutral(transitions[3]);
+            Assert.AreEqual(2, ActivePayloadCount(lease));
 
             Assert.IsTrue(runtime.TryStartIdentificationHaptic());
             Assert.IsTrue(SpinWait.SpinUntil(
@@ -804,6 +917,7 @@ public class Switch2BluetoothFeedbackLifetimeTests
             AssertJoyConGroup(transitions[6],
                 Switch2IdentificationHaptic.JoyConPulseGroup);
             AssertJoyConNeutral(transitions[7]);
+            Assert.AreEqual(4, ActivePayloadCount(lease));
 
             Assert.IsTrue(runtime.TryPublishTerminalNeutral());
             Assert.IsTrue(feedback.TryStopAndRetireUntil(Environment.TickCount64 + 1_000, maxAttempts: 3));
@@ -1102,9 +1216,26 @@ public class Switch2BluetoothFeedbackLifetimeTests
         Assert.AreEqual(expected, right);
     }
 
-    // Physical HD groups are finite and now correctly repeat while active.
-    // Cue/delay assertions compare exact decoded transitions, not the number
-    // of keepalive packets; all three subframes and both sides stay checked.
+    // Held output may repeat, but finite cues additionally assert the actual
+    // active packet count so transition deduplication cannot hide replays.
+    private static int ActivePayloadCount(RecordingLease lease)
+    {
+        int active = 0;
+        int count = lease.PayloadCount;
+        for (int index = 0; index < count; index++)
+        {
+            byte[] payload = lease.PayloadAt(index);
+            Switch2HdRumbleGroup left;
+            Switch2HdRumbleGroup right = default;
+            if (payload.Length == Switch2BluetoothHdRumbleCodec.JoyConPayloadLength)
+                Assert.IsTrue(Switch2BluetoothHdRumbleCodec.TryDecodeJoyCon(payload, out _, out left, out _));
+            else
+                Assert.IsTrue(Switch2BluetoothHdRumbleCodec.TryDecodeProController(payload, out _, out left, out right, out _));
+            if (HasAmplitude(left) || HasAmplitude(right)) active++;
+        }
+        return active;
+    }
+
     private static List<byte[]> RumbleTransitions(RecordingLease lease)
     {
         var result = new List<byte[]>();
@@ -1580,6 +1711,7 @@ public class Switch2BluetoothFeedbackLifetimeTests
         internal int WriteCount;
         internal int WriteAttempts;
         internal volatile bool RejectWrites;
+        internal volatile bool UncertainWrites;
         internal bool DisconnectedReleased;
         public bool IsDisconnectedAndReleased(Switch2ControllerModel expectedModel, ulong device, ulong transport) =>
             DisconnectedReleased && expectedModel == model && device == deviceGeneration && transport == transportGeneration;
@@ -1634,6 +1766,10 @@ public class Switch2BluetoothFeedbackLifetimeTests
                 LastPayload = copy;
                 payloads.Add(copy);
             }
+            if (UncertainWrites)
+                return Switch2BluetoothHdRumbleTransportWriteResult.Uncertain(
+                    expectedModel, expectedDeviceGeneration, expectedTransportGeneration,
+                    Switch2BluetoothHdRumbleTransportWriteFailure.TimedOut);
             return Switch2BluetoothHdRumbleTransportWriteResult.Complete(
                 expectedModel, expectedDeviceGeneration,
                 expectedTransportGeneration, payload.Length);

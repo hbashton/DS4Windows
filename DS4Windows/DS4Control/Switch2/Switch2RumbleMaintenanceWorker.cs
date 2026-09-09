@@ -17,13 +17,14 @@ internal sealed class Switch2RumbleMaintenanceWorker
     internal const int UsbIntervalMilliseconds = 12;
     internal const int BluetoothIntervalMilliseconds = 15;
     private const int Dormant = 0, Scheduled = 1, Running = 2, Signaled = 3, Stopped = 4;
-    private readonly Func<ulong, bool> service;
+    private readonly Func<ulong, Switch2RumbleMaintenanceResult> service;
     private readonly Timer timer;
     private readonly int intervalMilliseconds;
     private int state;
     private int failureCount;
+    private int consecutiveContention;
 
-    internal Switch2RumbleMaintenanceWorker(Func<ulong, bool> service,
+    internal Switch2RumbleMaintenanceWorker(Func<ulong, Switch2RumbleMaintenanceResult> service,
         int intervalMilliseconds, bool automaticTimer = true)
     {
         this.service = service ?? throw new ArgumentNullException(nameof(service));
@@ -64,33 +65,43 @@ internal sealed class Switch2RumbleMaintenanceWorker
 
     // Explicit timestamps allow deterministic scheduler tests without timers,
     // controller handles, user profiles, or sleeping through physical effects.
-    internal void RunScheduledTick(ulong nowMicroseconds)
+    internal int RunScheduledTick(ulong nowMicroseconds, ulong? completedMicroseconds = null)
     {
-        if (Interlocked.CompareExchange(ref state, Running, Scheduled) != Scheduled) return;
-        bool moreWork = false;
-        try { moreWork = service(nowMicroseconds); }
-        catch { Interlocked.Increment(ref failureCount); }
+        if (Interlocked.CompareExchange(ref state, Running, Scheduled) != Scheduled) return 0;
+        int scheduledDelay = 0;
+        Switch2RumbleMaintenanceResult result = default;
+        try { result = service(nowMicroseconds); }
+        catch
+        {
+            Interlocked.Increment(ref failureCount);
+            result = Switch2RumbleMaintenanceResult.RetryPending;
+        }
         finally
         {
             while (true)
             {
                 int observed = Volatile.Read(ref state);
                 if (observed == Stopped) break;
-                int next = moreWork || observed == Signaled ? Scheduled : Dormant;
+                int next = result.Disposition != Switch2RumbleMaintenanceDisposition.Idle || observed == Signaled ? Scheduled : Dormant;
                 if (Interlocked.CompareExchange(ref state, next, observed) != observed) continue;
                 if (next == Scheduled)
                 {
-                    // Match the donors' send-start cadence without piling up
-                    // missed ticks behind slow Bluetooth I/O.
-                    int delay = intervalMilliseconds;
-                    if (ControllerFeedbackClock.TryGetTimestampMicroseconds(out ulong completed) && completed >= nowMicroseconds)
-                        delay = (int)Math.Max(1UL, (ulong)intervalMilliseconds - Math.Min(
-                            (ulong)intervalMilliseconds - 1, (completed - nowMicroseconds) / 1000));
+                    // The sink's absolute host-write due time already accounts
+                    // for service duration and successful competing publishers.
+                    // Do not subtract this tick's duration a second time.
+                    ulong completed = completedMicroseconds.GetValueOrDefault();
+                    if ((!completedMicroseconds.HasValue && !ControllerFeedbackClock.TryGetTimestampMicroseconds(out completed)) ||
+                        completed < nowMicroseconds) completed = 0;
+                    int delay = Switch2RumbleMaintenanceSchedule.GetDelayMilliseconds(result,
+                        intervalMilliseconds, completed, ref consecutiveContention);
+                    scheduledDelay = delay;
                     ScheduleNext(delay);
                 }
+                else consecutiveContention = 0;
                 break;
             }
         }
+        return scheduledDelay;
     }
 
     private void ScheduleNext(int delayMilliseconds)

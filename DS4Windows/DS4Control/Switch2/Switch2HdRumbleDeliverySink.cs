@@ -276,6 +276,17 @@ internal interface ISwitch2HdRumblePhysicalWriter
 }
 
 /// <summary>
+/// Whether a completed rich frame may be repeated while its canonical lease
+/// stays fresh. This is independent of fidelity and never suppresses retries
+/// whose physical outcome is still uncertain.
+/// </summary>
+internal enum Switch2HdRumbleRepeatPolicy : byte
+{
+    SustainWhileFresh = 0,
+    OneShot = 1,
+}
+
+/// <summary>
 /// Final canonical-feedback-to-Switch-2 boundary. It adds no arbitration or
 /// queue: one existing <see cref="ControllerFeedbackStateLanePump"/> calls it
 /// only after claiming and admitting the canonical event. The physical writer
@@ -291,6 +302,13 @@ internal sealed class Switch2HdRumbleDeliverySink :
 
     private ControllerFeedbackDelivery lastDelivered;
     private bool lastDeliveredNeedsSustain;
+    private readonly ulong minimumMaintenanceIntervalMicroseconds;
+    private readonly Func<ulong> hostWriteStartClock;
+    // Normally the last successful host write-call start. If that clock was
+    // unavailable or moved backwards, seed a conservative recovered-clock
+    // baseline and wait one full interval; do not permanently mute sustain.
+    private ulong maintenanceCadenceAnchorMicroseconds;
+    private bool hasMaintenanceCadenceAnchor;
     private ControllerFeedbackDelivery unresolvedDelivery;
     private Switch2HdRumbleFeedbackPolicy selectedPolicy;
     private Switch2HdRumbleFeedbackPolicy unresolvedPolicy;
@@ -310,11 +328,13 @@ internal sealed class Switch2HdRumbleDeliverySink :
     private Switch2HdRumbleGroup sourcePreservedLeft;
     private Switch2HdRumbleGroup sourcePreservedRight;
     private Switch2HdRumbleFeedbackFidelity sourcePreservedFidelity;
+    private Switch2HdRumbleRepeatPolicy sourcePreservedRepeatPolicy;
     private bool hasDeliveredSourceSynthesis;
     private ControllerFeedbackFrame deliveredSourceFrame;
     private Switch2HdRumbleGroup deliveredSourceLeft;
     private Switch2HdRumbleGroup deliveredSourceRight;
     private Switch2HdRumbleFeedbackFidelity deliveredSourceFidelity;
+    private Switch2HdRumbleRepeatPolicy deliveredSourceRepeatPolicy;
     private readonly IControllerFeedbackDeliverySink maintenanceSink;
     private ControllerFeedbackFrame impulseReleaseFrame;
     private ushort impulseReleaseLeftTrigger;
@@ -340,7 +360,9 @@ internal sealed class Switch2HdRumbleDeliverySink :
         ISwitch2HdRumblePhysicalWriter writer,
         ulong deviceGeneration, ulong transportGeneration,
         Switch2HdRumbleFeedbackPolicy policy =
-            Switch2HdRumbleFeedbackPolicy.SdlBodyOnlyCompatibility)
+            Switch2HdRumbleFeedbackPolicy.SdlBodyOnlyCompatibility,
+        ulong minimumMaintenanceIntervalMicroseconds = 0,
+        Func<ulong> hostWriteStartClock = null)
     {
         this.writer = writer ?? throw new ArgumentNullException(nameof(writer));
         if (deviceGeneration == 0)
@@ -364,6 +386,10 @@ internal sealed class Switch2HdRumbleDeliverySink :
 
         this.deviceGeneration = deviceGeneration;
         this.transportGeneration = transportGeneration;
+        if (minimumMaintenanceIntervalMicroseconds is not (0 or 12000 or 15000))
+            throw new ArgumentOutOfRangeException(nameof(minimumMaintenanceIntervalMicroseconds));
+        this.minimumMaintenanceIntervalMicroseconds = minimumMaintenanceIntervalMicroseconds;
+        this.hostWriteStartClock = hostWriteStartClock;
         selectedPolicy = policy;
         selectedImpulseTuning = Switch2HdRumbleImpulseTuning.Default;
         selectedBodyTuning = Switch2HdRumbleBodyTuning.Default;
@@ -379,6 +405,44 @@ internal sealed class Switch2HdRumbleDeliverySink :
     internal bool NeedsSustainedRefresh
     {
         get { lock (gate) return !IsRetired && lastDeliveredNeedsSustain; }
+    }
+
+    internal ulong NextMaintenanceDueMicroseconds
+    {
+        get
+        {
+            lock (gate)
+                return !IsRetired && lastDeliveredNeedsSustain && hasMaintenanceCadenceAnchor ?
+                    Switch2RumbleMaintenanceSchedule.NextDue(maintenanceCadenceAnchorMicroseconds,
+                        minimumMaintenanceIntervalMicroseconds) : 0;
+        }
+    }
+
+    private bool TryGetHostWriteStart(out ulong timestamp)
+    {
+        if (hostWriteStartClock == null)
+            return ControllerFeedbackClock.TryGetTimestampMicroseconds(out timestamp);
+        try { timestamp = hostWriteStartClock(); }
+        catch { timestamp = 0; }
+        return timestamp != 0;
+    }
+
+    private bool IsMaintenanceDueNoLock()
+    {
+        if (minimumMaintenanceIntervalMicroseconds == 0) return true;
+        if (!TryGetHostWriteStart(out ulong now))
+        {
+            hasMaintenanceCadenceAnchor = false;
+            maintenanceCadenceAnchorMicroseconds = 0;
+            return false;
+        }
+        if (!hasMaintenanceCadenceAnchor || now < maintenanceCadenceAnchorMicroseconds)
+        {
+            maintenanceCadenceAnchorMicroseconds = now;
+            hasMaintenanceCadenceAnchor = true;
+            return false;
+        }
+        return now - maintenanceCadenceAnchorMicroseconds >= minimumMaintenanceIntervalMicroseconds;
     }
 
     private sealed class SustainedDeliverySink(Switch2HdRumbleDeliverySink owner) : IControllerFeedbackDeliverySink
@@ -529,7 +593,8 @@ internal sealed class Switch2HdRumbleDeliverySink :
         in ControllerFeedbackFrame frame,
         Switch2HdRumbleFeedbackFidelity fidelity,
         in Switch2HdRumbleGroup left,
-        in Switch2HdRumbleGroup right)
+        in Switch2HdRumbleGroup right,
+        Switch2HdRumbleRepeatPolicy repeatPolicy = Switch2HdRumbleRepeatPolicy.SustainWhileFresh)
     {
         bool validSource = fidelity switch
         {
@@ -553,7 +618,9 @@ internal sealed class Switch2HdRumbleDeliverySink :
                     ControllerFeedbackSource.Xbox360VirtualDevice,
             _ => false,
         };
-        if (!validSource || !frame.HasValidInvariants() ||
+        if (repeatPolicy is not (Switch2HdRumbleRepeatPolicy.SustainWhileFresh or
+                Switch2HdRumbleRepeatPolicy.OneShot) ||
+            !validSource || !frame.HasValidInvariants() ||
             frame.Command != ControllerFeedbackCommand.Apply ||
             frame.DeviceGeneration != deviceGeneration ||
             frame.TransportGeneration != transportGeneration)
@@ -571,6 +638,7 @@ internal sealed class Switch2HdRumbleDeliverySink :
             sourcePreservedLeft = left;
             sourcePreservedRight = right;
             sourcePreservedFidelity = fidelity;
+            sourcePreservedRepeatPolicy = repeatPolicy;
             hasSourcePreservedSynthesis = true;
             return true;
         }
@@ -725,6 +793,7 @@ internal sealed class Switch2HdRumbleDeliverySink :
             Switch2HdRumbleGroup preservedLeft;
             Switch2HdRumbleGroup preservedRight;
             Switch2HdRumbleFeedbackFidelity preservedFidelity;
+            Switch2HdRumbleRepeatPolicy preservedRepeatPolicy;
             bool useImpulseReleaseSynthesis;
             ushort releaseLeftTrigger;
             ushort releaseRightTrigger;
@@ -767,22 +836,30 @@ internal sealed class Switch2HdRumbleDeliverySink :
                 preservedLeft = sourcePreservedLeft;
                 preservedRight = sourcePreservedRight;
                 preservedFidelity = sourcePreservedFidelity;
+                preservedRepeatPolicy = sourcePreservedRepeatPolicy;
                 bool newSourcePreservedSynthesis = useSourcePreservedSynthesis;
                 bool retainedSource = !useSourcePreservedSynthesis && hasDeliveredSourceSynthesis &&
                     delivery.Disposition == ControllerFeedbackDeliveryDisposition.Frame &&
                     delivery.Frame == deliveredSourceFrame;
+                // One-shot is a presentation policy for this exact rich frame,
+                // not a different fidelity or a reason to discard uncertain I/O.
+                bool completedOneShot = hasDeliveredSourceSynthesis &&
+                    delivery.Disposition == ControllerFeedbackDeliveryDisposition.Frame &&
+                    delivery.Frame == deliveredSourceFrame &&
+                    deliveredSourceRepeatPolicy == Switch2HdRumbleRepeatPolicy.OneShot;
                 // Keep an exact already-presented rich design, not its lossy
                 // canonical marker. Streamed sample groups are not latched:
                 // replaying them after their source goes quiet stretches peaks.
                 bool streamedSource = retainedSource && deliveredSourceFidelity is
                     Switch2HdRumbleFeedbackFidelity.DualSensePcmDualBand or
                     Switch2HdRumbleFeedbackFidelity.NativeSwitch2PassThrough;
-                if ((sustain || exactUnresolvedRetry) && retainedSource && !streamedSource)
+                if ((sustain || exactUnresolvedRetry || completedOneShot) && retainedSource && !streamedSource)
                 {
                     useSourcePreservedSynthesis = true;
                     preservedLeft = deliveredSourceLeft;
                     preservedRight = deliveredSourceRight;
                     preservedFidelity = deliveredSourceFidelity;
+                    preservedRepeatPolicy = deliveredSourceRepeatPolicy;
                 }
                 useImpulseReleaseSynthesis = exactUnresolvedRetry ?
                     unresolvedUsesImpulseRelease :
@@ -802,18 +879,26 @@ internal sealed class Switch2HdRumbleDeliverySink :
                     unresolvedImpulseReleaseRevision :
                     impulseReleasePresentationRevision;
 
+                // Bound only a successful, byte-equivalent held Apply repeat.
+                // New frames, policy/impulse updates, Stop and uncertain retries
+                // retain immediate admission. Recheck here, not only at timer
+                // scheduling: another publisher can have written since Wake.
+                bool sustainRefresh = sustain && lastDeliveredNeedsSustain && !streamedSource &&
+                    delivery.Frame.Command == ControllerFeedbackCommand.Apply;
+                if (sustainRefresh && minimumMaintenanceIntervalMicroseconds != 0)
+                    sustainRefresh = IsMaintenanceDueNoLock();
                 bool exactPresentationRefresh =
                     !hasUnresolvedDelivery && delivery.Disposition ==
                         ControllerFeedbackDeliveryDisposition.Frame &&
                     lastDelivered == delivery &&
+                    !completedOneShot &&
                     (deliveryPolicy != lastDeliveredPolicy ||
                         deliveryImpulseTuning !=
                             lastDeliveredImpulseTuning ||
                         deliveryBodyTuning != lastDeliveredBodyTuning ||
                         deliveryXboxPolicyRevision != lastDeliveredXboxPolicyRevision ||
                         newSourcePreservedSynthesis ||
-                        sustain && lastDeliveredNeedsSustain && !streamedSource &&
-                            delivery.Frame.Command == ControllerFeedbackCommand.Apply ||
+                        sustainRefresh ||
                         useImpulseReleaseSynthesis &&
                             releasePresentationRevision !=
                                 lastDeliveredImpulseReleaseRevision);
@@ -903,6 +988,9 @@ internal sealed class Switch2HdRumbleDeliverySink :
             }
 
             Switch2HdRumblePhysicalWriteResult result;
+            // This is the host call's start, not a USB/BLE presentation claim.
+            // Commit it only after an unambiguous successful physical result.
+            bool hasWriteStart = TryGetHostWriteStart(out ulong writeStartMicroseconds);
             try
             {
                 result = writer.TryWrite(submission);
@@ -947,10 +1035,14 @@ internal sealed class Switch2HdRumbleDeliverySink :
                 currentEpochStopped = delivery.Disposition ==
                     ControllerFeedbackDeliveryDisposition.Stop;
                 lastDelivered = delivery;
+                hasMaintenanceCadenceAnchor = hasWriteStart;
+                maintenanceCadenceAnchorMicroseconds = hasWriteStart ? writeStartMicroseconds : 0;
                 // A profile can deliberately render Apply as silence. Only
                 // actual nonzero held output needs transport keepalives; never
                 // replay a finite PCM/native streaming slice as a held effect.
                 lastDeliveredNeedsSustain = submission.Command == ControllerFeedbackCommand.Apply &&
+                    (!useSourcePreservedSynthesis ||
+                        preservedRepeatPolicy == Switch2HdRumbleRepeatPolicy.SustainWhileFresh) &&
                     submission.Fidelity is not (Switch2HdRumbleFeedbackFidelity.DualSensePcmDualBand or
                         Switch2HdRumbleFeedbackFidelity.NativeSwitch2PassThrough) &&
                     (submission.Left.First.HasNonzeroAmplitude || submission.Left.Second.HasNonzeroAmplitude ||
@@ -963,6 +1055,7 @@ internal sealed class Switch2HdRumbleDeliverySink :
                     deliveredSourceLeft = preservedLeft;
                     deliveredSourceRight = preservedRight;
                     deliveredSourceFidelity = preservedFidelity;
+                    deliveredSourceRepeatPolicy = preservedRepeatPolicy;
                 }
                 else if (delivery.Disposition == ControllerFeedbackDeliveryDisposition.Stop ||
                          delivery.Frame != deliveredSourceFrame)
@@ -972,6 +1065,7 @@ internal sealed class Switch2HdRumbleDeliverySink :
                     deliveredSourceLeft = default;
                     deliveredSourceRight = default;
                     deliveredSourceFidelity = default;
+                    deliveredSourceRepeatPolicy = default;
                 }
                 lastDeliveredXboxPolicyRevision = deliveryXboxPolicyRevision;
                 if (delivery.Disposition ==
@@ -1012,6 +1106,7 @@ internal sealed class Switch2HdRumbleDeliverySink :
                     sourcePreservedLeft = default;
                     sourcePreservedRight = default;
                     sourcePreservedFidelity = default;
+                    sourcePreservedRepeatPolicy = default;
                 }
                 if (delivery.Disposition ==
                     ControllerFeedbackDeliveryDisposition.Stop)

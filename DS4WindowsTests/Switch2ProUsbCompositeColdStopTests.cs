@@ -16,6 +16,7 @@ public partial class Switch2ProUsbRuntimeOwnerTests
     public void UsbCompositeColdStopWaitsForMaintenanceOnlyWithinItsDeadline(
         bool releaseBeforeDeadline)
     {
+        ulong hostNow = 1000;
         CreateOwnedCreationInputs(out List<string> events, out var lifetime,
             out var calibration, out var baseLease, out _, out _,
             out var pumpFactory);
@@ -24,7 +25,8 @@ public partial class Switch2ProUsbRuntimeOwnerTests
             lifetime, out var bundle, out var admissionFailure), admissionFailure.ToString());
         Assert.IsTrue(bundle.TryTakeAuthority(out var authority));
         Assert.IsTrue(Switch2ProUsbOwnedFeedbackActivationLifetime.TryCreate(
-            bundle, authority, 1, out var feedback, out var feedbackFailure),
+            bundle, authority, 1, out var feedback, out var feedbackFailure,
+            hostWriteStartClock: () => hostNow),
             feedbackFailure.Failure.ToString());
         Assert.IsTrue(Switch2ProUsbOwnedCompositeRegistrationParticipant.TryCreateCore(
             bundle, authority, calibration, feedback, 500, pumpFactory,
@@ -53,6 +55,7 @@ public partial class Switch2ProUsbRuntimeOwnerTests
         var wire = new byte[ControllerFeedbackFrame.SerializedLength];
         Assert.IsTrue(frame.TryWriteTo(wire));
         Assert.IsTrue(session.TryPublish(wire));
+        hostNow += 12_000;
         lease.HoldNextWrite();
         var maintenance = Task.Factory.StartNew(
             () => feedback.TryServiceRumbleMaintenance(now + 12_000, null),

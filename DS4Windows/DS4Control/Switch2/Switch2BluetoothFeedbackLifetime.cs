@@ -994,6 +994,8 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
         }
     }
 
+    internal ulong NextRumbleMaintenanceDueMicroseconds => sink.NextMaintenanceDueMicroseconds;
+
     private bool WakeAfterRumblePublication(bool accepted)
     {
         // A retained canonical claim still needs service when its immediate
@@ -1075,7 +1077,8 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
         Switch2ControllerModel model, ulong deviceGeneration,
         ulong transportGeneration, out Switch2BluetoothFeedbackLifetime owner,
         Switch2HdRumbleFeedbackPolicy policy =
-            Switch2HdRumbleFeedbackPolicy.SdlBodyOnlyCompatibility)
+            Switch2HdRumbleFeedbackPolicy.SdlBodyOnlyCompatibility,
+        Func<ulong> hostWriteStartClock = null)
     {
         owner = null;
         if (lease == null || !lease.HasHdRumbleOutput ||
@@ -1093,7 +1096,8 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
             var writer = new Switch2BluetoothHdRumblePhysicalWriter(lease,
                 model, deviceGeneration, transportGeneration);
             var sink = new Switch2HdRumbleDeliverySink(writer,
-                deviceGeneration, transportGeneration, policy);
+                deviceGeneration, transportGeneration, policy,
+                minimumMaintenanceIntervalMicroseconds: 15000, hostWriteStartClock: hostWriteStartClock);
             owner = new Switch2BluetoothFeedbackLifetime(model,
                 deviceGeneration, transportGeneration, pump, sink,
                 lease as ISwitch2BluetoothPlayerLedTransportLease,
@@ -1146,7 +1150,8 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
                     leftTransportGeneration, rightDeviceGeneration,
                     rightTransportGeneration);
             var sink = new Switch2HdRumbleDeliverySink(joinedWriter,
-                logicalDeviceGeneration, logicalTransportGeneration, policy);
+                logicalDeviceGeneration, logicalTransportGeneration, policy,
+                minimumMaintenanceIntervalMicroseconds: 15000);
             owner = new Switch2BluetoothFeedbackLifetime(
                 Switch2ControllerModel.JoyCon2Left,
                 logicalDeviceGeneration, logicalTransportGeneration, pump,
@@ -1286,19 +1291,21 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
         ControllerFeedbackStateLanePump.Lane lane,
         in ControllerFeedbackActuatorState state,
         in Switch2HdRumbleGroup left,
-        in Switch2HdRumbleGroup right) =>
+        in Switch2HdRumbleGroup right,
+        Switch2HdRumbleRepeatPolicy repeatPolicy = Switch2HdRumbleRepeatPolicy.SustainWhileFresh) =>
         TryPublishNativeLocalEffectAndPump(lane, state, left, right,
             ControllerFeedbackPublicationOrigin.ProfileEffect,
-            Switch2HdRumbleFeedbackFidelity.NativeSwitch2ProfileEffect);
+            Switch2HdRumbleFeedbackFidelity.NativeSwitch2ProfileEffect, repeatPolicy);
 
     internal bool TryPublishNativePreviewAndPump(
         ControllerFeedbackStateLanePump.Lane lane,
         in ControllerFeedbackActuatorState state,
         in Switch2HdRumbleGroup left,
-        in Switch2HdRumbleGroup right) =>
+        in Switch2HdRumbleGroup right,
+        Switch2HdRumbleRepeatPolicy repeatPolicy = Switch2HdRumbleRepeatPolicy.SustainWhileFresh) =>
         TryPublishNativeLocalEffectAndPump(lane, state, left, right,
             ControllerFeedbackPublicationOrigin.TestPreview,
-            Switch2HdRumbleFeedbackFidelity.NativeSwitch2TestPreview);
+            Switch2HdRumbleFeedbackFidelity.NativeSwitch2TestPreview, repeatPolicy);
 
     private bool TryPublishNativeLocalEffectAndPump(
         ControllerFeedbackStateLanePump.Lane lane,
@@ -1306,13 +1313,16 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
         in Switch2HdRumbleGroup left,
         in Switch2HdRumbleGroup right,
         ControllerFeedbackPublicationOrigin origin,
-        Switch2HdRumbleFeedbackFidelity fidelity)
+        Switch2HdRumbleFeedbackFidelity fidelity,
+        Switch2HdRumbleRepeatPolicy repeatPolicy)
     {
+        if (repeatPolicy is not (Switch2HdRumbleRepeatPolicy.SustainWhileFresh or
+                Switch2HdRumbleRepeatPolicy.OneShot)) return false;
         if (!Monitor.TryEnter(rumbleTransactionGate)) return false;
         try
         {
             return WakeAfterRumblePublication(TryPublishNativeLocalEffectAndPumpCore(
-                lane, state, left, right, origin, fidelity));
+                lane, state, left, right, origin, fidelity, repeatPolicy));
         }
         finally { Monitor.Exit(rumbleTransactionGate); }
     }
@@ -1322,7 +1332,8 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
         in ControllerFeedbackActuatorState state,
         in Switch2HdRumbleGroup left, in Switch2HdRumbleGroup right,
         ControllerFeedbackPublicationOrigin origin,
-        Switch2HdRumbleFeedbackFidelity fidelity)
+        Switch2HdRumbleFeedbackFidelity fidelity,
+        Switch2HdRumbleRepeatPolicy repeatPolicy)
     {
         lock (gate)
         {
@@ -1342,7 +1353,7 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
             return false;
         }
         if (!sink.TryStageSourcePreservedSynthesis(frame, fidelity,
-                left, right) ||
+                left, right, repeatPolicy) ||
             !pump.TryRefreshCurrentPresentation(nowMicroseconds))
         {
             _ = lane.TryWithdraw(nowMicroseconds);
@@ -1352,8 +1363,13 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
 
         ControllerFeedbackPumpDisposition result = pump.PumpOnce(
             nowMicroseconds, sink, out _);
+        // RetryPending retains this exact canonical cue and wakes its output
+        // worker. This is queued acceptance, not a physical receipt: returning
+        // false would let the cue scheduler enqueue a new frame after the
+        // retained write may already have succeeded. USB uses the same rule.
         return result is ControllerFeedbackPumpDisposition.Delivered or
-            ControllerFeedbackPumpDisposition.None;
+            ControllerFeedbackPumpDisposition.None or
+            ControllerFeedbackPumpDisposition.RetryPending;
     }
 
     internal Switch2BluetoothPlayerLedRequestResult TryRequestPlayerLed(

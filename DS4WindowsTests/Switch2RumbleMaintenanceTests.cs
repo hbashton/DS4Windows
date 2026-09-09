@@ -24,8 +24,8 @@ public sealed class Switch2RumbleMaintenanceTests
             object pending = pendingField.GetValue(runtime);
             pendingField.FieldType.GetField("Withdraw", flags)!.SetValue(pending, true);
             pendingField.SetValue(runtime, pending);
-            var service = (Func<ulong, bool>)typeof(Switch2RuntimeInputDevice).GetMethod("ServiceRumbleMaintenance", flags)!
-                .CreateDelegate(typeof(Func<ulong, bool>), runtime);
+            var service = (Func<ulong, Switch2RumbleMaintenanceResult>)typeof(Switch2RuntimeInputDevice).GetMethod("ServiceRumbleMaintenance", flags)!
+                .CreateDelegate(typeof(Func<ulong, Switch2RumbleMaintenanceResult>), runtime);
             var worker = new Switch2RumbleMaintenanceWorker(service, 15, automaticTimer: false);
             try
             {
@@ -185,9 +185,11 @@ public sealed class Switch2RumbleMaintenanceTests
     [TestMethod]
     public void BluetoothKeepAliveUsesActualWriterAndNextPacketCounterThenRetires()
     {
+        ulong hostNow = 1000;
         var lease = new BluetoothLease();
         Assert.IsTrue(Switch2BluetoothFeedbackLifetime.TryCreate(lease,
-            Switch2ControllerModel.ProController2, 7, 11, out var lifetime));
+            Switch2ControllerModel.ProController2, 7, 11, out var lifetime,
+            hostWriteStartClock: () => hostNow));
         Assert.IsTrue(lifetime.TryActivate());
         Assert.IsTrue(lifetime.TryCreateLane(ControllerFeedbackPublicationOrigin.TestPreview,
             ControllerFeedbackSource.Xbox360VirtualDevice, 19, 250000, 100000, out var lane));
@@ -195,6 +197,7 @@ public sealed class Switch2RumbleMaintenanceTests
         Assert.IsTrue(lane.TryPublish(new ControllerFeedbackActuatorState(10000, 20000, 0, 0), now));
         Assert.AreEqual(ControllerFeedbackPumpDisposition.Delivered, lifetime.TryPumpOnce(now, out _));
         byte[] first = lease.Payloads[0];
+        hostNow += 15_000;
         Assert.AreEqual(ControllerFeedbackPumpDisposition.Delivered, lifetime.TryServiceRumbleMaintenance(now, _ => { }));
         Assert.AreEqual(2, lease.Payloads.Count);
         Assert.AreEqual((first[1] + 1) & 15, lease.Payloads[1][1] & 15);
@@ -211,9 +214,11 @@ public sealed class Switch2RumbleMaintenanceTests
     [DataRow(true)]
     public void BluetoothInputDrainAndRetirementNeverWaitForMaintenancePhysicalWrite(bool withVirtualSession)
     {
+        ulong hostNow = 1000;
         var lease = new BluetoothLease();
         Assert.IsTrue(Switch2BluetoothFeedbackLifetime.TryCreate(lease,
-            Switch2ControllerModel.ProController2, 7, 11, out var lifetime));
+            Switch2ControllerModel.ProController2, 7, 11, out var lifetime,
+            hostWriteStartClock: () => hostNow));
         Assert.IsTrue(lifetime.TryActivate());
         if (withVirtualSession)
             Assert.IsTrue(lifetime.TryCreateVirtualFeedbackSession(ControllerFeedbackSource.XboxOneVirtualDevice, out _));
@@ -223,6 +228,7 @@ public sealed class Switch2RumbleMaintenanceTests
         Assert.IsTrue(lane.TryPublish(new ControllerFeedbackActuatorState(10000, 20000, 0, 0), now));
         lifetime.TryPumpOnce(now, out _);
         lease.Block = true;
+        hostNow += 15_000;
         Task maintenance = Task.Run(() => lifetime.TryServiceRumbleMaintenance(now, _ => { }));
         try
         {
@@ -325,7 +331,7 @@ public sealed class Switch2RumbleMaintenanceTests
     public void WorkerCoalescesWakeParksOnIdleAndCannotRestartAfterStop()
     {
         int calls = 0;
-        var worker = new Switch2RumbleMaintenanceWorker(_ => { calls++; return false; }, 15, automaticTimer: false);
+        var worker = new Switch2RumbleMaintenanceWorker(_ => { calls++; return Switch2RumbleMaintenanceResult.Idle; }, 15, automaticTimer: false);
         Assert.IsFalse(worker.IsScheduled);
         worker.RunScheduledTick(1);
         Assert.AreEqual(0, calls);
@@ -352,7 +358,7 @@ public sealed class Switch2RumbleMaintenanceTests
             Interlocked.Increment(ref calls);
             entered.Set();
             Assert.IsTrue(release.Wait(TimeSpan.FromSeconds(3)));
-            return true;
+            return Switch2RumbleMaintenanceResult.Active();
         }, 12, automaticTimer: false);
         worker.Wake();
         Task first = Task.Run(() => worker.RunScheduledTick(1));
@@ -372,7 +378,7 @@ public sealed class Switch2RumbleMaintenanceTests
     [TestMethod]
     public void WarmMaintenanceSchedulingAllocatesNothing()
     {
-        var worker = new Switch2RumbleMaintenanceWorker(_ => true, 15, automaticTimer: false);
+        var worker = new Switch2RumbleMaintenanceWorker(_ => Switch2RumbleMaintenanceResult.Active(), 15, automaticTimer: false);
         worker.Wake();
         for (int index = 0; index < 1000; index++) worker.RunScheduledTick((ulong)index);
         long before = GC.GetAllocatedBytesForCurrentThread();
@@ -422,6 +428,96 @@ public sealed class Switch2RumbleMaintenanceTests
         Assert.IsTrue(sink.MaintenanceSink.TryDeliver(delivery));
         Assert.AreEqual(2, writer.Calls);
         Assert.AreEqual(first, writer.Last, "Native groups must not become the lossy canonical marker on refresh.");
+    }
+
+    [DataTestMethod]
+    [DataRow(false, false)]
+    [DataRow(false, true)]
+    [DataRow(true, false)]
+    [DataRow(true, true)]
+    public void OneShotRichFrameRetainsExactRetryButNeverBecomesSustained(bool preview, bool uncertain)
+    {
+        var writer = new Writer();
+        var sink = new Switch2HdRumbleDeliverySink(writer, 7, 11);
+        var delivery = Delivery(ControllerFeedbackSource.Xbox360VirtualDevice, 1, 1);
+        var left = Switch2ConnectionHaptic.ProBassGroup;
+        var right = Switch2IdentificationHaptic.ProPulseGroup;
+        var fidelity = preview ? Switch2HdRumbleFeedbackFidelity.NativeSwitch2TestPreview :
+            Switch2HdRumbleFeedbackFidelity.NativeSwitch2ProfileEffect;
+        Assert.IsTrue(sink.TryStageSourcePreservedSynthesis(delivery.Frame, fidelity, left, right,
+            Switch2HdRumbleRepeatPolicy.OneShot));
+        if (uncertain)
+            writer.Result = Switch2HdRumblePhysicalWriteResult.Uncertain(Switch2HdRumblePhysicalWriteFailure.DependencyThrew);
+        Assert.AreEqual(!uncertain, sink.TryDeliver(delivery));
+        var original = writer.Last;
+        Assert.AreEqual(left, original.Left);
+        Assert.AreEqual(right, original.Right);
+        if (uncertain)
+        {
+            Assert.IsFalse(sink.TryStageSourcePreservedSynthesis(delivery.Frame, fidelity,
+                right, left, Switch2HdRumbleRepeatPolicy.SustainWhileFresh),
+                "An uncertain packet cannot be replaced or have its repeat policy changed.");
+            writer.Result = Switch2HdRumblePhysicalWriteResult.Success();
+            Assert.IsTrue(sink.MaintenanceSink.TryDeliver(delivery),
+                "One-shot still permits an exact unresolved retry.");
+            Assert.AreEqual(original, writer.Last);
+        }
+        int completedCalls = uncertain ? 2 : 1;
+        Assert.AreEqual(completedCalls, writer.Calls);
+        Assert.IsFalse(sink.NeedsSustainedRefresh);
+        Assert.IsTrue(sink.MaintenanceSink.TryDeliver(delivery));
+        Assert.IsTrue(sink.TryDeliver(delivery));
+        Assert.AreEqual(completedCalls, writer.Calls);
+
+        Assert.IsTrue(Switch2HdRumbleBodyTuning.TryCreate(50, out var tuning));
+        Assert.IsTrue(sink.TrySelectConfiguration(Switch2HdRumbleFeedbackPolicy.SdlBodyOnlyCompatibility,
+            Switch2HdRumbleImpulseTuning.Default, tuning, out _));
+        Assert.IsTrue(sink.MaintenanceSink.TryDeliver(delivery));
+        Assert.AreEqual(completedCalls, writer.Calls,
+            "Changing a renderer setting must not retrigger a completed one-shot frame.");
+        Assert.AreEqual(original, writer.Last);
+
+        var stop = new ControllerFeedbackDelivery(ControllerFeedbackDeliveryDisposition.Stop,
+            delivery.Origin, default, 7, 11, delivery.DeliveryEpoch);
+        Assert.IsTrue(sink.TryDeliver(stop));
+        Assert.AreEqual(completedCalls + 1, writer.Calls);
+        Assert.IsFalse(sink.MaintenanceSink.TryDeliver(delivery));
+        Assert.IsFalse(sink.NeedsSustainedRefresh);
+    }
+
+    [TestMethod]
+    public void RepeatPolicyIsExactFrameStateAndDoesNotLeakIntoTheNextHeldFrame()
+    {
+        var writer = new Writer();
+        var sink = new Switch2HdRumbleDeliverySink(writer, 7, 11);
+        var first = Delivery(ControllerFeedbackSource.Xbox360VirtualDevice, 1, 1);
+        var group = Switch2ConnectionHaptic.ProBassGroup;
+        Assert.IsFalse(sink.TryStageSourcePreservedSynthesis(first.Frame,
+            Switch2HdRumbleFeedbackFidelity.NativeSwitch2TestPreview, group, group,
+            (Switch2HdRumbleRepeatPolicy)255));
+        Assert.IsTrue(sink.TryStageSourcePreservedSynthesis(first.Frame,
+            Switch2HdRumbleFeedbackFidelity.NativeSwitch2TestPreview, group, group,
+            Switch2HdRumbleRepeatPolicy.OneShot));
+        Assert.IsTrue(sink.TryDeliver(first));
+        Assert.IsFalse(sink.NeedsSustainedRefresh);
+        Assert.IsTrue(sink.TryDeliver(new ControllerFeedbackDelivery(ControllerFeedbackDeliveryDisposition.Stop,
+            first.Origin, default, 7, 11, first.DeliveryEpoch)));
+
+        Assert.IsTrue(ControllerFeedbackClock.TryGetTimestampMicroseconds(out ulong now));
+        Assert.IsTrue(ControllerFeedbackFrame.TryCreate(ControllerFeedbackSource.Xbox360VirtualDevice,
+            ControllerFeedbackCommand.Apply, ControllerFeedbackActuators.All, 1, 1, 0, 0,
+            2, 7, 11, 20, now, 250000, out var frame));
+        var successor = new ControllerFeedbackDelivery(ControllerFeedbackDeliveryDisposition.Frame,
+            first.Origin, frame, 7, 11, first.DeliveryEpoch + 1);
+        Assert.IsTrue(sink.TryStageSourcePreservedSynthesis(frame,
+            Switch2HdRumbleFeedbackFidelity.NativeSwitch2TestPreview, group, group));
+        Assert.IsTrue(sink.TryDeliver(successor));
+        Assert.IsTrue(sink.NeedsSustainedRefresh);
+        Assert.IsTrue(sink.MaintenanceSink.TryDeliver(successor));
+        Assert.AreEqual(4, writer.Calls);
+        Assert.AreEqual(group, writer.Last.Left);
+        Assert.AreEqual(group, writer.Last.Right);
+        Assert.IsFalse(sink.MaintenanceSink.TryDeliver(first), "A stale epoch remains rejected.");
     }
 
     [TestMethod]

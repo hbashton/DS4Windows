@@ -17,7 +17,8 @@ public sealed class Switch2ProUsbOwnedFeedbackActivationLifetimeTests
     [TestMethod]
     public void MaintenanceRepeatsExactRichUsbGroupsWithNewCountersButNeverRenewsExpiry()
     {
-        var composition = CreateCommitted(ContainerA);
+        ulong hostNow = 1000;
+        var composition = CreateCommitted(ContainerA, hostWriteStartClock: () => hostNow);
         Assert.IsTrue(composition.Feedback.TryCreateVirtualFeedbackSession(
             ControllerFeedbackSource.DualSenseVirtualDevice, out var session));
         var left = new Switch2HdRumbleGroup(new(101, 201, 301, 401),
@@ -34,8 +35,11 @@ public sealed class Switch2ProUsbOwnedFeedbackActivationLifetimeTests
             Assert.AreEqual(1, wakeCount, "Binding after an active frame must wake the dormant worker.");
             Assert.IsTrue(composition.Feedback.RequiresRumbleMaintenance);
             for (int index = 1; index <= 2; index++)
+            {
+                hostNow += 12_000;
                 Assert.AreEqual(ControllerFeedbackPumpDisposition.Delivered,
                     composition.Feedback.TryServiceRumbleMaintenance(now + (ulong)index * 12_000, null));
+            }
             Assert.AreEqual(3, composition.Lease.ReportCount);
             for (int index = 0; index < 3; index++)
             {
@@ -153,7 +157,8 @@ public sealed class Switch2ProUsbOwnedFeedbackActivationLifetimeTests
     [DataRow(true)]
     public void HeldUsbMaintenanceCannotMakeInputDrainOrQuiescenceWaitForItsWrite(bool withSession)
     {
-        var composition = CreateCommitted(ContainerA);
+        ulong hostNow = 1000;
+        var composition = CreateCommitted(ContainerA, hostWriteStartClock: () => hostNow);
         Switch2VirtualFeedbackSession session = null;
         ulong now;
         if (withSession)
@@ -170,6 +175,7 @@ public sealed class Switch2ProUsbOwnedFeedbackActivationLifetimeTests
                 composition.Feedback.TryPumpOnce(now, out _));
         }
         composition.Lease.BlockWrite = true;
+        hostNow += 12_000;
         var maintenance = Task.Factory.StartNew(
             () => composition.Feedback.TryServiceRumbleMaintenance(now + 12_000, null),
             CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
@@ -212,12 +218,14 @@ public sealed class Switch2ProUsbOwnedFeedbackActivationLifetimeTests
     [TestMethod]
     public void OrdinaryUsbSessionRetirementWaitsForMaintenanceThenAllowsReplacement()
     {
-        var composition = CreateCommitted(ContainerA);
+        ulong hostNow = 1000;
+        var composition = CreateCommitted(ContainerA, hostWriteStartClock: () => hostNow);
         Assert.IsTrue(composition.Feedback.TryCreateVirtualFeedbackSession(
             ControllerFeedbackSource.XboxOneVirtualDevice, out var session));
         Assert.IsTrue(session.TryPublish(XboxWire(1, session.OwnershipEpoch, 20_000, 0, 0, 0)));
         Assert.IsTrue(ControllerFeedbackClock.TryGetTimestampMicroseconds(out ulong now));
         composition.Lease.BlockWrite = true;
+        hostNow += 12_000;
         var maintenance = Task.Run(() => composition.Feedback.TryServiceRumbleMaintenance(now + 12_000, null));
         using var retirementStarted = new ManualResetEventSlim();
         Task<bool> retirement = null;
@@ -1626,8 +1634,62 @@ public sealed class Switch2ProUsbOwnedFeedbackActivationLifetimeTests
                 composition.Authority, 100).Outcome);
     }
 
+    [DataTestMethod]
+    [DataRow(false, false)]
+    [DataRow(false, true)]
+    [DataRow(true, false)]
+    [DataRow(true, true)]
+    public void NativeUsbLocalRepeatPolicyKeepsExpiryAndRejectsInvalidBeforePublication(bool preview, bool oneShot)
+    {
+        ulong hostNow = 1000;
+        Composition composition = CreateCommitted(ContainerA, hostWriteStartClock: () => hostNow);
+        Assert.IsTrue(composition.Feedback.TryCreateLane(preview ? ControllerFeedbackPublicationOrigin.TestPreview :
+            ControllerFeedbackPublicationOrigin.ProfileEffect, ControllerFeedbackSource.Xbox360VirtualDevice,
+            1, 250_000, 100_000, out var lane));
+        var left = Switch2ConnectionHaptic.ProBassGroup;
+        var right = Switch2IdentificationHaptic.ProPulseGroup;
+        bool Publish(Switch2HdRumbleRepeatPolicy policy) => preview ?
+            composition.Feedback.TryPublishNativePreviewAndPump(lane, new(1, 1, 0, 0), left, right, policy) :
+            composition.Feedback.TryPublishNativeProfileEffectAndPump(lane, new(1, 1, 0, 0), left, right, policy);
+        try
+        {
+            Assert.IsFalse(Publish((Switch2HdRumbleRepeatPolicy)255));
+            Assert.IsTrue(ControllerFeedbackClock.TryGetTimestampMicroseconds(out ulong now));
+            Assert.AreEqual(ControllerFeedbackPumpDisposition.None, composition.Feedback.TryPumpOnce(now, out _));
+            Assert.AreEqual(0, composition.Lease.ReportCount);
+            Assert.IsTrue(Publish(oneShot ? Switch2HdRumbleRepeatPolicy.OneShot :
+                Switch2HdRumbleRepeatPolicy.SustainWhileFresh));
+            Assert.IsTrue(ControllerFeedbackClock.TryGetTimestampMicroseconds(out now));
+            hostNow += 12_000;
+            _ = composition.Feedback.TryServiceRumbleMaintenance(now + 12_000, null);
+            hostNow += 12_000;
+            _ = composition.Feedback.TryServiceRumbleMaintenance(now + 24_000, null);
+            int activeCount = oneShot ? 1 : 3;
+            Assert.AreEqual(activeCount, composition.Lease.ReportCount);
+            Assert.AreEqual(!oneShot, composition.Feedback.RequiresRumbleMaintenance);
+            for (int index = 0; index < activeCount; index++)
+            {
+                Assert.IsTrue(Switch2UsbHdRumbleCodec.TryDecodeProController(composition.Lease.ReportAt(index),
+                    out byte counter, out var actualLeft, out var actualRight, out _));
+                Assert.AreEqual((byte)index, counter);
+                Assert.AreEqual(left, actualLeft);
+                Assert.AreEqual(right, actualRight);
+            }
+            _ = composition.Feedback.TryServiceRumbleMaintenance(now + 300_000, null);
+            Assert.AreEqual(activeCount + 1, composition.Lease.ReportCount, "One-shot policy must not suppress expiry Stop.");
+            AssertReport(composition.Lease.ReportAt(activeCount), (byte)activeCount, true);
+            _ = composition.Feedback.TryServiceRumbleMaintenance(now + 320_000, null);
+            Assert.AreEqual(activeCount + 1, composition.Lease.ReportCount);
+        }
+        finally
+        {
+            Assert.AreEqual(Switch2ProUsbOwnedFeedbackQuiescenceOutcome.ExactNeutralAndQuiescent,
+                composition.Feedback.TryNeutralizeAndQuiesce(composition.Authority, 100).Outcome);
+        }
+    }
+
     private static Composition CreateComposition(Guid containerId,
-        int operationWaitMilliseconds = 1)
+        int operationWaitMilliseconds = 1, Func<ulong> hostWriteStartClock = null)
     {
         Switch2PhysicalInputLifetime lifetime = CreateLifetime(containerId);
         var lease = new ScriptedOwnedLease(lifetime);
@@ -1640,7 +1702,8 @@ public sealed class Switch2ProUsbOwnedFeedbackActivationLifetimeTests
         Assert.IsTrue(Switch2ProUsbOwnedFeedbackActivationLifetime.TryCreate(
             bundle, authority, operationWaitMilliseconds,
             out Switch2ProUsbOwnedFeedbackActivationLifetime feedback,
-            out Switch2ProUsbOwnedFeedbackActivationCreateResult create),
+            out Switch2ProUsbOwnedFeedbackActivationCreateResult create,
+            hostWriteStartClock: hostWriteStartClock),
             create.Failure.ToString());
         Assert.IsTrue(create.Succeeded);
         Assert.IsFalse(create.RequiresRetention);
@@ -1648,10 +1711,10 @@ public sealed class Switch2ProUsbOwnedFeedbackActivationLifetimeTests
     }
 
     private static Composition CreateCommitted(Guid containerId,
-        int operationWaitMilliseconds = 1)
+        int operationWaitMilliseconds = 1, Func<ulong> hostWriteStartClock = null)
     {
         Composition composition = CreateComposition(containerId,
-            operationWaitMilliseconds);
+            operationWaitMilliseconds, hostWriteStartClock);
         var credential = Prepare(composition);
         Assert.AreEqual(
             Switch2ProUsbOwnedFeedbackActivationOutcome.Succeeded,

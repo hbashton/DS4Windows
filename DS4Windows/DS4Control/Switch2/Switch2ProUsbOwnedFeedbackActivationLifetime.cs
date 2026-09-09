@@ -102,6 +102,8 @@ internal sealed class Switch2ProUsbOwnedFeedbackActivationLifetime :
         }
     }
 
+    internal ulong NextRumbleMaintenanceDueMicroseconds => sink.NextMaintenanceDueMicroseconds;
+
     private bool WakeAfterRumblePublication(bool accepted)
     {
         // A retained canonical claim still needs service when its immediate
@@ -168,7 +170,8 @@ internal sealed class Switch2ProUsbOwnedFeedbackActivationLifetime :
         out Switch2ProUsbOwnedFeedbackActivationLifetime feedback,
         out Switch2ProUsbOwnedFeedbackActivationCreateResult result,
         Switch2HdRumbleFeedbackPolicy policy =
-            Switch2HdRumbleFeedbackPolicy.SdlBodyOnlyCompatibility)
+            Switch2HdRumbleFeedbackPolicy.SdlBodyOnlyCompatibility,
+        Func<ulong> hostWriteStartClock = null)
     {
         feedback = null;
         if (bundle == null)
@@ -276,7 +279,7 @@ internal sealed class Switch2ProUsbOwnedFeedbackActivationLifetime :
                 authority.DeviceGeneration, authority.TransportGeneration);
             var sink = new Switch2HdRumbleDeliverySink(writer,
                 authority.DeviceGeneration, authority.TransportGeneration,
-                policy);
+                policy, minimumMaintenanceIntervalMicroseconds: 12000, hostWriteStartClock: hostWriteStartClock);
             feedback = new Switch2ProUsbOwnedFeedbackActivationLifetime(bundle,
                 authority, lifetime, pump, bridge, sink, composite);
             result = new(
@@ -1181,19 +1184,21 @@ internal sealed class Switch2ProUsbOwnedFeedbackActivationLifetime :
         ControllerFeedbackStateLanePump.Lane lane,
         in ControllerFeedbackActuatorState feedbackState,
         in Switch2HdRumbleGroup left,
-        in Switch2HdRumbleGroup right) =>
+        in Switch2HdRumbleGroup right,
+        Switch2HdRumbleRepeatPolicy repeatPolicy = Switch2HdRumbleRepeatPolicy.SustainWhileFresh) =>
         TryPublishNativeLocalEffectAndPump(lane, feedbackState, left, right,
             ControllerFeedbackPublicationOrigin.ProfileEffect,
-            Switch2HdRumbleFeedbackFidelity.NativeSwitch2ProfileEffect);
+            Switch2HdRumbleFeedbackFidelity.NativeSwitch2ProfileEffect, repeatPolicy);
 
     internal bool TryPublishNativePreviewAndPump(
         ControllerFeedbackStateLanePump.Lane lane,
         in ControllerFeedbackActuatorState feedbackState,
         in Switch2HdRumbleGroup left,
-        in Switch2HdRumbleGroup right) =>
+        in Switch2HdRumbleGroup right,
+        Switch2HdRumbleRepeatPolicy repeatPolicy = Switch2HdRumbleRepeatPolicy.SustainWhileFresh) =>
         TryPublishNativeLocalEffectAndPump(lane, feedbackState, left, right,
             ControllerFeedbackPublicationOrigin.TestPreview,
-            Switch2HdRumbleFeedbackFidelity.NativeSwitch2TestPreview);
+            Switch2HdRumbleFeedbackFidelity.NativeSwitch2TestPreview, repeatPolicy);
 
     private bool TryPublishNativeLocalEffectAndPump(
         ControllerFeedbackStateLanePump.Lane lane,
@@ -1201,13 +1206,16 @@ internal sealed class Switch2ProUsbOwnedFeedbackActivationLifetime :
         in Switch2HdRumbleGroup left,
         in Switch2HdRumbleGroup right,
         ControllerFeedbackPublicationOrigin origin,
-        Switch2HdRumbleFeedbackFidelity fidelity)
+        Switch2HdRumbleFeedbackFidelity fidelity,
+        Switch2HdRumbleRepeatPolicy repeatPolicy)
     {
+        if (repeatPolicy is not (Switch2HdRumbleRepeatPolicy.SustainWhileFresh or
+                Switch2HdRumbleRepeatPolicy.OneShot)) return false;
         if (!Monitor.TryEnter(rumbleTransactionGate)) return false;
         try
         {
             return WakeAfterRumblePublication(TryPublishNativeLocalEffectAndPumpCore(
-                lane, feedbackState, left, right, origin, fidelity));
+                lane, feedbackState, left, right, origin, fidelity, repeatPolicy));
         }
         finally { Monitor.Exit(rumbleTransactionGate); }
     }
@@ -1217,7 +1225,8 @@ internal sealed class Switch2ProUsbOwnedFeedbackActivationLifetime :
         in ControllerFeedbackActuatorState feedbackState,
         in Switch2HdRumbleGroup left, in Switch2HdRumbleGroup right,
         ControllerFeedbackPublicationOrigin origin,
-        Switch2HdRumbleFeedbackFidelity fidelity)
+        Switch2HdRumbleFeedbackFidelity fidelity,
+        Switch2HdRumbleRepeatPolicy repeatPolicy)
     {
         if (Interlocked.CompareExchange(ref operationActive, 1, 0) != 0)
         {
@@ -1244,7 +1253,7 @@ internal sealed class Switch2ProUsbOwnedFeedbackActivationLifetime :
                 return false;
             }
             if (!sink.TryStageSourcePreservedSynthesis(frame, fidelity,
-                    left, right) ||
+                    left, right, repeatPolicy) ||
                 !pump.TryRefreshCurrentPresentation(nowMicroseconds))
             {
                 _ = lane.TryWithdraw(nowMicroseconds);

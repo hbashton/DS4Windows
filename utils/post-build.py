@@ -62,6 +62,8 @@ if len({entry.as_posix().casefold() for entry in relative_entries}) != len(relat
 # of producing an archive that later needs a network recovery path.
 required_offline_files = (
     "DS4Windows.exe",
+    "xbox-one-authorized-persona.json",
+    "extras/XBOX-ONE-PERSONA-NOTICE.md",
     "coreclr.dll",
     "hostfxr.dll",
     "extras/install-viiper-backend.ps1",

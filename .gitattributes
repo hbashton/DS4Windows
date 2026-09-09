@@ -12,6 +12,9 @@ extras/VIIPER-0.1.3-rc4.5-BUILD-NOTES.txt -text
 extras/LICENSE.txt -text whitespace=cr-at-eol
 extras/VIIPER-SYSTRAY-NOTICE.md -text whitespace=cr-at-eol
 extras/VIIPER-SYSTRAY-LICENSE.txt -text whitespace=cr-at-eol
+# The reviewed experimental Xbox persona is pinned byte-for-byte as a
+# deployment input, including its original LF line endings.
+extras/xbox-one-authorized-persona.json -text
 
 ###############################################################################
 # Set default behavior for command prompt diff.

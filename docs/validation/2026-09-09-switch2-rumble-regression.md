@@ -144,3 +144,30 @@ own `app/lab-data` only on first launch after the existing applications exit.
 Physical smoothness and connection-cue feel remain unconfirmed until a
 portable candidate is exercised on the controller. Published RC4.5 assets,
 installed application files, and user profiles are not modified by this work.
+
+## RC4.5.1 release follow-up
+
+The candidate was subsequently launched after the existing applications exited.
+Switch 2 Pro Bluetooth activation completed. Joy-Con activation using an Xbox
+profile exposed a packaging omission: the explicit Xbox persona JSON was not
+beside the application, and output validation correctly rejected that profile.
+The exact existing lab configuration was restored without restarting the app;
+this is not evidence of a new successful Joy-Con hardware activation or of
+subjectively smooth rumble.
+
+RC4.5.1 (Windows version 5.0.5.1) now includes that unchanged persona and a
+provenance notice in normal build/publish output, the portable ZIP and the
+installer. An explicit Git attribute preserves the reviewed JSON bytes across
+Windows checkout. The production parser and source-to-publish wiring have
+three regression cases; both package composition and installer validation
+reject missing required payloads. Two failing-first Python checks reproduced
+the omission; all 21 packaging/workflow checks now pass.
+
+The final unfiltered RC4.5.1 suite, including release ordering and persona
+packaging tests, passes **4,581**, with **zero failures** and the same **11
+existing opt-in integration skips** (`rc451-integrated-full-suite.trx`). The
+separate allocation selection passes **165/165**, without skips or failures
+(`rc451-allocation.trx`). The
+release recommendation is user-supplied; automated tests do not establish
+subjective haptic quality or universal game compatibility. The immutable
+RC4.5 tag and assets are retained; RC4.5.1 is a separate unsigned prerelease.

@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "identityAuthorizationGranted": true,
+  "identity": {
+    "vendorId": 61453,
+    "productId": 48877,
+    "deviceReleaseBcd": 256,
+    "deviceId": 281453518783236,
+    "firmwareMajor": 1,
+    "firmwareMinor": 0,
+    "firmwareBuild": 1,
+    "firmwareRevision": 0,
+    "hardwareMajor": 1,
+    "hardwareMinor": 0
+  },
+  "usb": { "maxPower2mA": 250, "outIntervalMs": 4, "inIntervalMs": 4 },
+  "strings": {
+    "manufacturer": "VIIPER Portable Lab",
+    "product": "VIIPER GIP Test Controller",
+    "serial": "0000fffb01020304A1B2C3D4E5F60706"
+  },
+  "derivePerRegistrationIdentity": true
+}

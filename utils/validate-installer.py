@@ -13,6 +13,8 @@ from pathlib import Path, PurePosixPath
 
 REQUIRED_PUBLISH_FILES = {
     "DS4Windows.exe",
+    "xbox-one-authorized-persona.json",
+    "extras/XBOX-ONE-PERSONA-NOTICE.md",
     "DS4Windows.release",
     "extras/install-viiper-backend.ps1",
     "extras/VIIPER-0.1.3-rc4.5-x64.exe",

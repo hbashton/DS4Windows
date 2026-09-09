@@ -22,10 +22,10 @@
 		     a SustainedLowLatency lease in the process. -->
 		<ServerGarbageCollection>false</ServerGarbageCollection>
 		<ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
-		<AssemblyVersion>5.0.5.0</AssemblyVersion>
-		<FileVersion>5.0.5.0</FileVersion>
-		<Version>5.0.5.0-rc4.5</Version>
-		<InformationalVersion>VIIPERRC4.5</InformationalVersion>
+		<AssemblyVersion>5.0.5.1</AssemblyVersion>
+		<FileVersion>5.0.5.1</FileVersion>
+		<Version>5.0.5.1-rc4.5.1</Version>
+		<InformationalVersion>VIIPERRC4.5.1</InformationalVersion>
 		<IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
 		<Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
 		<Platform Condition=" '$(Platform)' == '' ">x64</Platform>
@@ -138,6 +138,18 @@
 		</EmbeddedResource>
 		<Content Include="..\extras\VIIPER-0.1.3-rc4.5-x64.exe">
 			<Link>extras\VIIPER-0.1.3-rc4.5-x64.exe</Link>
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+		</Content>
+		<!-- Xbox output consumes this explicit deployment configuration beside
+		     the application in both portable and managed installations. -->
+		<Content Include="..\extras\xbox-one-authorized-persona.json">
+			<Link>xbox-one-authorized-persona.json</Link>
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+		</Content>
+		<Content Include="..\extras\XBOX-ONE-PERSONA-NOTICE.md">
+			<Link>extras\XBOX-ONE-PERSONA-NOTICE.md</Link>
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
 		</Content>

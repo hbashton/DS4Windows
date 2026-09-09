@@ -16,6 +16,7 @@ import zipfile
 REPOSITORY = Path(__file__).resolve().parent.parent
 REQUIRED = (
     "DS4Windows.exe", "coreclr.dll", "hostfxr.dll",
+    "xbox-one-authorized-persona.json", "extras/XBOX-ONE-PERSONA-NOTICE.md",
     "extras/install-viiper-backend.ps1", "extras/VIIPER-0.1.3-rc4.5-x64.exe",
     "extras/VIIPER-0.1.3-rc4.5-LICENSES.txt", "extras/VIIPER-0.1.3-rc4.5-PROVENANCE.txt",
     "extras/VIIPER-0.1.3-rc4.5-BUILD-NOTES.txt", "extras/LICENSE.txt",
@@ -37,6 +38,37 @@ VALIDATOR_SPEC.loader.exec_module(VALIDATOR)
 
 
 class LocalizationPackageTests(unittest.TestCase):
+    def test_missing_xbox_persona_is_rejected_before_replacing_package(self):
+        with tempfile.TemporaryDirectory(prefix="ds4w-missing-xbox-persona-") as temporary:
+            root = Path(temporary)
+            publish = root / "x64" / "Release" / "output"
+            publish.mkdir(parents=True)
+            for relative in REQUIRED:
+                if relative == "xbox-one-authorized-persona.json":
+                    continue
+                path = publish / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(("fixture:" + relative).encode("utf-8"))
+            previous = publish.parent / "DS4Windows"
+            previous.mkdir()
+            (previous / "preserve.txt").write_bytes(b"previous published output")
+            archive = publish.parent / "DS4Windows_missing-persona_x64.zip"
+            archive.write_bytes(b"previous archive")
+            result = subprocess.run([
+                sys.executable, str(REPOSITORY / "utils" / "post-build.py"),
+                str(publish), str(REPOSITORY), "missing-persona",
+            ], cwd=root, capture_output=True, text=True)
+            self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertIn("missing: xbox-one-authorized-persona.json", result.stderr)
+            self.assertEqual(b"previous archive", archive.read_bytes())
+            self.assertEqual(b"previous published output", (previous / "preserve.txt").read_bytes())
+            self.assertFalse((publish / "DS4Windows.release").exists())
+
+    def test_installer_also_requires_xbox_persona_and_notice(self):
+        self.assertTrue({"xbox-one-authorized-persona.json",
+                         "extras/XBOX-ONE-PERSONA-NOTICE.md"}.issubset(
+                             VALIDATOR.REQUIRED_PUBLISH_FILES))
+
     def test_actual_composition_preserves_standard_satellites_and_manifests(self):
         with tempfile.TemporaryDirectory(prefix="ds4w-localization-package-") as temporary:
             root = Path(temporary)

@@ -2159,8 +2159,15 @@ namespace DS4Windows
 
         public static bool[] InverseRumbleMotors => m_Config.inverseRumbleMotors;
 
-        public static bool[] Switch2MapXboxImpulseTriggersToHdRumble =>
+        // Keep the original backing field and XML name for saved profiles.
+        public static bool[] MapXboxImpulseTriggers =>
             m_Config.switch2MapXboxImpulseTriggersToHdRumble;
+
+        public static bool[] Switch2MapXboxImpulseTriggersToHdRumble =>
+            MapXboxImpulseTriggers;
+
+        public static bool[] XboxImpulseToAdaptiveTriggers =>
+            m_Config.xboxImpulseToAdaptiveTriggers;
 
         public static bool[] Switch2XboxImpulseDynamicFrequency =>
             m_Config.switch2XboxImpulseDynamicFrequency;
@@ -4439,6 +4446,8 @@ namespace DS4Windows
         {
             true, true, true, true, true, true, true, true, true,
         };
+        public bool[] xboxImpulseToAdaptiveTriggers =
+            Enumerable.Repeat(true, Global.TEST_PROFILE_ITEM_COUNT).ToArray();
         public bool[] switch2XboxImpulseDynamicFrequency =
         {
             true, true, true, true, true, true, true, true, true,
@@ -11080,6 +11089,8 @@ namespace DS4Windows
 
             rumble[device] = DEFAULT_RUMBLE;
             rumbleAutostopTime[device] = 0;
+            switch2MapXboxImpulseTriggersToHdRumble[device] = true;
+            xboxImpulseToAdaptiveTriggers[device] = true;
             switch2XboxBodyRumbleMode[device] = false;
             switch2DualSenseAudioHapticsEnabled[device] = true;
             switch2DualSenseAdaptiveTriggersEnabled[device] = true;

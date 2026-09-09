@@ -24,10 +24,11 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using DS4Windows.Switch2;
 
 namespace DS4Windows.InputDevices
 {
-    public class JoyConDevice : DS4Device
+    public partial class JoyConDevice : DS4Device
     {
         public class RumbleTableData
         {
@@ -223,6 +224,10 @@ namespace DS4Windows.InputDevices
         private byte[] outputReportBuffer;
         private byte[] rumbleReportBuffer;
         private LegacyNintendoRumbleOutput rumbleOutput;
+        private LegacyJoyConHdRumbleDelivery hdRumbleDelivery;
+        private LegacyJoyConHdRumbleAuthority hdRumbleAuthority;
+        private int connectionHapticStarted;
+        private readonly object legacyFeedbackGate = new();
         private byte[] neutralRumbleReportBuffer;
         private int rumbleStopWarningLogged;
         private int inputReportLen;
@@ -634,6 +639,7 @@ namespace DS4Windows.InputDevices
 
         protected override void StopOutputUpdate()
         {
+            hdRumbleDelivery?.Dispose();
             if (rumbleOutput != null && !rumbleOutput.StopAndJoin(neutralRumbleReportBuffer) &&
                 Interlocked.Exchange(ref rumbleStopWarningLogged, 1) == 0)
                 AppLogger.LogToGui("Joy-Con rumble stop could not be confirmed before output retirement. " +
@@ -645,7 +651,11 @@ namespace DS4Windows.InputDevices
             if (rumbleOutput != null) return rumbleOutput;
             neutralRumbleReportBuffer = new byte[rumbleReportBuffer.Length];
             EncodeRumbleData(neutralRumbleReportBuffer, 0, 0);
-            return rumbleOutput = new LegacyNintendoRumbleOutput(rumbleReportBuffer.Length, SubmitRumbleReport);
+            rumbleOutput = new LegacyNintendoRumbleOutput(rumbleReportBuffer.Length, SubmitRumbleReport,
+                IsHdRumbleAuthorityCurrent, neutralRumbleReportBuffer);
+            hdRumbleDelivery = new LegacyJoyConHdRumbleDelivery(rumbleOutput, rumbleReportBuffer.Length,
+                sideType == JoyConSide.Left, IsHdRumbleAuthorityCurrent);
+            return rumbleOutput;
         }
 
         protected unsafe void ReadInput()
@@ -1048,7 +1058,17 @@ namespace DS4Windows.InputDevices
 
                     PublishPhysicalMotion();
 
-                    if (conType == ConnectionType.USB)
+                    if (ProfileConnection != null)
+                    {
+                        // Joined idle activity belongs to both halves and all
+                        // new Nintendo timeout modes override the legacy timer.
+                        if (ShouldNintendoProfileDisconnect() && DisconnectBT(true))
+                        {
+                            timeoutExecuted = true;
+                            return;
+                        }
+                    }
+                    else if (conType == ConnectionType.USB)
                     {
                         if (idleTimeout == 0)
                         {
@@ -1356,20 +1376,31 @@ namespace DS4Windows.InputDevices
 
         public void WriteReport()
         {
+            lock (legacyFeedbackGate)
+            {
             if (rumbleOutput == null) return;
             MergeStates();
+
+            if (!TryGetRumblePreview(out _, out _, out _, out _) && hdRumbleDelivery?.Service() == true)
+                return;
 
             bool dirty = false;
             double tempRatio;
             if (sideType == JoyConSide.Left)
             {
-                tempRatio = currentHap.rumbleState.RumbleMotorStrengthLeftHeavySlow / 255.0;
+                tempRatio = (ProfileConnection?.Group.Joined == false ?
+                    Math.Max(currentHap.rumbleState.RumbleMotorStrengthLeftHeavySlow,
+                        currentHap.rumbleState.RumbleMotorStrengthRightLightFast) :
+                    currentHap.rumbleState.RumbleMotorStrengthLeftHeavySlow) / 255.0;
                 dirty = tempRatio != 0 || tempRatio != currentLeftAmpRatio;
                 currentLeftAmpRatio = tempRatio;
             }
             else if (sideType == JoyConSide.Right)
             {
-                tempRatio = currentHap.rumbleState.RumbleMotorStrengthRightLightFast / 255.0;
+                tempRatio = (ProfileConnection?.Group.Joined == false ?
+                    Math.Max(currentHap.rumbleState.RumbleMotorStrengthLeftHeavySlow,
+                        currentHap.rumbleState.RumbleMotorStrengthRightLightFast) :
+                    currentHap.rumbleState.RumbleMotorStrengthRightLightFast) / 255.0;
                 dirty = tempRatio != 0 || tempRatio != currentRightAmpRatio;
                 currentRightAmpRatio = tempRatio;
             }
@@ -1377,9 +1408,11 @@ namespace DS4Windows.InputDevices
             if (dirty)
             {
                 EncodeRumbleData(rumbleReportBuffer, currentLeftAmpRatio, currentRightAmpRatio);
-                rumbleOutput.Publish(rumbleReportBuffer, currentLeftAmpRatio != 0 || currentRightAmpRatio != 0);
+                rumbleOutput.Publish(rumbleReportBuffer, currentLeftAmpRatio != 0 || currentRightAmpRatio != 0,
+                    ProfileConnection?.Group);
             }
             else rumbleOutput.RequestRetry();
+            }
         }
 
         private bool SubmitRumbleReport(byte[] report)
@@ -1394,6 +1427,162 @@ namespace DS4Windows.InputDevices
 
         protected virtual bool WriteRumbleReport(byte[] report) =>
             hDevice.WriteOutputReportViaInterrupt(report, 100);
+
+        internal static RumbleTableData GetHdRumbleAmplitude(ushort packedAmplitude)
+        {
+            // Retain the pre-existing physical amplitude ceiling. The shared
+            // synthesis uses 0..1023; legacy's non-linear table uses 0..1000.
+            int index = Math.Min(AMP_LIMIT_MAX, (int)((uint)packedAmplitude * 1000 / 1023));
+            return compiledRumbleTable[index];
+        }
+
+        private bool IsHdRumbleAuthorityCurrent(object authority)
+        {
+            if (authority == null) return true; // unconditional local neutral
+            var group = authority as LegacyJoyConGroup;
+            if (authority is LegacyJoyConHdRumbleAuthority richAuthority)
+            {
+                group = richAuthority.Group;
+                if (group.Owner.Slot < 0 || group.Owner.Slot >= Global.TEST_PROFILE_ITEM_COUNT ||
+                    Global.ReadProfileSwitchRevision(group.Owner.Slot) != richAuthority.ProfileRevision) return false;
+            }
+            if (group == null) return false;
+            var entry = ProfileConnection;
+            return entry != null && ReferenceEquals(Volatile.Read(ref entry.Group), group) &&
+                group.Owner.Slot >= 0 && group.Owner.Slot < Global.EnableOutputDataToDS4.Length &&
+                Volatile.Read(ref Global.EnableOutputDataToDS4[group.Owner.Slot]) &&
+                Volatile.Read(ref group.Active) && Volatile.Read(ref entry.Connected) && !Volatile.Read(ref entry.Paused) &&
+                Volatile.Read(ref group.Owner.Connected) && !Volatile.Read(ref group.Owner.Paused) &&
+                (!group.Joined || Volatile.Read(ref group.Other.Connected) && !Volatile.Read(ref group.Other.Paused));
+        }
+
+        internal bool TryPublishHdRumble(in Switch2HdRumbleGroup left, in Switch2HdRumbleGroup right,
+            bool streaming, int delayMilliseconds, bool terminal = false,
+            LegacyJoyConHdRumbleSource source = LegacyJoyConHdRumbleSource.Generic,
+            Switch2HdRumbleGroup leftControl = default, Switch2HdRumbleGroup rightControl = default)
+        {
+            var entry = ProfileConnection;
+            var group = entry == null ? null : Volatile.Read(ref entry.Group);
+            if (group == null || !ReferenceEquals(group.Owner, entry)) return false;
+            bool suppressed = group.Owner.Slot >= 0 && group.Owner.Slot < Global.EnableOutputDataToDS4.Length &&
+                (!Volatile.Read(ref Global.EnableOutputDataToDS4[group.Owner.Slot]) ||
+                    Volatile.Read(ref group.Owner.Paused) || Volatile.Read(ref entry.Paused) ||
+                    group.Joined && Volatile.Read(ref group.Other.Paused));
+            if (terminal || suppressed)
+            {
+                // Stop is a local neutral obligation even while the cold link
+                // path pauses nonzero feedback. Do not turn pause into a fatal
+                // Xbox feedback-owner rejection. This never presents a waveform.
+                SetLocalLegacyRumble(0, 0);
+                if (group.Joined && group.Other.Device is JoyConDevice other) other.SetLocalLegacyRumble(0, 0);
+                return true;
+            }
+            if (!IsHdRumbleAuthorityCurrent(group)) return false;
+            if (!group.Joined)
+            {
+                var folded = LegacyJoyConHdRumble.FoldStandalone(left, right);
+                return PublishLocalHdRumble(folded, group, streaming, delayMilliseconds, terminal, source,
+                    LegacyJoyConHdRumble.FoldStandalone(leftControl, rightControl));
+            }
+            if (group.Left.Device is not JoyConDevice leftDevice || group.Right.Device is not JoyConDevice rightDevice ||
+                leftDevice.hdRumbleDelivery == null || rightDevice.hdRumbleDelivery == null) return false;
+            bool leftAccepted = leftDevice.PublishLocalHdRumble(left, group, streaming, delayMilliseconds, terminal, source, leftControl);
+            bool rightAccepted = rightDevice.PublishLocalHdRumble(right, group, streaming, delayMilliseconds, terminal, source, rightControl);
+            return leftAccepted && rightAccepted;
+        }
+
+        private bool PublishLocalHdRumble(in Switch2HdRumbleGroup waveform, LegacyJoyConGroup group,
+            bool streaming, int delayMilliseconds, bool terminal, LegacyJoyConHdRumbleSource source,
+            in Switch2HdRumbleGroup control)
+        {
+            lock (legacyFeedbackGate)
+            {
+                // The explicit preview owns physical output until released;
+                // discarded game frames must not resume as stale feedback.
+                if (TryGetRumblePreview(out _, out _, out _, out _)) return true;
+                return hdRumbleDelivery?.Publish(waveform, GetHdRumbleAuthority(group), streaming, delayMilliseconds, terminal, source, control) == true;
+            }
+        }
+
+        private LegacyJoyConHdRumbleAuthority GetHdRumbleAuthority(LegacyJoyConGroup group)
+        {
+            long revision = Global.ReadProfileSwitchRevision(group.Owner.Slot);
+            var credential = Volatile.Read(ref hdRumbleAuthority);
+            if (credential == null || !ReferenceEquals(credential.Group, group) || credential.ProfileRevision != revision)
+                Volatile.Write(ref hdRumbleAuthority, credential = new(group, revision));
+            return credential;
+        }
+
+        internal bool TryStartConnectionHaptic()
+        {
+            lock (legacyFeedbackGate)
+            {
+            var entry = ProfileConnection;
+            var group = entry == null ? null : Volatile.Read(ref entry.Group);
+            if (!connectionOpened || group == null || !ReferenceEquals(group.Owner, entry) ||
+                !IsHdRumbleAuthorityCurrent(group) || hdRumbleDelivery == null ||
+                group.Owner.Slot < 0 || group.Owner.Slot >= Global.Switch2ConnectionHapticEnabled.Length ||
+                !Global.Switch2ConnectionHapticEnabled[group.Owner.Slot] ||
+                !Global.EnableOutputDataToDS4[group.Owner.Slot] ||
+                TryGetRumblePreview(out _, out _, out _, out _)) return false;
+            var rumble = GetLatestRumbleState();
+            if (rumble.RumbleMotorStrengthLeftHeavySlow != 0 || rumble.RumbleMotorStrengthRightLightFast != 0 ||
+                Interlocked.CompareExchange(ref connectionHapticStarted, 1, 0) != 0 ||
+                !Switch2HdRumbleBodyTuning.TryCreate(Global.getRumbleBoost(group.Owner.Slot), out var tuning)) return false;
+            bool accepted = hdRumbleDelivery.TryStartConnectionCue(GetHdRumbleAuthority(group), tuning);
+            if (accepted && group.Joined && group.Other.Device is JoyConDevice other &&
+                !other.TryGetRumblePreview(out _, out _, out _, out _))
+                other.hdRumbleDelivery?.TryStartConnectionCue(other.GetHdRumbleAuthority(group), tuning);
+            return accepted;
+            }
+        }
+
+        public override void setRumble(byte rightLightFastMotor, byte leftHeavySlowMotor)
+        {
+            SetLocalLegacyRumble(rightLightFastMotor, leftHeavySlowMotor);
+            var entry = ProfileConnection;
+            var group = entry == null ? null : Volatile.Read(ref entry.Group);
+            if (group?.Joined == true && ReferenceEquals(group.Owner, entry) && IsHdRumbleAuthorityCurrent(group) &&
+                group.Other.Device is JoyConDevice other)
+                other.SetLocalLegacyRumble(rightLightFastMotor, leftHeavySlowMotor);
+        }
+
+        private void SetLocalLegacyRumble(byte light, byte heavy)
+        {
+            lock (legacyFeedbackGate)
+            {
+                hdRumbleDelivery?.Clear();
+                base.setRumble(light, heavy);
+            }
+        }
+
+        public override void SetRumblePreview(bool lightMotorActive, byte lightMotorStrength,
+            bool heavyMotorActive, byte heavyMotorStrength)
+        {
+            lock (legacyFeedbackGate)
+            {
+            hdRumbleDelivery?.Clear();
+            base.SetRumblePreview(lightMotorActive, lightMotorStrength, heavyMotorActive, heavyMotorStrength);
+            }
+            var entry = ProfileConnection;
+            var group = entry == null ? null : Volatile.Read(ref entry.Group);
+            if (group?.Joined == true && ReferenceEquals(group.Owner, entry) && IsHdRumbleAuthorityCurrent(group) &&
+                group.Other.Device is JoyConDevice other)
+                other.SetRumblePreview(lightMotorActive, lightMotorStrength, heavyMotorActive, heavyMotorStrength);
+        }
+
+        public override void ClearRumblePreview()
+        {
+            lock (legacyFeedbackGate)
+            {
+            hdRumbleDelivery?.Clear();
+            base.ClearRumblePreview();
+            }
+            var entry = ProfileConnection;
+            var group = entry == null ? null : Volatile.Read(ref entry.Group);
+            if (group?.Joined == true && ReferenceEquals(group.Owner, entry) && IsHdRumbleAuthorityCurrent(group) &&
+                group.Other.Device is JoyConDevice other) other.ClearRumblePreview();
+        }
 
         public override bool IsAlive()
         {
@@ -1716,6 +1905,14 @@ namespace DS4Windows.InputDevices
 
         public override bool DisconnectBT(bool callRemoval = false)
         {
+            if (!TryBeginNintendoBluetoothDisconnect(out var peer)) return false;
+            if (peer?.Device is JoyConDevice other)
+                other.queueEvent(() => other.CompleteNintendoPeerDisconnect(peer, callRemoval));
+            return DisconnectBluetoothPhysical(callRemoval);
+        }
+
+        protected virtual bool DisconnectBluetoothPhysical(bool callRemoval)
+        {
             StopOutputUpdate();
             Detach();
 
@@ -1753,24 +1950,10 @@ namespace DS4Windows.InputDevices
             Console.WriteLine("Disconnect successful: " + success);
             success = true;
 
-            // Need to grab reference here as Removal call would
-            // remove device reference
-            JoyConDevice tempJointDevice = jointDevice;
             if (callRemoval)
             {
                 isDisconnecting = true;
                 Removal?.Invoke(this, EventArgs.Empty);
-            }
-
-            // Place check here for now due to direct calls in other portions of
-            // code. Would be better placed in DisconnectWireless method
-            if (primaryDevice &&
-                tempJointDevice != null)
-            {
-                tempJointDevice.queueEvent(() =>
-                {
-                    tempJointDevice.DisconnectBT(callRemoval);
-                });
             }
 
             return success;
@@ -1904,7 +2087,16 @@ namespace DS4Windows.InputDevices
 
         // The physical reader is the sole caller. This reuses the existing
         // synchronous borrowed envelope, not one allocation per IMU sample.
-        internal void PublishPhysicalMotion() => sixAxis.FireProjectedSixAxisEvent(cState);
+        internal LegacyJoyConConnection ProfileConnection { get; set; }
+
+        internal void PublishPhysicalMotion()
+        {
+            // The unified Nintendo route composes motion once, after selecting
+            // the active hand(s). Its logical callback replaces this raw path.
+            if (ProfileConnection == null) sixAxis.FireProjectedSixAxisEvent(cState);
+        }
+
+        internal void PublishProjectedMotion(DS4State state) => sixAxis.FireProjectedSixAxisEvent(state);
 
         // CopyTo alone aliases Motion and makes the next physical sample
         // overwrite its own previous frame. Preserve exact scalar motion in

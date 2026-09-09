@@ -1123,6 +1123,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public event EventHandler ProfileEditorSectionDescriptionChanged;
 
         public string updaterExe = Environment.Is64BitProcess ? "DS4Updater.exe" : "DS4Updater_x86.exe";
+        private PortableUpdaterTicket preparedPortableUpdater;
+        public string LastUpdaterFailure { get; private set; }
 
         private string DownloadUpstreamUpdaterVersion()
         {
@@ -1147,7 +1149,24 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public bool RunUpdaterCheck(bool launch, out string upstreamVersion)
         {
             upstreamVersion = string.Empty;
+            LastUpdaterFailure = null;
+            preparedPortableUpdater = null;
             if (PortableLabContext.IsActive) return false;
+            if (PortableBrokerContext.IsActive)
+            {
+                try
+                {
+                    preparedPortableUpdater = PortableUpdaterBootstrap.PrepareAsync(
+                        App.requestClient, Global.exedirpath).GetAwaiter().GetResult();
+                    upstreamVersion = preparedPortableUpdater.Version.ToString(3);
+                    return true;
+                }
+                catch (Exception exception)
+                {
+                    LastUpdaterFailure = "Portable update was not started. " + exception.Message;
+                    return false;
+                }
+            }
             string destPath = Path.Combine(Global.exedirpath, "DS4Updater.exe");
             bool updaterExists = File.Exists(destPath);
             upstreamVersion = DownloadUpstreamUpdaterVersion();
@@ -1227,7 +1246,21 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public bool LauchDS4Updater(string releaseTag = null)
         {
-            if (PortableLabContext.IsActive || PortableBrokerContext.IsActive) return false;
+            if (PortableLabContext.IsActive) return false;
+            if (PortableBrokerContext.IsActive)
+            {
+                try
+                {
+                    return PortableUpdaterBootstrap.Launch(preparedPortableUpdater,
+                        releaseTag, Global.exeFileName);
+                }
+                catch (Exception exception)
+                {
+                    LastUpdaterFailure = "Portable update was not started. " + exception.Message;
+                    return false;
+                }
+                finally { preparedPortableUpdater = null; }
+            }
             bool launch = false;
             using (Process p = new Process())
             {

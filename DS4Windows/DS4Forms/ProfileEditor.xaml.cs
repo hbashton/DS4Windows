@@ -89,6 +89,11 @@ namespace DS4WinWPF.DS4Forms
 
         private bool keepsize;
         private bool controllerReadingsTabActive = false;
+        private int mappingReadingsDevice = -1;
+        private DS4Device mappingReadingsSource;
+        private bool mappingReadingsActive;
+        private bool showingMappingDialog;
+        private bool liveInputPreviewVisible;
 
         public bool Keepsize
         {
@@ -512,16 +517,20 @@ namespace DS4WinWPF.DS4Forms
 
         private void RefreshJoyConDiagram()
         {
-            bool automatic = diagramPhysicalController is Switch2RuntimeInputDevice &&
+            bool automatic = diagramPhysicalController != null &&
                 diagramPhysicalController.DeviceType is InputDeviceType.Switch2JoyConLeft or
-                    InputDeviceType.Switch2JoyConRight or InputDeviceType.Switch2JoyConJoined;
+                    InputDeviceType.Switch2JoyConRight or InputDeviceType.Switch2JoyConJoined or
+                    InputDeviceType.JoyConL or InputDeviceType.JoyConR or InputDeviceType.JoyConGrip;
             controllerDiagramSelector.IsEnabled = !automatic;
             controllerDiagramSelector.ToolTip = automatic ? "Follows this Joy-Con's holding style." : null;
             if (automatic)
             {
-                var runtime = (Switch2RuntimeInputDevice)diagramPhysicalController;
-                JoyConView view = JoyConArtwork.ResolveView(runtime.DeviceType,
-                    runtime.ResolveStandaloneJoyConHoldMode(Global.Switch2JoyConStandaloneHoldMode[deviceNum]));
+                InputDeviceType type = diagramPhysicalController is JoyConDevice { ProfileConnection.Group.Joined: true } ?
+                    InputDeviceType.JoyConGrip : diagramPhysicalController.DeviceType;
+                var hold = Global.Switch2JoyConStandaloneHoldMode[deviceNum];
+                if (diagramPhysicalController is Switch2RuntimeInputDevice runtime)
+                    hold = runtime.ResolveStandaloneJoyConHoldMode(hold);
+                JoyConView view = JoyConArtwork.ResolveView(type, hold);
                 ConfigureControllerDiagram((ControllerDiagramKind)((int)ControllerDiagramKind.JoyCon + (int)view), true);
             }
             else if (controllerDiagramKind >= ControllerDiagramKind.JoyCon)
@@ -1914,6 +1923,8 @@ namespace DS4WinWPF.DS4Forms
 
         public void Reload(int device, ProfileEntity profile = null, bool profileAlreadyLoaded = false)
         {
+            mappingReadingsActive = false;
+            mappingLiveInput.EnableControl(false);
             profileSettingsTabCon.DataContext = null;
             mappingListBox.DataContext = null;
             specialActionsTab.DataContext = null;
@@ -1955,6 +1966,13 @@ namespace DS4WinWPF.DS4Forms
             ColorByBatteryPerCheck();
 
             int readingsDevice = ResolveReadingsDeviceIndex(device, triggerPreviewDeviceIndex);
+            mappingReadingsDevice = readingsDevice;
+            DS4Device[] controllers = Program.rootHub?.DS4Controllers;
+            mappingReadingsSource = controllers != null &&
+                (uint)readingsDevice < (uint)controllers.Length ? controllers[readingsDevice] : null;
+            mappingLiveInput.UseDevice(readingsDevice, mappingReadingsSource);
+            mappingReadingsActive = true;
+            RefreshMappingLiveInput();
             if (readingsDevice >= 0)
             {
                 useControllerUD.Value = readingsDevice + 1;
@@ -2100,7 +2118,7 @@ namespace DS4WinWPF.DS4Forms
             MappedControl mpControl = mappingListVM.Mappings[mappingListVM.SelectedIndex];
             BindingWindow window = new BindingWindow(deviceNum, mpControl.Setting);
             window.Owner = App.Current.MainWindow;
-            window.ShowDialog();
+            ShowMappingBindingWindow(window);
             mpControl.UpdateMappingName();
             UpdateHighlightLabel(mpControl);
             Global.CacheProfileCustomsFlags(profileSettingsVM.Device);
@@ -2710,7 +2728,7 @@ namespace DS4WinWPF.DS4Forms
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
             };
             window.SelectSecondAction();
-            window.ShowDialog();
+            ShowMappingBindingWindow(window);
             control.UpdateMappingName();
             UpdateHighlightLabel(control);
             Global.CacheProfileCustomsFlags(profileSettingsVM.Device);
@@ -2924,6 +2942,8 @@ namespace DS4WinWPF.DS4Forms
         }
         private void ProfileEditor_Closed(object sender, EventArgs e)
         {
+            mappingReadingsActive = false;
+            mappingLiveInput.EnableControl(false);
             profileSettingsVM.UseControllerReadout = false;
             inputTimer.Stop();
             conReadingsUserCon.EnableControl(false);
@@ -2943,12 +2963,50 @@ namespace DS4WinWPF.DS4Forms
             }
         }
 
+        private void RefreshMappingLiveInput()
+        {
+            mappingLiveInput?.EnableControl(liveInputPreviewVisible && mappingReadingsActive && !showingMappingDialog &&
+                sidebarTabControl.SelectedItem == controlsTab);
+        }
+
+        private void LiveInputPreviewButton_Click(object sender, RoutedEventArgs e)
+        {
+            SetLiveInputPreviewVisible(!liveInputPreviewVisible);
+        }
+
+        private void SetLiveInputPreviewVisible(bool visible)
+        {
+            liveInputPreviewVisible = visible;
+            liveInputPreviewButton.Content = visible ? "Hide live preview" : "Show live preview";
+            mappingLiveInput.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+            RefreshMappingLiveInput();
+        }
+
+        private void ShowMappingBindingWindow(BindingWindow window)
+        {
+            // Reuse this editor's exact physical source, not its profile slot or
+            // a different controller which may have reused the slot meanwhile.
+            window.SetLiveInputDevice(mappingReadingsDevice, mappingReadingsSource);
+            window.LiveInputPreviewVisible = liveInputPreviewVisible;
+            showingMappingDialog = true;
+            RefreshMappingLiveInput();
+            try
+            {
+                window.ShowDialog();
+            }
+            finally
+            {
+                showingMappingDialog = false;
+                SetLiveInputPreviewVisible(window.LiveInputPreviewVisible);
+            }
+        }
+
         private void ShowControlBindingWindow()
         {
             MappedControl mpControl = mappingListVM.Mappings[mappingListVM.SelectedIndex];
             BindingWindow window = new BindingWindow(deviceNum, mpControl.Setting);
             window.Owner = App.Current.MainWindow;
-            window.ShowDialog();
+            ShowMappingBindingWindow(window);
             mpControl.UpdateMappingName();
             UpdateHighlightLabel(mpControl);
             Global.CacheProfileCustomsFlags(profileSettingsVM.Device);
@@ -2984,6 +3042,7 @@ namespace DS4WinWPF.DS4Forms
 
         private void SidebarTabControl_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            RefreshMappingLiveInput();
             if (sidebarTabControl.SelectedItem == contReadingsTab)
             {
                 controllerReadingsTabActive = true;
@@ -3003,7 +3062,7 @@ namespace DS4WinWPF.DS4Forms
             MappedControl mpControl = mappingListVM.ControlMap[control];
             BindingWindow window = new BindingWindow(deviceNum, mpControl.Setting);
             window.Owner = App.Current.MainWindow;
-            window.ShowDialog();
+            ShowMappingBindingWindow(window);
             mpControl.UpdateMappingName();
             UpdateHighlightLabel(mpControl);
             Global.CacheProfileCustomsFlags(profileSettingsVM.Device);
@@ -3016,7 +3075,7 @@ namespace DS4WinWPF.DS4Forms
             MappedControl mpControl = mappingListVM.ControlMap[control];
             BindingWindow window = new BindingWindow(deviceNum, mpControl.Setting);
             window.Owner = App.Current.MainWindow;
-            window.ShowDialog();
+            ShowMappingBindingWindow(window);
             mpControl.UpdateMappingName();
             UpdateHighlightLabel(mpControl);
             Global.CacheProfileCustomsFlags(profileSettingsVM.Device);
@@ -3087,20 +3146,19 @@ namespace DS4WinWPF.DS4Forms
 
         private void GyroCalibration_Click(object sender, RoutedEventArgs e)
         {
-            int deviceNum = profileSettingsVM.FuncDevNum;
-            if (deviceNum < ControlService.CURRENT_DS4_CONTROLLER_LIMIT)
+            DS4Device d = ResolveControllerContext(deviceNum, profileSettingsVM.FuncDevNum);
+            if (d is JoyConDevice original && original.ProfileConnection != null)
             {
-                DS4Device d = App.rootHub.DS4Controllers[deviceNum];
-                if (d == null)
-                {
-                    return;
-                }
-                d.ResetContinuousGyroCalibration();
-                if (d.JointDeviceSlotNumber != DS4Device.DEFAULT_JOINT_SLOT_NUMBER)
-                {
-                    DS4Device tempDev = App.rootHub.DS4Controllers[d.JointDeviceSlotNumber];
-                    tempDev?.ResetContinuousGyroCalibration();
-                }
+                LegacyJoyConProfileUiActions.TryResetGyroCalibration(original.ProfileConnection,
+                    static target => target.ResetContinuousGyroCalibration(),
+                    static (target, action) => target.queueEvent(action));
+                return;
+            }
+            d?.ResetContinuousGyroCalibration();
+            if (d != null && (uint)d.JointDeviceSlotNumber < ControlService.CURRENT_DS4_CONTROLLER_LIMIT)
+            {
+                DS4Device tempDev = App.rootHub?.DS4Controllers[d.JointDeviceSlotNumber];
+                tempDev?.ResetContinuousGyroCalibration();
             }
         }
 
@@ -3109,7 +3167,14 @@ namespace DS4WinWPF.DS4Forms
 
         private void Switch2StickCalibration_Click(object sender, RoutedEventArgs e)
         {
-            var runtime = ResolveControllerContext(deviceNum, profileSettingsVM.FuncDevNum) as Switch2RuntimeInputDevice;
+            var source = ResolveControllerContext(deviceNum, profileSettingsVM.FuncDevNum);
+            if (source is JoyConDevice)
+            {
+                MessageBox.Show("Original Joy-Cons use their built-in stick calibration. This PC calibration tool currently supports Switch 2 controllers only. You can still adjust dead zones and stick response in this profile.",
+                    "Stick calibration", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            var runtime = source as Switch2RuntimeInputDevice;
             if (runtime == null || runtime.RuntimeState != Switch2RuntimeInputDeviceState.Active)
             {
                 MessageBox.Show("Connect and select an active Switch 2 Pro or Joy-Con 2 controller before calibrating its sticks.",
@@ -3125,9 +3190,14 @@ namespace DS4WinWPF.DS4Forms
         private void Switch2MagnetometerCalibration_Click(object sender,
             RoutedEventArgs e)
         {
-            Switch2RuntimeInputDevice runtime = ResolveControllerContext(
-                deviceNum, profileSettingsVM.FuncDevNum) as
-                    Switch2RuntimeInputDevice;
+            var source = ResolveControllerContext(deviceNum, profileSettingsVM.FuncDevNum);
+            if (source is JoyConDevice)
+            {
+                MessageBox.Show("Original Joy-Cons do not have a compass sensor. Gyro aiming and horizon stabilization still work; use Calibrate gyro to correct motion drift.",
+                    "Compass calibration", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            Switch2RuntimeInputDevice runtime = source as Switch2RuntimeInputDevice;
             if (runtime == null)
             {
                 MessageBox.Show("Connect and select a Switch 2 Pro or Joy-Con 2 controller before calibrating its magnetometer.",
@@ -3237,7 +3307,7 @@ namespace DS4WinWPF.DS4Forms
             MappedControl mpControl = mappingListVM.ControlMap[control];
             BindingWindow window = new BindingWindow(deviceNum, mpControl.Setting);
             window.Owner = App.Current.MainWindow;
-            window.ShowDialog();
+            ShowMappingBindingWindow(window);
             mpControl.UpdateMappingName();
             Global.CacheProfileCustomsFlags(profileSettingsVM.Device);
         }
@@ -3270,7 +3340,7 @@ namespace DS4WinWPF.DS4Forms
             MappedControl mpControl = mappingListVM.ControlMap[ds4control];
             BindingWindow window = new BindingWindow(deviceNum, mpControl.Setting);
             window.Owner = App.Current.MainWindow;
-            window.ShowDialog();
+            ShowMappingBindingWindow(window);
             mpControl.UpdateMappingName();
             Global.CacheProfileCustomsFlags(profileSettingsVM.Device);
         }

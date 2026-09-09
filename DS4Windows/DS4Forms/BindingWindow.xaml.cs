@@ -55,6 +55,11 @@ namespace DS4WinWPF.DS4Forms
         private Button highlightBtn;
         private ExposeMode expose;
         private OutContType configuredOutputType = OutContType.ViiperX360;
+        private bool hasLiveInputContext;
+        private bool liveInputPreviewRequested;
+        private bool liveInputWindowClosed;
+        private bool liveInputContextBoundsApplied;
+        private bool liveInputBoundsApplied;
 
         public enum ExposeMode : uint
         {
@@ -113,9 +118,148 @@ namespace DS4WinWPF.DS4Forms
                 //otherKeysMouseGrid.Columns = 2;
                 Width = 950;
                 Height = 300;
+                fullPanel.MinWidth = 910;
+                fullPanel.MinHeight = 250;
             }
 
             ChangeForCurrentAction();
+            Loaded += BindingWindow_Loaded;
+            Unloaded += BindingWindow_Unloaded;
+            IsVisibleChanged += BindingWindow_IsVisibleChanged;
+            Closed += BindingWindow_Closed;
+        }
+
+        /// <summary>Explicit physical context; the edited profile slot is not a device identity.</summary>
+        public void SetLiveInputDevice(int physicalIndex, DS4Device expectedDevice)
+        {
+            ConfigureLiveInputContext(physicalIndex);
+            bindingLiveInput.UseDevice(hasLiveInputContext ? physicalIndex : -1,
+                hasLiveInputContext ? expectedDevice : null);
+            UpdateLiveInputObservation();
+        }
+
+        public void SetLiveInputDevice(int physicalIndex)
+        {
+            ConfigureLiveInputContext(physicalIndex);
+            bindingLiveInput.UseDevice(hasLiveInputContext ? physicalIndex : -1);
+            UpdateLiveInputObservation();
+        }
+
+        public bool LiveInputPreviewVisible
+        {
+            get => hasLiveInputContext && liveInputPreviewRequested;
+            set
+            {
+                liveInputPreviewRequested = value;
+                UpdateLiveInputPresentation();
+                UpdateLiveInputObservation();
+            }
+        }
+
+        private void ConfigureLiveInputContext(int physicalIndex)
+        {
+            bindingLiveInput.EnableControl(false);
+            hasLiveInputContext = ShouldShowLiveInput(expose, physicalIndex);
+            UpdateLiveInputPresentation();
+        }
+
+        private void UpdateLiveInputPresentation()
+        {
+            liveInputPreviewToggle.Visibility = hasLiveInputContext ?
+                Visibility.Visible : Visibility.Collapsed;
+            liveInputPreviewToggle.Content = LiveInputPreviewVisible ?
+                "Hide live preview" : "Show live preview";
+            liveInputPreviewScroll.Visibility = LiveInputPreviewVisible ?
+                Visibility.Visible : Visibility.Collapsed;
+            bindingLiveInput.Visibility = LiveInputPreviewVisible ?
+                Visibility.Visible : Visibility.Collapsed;
+            // Reserve only the compact toggle row before first show. Dialogs
+            // without controller context keep their original dimensions.
+            if (expose == ExposeMode.Full && !IsLoaded && !liveInputContextBoundsApplied)
+                Height = hasLiveInputContext ? (LiveInputPreviewVisible ? 710 : 576) : 540;
+            if (IsLoaded && hasLiveInputContext)
+                ApplyLiveInputWindowBounds();
+        }
+
+        private void LiveInputPreviewToggle_Click(object sender, RoutedEventArgs e) =>
+            LiveInputPreviewVisible = !LiveInputPreviewVisible;
+
+        internal static bool ShouldShowLiveInput(ExposeMode mode, int physicalIndex) =>
+            mode == ExposeMode.Full && physicalIndex >= 0 &&
+            physicalIndex < ControlService.CURRENT_DS4_CONTROLLER_LIMIT;
+
+        internal static bool ShouldObserveLiveInput(bool hasContext, bool previewVisible,
+            bool loaded, bool visible, bool closed) =>
+            hasContext && previewVisible && loaded && visible && !closed;
+
+        internal static Size GetLiveInputWindowSize(double workWidth, double workHeight,
+            bool previewVisible = true)
+        {
+            const double margin = 24;
+            double desiredHeight = previewVisible ? 710 : 576;
+            return new Size(
+                double.IsFinite(workWidth) && workWidth > margin ?
+                    Math.Min(1020, workWidth - margin) : 1020,
+                double.IsFinite(workHeight) && workHeight > margin ?
+                    Math.Min(desiredHeight, workHeight - margin) : desiredHeight);
+        }
+
+        internal static Point GetLiveInputWindowPosition(Rect workArea, Size windowSize,
+            Point currentPosition)
+        {
+            const double margin = 12;
+            double left = workArea.Left + margin;
+            double top = workArea.Top + margin;
+            return new Point(
+                double.IsFinite(currentPosition.X) ? Math.Clamp(currentPosition.X,
+                    left, Math.Max(left, workArea.Right - margin - windowSize.Width)) : left,
+                double.IsFinite(currentPosition.Y) ? Math.Clamp(currentPosition.Y,
+                    top, Math.Max(top, workArea.Bottom - margin - windowSize.Height)) : top);
+        }
+
+        private void ApplyLiveInputWindowBounds()
+        {
+            if (liveInputWindowClosed || (LiveInputPreviewVisible ?
+                liveInputBoundsApplied : liveInputContextBoundsApplied)) return;
+            // WorkingArea is in physical pixels. Convert with this window's
+            // current DPI so the strip and editor fit its actual monitor.
+            var handle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+            var working = System.Windows.Forms.Screen.FromHandle(handle).WorkingArea;
+            Matrix fromDevice = PresentationSource.FromVisual(this)?.CompositionTarget?.TransformFromDevice ??
+                Matrix.Identity;
+            Vector workSize = fromDevice.Transform(new Vector(working.Width, working.Height));
+            Size bounds = GetLiveInputWindowSize(workSize.X, workSize.Y, LiveInputPreviewVisible);
+            Point workOrigin = fromDevice.Transform(new Point(working.Left, working.Top));
+            Point position = GetLiveInputWindowPosition(new Rect(workOrigin,
+                new Size(workSize.X, workSize.Y)), bounds, new Point(Left, Top));
+            Width = bounds.Width;
+            Height = bounds.Height;
+            Left = position.X;
+            Top = position.Y;
+            liveInputContextBoundsApplied = true;
+            if (LiveInputPreviewVisible) liveInputBoundsApplied = true;
+        }
+
+        private void UpdateLiveInputObservation() => bindingLiveInput.EnableControl(
+            ShouldObserveLiveInput(hasLiveInputContext, LiveInputPreviewVisible, IsLoaded, IsVisible,
+                liveInputWindowClosed));
+
+        private void BindingWindow_Loaded(object sender, RoutedEventArgs e)
+        {
+            if (hasLiveInputContext) ApplyLiveInputWindowBounds();
+            UpdateLiveInputObservation();
+        }
+
+        private void BindingWindow_Unloaded(object sender, RoutedEventArgs e) =>
+            bindingLiveInput.EnableControl(false);
+
+        private void BindingWindow_IsVisibleChanged(object sender,
+            DependencyPropertyChangedEventArgs e) => UpdateLiveInputObservation();
+
+        private void BindingWindow_Closed(object sender, EventArgs e)
+        {
+            liveInputWindowClosed = true;
+            bindingLiveInput.EnableControl(false);
         }
 
         internal void SelectSecondAction()

@@ -64,6 +64,7 @@ internal readonly record struct Switch2DualSenseDelayedPolicyGuard(
 internal sealed class Switch2DualSenseFeedbackPolicyLane
 {
     private readonly object gate = new();
+    private readonly NintendoDualSenseRumbleSourceState rumbleSourceState = new();
     private readonly byte[] retainedFeedback =
         new byte[ViiperOutDevice.DualSenseAtomicFeedbackLength];
     private readonly Func<int, Switch2DualSenseConversionPolicy> readPolicy;
@@ -86,6 +87,7 @@ internal sealed class Switch2DualSenseFeedbackPolicyLane
     private ulong retainedExpiry;
     private ulong retainedPublicationRevision;
     private long retainedStreamGeneration;
+    private NintendoDualSenseRumbleSource retainedRumbleSource;
 
     internal Switch2DualSenseFeedbackPolicyLane(
         Func<int, Switch2DualSenseConversionPolicy> readPolicy,
@@ -102,7 +104,7 @@ internal sealed class Switch2DualSenseFeedbackPolicyLane
         bool rightTriggerActive, int bodyStrengthPercent,
         bool xboxBodyCarrierMode, int xboxBodyFrequencyLevel,
         int rumbleDelayMilliseconds, long profileRevision,
-        long streamGeneration = 0)
+        long streamGeneration = 0, bool freshNativeOutput = true)
     {
         if (session == null || feedback == null || feedbackLength < 6 ||
             feedbackLength > feedback.Length ||
@@ -112,6 +114,9 @@ internal sealed class Switch2DualSenseFeedbackPolicyLane
         }
         lock (gate)
         {
+            NintendoDualSenseRumbleSource rumbleSource = rumbleSourceState.Resolve(
+                session, deviceIndex, profileRevision, streamGeneration,
+                feedback.AsSpan(0, feedbackLength), freshNativeOutput);
             // A newer structurally valid source attempt supersedes the source
             // bytes even if its clock/publication subsequently fails. Keep
             // only an exact cleanup receipt for this same session/slot: it can
@@ -137,7 +142,7 @@ internal sealed class Switch2DualSenseFeedbackPolicyLane
                     rightTriggerActive, policy, bodyStrengthPercent,
                     xboxBodyCarrierMode, xboxBodyFrequencyLevel,
                     rumbleDelayMilliseconds, profileRevision, 0, 0,
-                    out ulong publicationRevision, deviceIndex, streamGeneration);
+                    out ulong publicationRevision, deviceIndex, streamGeneration, rumbleSource);
             if (publicationRevision == 0)
             {
                 return false;
@@ -163,6 +168,7 @@ internal sealed class Switch2DualSenseFeedbackPolicyLane
             retainedExpiry = now + ControllerFeedbackFrame.MaxTimeToLiveMicroseconds;
             retainedPublicationRevision = publicationRevision;
             retainedStreamGeneration = streamGeneration;
+            retainedRumbleSource = rumbleSource;
             return accepted;
         }
     }
@@ -205,7 +211,7 @@ internal sealed class Switch2DualSenseFeedbackPolicyLane
                     rightActive, policy, retainedBodyStrength,
                     retainedXboxCarrierMode, retainedXboxFrequency, 0,
                     profileRevision, retainedExpiry, retainedPublicationRevision,
-                    out publicationRevision, deviceIndex, streamGeneration);
+                    out publicationRevision, deviceIndex, streamGeneration, retainedRumbleSource);
             if (accepted)
             {
                 retainedPolicy = policy;
@@ -242,6 +248,7 @@ internal sealed class Switch2DualSenseFeedbackPolicyLane
         {
             retainedLength = 0;
             retainedSession = null;
+            rumbleSourceState.Reset();
         }
     }
 
@@ -253,21 +260,22 @@ internal sealed class Switch2DualSenseFeedbackPolicyLane
         int rumbleDelayMilliseconds, long profileRevision,
         ulong expiresAtMicroseconds, ulong expectedPublicationRevision,
         out ulong resultingPublicationRevision, int deviceIndex,
-        long streamGeneration)
+        long streamGeneration, in NintendoDualSenseRumbleSource rumbleSource)
     {
         bool rich = ViiperOutDevice.TryBuildSwitch2DualSenseHdRumbleGroups(
             feedback, feedbackLength, hapticsReportOffset,
             leftTriggerActive, rightTriggerActive, out var left, out var right,
             out var fidelity, policy.AudioHapticsEnabled,
-            policy.AdaptiveTriggersEnabled);
+            policy.AdaptiveTriggersEnabled, rumbleSource: rumbleSource);
         rich &= policy.OutputEnabled && (HasAmplitude(left) || HasAmplitude(right));
         // Only compact compatibility bytes belong to the body fallback here.
         // The generic translator can downmix PCM into body rumble, which would
         // bypass an explicitly disabled audio-haptic conversion lane.
         ControllerFeedbackActuatorState effectiveState = !policy.OutputEnabled ?
             default : rich ? new ControllerFeedbackActuatorState(1, 0, 0, 0) :
-            new ControllerFeedbackActuatorState((ushort)(feedback[0] * 257),
-                (ushort)(feedback[1] * 257), 0, 0);
+            !rumbleSource.CompatibilityAllowed ? default :
+            new ControllerFeedbackActuatorState(rumbleSource.BodyLow,
+                rumbleSource.BodyHigh, 0, 0);
         return session.TryPublishPolicyFeedback(effectiveState, rich, fidelity,
             left, right, bodyStrengthPercent, xboxBodyCarrierMode,
             xboxBodyFrequencyLevel, policy.OutputEnabled ? rumbleDelayMilliseconds : 0,

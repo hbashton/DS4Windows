@@ -56,10 +56,10 @@ public sealed class Switch2StickAssistProfileLaneTests
             Switch2JoyConProfileMode.StandaloneVerticalRight,
             timestamp: 4_000, leftPresent: false, rightPresent: true,
             pairEpoch: 0);
-        Assert.IsFalse(Advance(default, standaloneRight, 255, 0, 0, 255,
+        Assert.IsFalse(Advance(default, standaloneRight, 0, 255, 255, 0,
             true, 2.0, 1, ref state, out _));
         standaloneRight.CompletionTimestampQpc = 4_010;
-        Assert.IsTrue(Advance(default, standaloneRight, 255, 0, 0, 255,
+        Assert.IsTrue(Advance(default, standaloneRight, 0, 255, 255, 0,
             true, 2.0, 1, ref state,
             out Switch2StickAssistResult standaloneRightResult));
         Assert.IsTrue(standaloneRightResult.DeltaX > 0.0);

@@ -535,6 +535,46 @@ public sealed class Switch2RumbleMaintenanceTests
         Assert.IsFalse(sink.NeedsSustainedRefresh);
     }
 
+    [DataTestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public void AdaptiveOverlayCannotMakeFinitePcmRepeatWhilePureAdaptiveStillSustains(bool withPcm)
+    {
+        var feedback = new byte[ViiperOutDevice.DualSenseAtomicFeedbackLength];
+        feedback[28] = 0x02;
+        feedback[29] = 0x0C;
+        feedback[6] = 0x26;
+        feedback[7] = 0xFF;
+        feedback[8] = 0x03;
+        feedback[9] = feedback[10] = feedback[11] = 0xFF;
+        feedback[12] = 0x3F;
+        feedback[15] = 28;
+        if (withPcm)
+        {
+            feedback[76] = 0x36;
+            feedback[154] = 80;
+        }
+        Assert.IsTrue(ViiperOutDevice.TryBuildSwitch2DualSenseHdRumbleGroups(
+            feedback, feedback.Length, 76, false, true, out var left, out var right, out var fidelity));
+        var writer = new Writer();
+        Assert.IsTrue(ControllerFeedbackClock.TryGetTimestampMicroseconds(out ulong clock));
+        var sink = new Switch2HdRumbleDeliverySink(writer, 7, 11,
+            minimumMaintenanceIntervalMicroseconds: 15_000, hostWriteStartClock: () => clock);
+        var delivery = Delivery(ControllerFeedbackSource.DualSenseVirtualDevice, 1, 0);
+        Assert.IsTrue(sink.TryStageSourcePreservedSynthesis(delivery.Frame, fidelity, left, right));
+        Assert.IsTrue(sink.TryDeliver(delivery));
+        for (int repeat = 0; repeat < 12; repeat++)
+        {
+            clock += 15_000;
+            Assert.IsTrue(sink.MaintenanceSink.TryDeliver(delivery));
+        }
+        Assert.AreEqual(withPcm ? 1 : 13, writer.Calls,
+            "A held trigger can be repeated only when the submitted group contains no finite PCM interval.");
+        Assert.AreEqual(!withPcm, sink.NeedsSustainedRefresh);
+        Assert.AreEqual(left, writer.Last.Left);
+        Assert.AreEqual(right, writer.Last.Right);
+    }
+
     [TestMethod]
     public void StopCannotBeReplacedByAnOldKeepAlive()
     {

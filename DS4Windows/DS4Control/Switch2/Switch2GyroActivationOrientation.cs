@@ -39,6 +39,12 @@ internal struct Switch2GyroActivationOrientation
         identity = default;
         if (state == null)
             return false;
+        if (state.NintendoInputStatus.IsDeclared)
+        {
+            if (!NintendoProfileInput.TryRead(state, out var nintendo) || nintendo.PairEpoch != 0) return false;
+            identity = NintendoProfileInput.Identity(nintendo);
+            return true;
+        }
         var joyCon = state.Switch2JoyConRawInputStatus;
         var pro = state.Switch2RawInputStatus;
         if (!joyCon.IsValid || joyCon.ContractVersion != Switch2JoyConProfileInputFrame.CurrentVersion ||

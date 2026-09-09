@@ -72,6 +72,7 @@ namespace DS4Windows
         // lifetime fences and four rail/paddle controls, so it remains a
         // distinct copied sidecar rather than overloading the Pro status.
         public Switch2JoyConRawInputStatus Switch2JoyConRawInputStatus;
+        internal NintendoInputStatus NintendoInputStatus;
         public SixAxis Motion = null;
         public static readonly int DEFAULT_AXISDIR_VALUE = 127;
         public Int32 SASteeringWheelEmulationUnit;
@@ -187,6 +188,7 @@ namespace DS4Windows
             DualSenseRawInputStatus = state.DualSenseRawInputStatus;
             Switch2RawInputStatus = state.Switch2RawInputStatus;
             Switch2JoyConRawInputStatus = state.Switch2JoyConRawInputStatus;
+            NintendoInputStatus = state.NintendoInputStatus;
             Motion = state.Motion;
             TrackPadTouch0 = state.TrackPadTouch0;
             TrackPadTouch1 = state.TrackPadTouch1;
@@ -264,6 +266,7 @@ namespace DS4Windows
             state.DualSenseRawInputStatus = DualSenseRawInputStatus;
             state.Switch2RawInputStatus = Switch2RawInputStatus;
             state.Switch2JoyConRawInputStatus = Switch2JoyConRawInputStatus;
+            state.NintendoInputStatus = NintendoInputStatus;
             state.Motion = Motion;
             state.TrackPadTouch0 = TrackPadTouch0;
             state.TrackPadTouch1 = TrackPadTouch1;
@@ -289,6 +292,7 @@ namespace DS4Windows
             state.DualSenseRawInputStatus = DualSenseRawInputStatus;
             state.Switch2RawInputStatus = Switch2RawInputStatus;
             state.Switch2JoyConRawInputStatus = Switch2JoyConRawInputStatus;
+            state.NintendoInputStatus = NintendoInputStatus;
             state.TrackPadTouch0 = TrackPadTouch0;
             state.TrackPadTouch1 = TrackPadTouch1;
         }

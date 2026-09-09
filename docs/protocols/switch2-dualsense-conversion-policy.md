@@ -35,6 +35,16 @@ Adaptive-trigger conversion remains a side-local approximation, only for
 supported effects and a pressed physical trigger. Switch 2 has no resistance
 actuator. Neither setting makes this transformation lossless or hardware-proven.
 
+For a native DualSense report, the latest fresh control update owns both the
+compatibility selector and motor amplitudes. That compatibility command remains
+held until a fresh zero-motor command, source change, or lifecycle boundary.
+Incoming media may renew the canonical 250 ms lease as evidence that the source
+is live; it is not new motor intent and cannot replace those cached values with
+an older broker snapshot. The 250 ms lease is therefore not an individual
+compatibility-effect duration. Compositions containing PCM remain finite even
+when an adaptive-trigger approximation is mixed into the same packet; output
+maintenance cannot repeat that PCM interval to hold the trigger overlay.
+
 ## Live changes and safety boundaries
 
 `Switch2DualSenseFeedbackPolicyLane` retains at most one fixed-size compact

@@ -173,6 +173,31 @@ internal static class Switch2StickScrollTapLane
     internal const double DefaultCenterDeadzone = 0.03;
     internal const int MinimumEmitIntervalMilliseconds = 30;
 
+    internal static bool TryGetSource(DS4State input, out Switch2StickScrollLifetime lifetime, out long timestampQpc)
+    {
+        lifetime = default;
+        timestampQpc = 0;
+        if (input == null) return false;
+        if (!input.NintendoInputStatus.IsDeclared)
+            return TryGetSource(input.Switch2RawInputStatus, input.Switch2JoyConRawInputStatus, out lifetime, out timestampQpc);
+        if (!NintendoProfileInput.TryRead(input, out var nintendo)) return false;
+        lifetime = new((byte)(128 + (byte)nintendo.Mode), nintendo.PairEpoch,
+            nintendo.LeftGeneration, nintendo.LeftGeneration, nintendo.RightGeneration, nintendo.RightGeneration, nintendo.QpcFrequency);
+        timestampQpc = nintendo.CompletionTimestampQpc;
+        return true;
+    }
+
+    internal static bool TryAdvance(DS4State input, double lx, double ly, double rx,
+        double ry, Switch2StickScrollActivationMode leftMode, Switch2StickScrollActivationMode rightMode,
+        long profileRevision, ref Switch2StickScrollTapLaneState state, out Switch2StickScrollTapFrame frame)
+    {
+        frame = default;
+        if (!AreValidProfileCoordinates(lx, ly, rx, ry) || !IsValidMode(leftMode) || !IsValidMode(rightMode) ||
+            profileRevision < 0 || !TryGetSource(input, out var lifetime, out long timestamp))
+        { state = default; return false; }
+        return AdvanceSelected(lifetime, timestamp, lx, ly, rx, ry, leftMode, rightMode, profileRevision, ref state, out frame);
+    }
+
     internal static bool TryAdvance(in Switch2RawInputStatus pro,
         in Switch2JoyConRawInputStatus joyCon, double lx, double ly, double rx,
         double ry, Switch2StickScrollActivationMode leftMode,
@@ -191,6 +216,14 @@ internal static class Switch2StickScrollTapLane
             return false;
         }
 
+        return AdvanceSelected(lifetime, timestampQpc, lx, ly, rx, ry, leftMode, rightMode, profileRevision, ref state, out frame);
+    }
+
+    private static bool AdvanceSelected(in Switch2StickScrollLifetime lifetime, long timestampQpc,
+        double lx, double ly, double rx, double ry, Switch2StickScrollActivationMode leftMode,
+        Switch2StickScrollActivationMode rightMode, long profileRevision,
+        ref Switch2StickScrollTapLaneState state, out Switch2StickScrollTapFrame frame)
+    {
         Switch2StickScrollSector leftSector = ResolveSector(lx, ly);
         Switch2StickScrollSector rightSector = ResolveSector(rx, ry);
         int leftStep = ResolveStep(lx, ly);

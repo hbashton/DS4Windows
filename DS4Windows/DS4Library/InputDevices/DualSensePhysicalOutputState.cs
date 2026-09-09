@@ -46,6 +46,18 @@ namespace DS4Windows.InputDevices
         DS4LightbarState ProfileLightbar,
         bool NativeGameLightbarOwnershipReleased)
     {
+        // A session-owned presentation layer; the profile/Trigger Lab values
+        // above remain current while impulses temporarily override either side.
+        internal object XboxImpulseOwner { get; init; }
+        internal byte LeftXboxImpulse { get; init; }
+        internal byte RightXboxImpulse { get; init; }
+
+        internal DualSensePhysicalOutputSnapshot ForLocalTriggerReport() => this with
+        {
+            LeftTrigger = LeftXboxImpulse == 0 ? LeftTrigger : XboxImpulseTriggerEffect.Encode(LeftXboxImpulse),
+            RightTrigger = RightXboxImpulse == 0 ? RightTrigger : XboxImpulseTriggerEffect.Encode(RightXboxImpulse),
+        };
+
         internal static DualSensePhysicalOutputSnapshot Default => new(
             HapticPowerLevel:
                 (byte)DualSenseDevice.HapticPowerLevelFriendlyName.Str100,
@@ -313,6 +325,26 @@ namespace DS4Windows.InputDevices
                         nameof(trigger), "Invalid Trigger Id"),
                 };
                 return PublishLocked(next);
+            }
+        }
+
+        internal bool TrySetXboxImpulse(object owner, byte left, byte right, out bool changed)
+        {
+            ArgumentNullException.ThrowIfNull(owner);
+            lock (syncRoot)
+            {
+                changed = false;
+                bool release = left == 0 && right == 0;
+                if (latest.XboxImpulseOwner != null && !ReferenceEquals(latest.XboxImpulseOwner, owner))
+                    return release; // A retiring predecessor cannot clear its successor.
+                if (release && latest.XboxImpulseOwner == null) return true;
+                changed = PublishLocked(latest with
+                {
+                    XboxImpulseOwner = release ? null : owner,
+                    LeftXboxImpulse = left,
+                    RightXboxImpulse = right,
+                });
+                return true;
             }
         }
 

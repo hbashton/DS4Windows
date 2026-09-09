@@ -124,15 +124,14 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public bool ShowPlayStationControllerSettings =>
             controllerUiCapabilities.ShowPlayStationControllerSettings;
 
-        public bool ShowSwitch2Controls =>
-            controllerUiCapabilities.ShowSwitch2Controls;
+        // Profiles are universal. Keep Nintendo settings editable regardless
+        // of the controller currently supplying the live preview; each input
+        // backend applies only the features it can actually support.
+        public bool ShowSwitch2Controls => true;
 
-        public bool ShowSwitch2StandaloneJoyConControls =>
-            controllerUiCapabilities.ShowSwitch2StandaloneJoyConControls;
-        public bool ShowSwitch2JoyConControls =>
-            controllerUiCapabilities.ShowSwitch2JoyConControls;
-        public bool ShowSwitch2UsbHeadsetHelp =>
-            controllerUiCapabilities.ShowSwitch2UsbHeadsetHelp;
+        public bool ShowSwitch2StandaloneJoyConControls => true;
+        public bool ShowSwitch2JoyConControls => true;
+        public bool ShowSwitch2UsbHeadsetHelp => true;
 
         public bool SupportsAdaptiveTriggers =>
             controllerUiCapabilities.SupportsAdaptiveTriggers;
@@ -3654,15 +3653,38 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             set => Global.InverseRumbleMotors[device] = value;
         }
 
-        public bool Switch2MapXboxImpulseTriggersToHdRumble
+        public bool MapXboxImpulseTriggers
         {
-            get => Global.Switch2MapXboxImpulseTriggersToHdRumble[device];
+            get => System.Threading.Volatile.Read(ref Global.MapXboxImpulseTriggers[device]);
             set
             {
-                System.Threading.Volatile.Write(ref Global.Switch2MapXboxImpulseTriggersToHdRumble[device], value);
+                System.Threading.Volatile.Write(ref Global.MapXboxImpulseTriggers[device], value);
                 QueueXboxFeedbackPolicyRefresh();
+                MapXboxImpulseTriggersChanged?.Invoke(this, EventArgs.Empty);
+                Switch2MapXboxImpulseTriggersToHdRumbleChanged?.Invoke(this, EventArgs.Empty);
             }
         }
+        public event EventHandler MapXboxImpulseTriggersChanged;
+
+        // Compatibility alias for callers using the original Nintendo option.
+        public bool Switch2MapXboxImpulseTriggersToHdRumble
+        {
+            get => MapXboxImpulseTriggers;
+            set => MapXboxImpulseTriggers = value;
+        }
+        public event EventHandler Switch2MapXboxImpulseTriggersToHdRumbleChanged;
+
+        public bool XboxImpulseToAdaptiveTriggers
+        {
+            get => System.Threading.Volatile.Read(ref Global.XboxImpulseToAdaptiveTriggers[device]);
+            set
+            {
+                System.Threading.Volatile.Write(ref Global.XboxImpulseToAdaptiveTriggers[device], value);
+                QueueXboxFeedbackPolicyRefresh();
+                XboxImpulseToAdaptiveTriggersChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        public event EventHandler XboxImpulseToAdaptiveTriggersChanged;
 
         public bool Switch2XboxImpulseDynamicFrequency
         {

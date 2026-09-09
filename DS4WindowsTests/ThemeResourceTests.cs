@@ -94,6 +94,8 @@ namespace DS4WindowsTests
                         ((TextBlock)setupProgress.FindName(
                             "phaseText")).Text);
                     Switch2StickCalibrationEditorTests.ValidateStickCalibrationWindow(application);
+                    BindingWindowLiveInputLayoutTests.ValidateRenderedBindingWindows(
+                        application, resultsDirectory, renderedFiles);
                 }
                 catch (Exception ex)
                 {
@@ -108,7 +110,7 @@ namespace DS4WindowsTests
             {
                 Assert.Fail(failure.ToString());
             }
-            Assert.AreEqual(2, renderedFiles.Count);
+            Assert.AreEqual(14, renderedFiles.Count);
             foreach (string path in renderedFiles)
             {
                 Assert.IsTrue(System.IO.File.Exists(path), path);

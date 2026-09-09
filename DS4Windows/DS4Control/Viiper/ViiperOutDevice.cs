@@ -328,6 +328,8 @@ namespace DS4Windows
         // source to the newest desired state before returning.
         private long microphoneControlEpoch;
         private readonly object legacyDualSenseRumbleLock = new object();
+        private readonly object legacyJoyConFeedbackGate = new();
+        private readonly NintendoDualSenseRumbleSourceState legacyJoyConDualSenseRumbleSource = new();
         private readonly AutoResetEvent writerSignal = new AutoResetEvent(false);
         private readonly ManualResetEvent writerRateWaitStopSignal =
             new ManualResetEvent(false);
@@ -543,6 +545,7 @@ namespace DS4Windows
         private string xboxOneFeedbackRejectionDetail;
         private readonly Predicate<Switch2XboxFeedbackPolicyRequest> isCurrentSwitch2XboxPolicyRequest;
         private XboxOnePhysicalOutputSuppressionRequest xboxOnePhysicalOutputSuppressionRequested;
+        private long xboxOnePhysicalPolicyRequestRevision;
         private XboxOnePhysicalFeedbackSession xboxOnePhysicalFeedbackSession;
         private XboxOneAuthorizedFeedbackBinding xboxOneFeedbackBinding;
         private ulong xboxOneLastFeedbackSequence;
@@ -6407,9 +6410,14 @@ namespace DS4Windows
                 return;
             }
 
+            if (device is JoyConDevice legacyJoyCon && viiperType != ViiperVirtualDeviceType.XboxOne &&
+                TryHandleLegacyJoyConFeedback(legacyJoyCon, deviceIndex, feedback, feedbackLength,
+                    nativeOutputStreamGeneration, freshNativeOutput))
+                return;
+
             if (device is Switch2RuntimeInputDevice && IsDualSenseType() &&
                 TryHandleSwitch2DualSenseHdRumbleFeedback(device, feedback,
-                    feedbackLength, nativeOutputStreamGeneration))
+                    feedbackLength, nativeOutputStreamGeneration, freshNativeOutput))
             {
                 return;
             }
@@ -6662,9 +6670,88 @@ namespace DS4Windows
             group.Second.HasNonzeroAmplitude ||
             group.Third.HasNonzeroAmplitude;
 
+        private bool TryHandleLegacyJoyConFeedback(JoyConDevice device, int deviceIndex,
+            byte[] feedback, int feedbackLength, long sourceStreamGeneration, bool freshNativeOutput)
+        {
+            if (!TryDecodeCanonicalFeedbackForSwitch2(viiperType, feedback, feedbackLength, out var state)) return false;
+            lock (legacyJoyConFeedbackGate)
+            {
+            bool audio = deviceIndex < Global.Switch2DualSenseAudioHapticsEnabled.Length &&
+                Volatile.Read(ref Global.Switch2DualSenseAudioHapticsEnabled[deviceIndex]);
+            bool adaptive = deviceIndex < Global.Switch2DualSenseAdaptiveTriggersEnabled.Length &&
+                Volatile.Read(ref Global.Switch2DualSenseAdaptiveTriggersEnabled[deviceIndex]);
+            int offset = feedbackLength >= DualSenseCombinedExtendedFeedbackLength &&
+                feedback[DualSenseCombinedBluetoothReportOffset] == 0x36 ?
+                DualSenseCombinedBluetoothReportOffset : DualSenseBluetoothHapticsReportOffset;
+            var group = device.ProfileConnection?.Group;
+            NintendoDualSenseRumbleSource rumbleSource = IsDualSenseType() ?
+                legacyJoyConDualSenseRumbleSource.Resolve(group, deviceIndex,
+                    GetSwitch2FeedbackProfileRevision(deviceIndex),
+                    sourceStreamGeneration != 0 ? sourceStreamGeneration : Interlocked.Read(ref streamGeneration),
+                    feedback.AsSpan(0, feedbackLength), freshNativeOutput) : NintendoDualSenseRumbleSource.Legacy;
+            var leftState = (group?.Left?.Device ?? device).GetRawCurrentStateRef();
+            var rightState = (group?.Right?.Device ?? device).GetRawCurrentStateRef();
+            if (!Switch2HdRumbleBodyTuning.TryCreate(GetSwitch2BodyStrengthPercent(deviceIndex),
+                GetSwitch2XboxBodyRumbleMode(deviceIndex), GetSwitch2XboxBodyRumbleFrequency(deviceIndex), out var tuning)) return true;
+            if (IsDualSenseType() && TryBuildSwitch2DualSenseHdRumbleGroups(feedback, feedbackLength, offset,
+                    leftState != null && (leftState.L2Btn || leftState.L2 != 0),
+                    rightState != null && (rightState.R2Btn || rightState.R2 != 0),
+                    out var left, out var right, out _, false, adaptive, includeCompatibilityOnly: true,
+                    sourceTuning: tuning, inverseCompatibility: Global.InverseRumbleMotors[deviceIndex],
+                    rumbleSource: rumbleSource))
+            {
+                // Keep control and PCM origins distinct through scheduling.
+                // Later LED/control-only reports may update held feedback, but
+                // cannot erase or extend the current bounded PCM contribution.
+                if (audio && rumbleSource.PcmAllowed && DualSenseHapticsTranslator.TryTranslateToSwitch2Groups(
+                    feedback, feedbackLength, offset, out var leftPcm, out var rightPcm))
+                {
+                    leftPcm = Switch2HdRumbleFeedbackTranslator.ScaleSourcePreservedGroup(leftPcm, tuning);
+                    rightPcm = Switch2HdRumbleFeedbackTranslator.ScaleSourcePreservedGroup(rightPcm, tuning);
+                    device.TryPublishHdRumble(leftPcm, rightPcm, true, GetSwitch2RumbleDelayMilliseconds(deviceIndex),
+                        source: LegacyJoyConHdRumbleSource.DualSensePcm, leftControl: left, rightControl: right);
+                }
+                else device.TryPublishHdRumble(left, right, false, GetSwitch2RumbleDelayMilliseconds(deviceIndex),
+                    source: LegacyJoyConHdRumbleSource.DualSenseControl);
+            }
+            else
+            {
+                if (IsDualSenseType())
+                    state = new ControllerFeedbackActuatorState(rumbleSource.BodyLow,
+                        rumbleSource.BodyHigh, state.LeftTrigger, state.RightTrigger);
+                TryApplyLegacyJoyConCanonicalFeedback(device, deviceIndex, state, false);
+            }
+            // Validated original-Nintendo feedback is never additionally sent
+            // through the lossy byte-motor fallback.
+            return true;
+            }
+        }
+
+        internal static bool TryApplyLegacyJoyConCanonicalFeedback(JoyConDevice device, int deviceIndex,
+            in ControllerFeedbackActuatorState state, bool release)
+        {
+            // Retirement is unconditional local neutral; transient or corrupt
+            // tuning must not strand an otherwise authenticated Stop/expiry.
+            if (release) return device.TryPublishHdRumble(default, default, false, 0, terminal: true);
+            bool impulses = deviceIndex >= 0 && deviceIndex < Global.Switch2MapXboxImpulseTriggersToHdRumble.Length &&
+                Volatile.Read(ref Global.Switch2MapXboxImpulseTriggersToHdRumble[deviceIndex]);
+            if (!Switch2HdRumbleImpulseTuning.TryCreate(
+                    Volatile.Read(ref Global.Switch2XboxImpulseDynamicFrequency[deviceIndex]),
+                    Volatile.Read(ref Global.Switch2XboxImpulseFrequency[deviceIndex]),
+                    Volatile.Read(ref Global.Switch2XboxImpulseStrength[deviceIndex]), out var impulse) ||
+                !Switch2HdRumbleBodyTuning.TryCreate(GetSwitch2BodyStrengthPercent(deviceIndex),
+                    GetSwitch2XboxBodyRumbleMode(deviceIndex), GetSwitch2XboxBodyRumbleFrequency(deviceIndex), out var body))
+                return false;
+            var mapped = release ? default : state;
+            if (Global.InverseRumbleMotors[deviceIndex])
+                mapped = new ControllerFeedbackActuatorState(mapped.BodyHigh, mapped.BodyLow, mapped.LeftTrigger, mapped.RightTrigger);
+            return LegacyJoyConHdRumble.TrySynthesize(mapped, impulses, impulse, body, out var left, out var right) &&
+                device.TryPublishHdRumble(left, right, false, release ? 0 : GetSwitch2RumbleDelayMilliseconds(deviceIndex), release);
+        }
+
         private bool TryHandleSwitch2DualSenseHdRumbleFeedback(
             DS4Device device, byte[] feedback, int feedbackLength,
-            long sourceStreamGeneration)
+            long sourceStreamGeneration, bool freshNativeOutput)
         {
             if (!TryDecodeCanonicalFeedbackForSwitch2(viiperType,
                     feedback, feedbackLength, out _))
@@ -6700,7 +6787,7 @@ namespace DS4Windows
                 bodyStrengthPercent, xboxBodyCarrierMode,
                 xboxBodyFrequencyLevel, rumbleDelayMilliseconds,
                 feedbackProfileRevision, sourceStreamGeneration != 0 ?
-                    sourceStreamGeneration : Interlocked.Read(ref streamGeneration));
+                    sourceStreamGeneration : Interlocked.Read(ref streamGeneration), freshNativeOutput);
             if (published)
             {
                 Interlocked.Increment(ref switch2FeedbackValidated);
@@ -6771,11 +6858,13 @@ namespace DS4Windows
             var session = Volatile.Read(ref switch2FeedbackSession);
             if (session == null)
             {
-                if (Volatile.Read(ref Global.EnableOutputDataToDS4[expectedDeviceIndex])) return;
                 var physical = Volatile.Read(ref xboxOnePhysicalFeedbackSession);
                 if (physical == null || !physical.TryCaptureOutputPolicySequence(out ulong sequence)) return;
                 EnqueueXboxOnePhysicalOutputSuppression(
-                    new(physical, expectedDeviceIndex, Interlocked.Read(ref streamGeneration), sequence));
+                    new(physical, expectedDeviceIndex, Interlocked.Read(ref streamGeneration), sequence,
+                        Interlocked.Increment(ref xboxOnePhysicalPolicyRequestRevision),
+                        !Volatile.Read(ref Global.MapXboxImpulseTriggers[expectedDeviceIndex]),
+                        !Volatile.Read(ref Global.EnableOutputDataToDS4[expectedDeviceIndex])));
                 feedbackControlSignal.Set();
                 return;
             }
@@ -6818,7 +6907,8 @@ namespace DS4Windows
                     var hub = Program.rootHub;
                     if (hub == null || request.DeviceIndex < 0 || request.DeviceIndex >= hub.DS4Controllers.Length ||
                         !request.Session.Targets(hub.DS4Controllers[request.DeviceIndex])) return completed = true;
-                    return completed = request.Session.TrySuppressCurrentOutput(request.Sequence);
+                    return completed = request.Session.TryRefreshCurrentOutput(request.Sequence,
+                        request.SuppressOutput, request.SuppressImpulses);
                 }
                 finally { EndFeedbackCallback(); }
             }
@@ -6842,8 +6932,17 @@ namespace DS4Windows
                     request.StreamGeneration != Interlocked.Read(ref streamGeneration) ||
                     !ReferenceEquals(request.Session, Volatile.Read(ref xboxOnePhysicalFeedbackSession))) return;
                 if (previous != null && ReferenceEquals(previous.Session, request.Session) &&
-                    previous.DeviceIndex == request.DeviceIndex && previous.StreamGeneration == request.StreamGeneration &&
-                    previous.Sequence >= request.Sequence) return;
+                    previous.DeviceIndex == request.DeviceIndex && previous.StreamGeneration == request.StreamGeneration)
+                {
+                    if (previous.Sequence > request.Sequence ||
+                        previous.Sequence == request.Sequence && previous.Revision >= request.Revision) return;
+                    if (previous.Sequence == request.Sequence)
+                        request = request with
+                        {
+                            SuppressOutput = request.SuppressOutput || previous.SuppressOutput,
+                            SuppressImpulses = request.SuppressImpulses || previous.SuppressImpulses,
+                        };
+                }
                 if (ReferenceEquals(Interlocked.CompareExchange(ref xboxOnePhysicalOutputSuppressionRequested,
                         request, previous), previous)) return;
             }
@@ -6926,7 +7025,11 @@ namespace DS4Windows
             out Switch2HdRumbleGroup right,
             out Switch2HdRumbleFeedbackFidelity fidelity,
             bool audioHapticsEnabled = true,
-            bool adaptiveTriggersEnabled = true)
+            bool adaptiveTriggersEnabled = true,
+            bool includeCompatibilityOnly = false,
+            Switch2HdRumbleBodyTuning? sourceTuning = null,
+            bool inverseCompatibility = false,
+            NintendoDualSenseRumbleSource? rumbleSource = null)
         {
             left = default;
             right = default;
@@ -6938,16 +7041,24 @@ namespace DS4Windows
                 return false;
             }
 
-            ushort bodyLow = (ushort)(feedback[0] * 257);
-            ushort bodyHigh = (ushort)(feedback[1] * 257);
+            NintendoDualSenseRumbleSource source = rumbleSource ??
+                NintendoDualSenseRumbleSourceState.ReadSnapshot(feedback.AsSpan(0, feedbackLength));
+            ushort bodyLow = source.CompatibilityAllowed ? source.BodyLow : (ushort)0;
+            ushort bodyHigh = source.CompatibilityAllowed ? source.BodyHigh : (ushort)0;
+            if (inverseCompatibility) (bodyLow, bodyHigh) = (bodyHigh, bodyLow);
             Switch2HdRumbleGroup body =
                 Switch2HdRumbleFeedbackTranslator.
-                    CreateCompatibilityGroup(bodyLow, bodyHigh);
-            bool hasPcm = audioHapticsEnabled && DualSenseHapticsTranslator.
+                    CreateCompatibilityGroup(bodyLow, bodyHigh, sourceTuning ?? Switch2HdRumbleBodyTuning.Default);
+            bool hasPcm = source.PcmAllowed && audioHapticsEnabled && DualSenseHapticsTranslator.
                 TryTranslateToSwitch2Groups(feedback, feedbackLength,
                     hapticsReportOffset, out left, out right);
             if (hasPcm)
             {
+                if (sourceTuning.HasValue)
+                {
+                    left = Switch2HdRumbleFeedbackTranslator.ScaleSourcePreservedGroup(left, sourceTuning.Value);
+                    right = Switch2HdRumbleFeedbackTranslator.ScaleSourcePreservedGroup(right, sourceTuning.Value);
+                }
                 // Compatibility motor bytes can coexist with the audio lane.
                 // Preserve both instead of letting a silent PCM carrier erase
                 // conventional game rumble.
@@ -6972,6 +7083,8 @@ namespace DS4Windows
                             DualSenseTriggerEffectLength),
                         out Switch2HdRumbleGroup rightTrigger))
                 {
+                    if (sourceTuning.HasValue) rightTrigger = Switch2HdRumbleFeedbackTranslator.
+                        ScaleSourcePreservedGroup(rightTrigger, sourceTuning.Value);
                     right = DualSenseAdaptiveTriggerHdRumbleTranslator.Mix(
                         right, rightTrigger);
                     hasAdaptiveTrigger = true;
@@ -6985,13 +7098,15 @@ namespace DS4Windows
                             DualSenseTriggerEffectLength),
                         out Switch2HdRumbleGroup leftTrigger))
                 {
+                    if (sourceTuning.HasValue) leftTrigger = Switch2HdRumbleFeedbackTranslator.
+                        ScaleSourcePreservedGroup(leftTrigger, sourceTuning.Value);
                     left = DualSenseAdaptiveTriggerHdRumbleTranslator.Mix(
                         left, leftTrigger);
                     hasAdaptiveTrigger = true;
                 }
             }
 
-            if (!hasPcm && !hasAdaptiveTrigger)
+            if (!hasPcm && !hasAdaptiveTrigger && !includeCompatibilityOnly)
             {
                 // Let the canonical body-rumble path retain its normal
                 // arbitration and fidelity label when no richer source data
@@ -7000,10 +7115,12 @@ namespace DS4Windows
                 return false;
             }
 
-            fidelity = hasAdaptiveTrigger ?
-                Switch2HdRumbleFeedbackFidelity.
-                    DualSenseAdaptiveTriggerApproximation :
-                Switch2HdRumbleFeedbackFidelity.DualSensePcmDualBand;
+            // A composite containing PCM remains one finite media interval.
+            // Repeating it to sustain its trigger overlay would replay the
+            // authored waveform. Pure adaptive output can still be held.
+            fidelity = hasPcm ? Switch2HdRumbleFeedbackFidelity.DualSensePcmDualBand :
+                hasAdaptiveTrigger ? Switch2HdRumbleFeedbackFidelity.DualSenseAdaptiveTriggerApproximation :
+                Switch2HdRumbleFeedbackFidelity.SdlBodyCompatibility;
             return true;
         }
 
@@ -7265,7 +7382,11 @@ namespace DS4Windows
                 onFailure: () => AppLogger.LogToGui(
                     "Xbox One physical feedback owner was fenced after a state delivery or expiry-watchdog failure.", true),
                 isOutputEnabled: () => deviceIndex >= 0 && deviceIndex < Global.EnableOutputDataToDS4.Length &&
-                    Volatile.Read(ref Global.EnableOutputDataToDS4[deviceIndex]));
+                    Volatile.Read(ref Global.EnableOutputDataToDS4[deviceIndex]),
+                isImpulseEnabled: () => deviceIndex >= 0 && deviceIndex < Global.MapXboxImpulseTriggers.Length &&
+                    Volatile.Read(ref Global.MapXboxImpulseTriggers[deviceIndex]),
+                impulseToAdaptiveTriggers: () => deviceIndex >= 0 && deviceIndex < Global.XboxImpulseToAdaptiveTriggers.Length &&
+                    Volatile.Read(ref Global.XboxImpulseToAdaptiveTriggers[deviceIndex]));
             session = created;
             return accepted;
         }
@@ -7288,19 +7409,30 @@ namespace DS4Windows
 
             // This publishes to the existing sole physical output owner; it
             // does not perform or acknowledge a hardware HID flush.
+            if (device is JoyConDevice legacyJoyCon)
+                return TryApplyLegacyJoyConCanonicalFeedback(legacyJoyCon, deviceIndex, state, release);
+
             bool hasIndependentTriggerActuators =
                 device is DualSenseDevice dualSense &&
                 IsCurrentPhysicalSonyDualSense(dualSense);
             XboxOneCanonicalFeedbackAdapter.ProjectPhysical(state,
                 hasIndependentTriggerActuators,
+                Volatile.Read(ref Global.MapXboxImpulseTriggers[deviceIndex]),
+                Volatile.Read(ref Global.XboxImpulseToAdaptiveTriggers[deviceIndex]),
                 out byte heavySlow, out byte lightFast,
                 out byte leftImpulse, out byte rightImpulse);
             hub.SetDevRumble(device, heavySlow, lightFast,
                 deviceIndex);
             if (hasIndependentTriggerActuators)
             {
+                // Ordinary body-to-trigger Trigger Lab routing is independent
+                // of the Xbox impulse master and its dedicated overlay.
                 ApplyGameRumbleTriggerVibration(device, deviceIndex,
-                    rightImpulse, leftImpulse);
+                    (byte)((state.BodyHigh + 128) / 257),
+                    (byte)((state.BodyLow + 128) / 257));
+                if (!((DualSenseDevice)device).TrySetXboxImpulseTriggerFeedback(owner,
+                        release ? (byte)0 : leftImpulse, release ? (byte)0 : rightImpulse))
+                    return false;
                 if (release)
                 {
                     ReleaseTriggerLabRumbleOverrides(deviceIndex, device);

@@ -83,7 +83,10 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 controlTriggerList.Add(s);
             }
 
-            if (action.ucontrols != null)
+            // Other action types reuse the legacy extras/ucontrols storage for
+            // options such as Scan Code or Repeat, not a button chord.
+            if (action.ucontrols != null && action.typeID is
+                SpecialAction.ActionTypeId.Key or SpecialAction.ActionTypeId.Profile)
             {
                 foreach (string s in action.ucontrols.Split('/'))
                 {

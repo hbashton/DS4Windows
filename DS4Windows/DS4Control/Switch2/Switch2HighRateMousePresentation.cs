@@ -236,6 +236,7 @@ internal sealed class Switch2HighRateMousePresenter
     private readonly object presentationGate = new();
     private readonly AutoResetEvent wake = new(false);
     private readonly Action<int, int> output;
+    private readonly Func<bool> canPresent;
     private Switch2HighRateMouseSourceMixer mixer;
     private Thread worker;
     private volatile bool stopped;
@@ -245,9 +246,14 @@ internal sealed class Switch2HighRateMousePresenter
     {
     }
 
-    internal Switch2HighRateMousePresenter(Action<int, int> output)
+    internal Switch2HighRateMousePresenter(Func<bool> canPresent) : this(PresentToGlobal, canPresent)
+    {
+    }
+
+    internal Switch2HighRateMousePresenter(Action<int, int> output, Func<bool> canPresent = null)
     {
         this.output = output ?? throw new ArgumentNullException(nameof(output));
+        this.canPresent = canPresent;
     }
 
     internal bool TrySetSource(Switch2ContinuousMouseSource source,
@@ -455,6 +461,10 @@ internal sealed class Switch2HighRateMousePresenter
 
             try
             {
+                // Optional exact-owner fence for original Joy-Con topology.
+                // It reads immutable session references/atomic flags only and
+                // must never acquire a controller, group, or topology lock.
+                if (canPresent != null && !canPresent()) return;
                 output(deltaX, deltaY);
             }
             catch

@@ -16,7 +16,32 @@
         <local:BindingWinResourcePaths x:Key="resourcePaths" />
         <local:IntToBoolConverter x:Key="IntToBoolConverter" />
     </Window.Resources>
-    <DockPanel x:Name="fullPanel" Margin="4">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <Button x:Name="liveInputPreviewToggle" Grid.Row="0"
+                Content="Show live preview" Visibility="Collapsed"
+                HorizontalAlignment="Right" Margin="6,3,6,3" Padding="10,4"
+                Click="LiveInputPreviewToggle_Click"
+                ToolTip="See what your controller is sending while you choose an action." />
+        <ScrollViewer x:Name="liveInputPreviewScroll" Grid.Row="1"
+                      Visibility="Collapsed" Margin="6,6,6,8" MaxHeight="180"
+                      HorizontalScrollBarVisibility="Disabled"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalContentAlignment="Stretch">
+            <local:MappingLiveInputControl x:Name="bindingLiveInput"
+                                           Visibility="Collapsed"
+                                           HorizontalAlignment="Stretch" />
+        </ScrollViewer>
+        <ScrollViewer x:Name="bindingEditorScroll" Grid.Row="2"
+                      HorizontalScrollBarVisibility="Auto"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalContentAlignment="Stretch"
+                      VerticalContentAlignment="Stretch">
+    <DockPanel x:Name="fullPanel" Margin="4" MinWidth="980" MinHeight="490">
         <StackPanel x:Name="extrasSidePanel" Width="160" Orientation="Vertical" DockPanel.Dock="Right">
             <StackPanel.Resources>
                 <Thickness x:Key="spaceMargin" Bottom="8" />
@@ -620,4 +645,6 @@
 
         </DockPanel>
     </DockPanel>
+        </ScrollViewer>
+    </Grid>
 </Window>

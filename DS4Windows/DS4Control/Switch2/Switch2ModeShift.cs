@@ -259,15 +259,23 @@ internal static class Switch2ModeShift
     }
 
     private static bool HasExclusiveCurrentSource(DS4State source) => source != null &&
+        (source.NintendoInputStatus.IsDeclared ? NintendoProfileInput.TryRead(source, out _) :
         (source.Switch2JoyConRawInputStatus.IsValid && source.Switch2JoyConRawInputStatus.ContractVersion ==
             Switch2JoyConProfileInputFrame.CurrentVersion) !=
         (source.Switch2RawInputStatus.IsValid && source.Switch2RawInputStatus.ContractVersion ==
-            Switch2ProProfileInputFrame.CurrentVersion);
+            Switch2ProProfileInputFrame.CurrentVersion));
 
     private static DS4Controls HorizontalSL(DS4State source)
     {
         if (!HasExclusiveCurrentSource(source))
             return DS4Controls.None;
+        if (source.NintendoInputStatus.IsDeclared)
+            return source.NintendoInputStatus.Mode switch
+            {
+                Switch2JoyConProfileMode.StandaloneHorizontalLeft => DS4Controls.Switch2JoyConLeftSL,
+                Switch2JoyConProfileMode.StandaloneHorizontalRight => DS4Controls.Switch2JoyConRightSL,
+                _ => DS4Controls.None,
+            };
         var joyCon = source.Switch2JoyConRawInputStatus;
         if (!joyCon.IsValid || joyCon.ContractVersion != Switch2JoyConProfileInputFrame.CurrentVersion ||
             joyCon.PairEpoch != 0)

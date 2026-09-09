@@ -334,3 +334,6 @@ ASALocalRun/
 !DS4Windows/libs/x64/
 !DS4Windows/libs/x86/
 
+# Local validation runs and generated test artifacts
+/isolated_results/
+

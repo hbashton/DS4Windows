@@ -15,6 +15,176 @@ public sealed class Switch2DualSenseFeedbackPolicyTests
     private const int HapticsOffset = 76;
 
     [DataTestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void CapturedHadesControlCannotRenewStaleCompactMotor(bool withSilentPcm)
+    {
+        var owner = new RecordingOwner();
+        var session = owner.CreateSession();
+        var lane = new Switch2DualSenseFeedbackPolicyLane(
+            _ => Switch2DualSenseConversionPolicy.Default, () => owner.Now);
+        byte[] feedback = NativeFeedback(0x0C, withSilentPcm: withSilentPcm);
+        try
+        {
+            for (int report = 0; report < 4; report++)
+            {
+                owner.Now += 100_000;
+                Assert.IsTrue(PublishNative(lane, session, feedback));
+                Assert.IsTrue(owner.State.IsNeutral,
+                    "Captured 0C/57/00 control with compact 43 and raw zero motors selects no compatibility output.");
+                Assert.IsFalse(owner.Rich);
+            }
+        }
+        finally { Assert.IsTrue(session.TryRetire()); }
+    }
+
+    [DataTestMethod]
+    [DataRow(0x03, 0x00)]
+    [DataRow(0x02, 0x00)]
+    [DataRow(0x02, 0x04)]
+    [DataRow(0x00, 0x04)]
+    public void ValidCompatibilitySelectorKeepsMotorsThenStopBlocksStaleMedia(
+        int activeFlag0, int activeFlag2)
+    {
+        var owner = new RecordingOwner();
+        var session = owner.CreateSession();
+        var lane = new Switch2DualSenseFeedbackPolicyLane(
+            _ => Switch2DualSenseConversionPolicy.Default, () => owner.Now);
+        byte[] feedback = NativeFeedback((byte)activeFlag0, (byte)activeFlag2);
+        try
+        {
+            Assert.IsTrue(PublishNative(lane, session, feedback));
+            Assert.AreEqual((ushort)(43 * 257), owner.State.BodyLow,
+                "02 selects held rumble without authorizing raw motor-byte updates.");
+            feedback[29] = 0;
+            feedback[67] = 0;
+            Assert.IsTrue(PublishNative(lane, session, feedback));
+            Assert.IsTrue(owner.State.IsNeutral);
+            // Media carries the broker's older accumulated selector and motors.
+            feedback[29] = (byte)activeFlag0;
+            feedback[67] = (byte)activeFlag2;
+            feedback[HapticsOffset] = 0x36;
+            for (int interval = 0; interval < 4; interval++)
+            {
+                owner.Now += 100_000;
+                Assert.IsTrue(PublishNative(lane, session, feedback, fresh: false));
+                Assert.IsTrue(owner.State.IsNeutral,
+                    "Accumulated media cannot reselect an ended compatibility effect.");
+            }
+        }
+        finally { Assert.IsTrue(session.TryRetire()); }
+    }
+
+    [TestMethod]
+    public void NativeAudioSelectionKeepsPcmAndAdaptiveTranslationIndependent()
+    {
+        byte[] feedback = NativeFeedback(0x0C, withSilentPcm: true);
+        feedback[HapticsOffset + 78] = 80;
+        Assert.IsTrue(ViiperOutDevice.TryBuildSwitch2DualSenseHdRumbleGroups(
+            feedback, feedback.Length, HapticsOffset, false, false,
+            out var audioLeft, out var audioRight, out _, adaptiveTriggersEnabled: false));
+        feedback[0] = 0;
+        Assert.IsTrue(ViiperOutDevice.TryBuildSwitch2DualSenseHdRumbleGroups(
+            feedback, feedback.Length, HapticsOffset, false, false,
+            out var cleanLeft, out var cleanRight, out _, adaptiveTriggersEnabled: false));
+        Assert.AreEqual(cleanLeft, audioLeft, "Disabled compact motors must not contaminate the PCM lane.");
+        Assert.AreEqual(cleanRight, audioRight);
+
+        feedback[29] = 0x02;
+        Assert.IsFalse(ViiperOutDevice.TryBuildSwitch2DualSenseHdRumbleGroups(
+            feedback, feedback.Length, HapticsOffset, false, false,
+            out _, out _, out _, adaptiveTriggersEnabled: false),
+            "The rumble selector disables the audio-haptic source.");
+        Feedback().AsSpan(6, 11).CopyTo(feedback.AsSpan(6, 11));
+        Assert.IsTrue(ViiperOutDevice.TryBuildSwitch2DualSenseHdRumbleGroups(
+            feedback, feedback.Length, HapticsOffset, false, true,
+            out _, out _, out var fidelity));
+        Assert.AreEqual(Switch2HdRumbleFeedbackFidelity.DualSenseAdaptiveTriggerApproximation, fidelity);
+    }
+
+    [DataTestMethod]
+    [DataRow(0x03, 0x00)]
+    [DataRow(0x02, 0x00)]
+    [DataRow(0x02, 0x04)]
+    public void ZeroMotorControlCannotBeUndoneByMediaWithTheSameSelector(int flag0, int flag2)
+    {
+        var owner = new RecordingOwner();
+        var session = owner.CreateSession();
+        var lane = new Switch2DualSenseFeedbackPolicyLane(
+            _ => Switch2DualSenseConversionPolicy.Default, () => owner.Now);
+        byte[] feedback = NativeFeedback((byte)flag0, (byte)flag2);
+        try
+        {
+            feedback[1] = 9;
+            Assert.IsTrue(PublishNative(lane, session, feedback));
+            Assert.AreEqual((ushort)(43 * 257), owner.State.BodyLow);
+            Assert.AreEqual((ushort)(9 * 257), owner.State.BodyHigh);
+            feedback[0] = feedback[1] = 0;
+            Assert.IsTrue(PublishNative(lane, session, feedback));
+            Assert.IsTrue(owner.State.IsNeutral);
+            feedback[0] = 43;
+            feedback[1] = 9;
+            feedback[HapticsOffset] = 0x36;
+            for (int interval = 0; interval < 4; interval++)
+            {
+                owner.Now += 100_000;
+                Assert.IsTrue(PublishNative(lane, session, feedback, fresh: false));
+                Assert.IsTrue(owner.State.IsNeutral,
+                    "Mode equality does not authorize cached media motor amplitudes.");
+            }
+        }
+        finally { Assert.IsTrue(session.TryRetire()); }
+    }
+
+    [TestMethod]
+    public void SourceStopSurvivesLivePreferenceRefreshAndFailedClock()
+    {
+        var owner = new RecordingOwner();
+        var session = owner.CreateSession();
+        var policy = Switch2DualSenseConversionPolicy.Default;
+        var lane = new Switch2DualSenseFeedbackPolicyLane(_ => policy, () => owner.Now);
+        byte[] feedback = NativeFeedback(0x03);
+        try
+        {
+            Assert.IsTrue(PublishNative(lane, session, feedback));
+            owner.Now = 0;
+            feedback[29] = 0x0C;
+            Assert.IsFalse(PublishNative(lane, session, feedback));
+            owner.Now = 2_000_000;
+            feedback[29] = 0x03;
+            feedback[HapticsOffset] = 0x36;
+            Assert.IsTrue(PublishNative(lane, session, feedback, fresh: false));
+            Assert.IsTrue(owner.State.IsNeutral);
+            policy = new(false, true);
+            Assert.IsTrue(lane.TryRefresh(session, 0, 7, streamGeneration: 11));
+            Assert.IsTrue(owner.State.IsNeutral);
+            policy = Switch2DualSenseConversionPolicy.Default;
+            Assert.IsTrue(lane.TryRefresh(session, 0, 7, streamGeneration: 11));
+            Assert.IsTrue(owner.State.IsNeutral);
+        }
+        finally { Assert.IsTrue(session.TryRetire()); }
+    }
+
+    private static byte[] NativeFeedback(byte flag0, byte flag2 = 0, bool withSilentPcm = false)
+    {
+        var feedback = new byte[ViiperOutDevice.DualSenseAtomicFeedbackLength];
+        feedback[0] = 43;
+        feedback[6] = feedback[17] = 5;
+        feedback[28] = 2;
+        feedback[29] = flag0;
+        feedback[30] = 0x57;
+        feedback[67] = flag2;
+        if (withSilentPcm) feedback[HapticsOffset] = 0x36;
+        return feedback;
+    }
+
+    private static bool PublishNative(Switch2DualSenseFeedbackPolicyLane lane,
+        Switch2VirtualFeedbackSession session, byte[] feedback, bool fresh = true) =>
+        lane.TryPublish(session, 0, feedback, feedback.Length, HapticsOffset,
+            false, false, 100, false, 10, 0, 7, streamGeneration: 11,
+            freshNativeOutput: fresh);
+
+    [DataTestMethod]
     [DataRow(false, false)]
     [DataRow(false, true)]
     [DataRow(true, false)]
@@ -50,9 +220,8 @@ public sealed class Switch2DualSenseFeedbackPolicyTests
         {
             Assert.AreEqual(expectedLeft, left);
             Assert.AreEqual(expectedRight, right);
-            Assert.AreEqual(adaptive ? Switch2HdRumbleFeedbackFidelity.
-                DualSenseAdaptiveTriggerApproximation :
-                Switch2HdRumbleFeedbackFidelity.DualSensePcmDualBand, fidelity);
+            Assert.AreEqual(audio ? Switch2HdRumbleFeedbackFidelity.DualSensePcmDualBand :
+                Switch2HdRumbleFeedbackFidelity.DualSenseAdaptiveTriggerApproximation, fidelity);
         }
 
         var owner = new RecordingOwner();

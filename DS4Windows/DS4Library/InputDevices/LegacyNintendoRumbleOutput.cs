@@ -12,6 +12,9 @@ internal sealed class LegacyNintendoRumbleOutput
     private readonly byte[] latest;
     private readonly byte[] writing;
     private readonly Func<byte[], bool> submit;
+    private readonly Func<object, bool> authorityIsCurrent;
+    private readonly byte[] staleNeutral;
+    private object authority;
     private Thread worker;
     private ulong revision;
     private bool pending;
@@ -23,10 +26,15 @@ internal sealed class LegacyNintendoRumbleOutput
     private int pumping;
     private Exception lastWriteException;
 
-    internal LegacyNintendoRumbleOutput(int reportLength, Func<byte[], bool> submit)
+    internal LegacyNintendoRumbleOutput(int reportLength, Func<byte[], bool> submit,
+        Func<object, bool> authorityIsCurrent = null, byte[] staleNeutral = null)
     {
         if (reportLength < 10) throw new ArgumentOutOfRangeException(nameof(reportLength));
         this.submit = submit ?? throw new ArgumentNullException(nameof(submit));
+        if (authorityIsCurrent != null && staleNeutral?.Length != reportLength)
+            throw new ArgumentException("An authority validator requires an exact neutral packet.", nameof(staleNeutral));
+        this.authorityIsCurrent = authorityIsCurrent;
+        this.staleNeutral = staleNeutral == null ? null : (byte[])staleNeutral.Clone();
         latest = new byte[reportLength];
         writing = new byte[reportLength];
     }
@@ -45,7 +53,7 @@ internal sealed class LegacyNintendoRumbleOutput
         }
     }
 
-    internal bool Publish(ReadOnlySpan<byte> report, bool isActive)
+    internal bool Publish(ReadOnlySpan<byte> report, bool isActive, object publicationAuthority = null)
     {
         if (report.Length != latest.Length) throw new ArgumentException("Wrong rumble report length.", nameof(report));
         lock (gate)
@@ -55,6 +63,7 @@ internal sealed class LegacyNintendoRumbleOutput
             unchecked { ++revision; }
             pending = true;
             active = isActive;
+            authority = publicationAuthority;
             WakeNoLock();
             return true;
         }
@@ -81,6 +90,7 @@ internal sealed class LegacyNintendoRumbleOutput
         {
             ulong claimedRevision;
             bool claimedActive;
+            object claimedAuthority;
             lock (gate)
             {
                 if (!wake || !pending) return false;
@@ -88,13 +98,27 @@ internal sealed class LegacyNintendoRumbleOutput
                 latest.CopyTo(writing, 0);
                 claimedRevision = revision;
                 claimedActive = active;
+                claimedAuthority = authority;
                 // A failed/throwing native call may still have reached hardware.
                 if (claimedActive) possiblyActive = true;
                 if (stopping) ++stopAttempts;
             }
 
             bool accepted;
-            try { accepted = submit(writing); }
+            try
+            {
+                // The credential is captured with the packet, not looked up
+                // from the newer mailbox after claiming an older packet.
+                // No topology lock is held while calling native HID.
+                if (authorityIsCurrent != null &&
+                    (claimedActive && claimedAuthority == null ||
+                     claimedAuthority != null && !authorityIsCurrent(claimedAuthority)))
+                {
+                    staleNeutral.CopyTo(writing, 0);
+                    claimedActive = false;
+                }
+                accepted = submit(writing);
+            }
             catch (Exception error)
             {
                 // Do not crash the input lifetime from this background thread.
@@ -143,6 +167,7 @@ internal sealed class LegacyNintendoRumbleOutput
             if (stopping) return;
             stopping = true;
             active = false;
+            authority = null; // retirement neutral is unconditional
             neutral.CopyTo(latest);
             unchecked { ++revision; }
             // Unsubmitted effects can be discarded. An in-flight active write

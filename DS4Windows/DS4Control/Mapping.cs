@@ -2380,8 +2380,7 @@ namespace DS4Windows
             ref Switch2StickScrollTapLaneState switch2StickScrollTapLane =
                 ref switch2StickScrollTapLanes[device];
             Switch2StickScrollTapLane.TryAdvance(
-                cState.Switch2RawInputStatus,
-                cState.Switch2JoyConRawInputStatus,
+                cState,
                 cState.LXAxis.ProfileCoordinate, cState.LYAxis.ProfileCoordinate, cState.RXAxis.ProfileCoordinate, cState.RYAxis.ProfileCoordinate,
                 Global.Switch2LeftStickScrollActivationMode[device],
                 Global.Switch2RightStickScrollActivationMode[device],
@@ -2399,8 +2398,7 @@ namespace DS4Windows
             ref Switch2StickDirectionTapLaneState directionTapLane =
                 ref switch2StickDirectionTapLanes[device];
             Switch2StickDirectionTapLane.TryAdvance(
-                cState.Switch2RawInputStatus,
-                cState.Switch2JoyConRawInputStatus,
+                cState,
                 cState.LXAxis.ProfileCoordinate, cState.LYAxis.ProfileCoordinate, cState.RXAxis.ProfileCoordinate, cState.RYAxis.ProfileCoordinate,
                 directionModes, switch2ProfileRevision,
                 ref directionTapLane,
@@ -2955,16 +2953,15 @@ namespace DS4Windows
 
             ref Switch2StickAssistProfileLaneState switch2StickAssistLane =
                 ref switch2StickAssistProfileLanes[device];
-            Switch2RuntimeInputDevice switch2Runtime =
-                ctrl.DS4Controllers[device] as Switch2RuntimeInputDevice;
+            INintendoMousePresentation switch2Runtime =
+                ctrl.DS4Controllers[device] as INintendoMousePresentation;
             bool switch2HighRateMouse = switch2Runtime != null &&
                 Global.Switch2HighRateMousePresentation[device];
             bool switch2GyroMouseOutputActive =
                 tp.ConsumeGyroMouseOutputActive();
             bool switch2StickAssistAdvanced =
                 Switch2StickAssistProfileLane.TryAdvance(
-                    cState.Switch2RawInputStatus,
-                    cState.Switch2JoyConRawInputStatus,
+                    cState,
                     cState.LXAxis.ProfileCoordinate, cState.LYAxis.ProfileCoordinate, cState.RXAxis.ProfileCoordinate, cState.RYAxis.ProfileCoordinate,
                     switch2GyroMouseOutputActive,
                     Global.Switch2GyroMouseStickAssistSensitivity[device],
@@ -2999,7 +2996,7 @@ namespace DS4Windows
             ref Switch2MappedStickMousePresentationFrame
                 mappedStickMouseFrame =
                     ref switch2MappedStickMouseFrames[device];
-            bool mappedStickSourceValid =
+            bool mappedStickSourceValid = NintendoProfileInput.TryRead(cState, out _) ||
                 Switch2StickScrollTapLane.TryGetSource(
                     cState.Switch2RawInputStatus,
                     cState.Switch2JoyConRawInputStatus, out _, out _);
@@ -3617,7 +3614,7 @@ namespace DS4Windows
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void CaptureSwitch2MappedStickMouse(int device,
-            DS4Controls control, double signedDelta, ControlService ctrl)
+            DS4Controls control, double signedDelta, ControlService ctrl, DS4State state)
         {
             if ((uint)device >= switch2MappedStickMouseFrames.Length ||
                 ctrl?.DS4Controllers[device] == null)
@@ -3627,7 +3624,8 @@ namespace DS4Windows
 
             switch2MappedStickMouseFrames[device].TryCapture(control,
                 signedDelta,
-                ctrl.DS4Controllers[device].lastTimeElapsedDouble);
+                NintendoProfileInput.ResolveReportIntervalMilliseconds(state,
+                    ctrl.DS4Controllers[device].lastTimeElapsedDouble));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -4209,7 +4207,7 @@ namespace DS4Windows
                                         tempMouseDeltaY = -Math.Abs((tempMouseDeltaY == -2147483648 ? 0 : tempMouseDeltaY));
                                         CaptureSwitch2MappedStickMouse(device,
                                             dcs.control, tempMouseDeltaY,
-                                            ctrl);
+                                            ctrl, cState);
                                     }
 
                                     break;
@@ -4222,7 +4220,7 @@ namespace DS4Windows
                                         tempMouseDeltaY = Math.Abs((tempMouseDeltaY == -2147483648 ? 0 : tempMouseDeltaY));
                                         CaptureSwitch2MappedStickMouse(device,
                                             dcs.control, tempMouseDeltaY,
-                                            ctrl);
+                                            ctrl, cState);
                                     }
 
                                     break;
@@ -4235,7 +4233,7 @@ namespace DS4Windows
                                         tempMouseDeltaX = -Math.Abs((tempMouseDeltaX == -2147483648 ? 0 : tempMouseDeltaX));
                                         CaptureSwitch2MappedStickMouse(device,
                                             dcs.control, tempMouseDeltaX,
-                                            ctrl);
+                                            ctrl, cState);
                                     }
 
                                     break;
@@ -4248,7 +4246,7 @@ namespace DS4Windows
                                         tempMouseDeltaX = Math.Abs((tempMouseDeltaX == -2147483648 ? 0 : tempMouseDeltaX));
                                         CaptureSwitch2MappedStickMouse(device,
                                             dcs.control, tempMouseDeltaX,
-                                            ctrl);
+                                            ctrl, cState);
                                     }
 
                                     break;
@@ -5885,7 +5883,8 @@ namespace DS4Windows
             int controlNum = (int)control;
             DS4StateFieldMapping.ControlType controlType = DS4StateFieldMapping.mappedType[controlNum];
             //long timeElapsed = ctrl.DS4Controllers[device].getLastTimeElapsed();
-            double timeElapsed = ctrl.DS4Controllers[device].lastTimeElapsedDouble;
+            double timeElapsed = NintendoProfileInput.ResolveReportIntervalMilliseconds(cState,
+                ctrl.DS4Controllers[device].lastTimeElapsedDouble);
             //double mouseOffset = 0.025;
             double tempMouseOffsetX = 0.0, tempMouseOffsetY = 0.0;
             double mouseVerticalScale = 1.0;
@@ -6160,8 +6159,7 @@ namespace DS4Windows
             if (controlType == DS4StateFieldMapping.ControlType.AxisDir)
             {
                 value *= Switch2MappedStickMouseSensitivity.ResolveGain(
-                    cState.Switch2RawInputStatus,
-                    cState.Switch2JoyConRawInputStatus, control,
+                    cState, control,
                     Global.Switch2LeftStickMouseSensitivity[device],
                     Global.Switch2RightStickMouseSensitivity[device]);
             }

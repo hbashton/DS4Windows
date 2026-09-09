@@ -297,6 +297,9 @@ namespace DS4Windows
                 return false;
             }
 
+            if (state.NintendoInputStatus.IsDeclared)
+                return NintendoProfileInput.TryReadButton(state, control);
+
             Switch2RawInputStatus pro = state.Switch2RawInputStatus;
             Switch2JoyConRawInputStatus joyCon =
                 state.Switch2JoyConRawInputStatus;

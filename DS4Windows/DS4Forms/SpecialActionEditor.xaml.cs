@@ -55,35 +55,8 @@ namespace DS4WinWPF.DS4Forms
         {
             InitializeComponent();
 
-            triggerBoxes = new List<CheckBox>()
-            {
-                crossTrigCk, circleTrigCk, squareTrigCk, triangleTrigCk,
-                optionsTrigCk, shareTrigCk, upTrigCk, downTrigCk,
-                leftTrigCk, rightTrigCk, psTrigCk, muteTrigCk, l1TrigCk,
-                r1TrigCk, l2TrigCk, l2FullPullTrigCk, r2TrigCk, r2TrigFullPullCk, l3TrigCk,
-                r3TrigCk, fnLTrigCk, fnRTrigCk, bLPTrigCk, bRPTrigCk,
-                leftTouchTrigCk, upperTouchTrigCk, multitouchTrigCk,
-                rightTouchTrigCk, lsuTrigCk, lsdTrigCk, lslTrigCk,
-                lsrTrigCk, rsuTrigCk, rsdTrigCk, rslTrigCk,
-                rsrTrigCk, swipeUpTrigCk, swipeDownTrigCk, swipeLeftTrigCk,
-                swipeRightTrigCk, tiltUpTrigCk, tiltDownTrigCk, tiltLeftTrigCk,
-                tiltRightTrigCk,touchStartedTrigCk,touchEndedTrigCk
-            };
-
-            unloadTriggerBoxes = new List<CheckBox>()
-            {
-                unloadCrossTrigCk, unloadCircleTrigCk, unloadSquareTrigCk, unloadTriangleTrigCk,
-                unloadOptionsTrigCk, unloadShareTrigCk, unloadUpTrigCk, unloadDownTrigCk,
-                unloadLeftTrigCk, unloadRightTrigCk, unloadPsTrigCk, unloadMuteTrigCk, unloadL1TrigCk,
-                unloadR1TrigCk, unloadL2TrigCk, unloadL2FullPullTrigCk, unloadR2TrigCk, unloadR2FullPullTrigCk, unloadL3TrigCk,
-                unloadR3TrigCk, unloadfnLTrigCk, unloadfnRTrigCk, unloadbLPTrigCk, unloadbRPTrigCk,
-                unloadLeftTouchTrigCk, unloadUpperTouchTrigCk, unloadMultitouchTrigCk,
-                unloadRightTouchTrigCk, unloadLsuTrigCk, unloadLsdTrigCk, unloadLslTrigCk,
-                unloadLsrTrigCk, unloadRsuTrigCk, unloadRsdTrigCk, unloadRslTrigCk,
-                unloadRsrTrigCk, unloadSwipeUpTrigCk, unloadSwipeDownTrigCk, unloadSwipeLeftTrigCk,
-                unloadSwipeRightTrigCk, unloadTiltUpTrigCk, unloadTiltDownTrigCk, unloadTiltLeftTrigCk,
-                unloadTiltRightTrigCk,unloadTouchStartedTrigCk, unloadTouchEndedTrigCk,
-            };
+            triggerBoxes = BuildTriggerChecklist(triggerPanel, ControlTriggerCheckBox_Click);
+            unloadTriggerBoxes = BuildTriggerChecklist(unloadTriggerPanel, ControlUnloadTriggerCheckBox_Click);
 
             specialActVM = new SpecialActEditorViewModel(deviceNum, specialAction);
             macroActVM = new MacroViewModel();
@@ -136,6 +109,98 @@ namespace DS4WinWPF.DS4Forms
             actionTypeCombo.SelectionChanged += ActionTypeCombo_SelectionChanged;
         }
 
+        private static List<CheckBox> BuildTriggerChecklist(StackPanel panel, RoutedEventHandler clicked)
+        {
+            var boxes = new List<CheckBox>();
+            string previousGroup = null;
+            foreach (SpecialActionTriggerCatalog.Entry entry in SpecialActionTriggerCatalog.Entries)
+            {
+                if (entry.Group != previousGroup)
+                {
+                    AddTriggerHeading(panel, entry.Group);
+                    previousGroup = entry.Group;
+                }
+
+                CheckBox box = CreateTriggerCheckBox(entry.Tag, entry.Label, entry.Detail, clicked);
+                boxes.Add(box);
+                panel.Children.Add(box);
+            }
+
+            return boxes;
+        }
+
+        private static void AddTriggerHeading(StackPanel panel, string heading)
+        {
+            var text = new TextBlock
+            {
+                Text = heading, FontWeight = FontWeights.SemiBold,
+                Margin = new Thickness(0, 12, 0, 6), TextWrapping = TextWrapping.Wrap,
+            };
+            text.SetResourceReference(TextBlock.ForegroundProperty, "ForegroundColor");
+            panel.Children.Add(text);
+        }
+
+        private static CheckBox CreateTriggerCheckBox(string tag, string label,
+            string detail, RoutedEventHandler clicked)
+        {
+            var content = new StackPanel();
+            var title = new TextBlock { Text = label, TextWrapping = TextWrapping.Wrap };
+            title.SetResourceReference(TextBlock.ForegroundProperty, "ForegroundColor");
+            content.Children.Add(title);
+            if (!string.IsNullOrEmpty(detail))
+            {
+                var subtitle = new TextBlock
+                {
+                    Text = detail, TextWrapping = TextWrapping.Wrap, FontSize = 11,
+                    Margin = new Thickness(0, 2, 0, 0),
+                };
+                subtitle.SetResourceReference(TextBlock.ForegroundProperty, "ForegroundColor");
+                content.Children.Add(subtitle);
+            }
+
+            var box = new CheckBox
+            {
+                Tag = tag, Content = content, Margin = new Thickness(0, 3, 0, 5),
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                VerticalContentAlignment = VerticalAlignment.Top,
+            };
+            box.SetResourceReference(Control.ForegroundProperty, "ForegroundColor");
+            System.Windows.Automation.AutomationProperties.SetName(box,
+                string.IsNullOrEmpty(detail) ? label : $"{label}, {detail}");
+            box.Click += clicked;
+            return box;
+        }
+
+        private static void RestoreTriggerSelection(StackPanel panel, List<CheckBox> boxes,
+            List<string> selected, RoutedEventHandler clicked)
+        {
+            bool addedUnknownHeading = false;
+            foreach (string tag in selected)
+            {
+                CheckBox box = boxes.Find(candidate => string.Equals(candidate.Tag as string, tag,
+                    StringComparison.Ordinal));
+                if (box == null)
+                {
+                    // Never silently remove an older/newer saved token when opening an action.
+                    // Unknown tokens remain inert in the runtime parser and can be removed explicitly.
+                    if (!addedUnknownHeading)
+                    {
+                        AddTriggerHeading(panel, "Other saved triggers");
+                        addedUnknownHeading = true;
+                    }
+                    box = CreateTriggerCheckBox(tag, $"Unrecognized: {tag}",
+                        "Kept as saved. Uncheck to remove.", clicked);
+                    boxes.Add(box);
+                    panel.Children.Add(box);
+                }
+                box.IsChecked = true;
+            }
+        }
+
+        internal IReadOnlyList<CheckBox> TriggerCheckBoxes => triggerBoxes;
+        internal IReadOnlyList<CheckBox> UnloadTriggerCheckBoxes => unloadTriggerBoxes;
+        internal SpecialActEditorViewModel EditorViewModel => specialActVM;
+
         private void UnregisterDataContext()
         {
             actionTypeTabControl.DataContext = null;
@@ -157,45 +222,10 @@ namespace DS4WinWPF.DS4Forms
         private void LoadAction(DS4Windows.SpecialAction specialAction)
         {
             specialActVM.LoadAction(specialAction);
-            string[] tempTriggers = specialActVM.ControlTriggerList.ToArray();
-            foreach (string control in tempTriggers)
-            {
-                bool found = false;
-                foreach (CheckBox box in triggerBoxes)
-                {
-                    if (box.Tag.ToString() == control)
-                    {
-                        box.IsChecked = true;
-                        found = true;
-                        break;
-                    }
-                }
-
-                if (!found)
-                {
-                    specialActVM.ControlTriggerList.Remove(control);
-                }
-            }
-
-            tempTriggers = specialActVM.ControlUnloadTriggerList.ToArray();
-            foreach (string control in tempTriggers)
-            {
-                bool found = false;
-                foreach (CheckBox box in unloadTriggerBoxes)
-                {
-                    if (box.Tag.ToString() == control)
-                    {
-                        box.IsChecked = true;
-                        found = true;
-                        break;
-                    }
-                }
-
-                if (!found)
-                {
-                    specialActVM.ControlUnloadTriggerList.Remove(control);
-                }
-            }
+            RestoreTriggerSelection(triggerPanel, triggerBoxes, specialActVM.ControlTriggerList,
+                ControlTriggerCheckBox_Click);
+            RestoreTriggerSelection(unloadTriggerPanel, unloadTriggerBoxes, specialActVM.ControlUnloadTriggerList,
+                ControlUnloadTriggerCheckBox_Click);
 
             switch (specialAction.typeID)
             {
@@ -355,11 +385,12 @@ namespace DS4WinWPF.DS4Forms
             string name = check.Tag.ToString();
             if (check.IsChecked == true)
             {
-                specialActVM.ControlTriggerList.Add(name);
+                if (!specialActVM.ControlTriggerList.Contains(name))
+                    specialActVM.ControlTriggerList.Add(name);
             }
             else
             {
-                specialActVM.ControlTriggerList.Remove(name);
+                specialActVM.ControlTriggerList.RemoveAll(value => value == name);
             }
         }
 
@@ -369,11 +400,12 @@ namespace DS4WinWPF.DS4Forms
             string name = check.Tag.ToString();
             if (check.IsChecked == true)
             {
-                specialActVM.ControlUnloadTriggerList.Add(name);
+                if (!specialActVM.ControlUnloadTriggerList.Contains(name))
+                    specialActVM.ControlUnloadTriggerList.Add(name);
             }
             else
             {
-                specialActVM.ControlUnloadTriggerList.Remove(name);
+                specialActVM.ControlUnloadTriggerList.RemoveAll(value => value == name);
             }
         }
 

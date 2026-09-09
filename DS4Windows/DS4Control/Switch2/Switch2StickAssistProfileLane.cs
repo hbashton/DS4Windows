@@ -26,6 +26,12 @@ internal enum Switch2StickAssistSource : byte
     JoinedRight = 2,
     StandaloneLeft = 3,
     StandaloneRight = 4,
+    OriginalJoinedRight = 5,
+    OriginalVerticalLeft = 6,
+    OriginalVerticalRight = 7,
+    OriginalHorizontalLeft = 8,
+    OriginalHorizontalRight = 9,
+    StandaloneVerticalRight = 10,
 }
 
 internal struct Switch2StickAssistProfileLaneState
@@ -69,6 +75,40 @@ internal static class Switch2StickAssistProfileLane
         double.IsFinite(value) && value >= MinimumSensitivity &&
             value <= MaximumSensitivity ? value : DefaultSensitivity;
 
+    internal static bool TryAdvance(DS4State input, double leftX, double leftY,
+        double rightX, double rightY, bool gyroMouseOutputActive,
+        double sensitivity, long profileRevision,
+        ref Switch2StickAssistProfileLaneState state,
+        out Switch2StickAssistResult result)
+    {
+        result = default;
+        if (input == null) { state = default; return false; }
+        if (!input.NintendoInputStatus.IsDeclared)
+            return TryAdvance(input.Switch2RawInputStatus, input.Switch2JoyConRawInputStatus,
+                leftX, leftY, rightX, rightY, gyroMouseOutputActive, sensitivity,
+                profileRevision, ref state, out result);
+        sensitivity = NormalizeSensitivity(sensitivity);
+        if (!NintendoProfileInput.TryRead(input, out var nintendo) ||
+            !Switch2StickScrollTapLane.AreValidProfileCoordinates(leftX, leftY, rightX, rightY) ||
+            !gyroMouseOutputActive || sensitivity <= 0 || profileRevision < 0)
+        { state = default; return false; }
+        Switch2StickAssistSource source = nintendo.Mode switch
+        {
+            Switch2JoyConProfileMode.Joined => Switch2StickAssistSource.OriginalJoinedRight,
+            Switch2JoyConProfileMode.StandaloneVerticalLeft => Switch2StickAssistSource.OriginalVerticalLeft,
+            Switch2JoyConProfileMode.StandaloneVerticalRight => Switch2StickAssistSource.OriginalVerticalRight,
+            Switch2JoyConProfileMode.StandaloneHorizontalLeft => Switch2StickAssistSource.OriginalHorizontalLeft,
+            _ => Switch2StickAssistSource.OriginalHorizontalRight,
+        };
+        bool useRight = nintendo.Mode is Switch2JoyConProfileMode.Joined or
+            Switch2JoyConProfileMode.StandaloneVerticalRight;
+        ulong generation = nintendo.Mode is Switch2JoyConProfileMode.StandaloneVerticalLeft or
+            Switch2JoyConProfileMode.StandaloneHorizontalLeft ? nintendo.LeftGeneration : nintendo.RightGeneration;
+        return AdvanceSelected(source, generation, generation, nintendo.PairEpoch,
+            nintendo.CompletionTimestampQpc, nintendo.QpcFrequency, useRight ? rightX : leftX,
+            useRight ? rightY : leftY, sensitivity, profileRevision, ref state, out result);
+    }
+
     internal static bool TryAdvance(in Switch2RawInputStatus pro,
         in Switch2JoyConRawInputStatus joyCon, double leftX, double leftY,
         double rightX, double rightY, bool gyroMouseOutputActive,
@@ -91,6 +131,17 @@ internal static class Switch2StickAssistProfileLane
             return false;
         }
 
+        return AdvanceSelected(source, deviceGeneration, transportGeneration, pairEpoch,
+            timestamp, frequency, stickX, stickY, sensitivity, profileRevision, ref state, out result);
+    }
+
+    private static bool AdvanceSelected(Switch2StickAssistSource source,
+        ulong deviceGeneration, ulong transportGeneration, ulong pairEpoch,
+        long timestamp, long frequency, double stickX, double stickY, double sensitivity,
+        long profileRevision, ref Switch2StickAssistProfileLaneState state,
+        out Switch2StickAssistResult result)
+    {
+        result = default;
         bool sameLifetime = state.HasBaseline && state.Source == source &&
             state.DeviceGeneration == deviceGeneration &&
             state.TransportGeneration == transportGeneration &&
@@ -200,14 +251,14 @@ internal static class Switch2StickAssistProfileLane
                     when joyCon.RightPresent &&
                         joyCon.RightDeviceGeneration != 0 &&
                         joyCon.RightTransportGeneration != 0:
-                source = Switch2StickAssistSource.StandaloneRight;
+                source = joyCon.Mode == Switch2JoyConProfileMode.StandaloneVerticalRight ?
+                    Switch2StickAssistSource.StandaloneVerticalRight : Switch2StickAssistSource.StandaloneRight;
                 deviceGeneration = joyCon.RightDeviceGeneration;
                 transportGeneration = joyCon.RightTransportGeneration;
-                // Standalone Joy-Cons are mini-controller presentations. The
-                // existing profile projection places either physical side's
-                // orientation-corrected stick on the logical left stick.
-                stickX = leftX;
-                stickY = leftY;
+                // Only sideways mini-controller mode moves the right stick to
+                // the logical left. Upright-right keeps RX/RY in the mapper.
+                stickX = joyCon.Mode == Switch2JoyConProfileMode.StandaloneVerticalRight ? rightX : leftX;
+                stickY = joyCon.Mode == Switch2JoyConProfileMode.StandaloneVerticalRight ? rightY : leftY;
                 break;
             default:
                 return false;

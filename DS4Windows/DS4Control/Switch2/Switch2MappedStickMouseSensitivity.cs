@@ -26,6 +26,16 @@ internal static class Switch2MappedStickMouseSensitivity
         double.IsFinite(value) && value >= Minimum && value <= Maximum ?
             value : Default;
 
+    internal static double ResolveGain(DS4State state, DS4Controls control,
+        double leftSensitivity, double rightSensitivity)
+    {
+        if (state == null) return 1.0;
+        if (!state.NintendoInputStatus.IsDeclared)
+            return ResolveGain(state.Switch2RawInputStatus, state.Switch2JoyConRawInputStatus,
+                control, leftSensitivity, rightSensitivity);
+        return NintendoProfileInput.TryRead(state, out _) ? ResolveControlGain(control, leftSensitivity, rightSensitivity) : 1.0;
+    }
+
     internal static double ResolveGain(in Switch2RawInputStatus pro,
         in Switch2JoyConRawInputStatus joyCon, DS4Controls control,
         double leftSensitivity, double rightSensitivity)
@@ -35,6 +45,11 @@ internal static class Switch2MappedStickMouseSensitivity
             return 1.0;
         }
 
+        return ResolveControlGain(control, leftSensitivity, rightSensitivity);
+    }
+
+    private static double ResolveControlGain(DS4Controls control, double leftSensitivity, double rightSensitivity)
+    {
         double sensitivity;
         if (control is DS4Controls.LXNeg or DS4Controls.LXPos or
                 DS4Controls.LYNeg or DS4Controls.LYPos)

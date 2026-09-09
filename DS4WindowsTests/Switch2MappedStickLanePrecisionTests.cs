@@ -140,26 +140,45 @@ public sealed class Switch2MappedStickLanePrecisionTests
         Assert.AreEqual((180.2 - 128) / 127 * 240, second.VelocityX);
     }
 
-    [TestMethod]
-    public void StandaloneRightAssistUsesPreciseLogicalLeftCoordinates()
+    [DataTestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void StandaloneRightAssistUsesPreciseCoordinatesForItsOrientation(bool horizontal)
     {
         var source = new Switch2JoyConRawInputStatus
         {
             IsValid = true,
             ContractVersion = Switch2JoyConProfileInputFrame.CurrentVersion,
-            Mode = Switch2JoyConProfileMode.StandaloneVerticalRight,
+            Mode = horizontal ? Switch2JoyConProfileMode.StandaloneHorizontalRight :
+                Switch2JoyConProfileMode.StandaloneVerticalRight,
             RightPresent = true,
             RightDeviceGeneration = 5,
             RightTransportGeneration = 6,
             CompletionTimestampQpc = 1_000,
             QpcFrequency = 1_000,
         };
+        // The producer keeps upright right-hand input in RX/RY. Only sideways
+        // mini-controller mode moves it to LX/LY. Poison the unselected stick.
+        double leftX = horizontal ? 129.25 : 0, leftY = horizontal ? 126.75 : 255;
+        double rightX = horizontal ? 0 : 129.25, rightY = horizontal ? 255 : 126.75;
         Switch2StickAssistProfileLaneState state = default;
         Assert.IsFalse(Switch2StickAssistProfileLane.TryAdvance(default, source,
-            129.25, 126.75, 0, 255, true, 5, 1, ref state, out _));
+            leftX, leftY, rightX, rightY, true, 5, 1, ref state, out _));
         source.CompletionTimestampQpc = 1_010;
         Assert.IsTrue(Switch2StickAssistProfileLane.TryAdvance(default, source,
-            129.25, 126.75, 0, 255, true, 5, 1, ref state, out var result));
+            leftX, leftY, rightX, rightY, true, 5, 1, ref state, out var result));
+        Assert.AreEqual(1.25 / 127 * 240, result.VelocityX);
+        Assert.AreEqual(-1.25 / 128 * 240, result.VelocityY);
+
+        source.Mode = horizontal ? Switch2JoyConProfileMode.StandaloneVerticalRight :
+            Switch2JoyConProfileMode.StandaloneHorizontalRight;
+        source.CompletionTimestampQpc = 1_020;
+        Assert.IsFalse(Switch2StickAssistProfileLane.TryAdvance(default, source,
+            rightX, rightY, leftX, leftY, true, 5, 1, ref state, out _),
+            "Changing holding style establishes a baseline, not an inherited movement delta.");
+        source.CompletionTimestampQpc = 1_030;
+        Assert.IsTrue(Switch2StickAssistProfileLane.TryAdvance(default, source,
+            rightX, rightY, leftX, leftY, true, 5, 1, ref state, out result));
         Assert.AreEqual(1.25 / 127 * 240, result.VelocityX);
         Assert.AreEqual(-1.25 / 128 * 240, result.VelocityY);
     }

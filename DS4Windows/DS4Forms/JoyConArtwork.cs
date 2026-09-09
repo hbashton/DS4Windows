@@ -42,8 +42,8 @@ namespace DS4WinWPF.DS4Forms
             // retains a standalone fallback from an earlier session.
             if (hold == Switch2JoyConHoldMode.Horizontal)
             {
-                if (type == InputDeviceType.Switch2JoyConLeft) return SidewaysLeft;
-                if (type == InputDeviceType.Switch2JoyConRight) return SidewaysRight;
+                if (type is InputDeviceType.Switch2JoyConLeft or InputDeviceType.JoyConL) return SidewaysLeft;
+                if (type is InputDeviceType.Switch2JoyConRight or InputDeviceType.JoyConR) return SidewaysRight;
             }
             return ForDevice(type);
         }

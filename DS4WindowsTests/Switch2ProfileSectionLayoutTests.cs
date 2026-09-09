@@ -27,7 +27,7 @@ public sealed class Switch2ProfileSectionLayoutTests
         "http://schemas.microsoft.com/winfx/2006/xaml";
 
     [TestMethod]
-    public void Switch2IsItsOwnSettingsPageBetweenTriggerLabAndAdvanced()
+    public void NintendoOptionsIsItsOwnSettingsPageBetweenTriggerLabAndAdvanced()
     {
         var editor = Load("ProfileEditor.xaml");
         var settings = editor.Descendants(Wpf + "TabControl").Single(
@@ -35,7 +35,7 @@ public sealed class Switch2ProfileSectionLayoutTests
         var tabs = settings.Elements(Wpf + "TabItem").ToArray();
         CollectionAssert.AreEqual(new[]
         {
-            "Audio Haptics", "Trigger Lab", "Switch 2 Controls", "Advanced",
+            "Audio Haptics", "Trigger Lab", "Nintendo Options", "Advanced",
         }, tabs.TakeLast(4).Select(node => (string)node.Attribute("Header")).ToArray());
         Assert.AreEqual(8, tabs.Length);
         Assert.AreEqual("switch2ControlsTab", (string)tabs[6].Attribute(Xaml + "Name"));
@@ -56,13 +56,33 @@ public sealed class Switch2ProfileSectionLayoutTests
         var items = menu.Elements(Wpf + "ListBoxItem").ToArray();
         Assert.AreEqual(13, items.Length);
         Assert.AreEqual("Trigger Lab", (string)items[9].Attribute("Content"));
-        Assert.AreEqual("Switch 2 Controls", (string)items[10].Attribute("Content"));
+        Assert.AreEqual("Nintendo Options", (string)items[10].Attribute("Content"));
         Assert.AreEqual("Advanced", (string)items[11].Attribute("Content"));
         Assert.AreEqual("Log", (string)items[12].Attribute("Content"));
     }
 
+    [TestMethod]
+    public void DeviceOptionsRemoveGlobalJoyConLinkAndGyroSelectorsButKeepPerDeviceControls()
+    {
+        var window = Load("ControllerRegisterOptionsWindow.xaml");
+        Assert.IsFalse(window.Descendants().Attributes().Any(attribute =>
+            attribute.Value.Contains("JoyCon Global Options", StringComparison.Ordinal) ||
+            attribute.Value.Contains("ParentOptions.LinkedMode", StringComparison.Ordinal) ||
+            attribute.Value.Contains("ParentOptions.JoinGyroProv", StringComparison.Ordinal)));
+        var joyCon = window.Descendants(Wpf + "TabItem").Single(node =>
+            (string)node.Attribute(Xaml + "Name") == "joyConOptsTabItem");
+        Assert.AreEqual(1, joyCon.Descendants(Wpf + "CheckBox").Count(node =>
+            ((string)node.Attribute("IsChecked"))?.Contains("Options.EnableHomeLED", StringComparison.Ordinal) == true));
+        Assert.IsTrue(window.Descendants(Wpf + "CheckBox").Any(node =>
+            (string)node.Attribute("IsChecked") == "{Binding JoyConDeviceOpts.Enabled}"));
+        var dualSense = window.Descendants(Wpf + "TabItem").Single(node =>
+            (string)node.Attribute(Xaml + "Name") == "dualSenseOptsTabItem");
+        CollectionAssert.AreEquivalent(new[] { "{Binding Options.LedMode}", "{Binding Options.MuteLedMode}" },
+            dualSense.Descendants(Wpf + "ComboBox").Select(node => (string)node.Attribute("SelectedValue")).ToArray());
+    }
+
     [DataTestMethod]
-    [DataRow("Switch2MapXboxImpulseTriggersToHdRumble")]
+    [DataRow("Switch2XboxImpulseStrength")]
     [DataRow("Switch2RumbleDelayMilliseconds")]
     [DataRow("Switch2XboxImpulseDynamicFrequency")]
     [DataRow("Switch2FaceButtonLayoutIndex")]
@@ -150,7 +170,7 @@ public sealed class Switch2ProfileSectionLayoutTests
     }
 
     [DataTestMethod]
-    [DataRow("Switch2MapXboxImpulseTriggersToHdRumble", "switch2FeedbackCard")]
+    [DataRow("Switch2XboxImpulseStrength", "switch2FeedbackCard")]
     [DataRow("Switch2DualSenseAudioHapticsEnabled", "switch2FeedbackCard")]
     [DataRow("Switch2RumbleDelayMilliseconds", "switch2FeedbackCard")]
     [DataRow("Switch2HighRateMousePresentation", "switch2MotionCard")]
@@ -262,6 +282,62 @@ public sealed class Switch2ProfileSectionLayoutTests
             (string)node.Attribute(Xaml + "Name") == "switch2ButtonLayerCard");
         CollectionAssert.AreEquivalent(new[] { "Switch2EditSecondAction_Click", "Switch2OpenButtonMapping_Click" },
             layer.Descendants(Wpf + "Button").Select(node => (string)node.Attribute("Click")).ToArray());
+    }
+
+    [TestMethod]
+    public void DjgButtonGroupsNameThePhysicalControllerNotAnActivationPromise()
+    {
+        var pair = Load("ProfileEditor.xaml").Descendants(Wpf + "Expander")
+            .Single(node => (string)node.Attribute(Xaml + "Name") == "switch2PairCard");
+        CollectionAssert.AreEqual(new[] { "Left Joy-Con buttons", "Right Joy-Con buttons" },
+            pair.Descendants(Wpf + "Expander")
+                .Select(node => (string)node.Attribute("Header")).ToArray());
+        Assert.IsFalse(pair.Descendants().Attributes().Any(attribute =>
+            attribute.Value.Contains("activates that side", StringComparison.OrdinalIgnoreCase) ||
+            attribute.Value.Contains("activate the left side", StringComparison.OrdinalIgnoreCase) ||
+            attribute.Value.Contains("activate the right side", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    [TestMethod]
+    public void DjgButtonActionHelpTracksTheSelectedModeAndWraps()
+    {
+        var pair = Load("ProfileEditor.xaml").Descendants(Wpf + "Expander")
+            .Single(node => (string)node.Attribute(Xaml + "Name") == "switch2PairCard");
+        var help = pair.Descendants(Wpf + "TextBlock").SingleOrDefault(node =>
+            (string)node.Attribute("Text") == "{Binding Switch2DualGyroEditor.ButtonActionDescription}");
+        Assert.IsNotNull(help, "Each mode must explain its actual button action.");
+        Assert.AreEqual("Wrap", (string)help.Attribute("TextWrapping"));
+        Assert.IsNull(help.Attribute("Height"), "Longer mode descriptions must be allowed to grow.");
+        var behavior = pair.Descendants(Wpf + "ComboBox").Single(node =>
+            (string)node.Attribute("SelectedIndex") == "{Binding Switch2DualGyroEditor.ActivationModeIndex}");
+        CollectionAssert.AreEqual(new[] { "While held", "Press to toggle" },
+            behavior.Elements(Wpf + "ComboBoxItem")
+                .Select(node => (string)node.Attribute("Content")).ToArray());
+        Assert.IsTrue(behavior.Parent!.Elements(Wpf + "TextBlock").Any(node =>
+            (string)node.Attribute("Text") == "Button behavior:"));
+    }
+
+    [TestMethod]
+    public void DjgExplainsTheSeparateMouseGateBeforeOpeningDetails()
+    {
+        var help = Load("ProfileEditor.xaml").Descendants(Wpf + "TextBlock")
+            .SingleOrDefault(node => (string)node.Attribute(Xaml + "Name") == "switch2DualGyroOutputHint");
+        Assert.IsNotNull(help, "Explain the second aiming control without requiring a tooltip or expanded details.");
+        Assert.IsFalse(help.Ancestors(Wpf + "Expander").Any());
+        Assert.AreEqual("Wrap", (string)help.Attribute("TextWrapping"));
+        Assert.IsNull(help.Attribute("Height"));
+        string text = (string)help.Attribute("Text");
+        StringAssert.Contains(text, "Aim by tilting");
+        StringAssert.Contains(text, "Always on");
+        StringAssert.Contains(text, "separate");
+        StringAssert.Contains(text, "does not choose a hand");
+        Assert.IsTrue(help.Ancestors(Wpf + "Border").First().Descendants(Wpf + "Button")
+            .Any(node => (string)node.Attribute("Click") == "Switch2OpenAimSetup_Click"));
+        var outputActivation = help.Ancestors(Wpf + "TabItem").First()
+            .Descendants(Wpf + "ComboBox").Single(node =>
+                (string)node.Attribute("SelectedIndex") == "{Binding Switch2AimSetup.ActivationIndex}");
+        Assert.AreEqual("Always on", (string)outputActivation.Elements(Wpf + "ComboBoxItem")
+            .First().Attribute("Content"), "The hint must use the actual option name.");
     }
 
     private static XDocument Load(params string[] relative)

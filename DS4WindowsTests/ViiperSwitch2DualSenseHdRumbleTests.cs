@@ -98,7 +98,7 @@ namespace DS4WindowsTests
                     out Switch2HdRumbleFeedbackFidelity fidelity));
 
             Assert.AreEqual(Switch2HdRumbleFeedbackFidelity.
-                DualSenseAdaptiveTriggerApproximation, fidelity);
+                DualSensePcmDualBand, fidelity);
             Assert.IsTrue(left.First.Oscillator0AmplitudeCode >
                 right.First.Oscillator0AmplitudeCode,
                 "The left trigger program must be added only to the left PCM lane.");

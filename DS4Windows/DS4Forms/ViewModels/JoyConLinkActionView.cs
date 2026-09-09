@@ -5,8 +5,9 @@ namespace DS4WinWPF.DS4Forms.ViewModels;
 
 public sealed record JoyConLinkActionView
 {
-    internal Switch2JoyConPairCandidate Candidate { get; init; }
-    internal InputControllerSlotToken JoinedToken { get; init; }
+    internal NintendoJoyConCandidate Candidate { get; init; }
+    internal NintendoJoyConJoined Joined { get; init; }
+    internal InputControllerSlotToken JoinedToken => Joined.Switch2;
     public bool Visible { get; init; }
     public bool Enabled { get; init; }
     public bool IsArmed { get; init; }

@@ -5426,7 +5426,7 @@ namespace DS4Windows.InputDevices
         {
             ClaimPhysicalOutputState();
             DualSensePhysicalOutputSnapshot outputState =
-                activePhysicalOutputState;
+                activePhysicalOutputState.ForLocalTriggerReport();
 
             bool change = false;
             bool rumbleSet = currentHap.IsRumbleSet();
@@ -7910,6 +7910,13 @@ namespace DS4Windows.InputDevices
             {
                 QueuePhysicalOutputUpdate();
             }
+        }
+
+        internal bool TrySetXboxImpulseTriggerFeedback(object owner, byte left, byte right)
+        {
+            bool accepted = physicalOutputStateMailbox.TrySetXboxImpulse(owner, left, right, out bool changed);
+            if (changed) QueuePhysicalOutputUpdate();
+            return accepted;
         }
 
         private byte DeviceBatteryLinearMask(int deviceBattery)

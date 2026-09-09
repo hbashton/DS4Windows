@@ -102,7 +102,7 @@ namespace DS4WinWPF.DS4Forms
             overviewAudioHapticsOverrideReleaseRequests = new();
         private DispatcherTimer overviewProfileSaveTimer;
         private DispatcherTimer overviewStatusRefreshTimer;
-        private readonly Switch2JoyConManualPairSelection
+        private readonly NintendoJoyConManualPairSelection
             switch2JoyConManualPairSelection = new();
         private string switch2JoyConManualRowsSignature = string.Empty;
         private bool switch2JoyConMutationBusy;
@@ -354,8 +354,8 @@ namespace DS4WinWPF.DS4Forms
                 {
                     Dispatcher.Invoke(() =>
                     {
-                        MessageBox.Show(Properties.Resources.PleaseDownloadUpdater);
-                        if (!string.IsNullOrEmpty(newUpdaterVersion))
+                        MessageBox.Show(mainWinVM.LastUpdaterFailure ?? Properties.Resources.PleaseDownloadUpdater);
+                        if (mainWinVM.LastUpdaterFailure == null && !string.IsNullOrEmpty(newUpdaterVersion))
                         {
                             Util.StartProcessHelper(
                                 $"https://github.com/hbashton/DS4Updater/releases/tag/v{newUpdaterVersion}");
@@ -367,13 +367,9 @@ namespace DS4WinWPF.DS4Forms
 
         private bool CanStartPortableUpdate()
         {
-            if (!PortableBrokerContext.IsActive) return true;
-            // The legacy updater can kill DS4Windows before owned-broker
-            // cleanup and does not retire VIIPER before replacing its image.
-            Dispatcher.Invoke(() => MessageBox.Show(
-                "To update this portable copy, download the new portable ZIP from the DS4Windows GitHub releases page. Save your profiles, close DS4Windows and VIIPER, then extract the ZIP into a new folder. The older updater cannot safely replace the bundled broker in place. No files or running apps were changed.",
-                "DS4Windows portable update", MessageBoxButton.OK, MessageBoxImage.Information));
-            return false;
+            // RunUpdaterCheck enforces the verified >=2.0.5 portable protocol.
+            // Diagnostic labs remain isolated from public automatic updates.
+            return !PortableLabContext.IsActive;
         }
 
         private void Check_Version(bool showstatus = false)
@@ -424,8 +420,8 @@ namespace DS4WinWPF.DS4Forms
                     {
                         Dispatcher.Invoke(() =>
                         {
-                            MessageBox.Show(Properties.Resources.PleaseDownloadUpdater);
-                            if (!string.IsNullOrEmpty(newUpdaterVersion))
+                            MessageBox.Show(mainWinVM.LastUpdaterFailure ?? Properties.Resources.PleaseDownloadUpdater);
+                            if (mainWinVM.LastUpdaterFailure == null && !string.IsNullOrEmpty(newUpdaterVersion))
                             {
                                 Util.StartProcessHelper($"https://github.com/hbashton/DS4Updater/releases/tag/v{newUpdaterVersion}");
                             }
@@ -1734,7 +1730,7 @@ Suspend support not enabled.", true);
                     description = "Build persistent L2 and R2 adaptive-trigger effects saved directly in this profile.";
                     break;
                 case 10:
-                    title = "Switch 2 Controls";
+                    title = "Nintendo Options";
                     description = "Tune HD rumble, motion, Joy-Con mouse modes, calibration, and controller behavior.";
                     break;
                 case 11:
@@ -1878,10 +1874,13 @@ Suspend support not enabled.", true);
 
             if (!persisted)
             {
-                button.ToolTip =
+                button.ToolTip = controller.Device is DS4Windows.InputDevices.JoyConDevice ?
+                    "The holding style is active, but the profile could not be saved." :
                     "The new hold mode is active for this connection, but " +
                     "its controller-specific record could not be saved.";
             }
+            else button.SetBinding(FrameworkElement.ToolTipProperty,
+                new Binding(nameof(CompositeDeviceModel.Switch2StandaloneHoldModeToolTip)));
         }
 
         private void Switch2IdentifyBtn_Click(object sender,
@@ -2626,20 +2625,17 @@ Suspend support not enabled.", true);
         private sealed class Switch2JoyConManualRow
         {
             internal Switch2JoyConManualRow(
-                in Switch2JoyConPairCandidate candidate, bool isArmed)
+                in NintendoJoyConCandidate candidate, bool isArmed)
             {
                 Candidate = candidate;
                 IsArmed = isArmed;
-                Label = candidate.Model ==
-                    Switch2ControllerModel.JoyCon2Left ?
-                    $"Joy-Con 2 (Left) #{candidate.Id}" :
-                    $"Joy-Con 2 (Right) #{candidate.Id}";
+                Label = candidate.Label;
                 PairButtonToolTip = isArmed ?
                     "Cancel this Joy-Con pairing selection" :
                     "Select this Joy-Con for manual pairing";
             }
 
-            internal Switch2JoyConPairCandidate Candidate { get; }
+            internal NintendoJoyConCandidate Candidate { get; }
             public string Label { get; }
             public bool IsArmed { get; }
             public string PairButtonToolTip { get; }
@@ -2660,32 +2656,32 @@ Suspend support not enabled.", true);
             }
 
             bool automatic = settingsWrapVM?.AutomaticJoyConPairing == true;
-            Switch2JoyConPairCandidate[] candidates = App.rootHub.running ?
-                App.rootHub.GetSwitch2JoyConPairCandidates() :
-                Array.Empty<Switch2JoyConPairCandidate>();
+            NintendoJoyConCandidate[] candidates = App.rootHub.running ?
+                App.rootHub.GetNintendoJoyConPairCandidates() :
+                Array.Empty<NintendoJoyConCandidate>();
             if (switch2JoyConManualPairSelection.Reconcile(candidates))
             {
                 force = true;
             }
 
-            bool canSelect = GetSwitch2JoyConActionAvailability().CanSelect;
+            bool canSelect = CanSelectNintendoJoyCons;
             if (automatic) switch2JoyConManualPairSelection.Clear();
             var cards = conLvViewModel.GetControllerSnapshot();
             foreach (var card in cards)
             {
                 var candidate = candidates.FirstOrDefault(item =>
-                    item.SlotToken.IsValid && ReferenceEquals(item.SlotToken.Registration.Device, card.Device));
-                var joined = App.rootHub.running ? App.rootHub.GetJoinedJoyConToken(card.Device) : default;
-                card.RefreshJoyConLinkAction(candidate, joined,
-                    candidate.Id > 0 && switch2JoyConManualPairSelection.IsArmed(candidate), canSelect, automatic);
+                    ReferenceEquals(item.Device, card.Device));
+                var joined = App.rootHub.running ? App.rootHub.GetNintendoJoinedJoyCons(card.Device) : default;
+                card.RefreshNintendoJoyConLinkAction(candidate, joined,
+                    candidate.IsValid && switch2JoyConManualPairSelection.IsArmed(candidate), canSelect, automatic);
             }
             var signature = new StringBuilder();
             signature.Append(automatic).Append('|').
-                Append(canSelect).Append('|').Append(cards.Any(card => card.JoyConLinkAction.JoinedToken.IsValid)).Append('|');
-            foreach (Switch2JoyConPairCandidate candidate in candidates)
+                Append(canSelect).Append('|').Append(cards.Any(card => card.JoyConLinkAction.Joined.IsValid)).Append('|');
+            foreach (NintendoJoyConCandidate candidate in candidates)
             {
-                signature.Append(candidate.Id).Append(':').
-                    Append((byte)candidate.Model).Append(':').
+                signature.Append(candidate.IsOriginal).Append(':').
+                    Append(candidate.IsLeft).Append(':').
                     Append(candidate.ArrivalOrdinal).Append(':').
                     Append(switch2JoyConManualPairSelection.IsArmed(candidate)).
                     Append(';');
@@ -2705,7 +2701,7 @@ Suspend support not enabled.", true);
                 Visibility.Collapsed;
             switch2JoyConManualRows.IsEnabled = canSelect;
             var rows = new List<Switch2JoyConManualRow>(candidates.Length);
-            foreach (Switch2JoyConPairCandidate candidate in candidates)
+            foreach (NintendoJoyConCandidate candidate in candidates)
             {
                 rows.Add(new Switch2JoyConManualRow(candidate,
                     switch2JoyConManualPairSelection.IsArmed(candidate)));
@@ -2721,7 +2717,7 @@ Suspend support not enabled.", true);
         private async void Switch2JoyConManualPairBtn_Click(object sender,
             RoutedEventArgs e)
         {
-            if (!GetSwitch2JoyConActionAvailability().CanSelect || sender is not Button button ||
+            if (!CanSelectNintendoJoyCons || sender is not Button button ||
                 button.DataContext is not Switch2JoyConManualRow row)
             {
                 return;
@@ -2732,10 +2728,10 @@ Suspend support not enabled.", true);
 
         private async void Switch2JoyConCardLinkBtn_Click(object sender, RoutedEventArgs e)
         {
-            if (!GetSwitch2JoyConActionAvailability().CanSelect || sender is not Button button ||
+            if (!CanSelectNintendoJoyCons || sender is not Button button ||
                 button.DataContext is not CompositeDeviceModel card || !card.JoyConLinkAction.Enabled) return;
             var action = card.JoyConLinkAction;
-            if (!action.JoinedToken.IsValid)
+            if (!action.Joined.IsValid)
             {
                 await SelectJoyConForLinkAsync(new Switch2JoyConManualRow(action.Candidate, action.IsArmed));
                 return;
@@ -2745,9 +2741,9 @@ Suspend support not enabled.", true);
             switch2JoyConManualStatusText.Text = "Unlinking — keeping both Joy-Cons connected…";
             try
             {
-                var result = await Task.Run(async () => await App.rootHub.UnlinkSwitch2JoyConsAsync(action.JoinedToken));
-                switch2JoyConManualStatusText.Text = result.Succeeded ?
-                    "Joy-Cons are now two separate controllers." : $"Could not finish unlinking: {result.Failure}. Check the controller list and log.";
+                bool result = await App.rootHub.UnlinkNintendoJoyConsAsync(action.Joined);
+                switch2JoyConManualStatusText.Text = result ?
+                    "Joy-Cons are now two separate controllers." : "Could not finish unlinking. Check the controller list and log.";
             }
             catch (Exception exception)
             { switch2JoyConManualStatusText.Text = $"Could not finish unlinking: {exception.Message}"; }
@@ -2756,7 +2752,7 @@ Suspend support not enabled.", true);
 
         private async Task SelectJoyConForLinkAsync(Switch2JoyConManualRow row)
         {
-            Switch2JoyConManualPairSelectionResult selection =
+            NintendoJoyConSelectionResult selection =
                 switch2JoyConManualPairSelection.Select(row.Candidate);
             switch (selection.Disposition)
             {
@@ -2773,7 +2769,7 @@ Suspend support not enabled.", true);
                 case Switch2JoyConManualPairSelectionDisposition.
                         IncompatibleSide:
                     switch2JoyConManualStatusText.Text =
-                        "Choose one left and one right Joy-Con 2.";
+                        "Choose one left and one right Joy-Con from the same generation.";
                     return;
                 case Switch2JoyConManualPairSelectionDisposition.PairReady:
                     break;
@@ -2789,18 +2785,16 @@ Suspend support not enabled.", true);
                 "Joining and remembering the selected Joy-Con pair…";
             try
             {
-                Switch2JoyConPairActivationResult result = await Task.Run(async () => await App.rootHub.
-                    CreateAndActivateSwitch2JoyConPairAsync(
-                        selection.LeftCandidateId,
-                        selection.RightCandidateId, preferredCandidateId: selection.PreferredCandidateId));
-                switch2JoyConManualStatusText.Text = result.Succeeded ?
-                    "Joy-Con 2 pair connected as one controller." :
-                    $"Joy-Con 2 pair could not be joined: {result.Failure}.";
+                bool result = await App.rootHub.LinkNintendoJoyConsAsync(selection.Preferred,
+                    selection.Preferred.IsLeft ? selection.Right : selection.Left);
+                switch2JoyConManualStatusText.Text = result ?
+                    "Joy-Cons connected as one controller." :
+                    "The Joy-Con pair could not be joined. Check the controller list and log.";
             }
             catch (Exception exception)
             {
                 switch2JoyConManualStatusText.Text =
-                    $"Joy-Con 2 pair could not be joined: {exception.GetType().Name}.";
+                    $"Joy-Con pair could not be joined: {exception.Message}";
             }
             finally
             {
@@ -2819,12 +2813,12 @@ Suspend support not enabled.", true);
             SetSwitch2JoyConMutationBusy(true);
             try
             {
-                if (enabled && IsSwitch2JoyConLifecycleAvailable())
+                if (enabled && App.rootHub?.running == true)
                 {
                     switch2JoyConPairStatusText.Text =
                         "Pairing the oldest compatible Joy-Con halves…";
                     int activated = await App.rootHub.
-                        ReconcileAutomaticSwitch2JoyConPairsAsync();
+                        ReconcileAutomaticNintendoJoyConPairsAsync();
                     switch2JoyConPairStatusText.Text = activated == 0 ?
                         "Automatic pairing is on. Waiting for compatible left/right halves." :
                         $"Automatically connected {activated} Joy-Con pair{(activated == 1 ? string.Empty : "s")}.";
@@ -2960,6 +2954,9 @@ Suspend support not enabled.", true);
                 RefreshSwitch2JoyConManualRows(force: true);
             }
         }
+
+        private bool CanSelectNintendoJoyCons => App.rootHub?.running == true &&
+            settingsWrapVM?.AutomaticJoyConPairing != true && !Switch2ControllerActionBusy;
 
         private bool IsSwitch2JoyConLifecycleAvailable()
         {

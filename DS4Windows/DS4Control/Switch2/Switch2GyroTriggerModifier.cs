@@ -23,7 +23,8 @@ internal readonly struct Switch2GyroTriggerSourceIdentity :
     internal Switch2GyroTriggerSourceIdentity(bool joyCon, ulong pairEpoch,
         ulong leftDeviceGeneration, ulong leftTransportGeneration,
         ulong rightDeviceGeneration, ulong rightTransportGeneration,
-        Switch2JoyConProfileMode joyConMode = Switch2JoyConProfileMode.Invalid)
+        Switch2JoyConProfileMode joyConMode = Switch2JoyConProfileMode.Invalid,
+        bool originalNintendo = false)
     {
         JoyCon = joyCon;
         PairEpoch = pairEpoch;
@@ -32,9 +33,11 @@ internal readonly struct Switch2GyroTriggerSourceIdentity :
         RightDeviceGeneration = rightDeviceGeneration;
         RightTransportGeneration = rightTransportGeneration;
         JoyConMode = joyCon ? joyConMode : Switch2JoyConProfileMode.Invalid;
+        OriginalNintendo = originalNintendo;
     }
 
     internal bool JoyCon { get; }
+    internal bool OriginalNintendo { get; }
     internal ulong PairEpoch { get; }
     internal ulong LeftDeviceGeneration { get; }
     internal ulong LeftTransportGeneration { get; }
@@ -45,7 +48,7 @@ internal readonly struct Switch2GyroTriggerSourceIdentity :
     internal Switch2JoyConProfileMode JoyConMode { get; }
 
     internal bool HasSamePhysicalSource(Switch2GyroTriggerSourceIdentity other) =>
-        JoyCon == other.JoyCon && PairEpoch == other.PairEpoch &&
+        OriginalNintendo == other.OriginalNintendo && JoyCon == other.JoyCon && PairEpoch == other.PairEpoch &&
         LeftDeviceGeneration == other.LeftDeviceGeneration &&
         LeftTransportGeneration == other.LeftTransportGeneration &&
         RightDeviceGeneration == other.RightDeviceGeneration &&
@@ -59,7 +62,7 @@ internal readonly struct Switch2GyroTriggerSourceIdentity :
 
     public override int GetHashCode() => HashCode.Combine(JoyCon, PairEpoch,
         LeftDeviceGeneration, LeftTransportGeneration,
-        RightDeviceGeneration, RightTransportGeneration, JoyConMode);
+        RightDeviceGeneration, RightTransportGeneration, JoyConMode, OriginalNintendo);
 }
 
 internal readonly struct Switch2GyroTriggerModifierInput
@@ -167,6 +170,15 @@ internal static class Switch2GyroTriggerModifier
         if (state == null || profileRevision < 0)
         {
             return false;
+        }
+
+        if (state.NintendoInputStatus.IsDeclared)
+        {
+            if (!NintendoProfileInput.TryRead(state, out var nintendo)) return false;
+            input = new(NintendoProfileInput.Identity(nintendo), nintendo.Buttons,
+                nintendo.CompletionTimestampQpc, nintendo.QpcFrequency,
+                profileRevision, tuningSourceKey, outputActive);
+            return true;
         }
 
         Switch2JoyConRawInputStatus joyCon =
@@ -313,6 +325,8 @@ internal static class Switch2GyroTriggerModifier
 
     internal static Switch2JoyConProfileButton ReadButtons(DS4State state)
     {
+        if (state.NintendoInputStatus.IsDeclared)
+            return NintendoProfileInput.TryRead(state, out var nintendo) ? nintendo.Buttons : 0;
         if (state == null)
         {
             return Switch2JoyConProfileButton.None;

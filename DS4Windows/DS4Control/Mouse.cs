@@ -290,7 +290,8 @@ namespace DS4Windows
                 out bool gyroLocked)
         {
             gyroLocked = false;
-            if (dev is not Switch2RuntimeInputDevice || state == null)
+            if (state == null || (dev is not Switch2RuntimeInputDevice &&
+                !NintendoProfileInput.TryRead(state, out _)))
             {
                 switch2GyroTriggerModifierState = default;
                 switch2GyroLockState = default;
@@ -412,7 +413,7 @@ namespace DS4Windows
             }
             if (outMode == GyroOutMode.Controls)
             {
-                s = dev.getCurrentStateRef();
+                s = arg.SourceState ?? dev.getCurrentStateRef();
 
                 var triggerActive = IsGyroTriggerActive(outMode);
 
@@ -431,7 +432,7 @@ namespace DS4Windows
             }
             else if (outMode == GyroOutMode.Mouse && Global.getGyroSensitivity(deviceNum) > 0)
             {
-                s = dev.getCurrentStateRef();
+                s = arg.SourceState ?? dev.getCurrentStateRef();
 
                 var triggerActive = IsGyroTriggerActive(outMode,
                     out int triggerIndex);
@@ -450,7 +451,7 @@ namespace DS4Windows
             }
             else if (outMode == GyroOutMode.MouseJoystick)
             {
-                s = dev.getCurrentStateRef();
+                s = arg.SourceState ?? dev.getCurrentStateRef();
                 var triggerActive = IsGyroTriggerActive(outMode,
                     out int triggerIndex);
                 bool outputActive = useReverseRatchet && triggerActive ||
@@ -470,7 +471,7 @@ namespace DS4Windows
             }
             else if (outMode == GyroOutMode.DirectionalSwipe)
             {
-                s = dev.getCurrentStateRef();
+                s = arg.SourceState ?? dev.getCurrentStateRef();
 
                 GyroDirectionalSwipeInfo swipeMapInfo = Global.GetGyroSwipeInfo(deviceNum);
 

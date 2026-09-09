@@ -40,6 +40,9 @@ namespace DS4Windows
         private ITimer expiryTimer;
         private Action onFailure;
         private Func<bool> isOutputEnabled;
+        private Func<bool> isImpulseEnabled;
+        private Func<bool> impulseToAdaptiveTriggers;
+        private bool lastImpulseToAdaptiveTriggers = true;
 
         private XboxOnePhysicalFeedbackSession(ulong deviceGeneration,
             ulong transportGeneration, ulong ownershipEpoch,
@@ -82,6 +85,10 @@ namespace DS4Windows
         }
 
         internal bool TrySuppressCurrentOutput(ulong expectedSequence)
+            => TryRefreshCurrentOutput(expectedSequence, suppressOutput: true, suppressImpulses: false);
+
+        internal bool TryRefreshCurrentOutput(ulong expectedSequence,
+            bool suppressOutput, bool suppressImpulses)
         {
             lock (gate)
             {
@@ -94,7 +101,8 @@ namespace DS4Windows
                 }
                 // Restrict presentation, not the authenticated frame/TTL. The
                 // same pump delivers neutral, preserving its retry and expiry.
-                sink.OutputSuppressed = true;
+                sink.OutputSuppressed |= suppressOutput;
+                sink.ImpulsesSuppressed |= suppressImpulses;
                 _ = pump.TryRefreshCurrentPresentation(now);
                 return TryPumpNoLock(ref now);
             }
@@ -111,7 +119,8 @@ namespace DS4Windows
             Func<ControllerFeedbackActuatorState, bool, bool> publishPhysicalState,
             out XboxOnePhysicalFeedbackSession session,
             TimeProvider timeProvider = null, Action onFailure = null,
-            Func<bool> isOutputEnabled = null)
+            Func<bool> isOutputEnabled = null, Func<bool> isImpulseEnabled = null,
+            Func<bool> impulseToAdaptiveTriggers = null)
         {
             session = null;
             if (publishPhysicalState == null ||
@@ -129,6 +138,8 @@ namespace DS4Windows
             created.timeProvider = timeProvider ?? TimeProvider.System;
             created.onFailure = onFailure;
             created.isOutputEnabled = isOutputEnabled;
+            created.isImpulseEnabled = isImpulseEnabled;
+            created.impulseToAdaptiveTriggers = impulseToAdaptiveTriggers;
             session = created;
             return true;
         }
@@ -151,7 +162,7 @@ namespace DS4Windows
                 {
                     return false;
                 }
-                bool refreshSuppressedPresentation = sink.OutputSuppressed;
+                bool refreshSuppressedPresentation = sink.OutputSuppressed || sink.ImpulsesSuppressed;
                 Volatile.Write(ref lastSequence, frame.Sequence);
                 hasPublished = true;
                 if (frame.IsStop)
@@ -161,7 +172,17 @@ namespace DS4Windows
                 // Publish the sequence before sampling live policy. An off
                 // edit either precedes this read or captures this sequence
                 // for the worker; it cannot fall between both protections.
-                try { sink.OutputSuppressed = !(isOutputEnabled?.Invoke() ?? true); }
+                try
+                {
+                    sink.OutputSuppressed = !(isOutputEnabled?.Invoke() ?? true);
+                    sink.ImpulsesSuppressed = !(isImpulseEnabled?.Invoke() ?? true);
+                    bool adaptive = impulseToAdaptiveTriggers?.Invoke() ?? true;
+                    // A routing edit can capture a predecessor sequence just
+                    // before this renewal. Force re-projection even when the
+                    // canonical amplitudes deduplicate and that wake is stale.
+                    refreshSuppressedPresentation |= adaptive != lastImpulseToAdaptiveTriggers;
+                    lastImpulseToAdaptiveTriggers = adaptive;
+                }
                 catch
                 {
                     FailNoLock();
@@ -169,7 +190,7 @@ namespace DS4Windows
                 }
                 // A new accepted frame can resume even when its actuator
                 // values equal the previously suppressed canonical state.
-                if (refreshSuppressedPresentation || sink.OutputSuppressed)
+                if (refreshSuppressedPresentation || sink.OutputSuppressed || sink.ImpulsesSuppressed)
                     _ = pump.TryRefreshCurrentPresentation(now);
                 expiryMicroseconds = frame.TimestampMicroseconds >
                         ulong.MaxValue - frame.TimeToLiveMicroseconds ?
@@ -410,6 +431,7 @@ namespace DS4Windows
         {
             private readonly Func<ControllerFeedbackActuatorState, bool, bool> publish;
             internal bool OutputSuppressed;
+            internal bool ImpulsesSuppressed;
 
             internal PhysicalStateSink(
                 Func<ControllerFeedbackActuatorState, bool, bool> publish) =>
@@ -425,7 +447,8 @@ namespace DS4Windows
                 {
                     state = new ControllerFeedbackActuatorState(
                         delivery.Frame.BodyLow, delivery.Frame.BodyHigh,
-                        delivery.Frame.LeftTrigger, delivery.Frame.RightTrigger);
+                        ImpulsesSuppressed ? (ushort)0 : delivery.Frame.LeftTrigger,
+                        ImpulsesSuppressed ? (ushort)0 : delivery.Frame.RightTrigger);
                 }
                 return publish(state, release || delivery.Frame.IsStop);
             }
@@ -436,7 +459,8 @@ namespace DS4Windows
     // frame; there is no enable request that can resurrect this sequence.
     internal sealed record XboxOnePhysicalOutputSuppressionRequest(
         XboxOnePhysicalFeedbackSession Session, int DeviceIndex,
-        long StreamGeneration, ulong Sequence);
+        long StreamGeneration, ulong Sequence, long Revision = 0,
+        bool SuppressImpulses = false, bool SuppressOutput = true);
 
     /// <summary>
     /// Physical capability projection for the four canonical Xbox actuators.
@@ -447,6 +471,18 @@ namespace DS4Windows
     /// </summary>
     internal static class XboxOneCanonicalFeedbackAdapter
     {
+        internal static void ProjectPhysical(
+            in ControllerFeedbackActuatorState state,
+            bool hasIndependentTriggerActuators, bool impulsesEnabled,
+            bool impulseToAdaptiveTriggers, out byte heavySlow,
+            out byte lightFast, out byte leftImpulse, out byte rightImpulse)
+        {
+            ControllerFeedbackActuatorState effective = impulsesEnabled ? state :
+                new(state.BodyLow, state.BodyHigh, 0, 0);
+            ProjectPhysical(effective, hasIndependentTriggerActuators && impulseToAdaptiveTriggers,
+                out heavySlow, out lightFast, out leftImpulse, out rightImpulse);
+        }
+
         internal static void ProjectPhysical(
             in ControllerFeedbackActuatorState state,
             bool hasIndependentTriggerActuators, out byte heavySlow,

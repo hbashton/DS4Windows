@@ -496,6 +496,13 @@ namespace DS4WinWPF.DS4Control.DTOXml
             set;
         } = true;
 
+        [XmlElement("XboxImpulseToAdaptiveTriggers")]
+        public bool XboxImpulseToAdaptiveTriggers
+        {
+            get;
+            set;
+        } = true;
+
         [XmlElement("Switch2XboxImpulseDynamicFrequency")]
         public bool Switch2XboxImpulseDynamicFrequency
         {
@@ -2316,6 +2323,8 @@ namespace DS4WinWPF.DS4Control.DTOXml
             InverseRumbleMotors = source.inverseRumbleMotors[deviceIndex];
             Switch2MapXboxImpulseTriggersToHdRumble =
                 source.switch2MapXboxImpulseTriggersToHdRumble[deviceIndex];
+            XboxImpulseToAdaptiveTriggers =
+                source.xboxImpulseToAdaptiveTriggers[deviceIndex];
             Switch2XboxImpulseDynamicFrequency =
                 source.switch2XboxImpulseDynamicFrequency[deviceIndex];
             Switch2XboxImpulseFrequency =
@@ -3024,6 +3033,8 @@ namespace DS4WinWPF.DS4Control.DTOXml
             destination.inverseRumbleMotors[deviceIndex] = InverseRumbleMotors;
             destination.switch2MapXboxImpulseTriggersToHdRumble[deviceIndex] =
                 Switch2MapXboxImpulseTriggersToHdRumble;
+            destination.xboxImpulseToAdaptiveTriggers[deviceIndex] =
+                XboxImpulseToAdaptiveTriggers;
             destination.switch2XboxImpulseDynamicFrequency[deviceIndex] =
                 Switch2XboxImpulseDynamicFrequency;
             destination.switch2XboxImpulseFrequency[deviceIndex] =

@@ -14,6 +14,179 @@ namespace DS4WindowsTests;
 [DoNotParallelize]
 public sealed class Switch2DualGyroEditorTests
 {
+    [DataTestMethod]
+    [DataRow(0, 0)]
+    [DataRow(0, 1)]
+    [DataRow(1, 0)]
+    [DataRow(1, 1)]
+    [DataRow(2, 0)]
+    [DataRow(2, 1)]
+    public void ButtonActionDescriptionExplainsEachModeWithoutChangingSettings(
+        int mode, int activation)
+    {
+        WithKnownDescriptionProfile(() =>
+        {
+            var editor = CreateDescriptionEditor();
+            ProfileSnapshot original = ProfileSnapshot.Capture();
+            editor.ModeIndex = mode;
+            editor.ActivationModeIndex = activation;
+            ProfileSnapshot configured = ProfileSnapshot.Capture();
+            Assert.AreEqual(original with { Mode = configured.Mode,
+                Activation = configured.Activation }, configured,
+                "Description-related mode edits must preserve independent profile settings.");
+            Assert.IsFalse(typeof(Switch2DualGyroEditorViewModel)
+                .GetProperty(nameof(editor.ButtonActionDescription)).CanWrite,
+                "The explanation must not be a writable profile setting.");
+
+            string description = editor.ButtonActionDescription.ToLowerInvariant();
+            if (mode == 2)
+            {
+                foreach (string phrase in new[] { "both", "start", "pause", "that joy-con" })
+                    StringAssert.Contains(description, phrase);
+            }
+            else
+            {
+                foreach (string phrase in new[] { "either joy-con", "swap", "do not select" })
+                    StringAssert.Contains(description, phrase);
+            }
+            foreach (string phrase in activation == 0 ? new[] { "hold", "release" } :
+                new[] { "press", "again" })
+                StringAssert.Contains(description, phrase);
+
+            Assert.AreEqual(configured, ProfileSnapshot.Capture(),
+                "Reading the explanation must not change aiming, buttons, or the generic gyro gate.");
+            editor.RefreshFromProfile();
+            Assert.AreEqual(description, editor.ButtonActionDescription.ToLowerInvariant());
+            Assert.AreEqual(configured, ProfileSnapshot.Capture(),
+                "Refreshing explanatory bindings must not rewrite the profile.");
+        });
+    }
+
+    [TestMethod]
+    public void BoundButtonActionDescriptionRefreshesForModeActivationAndProfileLoad()
+    {
+        Exception failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                WithKnownDescriptionProfile(() =>
+                {
+                    var editor = CreateDescriptionEditor();
+                    var text = new TextBlock();
+                    var changed = new List<string>();
+                    editor.PropertyChanged += (_, args) => changed.Add(args.PropertyName);
+                    text.SetBinding(TextBlock.TextProperty,
+                        new Binding(nameof(editor.ButtonActionDescription))
+                        { Source = editor, Mode = BindingMode.OneWay });
+                    try
+                    {
+                        Assert.AreEqual(editor.ButtonActionDescription, text.Text);
+                        ProfileSnapshot original = ProfileSnapshot.Capture();
+                        CheckRefresh(() => editor.ModeIndex = 1);
+                        CheckRefresh(() => editor.ActivationModeIndex = 1);
+                        ProfileSnapshot configured = ProfileSnapshot.Capture();
+                        Assert.AreEqual(original with { Mode = configured.Mode,
+                            Activation = configured.Activation }, configured);
+
+                        // Loading a profile changes the backing fields, then refreshes
+                        // this same bound editor. It must not restore stale UI values.
+                        Global.Switch2DualJoyConGyroMode[Global.TEST_PROFILE_INDEX] =
+                            Switch2DualGyroMode.SingleSideToggle;
+                        Global.Switch2DualJoyConGyroActivationMode[Global.TEST_PROFILE_INDEX] =
+                            Switch2DualGyroActivationMode.Hold;
+                        ProfileSnapshot loaded = ProfileSnapshot.Capture();
+                        CheckRefresh(editor.RefreshFromProfile);
+                        Assert.AreEqual(loaded, ProfileSnapshot.Capture());
+                        StringAssert.Contains(text.Text.ToLowerInvariant(), "pause");
+                        StringAssert.Contains(text.Text.ToLowerInvariant(), "release");
+                    }
+                    finally
+                    {
+                        BindingOperations.ClearAllBindings(text);
+                    }
+
+                    void CheckRefresh(Action change)
+                    {
+                        changed.Clear();
+                        change();
+                        Dispatcher.CurrentDispatcher.Invoke(() => { }, DispatcherPriority.DataBind);
+                        CollectionAssert.Contains(changed,
+                            nameof(editor.ButtonActionDescription),
+                            "The read-only explanation needs its own change notification.");
+                        Assert.AreEqual(editor.ButtonActionDescription, text.Text,
+                            "The bound explanation must follow the current profile.");
+                    }
+                });
+            }
+            catch (Exception exception) { failure = exception; }
+            finally { Dispatcher.CurrentDispatcher.InvokeShutdown(); }
+        }) { IsBackground = true };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        Assert.IsTrue(thread.Join(TimeSpan.FromSeconds(15)), "Description binding test timed out.");
+        if (failure != null)
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
+    }
+
+    private static Switch2DualGyroEditorViewModel CreateDescriptionEditor() => new(
+        Global.TEST_PROFILE_INDEX, new[] {
+            (Switch2JoyConProfileButton.LeftTrigger, "ZL"),
+            (Switch2JoyConProfileButton.RightTrigger, "ZR"),
+            (Switch2JoyConProfileButton.LeftRailSL, "Left SL"),
+            (Switch2JoyConProfileButton.RightRailSR, "Right SR"),
+        });
+
+    private static void WithKnownDescriptionProfile(Action action)
+    {
+        ProfileSnapshot previous = ProfileSnapshot.Capture();
+        try
+        {
+            new ProfileSnapshot(Switch2DualGyroMode.SwitchDominantSide,
+                Switch2DualGyroActivationMode.Hold, true,
+                Switch2DualGyroDominantSide.Left,
+                Switch2JoyConProfileButton.LeftTrigger | Switch2JoyConProfileButton.LeftRailSL,
+                Switch2JoyConProfileButton.RightTrigger | Switch2JoyConProfileButton.RightRailSR,
+                "7", true, GyroOutMode.Mouse, 137, 3, true, true).Restore();
+            action();
+        }
+        finally { previous.Restore(); }
+    }
+
+    private readonly record struct ProfileSnapshot(Switch2DualGyroMode Mode,
+        Switch2DualGyroActivationMode Activation, bool Enabled,
+        Switch2DualGyroDominantSide Dominant, Switch2JoyConProfileButton Left,
+        Switch2JoyConProfileButton Right, string Triggers, bool TriggerCondition,
+        GyroOutMode OutputMode, int Sensitivity, int Invert, bool TriggerTurns, bool Toggle)
+    {
+        private const int Slot = Global.TEST_PROFILE_INDEX;
+
+        internal static ProfileSnapshot Capture() => new(
+            Global.Switch2DualJoyConGyroMode[Slot], Global.Switch2DualJoyConGyroActivationMode[Slot],
+            Global.Switch2DualJoyConGyroFusionEnabled[Slot], Global.Switch2DualJoyConGyroDominantSide[Slot],
+            Global.Switch2DualJoyConGyroLeftActivationButton[Slot],
+            Global.Switch2DualJoyConGyroRightActivationButton[Slot], Global.SATriggers[Slot],
+            Global.SATriggerCond[Slot], Global.GyroOutputMode[Slot], Global.GyroSensitivity[Slot],
+            Global.GyroInvert[Slot], Global.GyroTriggerTurns[Slot], Global.GyroMouseToggle[Slot]);
+
+        internal void Restore()
+        {
+            Global.Switch2DualJoyConGyroMode[Slot] = Mode;
+            Global.Switch2DualJoyConGyroActivationMode[Slot] = Activation;
+            Global.Switch2DualJoyConGyroFusionEnabled[Slot] = Enabled;
+            Global.Switch2DualJoyConGyroDominantSide[Slot] = Dominant;
+            Global.Switch2DualJoyConGyroLeftActivationButton[Slot] = Left;
+            Global.Switch2DualJoyConGyroRightActivationButton[Slot] = Right;
+            Global.SATriggers[Slot] = Triggers;
+            Global.SATriggerCond[Slot] = TriggerCondition;
+            Global.GyroOutputMode[Slot] = OutputMode;
+            Global.GyroSensitivity[Slot] = Sensitivity;
+            Global.GyroInvert[Slot] = Invert;
+            Global.GyroTriggerTurns[Slot] = TriggerTurns;
+            Global.GyroMouseToggle[Slot] = Toggle;
+        }
+    }
+
     [TestMethod]
     public void DualGyroOffersOnlyTheOwnPhysicalRailsForEachHalf()
     {

@@ -29,6 +29,9 @@ namespace DS4Windows
     {
         public SixAxis sixAxis;
         public DateTime timeStamp;
+        // Synchronous borrowed logical input, when motion belongs to a projected
+        // Nintendo pair rather than the physical device's private raw buffer.
+        internal DS4State SourceState { get; private set; }
         public SixAxisEventArgs(DateTime utcTimestamp, SixAxis sa)
         {
             sixAxis = sa;
@@ -40,10 +43,11 @@ namespace DS4Windows
         /// devices. Event consumers must finish reading the envelope before
         /// returning from the callback, just as they must for DS4State.
         /// </summary>
-        internal void Reset(DateTime utcTimestamp, SixAxis sa)
+        internal void Reset(DateTime utcTimestamp, SixAxis sa, DS4State sourceState = null)
         {
             sixAxis = sa;
             timeStamp = utcTimestamp;
+            SourceState = sourceState;
         }
     }
 
@@ -570,7 +574,7 @@ namespace DS4Windows
                 return;
             }
 
-            projectedEventArgs.Reset(state.ReportTimeStamp, state.Motion);
+            projectedEventArgs.Reset(state.ReportTimeStamp, state.Motion, state);
             // Subscription retirement can clear the event concurrently. Use
             // the captured list; exact callback owners fence late invocations.
             subscribers(this, projectedEventArgs);

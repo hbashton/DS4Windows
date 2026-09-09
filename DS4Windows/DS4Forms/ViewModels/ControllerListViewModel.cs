@@ -75,6 +75,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             service.PreServiceStop += ClearControllerList;
             service.HotplugController += Service_HotplugController;
             service.RemovedController += Service_RemovedController;
+            service.NintendoJoyConTopologyChanged += Service_NintendoJoyConTopologyChanged;
             //tester.StartControllers += ControllersChanged;
             //tester.ControllersRemoved += ClearControllerList;
 
@@ -121,9 +122,19 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             using (WriteLocker writeLock = new WriteLocker(_colListLocker))
             {
                 if (device.IsRemoving || device.IsRemoved) return;
+                if (device is JoyConDevice && !device.PrimaryDevice)
+                {
+                    if (controllerDict.TryGetValue(index, out var secondary) && ReferenceEquals(secondary.Device, device))
+                        RemoveModelNoLock(secondary);
+                    return;
+                }
                 if (controllerDict.TryGetValue(index, out CompositeDeviceModel existing))
                 {
-                    if (ReferenceEquals(existing.Device, device)) return;
+                    if (ReferenceEquals(existing.Device, device))
+                    {
+                        existing.RequestUpdatedIdentity();
+                        return;
+                    }
                     // A delayed removal notification must neither hide the
                     // replacement nor keep the old row in a reused slot.
                     RemoveModelNoLock(existing);
@@ -140,6 +151,13 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             DS4Device device, int index)
         {
             if (RemoveController(device, index)) SaveAfterRemoval();
+        }
+
+        private void Service_NintendoJoyConTopologyChanged(object sender, EventArgs e)
+        {
+            var dispatcher = System.Windows.Application.Current?.Dispatcher;
+            if (dispatcher != null && !dispatcher.HasShutdownStarted)
+                dispatcher.BeginInvoke(new Action(() => ControllersChanged(sender, e)));
         }
 
         private void ClearControllerList(object sender, EventArgs e)
@@ -238,16 +256,20 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         internal void RefreshJoyConLinkAction(Switch2JoyConPairCandidate candidate,
             InputControllerSlotToken joinedToken, bool armed, bool canSelect, bool automatic)
+            => RefreshNintendoJoyConLinkAction(new(candidate), new(joinedToken), armed, canSelect, automatic);
+
+        internal void RefreshNintendoJoyConLinkAction(NintendoJoyConCandidate candidate,
+            NintendoJoyConJoined joined, bool armed, bool canSelect, bool automatic)
         {
             var next = new JoyConLinkActionView
             {
-                Candidate = candidate, JoinedToken = joinedToken,
-                Visible = candidate.Id > 0 || joinedToken.IsValid,
-                Enabled = canSelect && (candidate.Id > 0 || joinedToken.IsValid),
+                Candidate = candidate, Joined = joined,
+                Visible = candidate.IsValid || joined.IsValid,
+                Enabled = canSelect && (candidate.IsValid || joined.IsValid),
                 IsArmed = armed,
-                Text = joinedToken.IsValid ? "Unlink" : armed ? "Cancel" : "Link",
+                Text = joined.IsValid ? "Unlink" : armed ? "Cancel" : "Link",
                 ToolTip = automatic ? "Turn off automatic pairing in Settings to link or unlink Joy-Cons." :
-                    joinedToken.IsValid ? "Use these Joy-Cons as two separate controllers." :
+                    joined.IsValid ? "Use these Joy-Cons as two separate controllers." :
                     armed ? "Cancel this selection." : "Select this Joy-Con, then Link on the other one. This controller keeps its profile and virtual pad."
             };
             if (next == JoyConLinkAction) return;
@@ -281,7 +303,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         }
         public event EventHandler SelectedProfileChanged;
 
-        public string ControllerDisplayName => device.DisplayName;
+        public string ControllerDisplayName => device is JoyConDevice { ProfileConnection.Group.Joined: true } ?
+            "Joy-Con Pair" : device.DisplayName;
 
         public string ConnectionText => device.ConnectionType switch
         {
@@ -312,7 +335,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public bool SupportsSwitch2StandaloneHoldMode =>
             device is Switch2RuntimeInputDevice runtime &&
-            runtime.SupportsStandaloneJoyConHoldMode;
+            runtime.SupportsStandaloneJoyConHoldMode || device is JoyConDevice original &&
+                LegacyJoyConProfileUiActions.IsStandalone(original.ProfileConnection);
 
         public bool SupportsSwitch2Identification =>
             device is Switch2RuntimeInputDevice;
@@ -325,8 +349,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public event EventHandler Switch2StandaloneHoldModeTextChanged;
 
         public string Switch2StandaloneHoldModeToolTip =>
-            "Switch between holding this Joy-Con upright or sideways. " +
-            "Your choice is remembered for this controller.";
+            device is JoyConDevice ? "Hold this Joy-Con upright or sideways. Saves to its current profile." :
+                "Switch between holding this Joy-Con upright or sideways. Your choice is remembered for this controller.";
 
         public bool SupportsControllerAudio =>
             UiCapabilities.SupportsControllerAudio;
@@ -403,7 +427,9 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         {
             get
             {
-                if (JoyConArtwork.ForDevice(device.DeviceType,
+                InputDeviceType artworkType = device is JoyConDevice { ProfileConnection.Group.Joined: true } ?
+                    InputDeviceType.JoyConGrip : device.DeviceType;
+                if (JoyConArtwork.ForDevice(artworkType,
                         EffectiveSwitch2StandaloneHoldMode()) is ImageSource joyCon)
                     return joyCon;
                 string imageName = UiCapabilities.ImageResourceName;
@@ -435,22 +461,24 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public bool TryToggleSwitch2StandaloneHoldMode(out bool persisted)
         {
             persisted = false;
-            if (device is not Switch2RuntimeInputDevice runtime ||
-                !runtime.SupportsStandaloneJoyConHoldMode)
-            {
-                return false;
-            }
+            if (!SupportsSwitch2StandaloneHoldMode) return false;
 
             Switch2JoyConHoldMode next =
                 EffectiveSwitch2StandaloneHoldMode() ==
                     Switch2JoyConHoldMode.Horizontal ?
                     Switch2JoyConHoldMode.Vertical :
                     Switch2JoyConHoldMode.Horizontal;
-            if (!runtime.TrySetStandaloneJoyConHoldMode(next,
-                    out persisted))
+            if (device is Switch2RuntimeInputDevice runtime)
             {
-                return false;
+                if (!runtime.TrySetStandaloneJoyConHoldMode(next, out persisted)) return false;
             }
+            else if (device is JoyConDevice original)
+            {
+                if (!LegacyJoyConProfileUiActions.TrySetHoldMode(original.ProfileConnection, next,
+                        static (slot, name) => Global.store.SaveProfileNew(slot, name), out persisted)) return false;
+                if (persisted) selectedEntity?.FireSaved();
+            }
+            else return false;
             Switch2StandaloneHoldModeTextChanged?.Invoke(this,
                 EventArgs.Empty);
             return true;
@@ -464,7 +492,8 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 Switch2JoyConHoldMode.Vertical;
             return device is Switch2RuntimeInputDevice runtime ?
                 runtime.ResolveStandaloneJoyConHoldMode(fallback) :
-                Switch2JoyConHoldMode.Vertical;
+                device is JoyConDevice { ProfileConnection.Group.Joined: true } ? Switch2JoyConHoldMode.Vertical :
+                device.DeviceType is InputDeviceType.JoyConL or InputDeviceType.JoyConR ? fallback : Switch2JoyConHoldMode.Vertical;
         }
 
         public string StatusSource
@@ -544,7 +573,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public string IdText
         {
-            get => $"{device.DisplayName} ({device.DisplayIdentity})";
+            get => $"{ControllerDisplayName} ({device.DisplayIdentity})";
         }
         public event EventHandler IdTextChanged;
 

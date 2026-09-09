@@ -162,7 +162,7 @@ public class PortableBrokerIntegrationTests
     }
 
     [TestMethod]
-    public void BothUpdateConfirmationPathsExplainFreshPortableExtractionBeforeUpdaterPreparation()
+    public void BothUpdateConfirmationPathsPrepareAndLaunchVerifiedUpdaterBeforeNormalShutdown()
     {
         string source = Read("DS4Forms", "MainWindow.xaml.cs");
         foreach ((string begin, string end) in new[]
@@ -180,26 +180,26 @@ public class PortableBrokerIntegrationTests
         }
         string guidance = Section(source, "private bool CanStartPortableUpdate()",
             "private void Check_Version(");
-        StringAssert.Contains(guidance,
-            "if (!PortableBrokerContext.IsActive) return true;");
-        StringAssert.Contains(guidance, "Dispatcher.Invoke(");
-        StringAssert.Contains(guidance, "Save your profiles");
-        StringAssert.Contains(guidance, "close DS4Windows and VIIPER");
-        StringAssert.Contains(guidance, "ZIP");
-        StringAssert.Contains(guidance, "new folder");
-        StringAssert.Contains(guidance, "return false;");
+        StringAssert.Contains(guidance, "return !PortableLabContext.IsActive;");
+        string preparation = Section(Read("DS4Forms", "ViewModels", "MainWindowsViewModel.cs"),
+            "public bool RunUpdaterCheck(", "public void DownloadUpstreamVersionInfo()");
+        Before(preparation, "if (PortableLabContext.IsActive) return false;", "PortableUpdaterBootstrap.PrepareAsync(");
+        Before(preparation, "PortableUpdaterBootstrap.PrepareAsync(", "DownloadUpstreamUpdaterVersion()");
+        StringAssert.Contains(preparation, "LastUpdaterFailure");
         Assert.IsFalse(guidance.Contains("UsesBorrowedBroker", StringComparison.Ordinal));
         Assert.IsFalse(guidance.Contains(".Dispose(", StringComparison.Ordinal));
         Assert.IsFalse(guidance.Contains(".Kill(", StringComparison.Ordinal));
     }
 
     [TestMethod]
-    public void DirectUpdaterLaunchRejectsEveryPortableSessionBeforeAllocatingAProcess()
+    public void DirectPortableUpdaterLaunchRequiresPreparedProtocolAndNeverUsesLegacyProcessPath()
     {
         string launch = Section(Read("DS4Forms", "ViewModels", "MainWindowsViewModel.cs"),
             "public bool LauchDS4Updater(", "public bool IsNET8Available()");
         StringAssert.Contains(System.Text.RegularExpressions.Regex.Replace(launch, @"\s+", " "),
-            "if (PortableLabContext.IsActive || PortableBrokerContext.IsActive) return false;");
+            "if (PortableLabContext.IsActive) return false;");
+        StringAssert.Contains(launch, "return PortableUpdaterBootstrap.Launch(preparedPortableUpdater,");
+        StringAssert.Contains(launch, "finally { preparedPortableUpdater = null; }");
         Before(launch, "PortableBrokerContext.IsActive",
             "new Process()");
         Before(launch, "PortableBrokerContext.IsActive",

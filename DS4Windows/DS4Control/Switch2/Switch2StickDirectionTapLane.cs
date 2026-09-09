@@ -191,6 +191,18 @@ internal static class Switch2StickDirectionTapLane
 {
     internal const int PulseMilliseconds = 80;
 
+    internal static bool TryAdvance(DS4State input, double lx, double ly, double rx,
+        double ry, in Switch2StickDirectionActivationModes modes, long profileRevision,
+        ref Switch2StickDirectionTapLaneState state, out Switch2StickDirectionTapFrame frame)
+    {
+        frame = default;
+        if (!Switch2StickScrollTapLane.AreValidProfileCoordinates(lx, ly, rx, ry) || profileRevision < 0 ||
+            !modes.TryGetTapMasks(out var leftTapMask, out var rightTapMask) ||
+            !Switch2StickScrollTapLane.TryGetSource(input, out var lifetime, out long timestamp))
+        { state = default; return false; }
+        return AdvanceSelected(lifetime, timestamp, lx, ly, rx, ry, leftTapMask, rightTapMask, profileRevision, ref state, out frame);
+    }
+
     internal static bool TryAdvance(in Switch2RawInputStatus pro,
         in Switch2JoyConRawInputStatus joyCon, double lx, double ly, double rx,
         double ry, in Switch2StickDirectionActivationModes modes,
@@ -210,6 +222,14 @@ internal static class Switch2StickDirectionTapLane
             return false;
         }
 
+        return AdvanceSelected(lifetime, timestampQpc, lx, ly, rx, ry, leftTapMask, rightTapMask, profileRevision, ref state, out frame);
+    }
+
+    private static bool AdvanceSelected(in Switch2StickScrollLifetime lifetime, long timestampQpc,
+        double lx, double ly, double rx, double ry, Switch2StickScrollSector leftTapMask,
+        Switch2StickScrollSector rightTapMask, long profileRevision,
+        ref Switch2StickDirectionTapLaneState state, out Switch2StickDirectionTapFrame frame)
+    {
         Switch2StickScrollSector leftSector =
             Switch2StickScrollTapLane.ResolveSector(lx, ly);
         Switch2StickScrollSector rightSector =

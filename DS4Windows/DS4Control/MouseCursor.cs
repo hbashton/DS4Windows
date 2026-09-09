@@ -257,7 +257,7 @@ namespace DS4Windows
             yAction = (int)yMotion;
 
             bool highRateEnabled = inputDevice is
-                    Switch2RuntimeInputDevice &&
+                    INintendoMousePresentation &&
                 Global.Switch2HighRateMousePresentation[deviceNumber] &&
                 double.IsFinite(arg.sixAxis.elapsed) &&
                 arg.sixAxis.elapsed > 0.0;
@@ -314,13 +314,13 @@ namespace DS4Windows
                 continuousY *= -1.0;
             }
 
-            if (inputDevice is Switch2RuntimeInputDevice switch2Runtime)
+            if (inputDevice is INintendoMousePresentation switch2Runtime)
             {
                 long profileRevision = Math.Max(0,
                     Global.ReadProfileSwitchRevision(deviceNumber));
                 if (highRateEnabled)
                 {
-                    switch2Runtime.TrySetHighRateMouseSource(
+                    highRateEnabled = switch2Runtime.TrySetHighRateMouseSource(
                             Switch2ContinuousMouseSource.Gyro,
                             active: true,
                             continuousX / arg.sixAxis.elapsed,
@@ -363,7 +363,7 @@ namespace DS4Windows
 
         public void StopHighRateGyroMouse()
         {
-            if (inputDevice is Switch2RuntimeInputDevice switch2Runtime)
+            if (inputDevice is INintendoMousePresentation switch2Runtime)
             {
                 switch2Runtime.TrySetHighRateMouseSource(
                     Switch2ContinuousMouseSource.Gyro, active: false,

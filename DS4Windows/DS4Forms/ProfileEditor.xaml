@@ -64,8 +64,12 @@
         <TabControl Grid.Row="1" x:Name="sidebarTabControl"
                     Style="{StaticResource BridgeProfileTabControlStyle}"
                     SelectionChanged="SidebarTabControl_SelectionChanged">
-            <TabItem Header="{lex:Loc Controls}">
+            <TabItem x:Name="controlsTab" Header="{lex:Loc Controls}">
                 <Grid Background="Transparent">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="3*" MaxWidth="482" />
                         <ColumnDefinition Width="2*" MinWidth="220" />
@@ -350,25 +354,19 @@
                             </Grid.RowDefinitions>
                             <Border Padding="16,13" BorderBrush="{DynamicResource BorderColor}"
                                     BorderThickness="0,0,0,1">
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel>
-                                        <TextBlock Text="Button mappings" FontSize="16" FontWeight="SemiBold" />
+                                <WrapPanel>
+                                    <StackPanel Margin="0,0,12,7">
+                                        <TextBlock Text="Button mappings" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap" />
                                         <TextBlock Text="Double-click a row to change its action."
-                                                   Margin="0,3,0,0" FontSize="11"
+                                                   Margin="0,3,0,0" FontSize="11" TextWrapping="Wrap"
                                                    Foreground="{DynamicResource MutedForegroundColor}" />
                                     </StackPanel>
-                                    <Border Grid.Column="1" Background="{DynamicResource RaisedBackgroundColor}"
-                                            BorderBrush="{DynamicResource BorderColor}" BorderThickness="1"
-                                            CornerRadius="4" Padding="9,5" VerticalAlignment="Center">
-                                        <TextBlock Text="{Binding ElementName=mappingListBox, Path=Items.Count, StringFormat={}{0} controls}"
-                                                   FontSize="10" FontWeight="SemiBold"
-                                                   Foreground="{DynamicResource MutedForegroundColor}" />
-                                    </Border>
-                                </Grid>
+                                    <Button x:Name="liveInputPreviewButton"
+                                            Content="Show live preview" Click="LiveInputPreviewButton_Click"
+                                            FontSize="11" Padding="9,5" Margin="0,0,0,7"
+                                            VerticalAlignment="Center"
+                                            Style="{StaticResource BridgeSecondaryButtonStyle}" />
+                                </WrapPanel>
                             </Border>
 
                             <ListBox Grid.Row="1" x:Name="mappingListBox" ItemsSource="{Binding Mappings}"
@@ -449,6 +447,9 @@
                             </ListBox>
                         </Grid>
                     </Border>
+                    <local:MappingLiveInputControl x:Name="mappingLiveInput"
+                        Grid.Row="1" Grid.ColumnSpan="2" Margin="0,12,0,0"
+                        Visibility="Collapsed" />
                 </Grid>
             </TabItem>
             <TabItem x:Name="specialActionsTab" Header="Special Actions">
@@ -2238,7 +2239,7 @@
                                          SettingsChanged="ProfileTriggerLabControl_SettingsChanged" />
             </TabItem>
 
-<TabItem x:Name="switch2ControlsTab" Header="Switch 2 Controls"
+<TabItem x:Name="switch2ControlsTab" Header="Nintendo Options"
                      Tag="HD rumble, motion, Joy-Con mouse modes, calibration, and controller behavior">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <StackPanel>
@@ -2255,9 +2256,9 @@
                                 </Style>
                             </Border.Style>
                             <StackPanel>
-                                <TextBlock Text="Switch 2 controller settings" FontSize="16" FontWeight="SemiBold" />
+                                <TextBlock Text="Nintendo Options" FontSize="16" FontWeight="SemiBold" />
                                 <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" Opacity="0.78"
-                                           Text="Select a Switch 2 Pro or Joy-Con 2, or open a profile without a controller to edit these settings." />
+                                           Text="These settings are saved with the profile and apply to controllers that support them." />
                             </StackPanel>
                         </Border>
                         <StackPanel x:Name="switch2SettingsPanel" Margin="8,8,8,0" HorizontalAlignment="Stretch" Visibility="{Binding ShowSwitch2Controls, Converter={StaticResource BooleanToVisibilityConverter}}">
@@ -2294,7 +2295,7 @@
                             </StackPanel.Resources>
                             <TextBlock Text="How do you want to play?" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,4" />
                             <TextBlock Text="Point at menus. Aim by tilting. Feel the game. Start with what you want to do; fine-tuning is tucked inside each section." TextWrapping="Wrap" Opacity="0.78" Margin="0,0,0,8" />
-                            <TextBlock Text="Saved with this profile. Desk mouse and motion aiming are separate features." TextWrapping="Wrap" Margin="0,0,0,18" />
+                            <TextBlock Text="Saved with this profile for any controller. Features your controller doesn't support have no effect. Desk mouse and motion aiming are separate features." TextWrapping="Wrap" Margin="0,0,0,18" />
                             <Border Style="{StaticResource Switch2SettingsCardStyle}" Visibility="{Binding ShowSwitch2JoyConControls, Converter={StaticResource BooleanToVisibilityConverter}}">
                                 <Expander x:Name="switch2JoyConCard" IsExpanded="true" HorizontalContentAlignment="Stretch" AutomationProperties.Name="Mouse on a desk">
                                     <Expander.Header>
@@ -2386,7 +2387,7 @@
                                             <WrapPanel>
                                                 <TextBlock Text="When to aim:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
                                                 <ComboBox SelectedIndex="{Binding Switch2AimSetup.ActivationIndex}" MinHeight="32" MinWidth="200" AutomationProperties.Name="Motion aiming activation">
-                                                    <ComboBoxItem Content="Always" />
+                                                    <ComboBoxItem Content="Always on" />
                                                     <ComboBoxItem Content="Hold ZL / L2" />
                                                     <ComboBoxItem Content="Hold ZR / R2" />
                                                     <ComboBoxItem Content="Custom — see Gyro settings" IsEnabled="False" />
@@ -2639,7 +2640,8 @@
                                         </StackPanel>
                                     </DockPanel>
                                     <CheckBox x:Name="Switch2DualJoyConGyroEnabledCheckBox" IsChecked="{Binding Switch2DualGyroEditor.Enabled}" Content="Aim with both Joy-Cons (DJG)" FontSize="15" FontWeight="SemiBold" Margin="26,14,0,6" ToolTip="Let a joined pair share motion aiming. Turn off to use the normal single motion source." />
-                                    <TextBlock Text="On: use your chosen two-hand behavior below. Off: use the normal motion source. This does not pair the controllers or turn on mouse aiming." TextWrapping="Wrap" Margin="26,0,4,10" Opacity="0.78" />
+                                    <TextBlock Text="Choose which hand supplies motion. This does not pair your Joy-Cons or turn on mouse aiming." TextWrapping="Wrap" Margin="26,0,4,8" Opacity="0.78" />
+                                    <TextBlock x:Name="switch2DualGyroOutputHint" Text="For mouse or stick aiming, start with Aim by tilting → When to aim: Always on. Choosing a button there adds a separate on/off control; it does not choose a hand." TextWrapping="Wrap" Margin="26,0,4,10" />
                                     <Button Content="Set up motion aiming…" Click="Switch2OpenAimSetup_Click" HorizontalAlignment="Left" Margin="26,0,0,12" Padding="10,5" />
                                     <Expander x:Name="switch2PairCard" IsExpanded="false" HorizontalContentAlignment="Stretch" AutomationProperties.Name="Which Joy-Con aims?">
                                         <Expander.Header>
@@ -2669,14 +2671,15 @@
                                                         </ComboBox>
                                                     </StackPanel>
                                                     <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                                                        <TextBlock Text="Activation:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
+                                                        <TextBlock Text="Button behavior:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
                                                         <ComboBox MinHeight="28" MinWidth="120" SelectedIndex="{Binding Switch2DualGyroEditor.ActivationModeIndex}">
-                                                            <ComboBoxItem Content="Hold" />
-                                                            <ComboBoxItem Content="Toggle" />
+                                                            <ComboBoxItem Content="While held" />
+                                                            <ComboBoxItem Content="Press to toggle" />
                                                         </ComboBox>
                                                     </StackPanel>
-                                                    <TextBlock Margin="0,7,0,4" TextWrapping="Wrap" Opacity="0.78" Text="Choose buttons for each Joy-Con. Any selected button activates that side; you do not need to press them together." />
-                                                    <Expander Header="Buttons that activate the left side" Margin="0,4,0,0">
+                                                    <TextBlock Margin="0,10,0,6" TextWrapping="Wrap" Text="{Binding Switch2DualGyroEditor.ButtonActionDescription}" />
+                                                    <TextBlock Margin="0,0,0,4" TextWrapping="Wrap" Opacity="0.78" Text="{Binding Switch2DualGyroEditor.ButtonSelectionHint}" />
+                                                    <Expander Header="Left Joy-Con buttons" Margin="0,4,0,0">
                                                         <ItemsControl ItemsSource="{Binding Switch2DualGyroEditor.LeftActivationChoices}" Margin="0,3,0,0">
                                                             <ItemsControl.ItemsPanel>
                                                                 <ItemsPanelTemplate>
@@ -2690,7 +2693,7 @@
                                                             </ItemsControl.ItemTemplate>
                                                         </ItemsControl>
                                                     </Expander>
-                                                    <Expander Header="Buttons that activate the right side" Margin="0,4,0,0">
+                                                    <Expander Header="Right Joy-Con buttons" Margin="0,4,0,0">
                                                         <ItemsControl ItemsSource="{Binding Switch2DualGyroEditor.RightActivationChoices}" Margin="0,3,0,0">
                                                             <ItemsControl.ItemsPanel>
                                                                 <ItemsPanelTemplate>
@@ -2727,8 +2730,8 @@
                                             <xctk:IntegerUpDown MinHeight="28" Value="{Binding RumbleBoost}" Minimum="0" Maximum="200" Increment="10" Width="70" />
                                             <TextBlock Text="%" VerticalAlignment="Center" Margin="4,0,0,0" />
                                         </StackPanel>
-                                        <CheckBox x:Name="Switch2XboxImpulseEnabledCheckBox" IsChecked="{Binding Switch2MapXboxImpulseTriggersToHdRumble}" Content="Include Xbox trigger rumble" ToolTip="Feel Xbox trigger vibrations on the matching side of your controller." />
-                                        <StackPanel Margin="20,4,0,0" IsEnabled="{Binding IsChecked, ElementName=Switch2XboxImpulseEnabledCheckBox}">
+                                        <CheckBox x:Name="Switch2XboxImpulseEnabledCheckBox" IsChecked="{Binding MapXboxImpulseTriggers}" Content="Include Xbox trigger rumble" ToolTip="Feel Xbox trigger vibrations on the matching side of your controller. Shares the setting in Advanced." />
+                                        <StackPanel x:Name="XboxImpulseRumbleTuningPanel" Margin="20,4,0,0" IsEnabled="{Binding MapXboxImpulseTriggers}">
                                             <CheckBox x:Name="Switch2XboxImpulseDynamicFrequencyCheckBox" IsChecked="{Binding Switch2XboxImpulseDynamicFrequency}" Content="Vary trigger rumble feel" ToolTip="Change the feel of trigger rumble as its strength changes." />
                                             <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
                                                 <TextBlock Text="Trigger rumble strength:" VerticalAlignment="Center" Width="180" Margin="0,0,12,0" />
@@ -3121,6 +3124,25 @@
                                 <Button x:Name="lightRumbleTestBtn" Content="{lex:Loc TestLight}" Margin="10,0,0,0" Click="RumbleTestBtn_Click" />
                             </UniformGrid>
                                 <CheckBox Content="{lex:Loc InverseMotors}" IsChecked="{Binding InverseRumbleMotors}" />
+                                <CheckBox x:Name="XboxImpulseTriggersCheckBox" IsChecked="{Binding MapXboxImpulseTriggers}"
+                                          Content="Translate Xbox impulse-trigger vibration" Margin="0,5,0,0"
+                                          ToolTip="Feel Xbox trigger vibrations through your controller's triggers or rumble motors. Works independently of Trigger Lab." />
+                                <StackPanel Margin="20,4,0,0" IsEnabled="{Binding MapXboxImpulseTriggers}">
+                                    <CheckBox x:Name="XboxImpulseToAdaptiveTriggersCheckBox" IsChecked="{Binding XboxImpulseToAdaptiveTriggers}"
+                                              Content="Send impulse vibration to adaptive triggers" IsEnabled="{Binding SupportsAdaptiveTriggers}"
+                                              ToolTipService.ShowOnDisabled="True"
+                                              ToolTip="DualSense and Edge: use adaptive triggers for Xbox impulse vibration. Turn off to use body rumble. Requires impulse translation above.">
+                                        <CheckBox.Style>
+                                            <Style TargetType="CheckBox" BasedOn="{StaticResource CheckBoxStyle}">
+                                                <Style.Triggers>
+                                                    <Trigger Property="IsEnabled" Value="False">
+                                                        <Setter Property="Opacity" Value="0.5" />
+                                                    </Trigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </CheckBox.Style>
+                                    </CheckBox>
+                                </StackPanel>
                                 <GroupBox Header="PlayStation controller features" Margin="0,12,0,0" Padding="2,4"
                                           Visibility="{Binding ShowPlayStationControllerSettings, Converter={StaticResource BooleanToVisibilityConverter}}">
 

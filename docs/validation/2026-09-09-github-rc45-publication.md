@@ -100,7 +100,56 @@ The full installer is the recommended managed update path, and fresh-folder
 ZIP extraction remains the portable path. This operation does not modify or
 publish a separate DS4Updater repository.
 
-At this source checkpoint, publication is in progress. Final tag SHAs, build
+## Final broker selection and publication
+
+VIIPER main run `34338656190` and tagged run `34339492052` both passed at
+`a9111494bad3fe56a509fe094792d089fc506f36`. These include the full Linux and
+Windows gates, four generated-client builds, all executable platforms and both
+native libraries. The annotated `v0.1.3-rc4.5` tag points to that source; its
+tag object is `875dd3ee1a395c1f2c086a086e2b888dcc0f0acf`.
+
+The Windows x64 release ZIP hash is
+`527D0EFADE77F96E0CB31D3F74BA8178C77539135C8026E5CA0F8470A4CE22BD`.
+Its executable hash is
+`F1ECEF158F02D0BDCD1296C8D5097A281169081D0D59C1A8971592FAC78155EF`.
+Archive contents, PE versions, embedded Go/source/build metadata, clean VCS
+identity and complete license bytes were verified without executing the broker.
+The exact-source ZIP hash is
+`D20AE4DEECE5F1C75EE8041742DC6D77608660D2DD7476C786EEF046768DD5F1`.
+All ten workflow assets and three source/checksum records matched GitHub's
+reported digests after upload. Release ID `385419029` was published at
+`2026-09-09T10:37:26Z` as a prerelease; stable/latest remains `v0.1.2`.
+
+DS4Windows' bundled executable, runtime/setup identity checks, provenance and
+notice pins now bind that same release artifact. The two systray notices are
+preserved byte-for-byte from CI; their line-ending-only differences from the
+previous local copies do not change license text. The former local candidate
+hashes are superseded, not aliases for the newly selected executable.
+
+Intermediate DS4Windows main run `34339061056` passed its complete tests,
+package checks, MSI/Burn build, offline layout and hosted-runner MSI install,
+repair and uninstall. Its old broker input is not the final release artifact.
+After the final broker repin, the local complete suite again passed 4,536 tests
+with zero failures and the same 11 opt-in skips.
+
+An actual authenticated draft lookup showed that GitHub's published-by-tag REST
+endpoint returns 404 for drafts. Dispatch now resolves an exact, unique tag
+through the paginated release list and rechecks the numeric release ID; the
+pre-upload check uses that same ID. Published-event verification retains its
+published-by-tag checks. The exact resolver passed against the real VIIPER
+draft and seven offline missing/duplicate/changed-identity cases. All 19 Python
+tests and 37 negative policy mutations pass; stable signing is unchanged.
+
+The final local source run passed 4,539 tests with zero failures and 11 opt-in
+skips. Unlike the unchanged CI filter, this run also included the three legacy
+profile/settings cases (`CheckSettingsSave`, `CheckWriteProfile`, and
+`CheckJaysProfileRead`); these account for the count difference. The separate
+153 allocation-named selection passed again. All eight process-integration
+cases passed again using a peer rebuilt from the final tagged `a911149` source;
+its executable hash remained the same `8BA2AA21...` recorded above. No production
+broker was executed or controller touched for these tests.
+
+At this source checkpoint, DS4Windows publication is in progress. Final tag SHAs, build
 runs, artifact hashes and public URLs are to be verified from GitHub after
 the workflows complete. Earlier local acceptance remains documented in the
 [portable startup qualification](2026-09-08-portable-broker-startup.md), but

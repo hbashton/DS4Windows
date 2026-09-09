@@ -38,6 +38,13 @@ public sealed class ReleaseSigningPolicyTests
         string source = Workflow();
         StringAssert.Contains(source, "EVENT_PRERELEASE: ${{ github.event.release.prerelease }}");
         StringAssert.Contains(source, "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag");
+        string identity = Between(source, "  identity:", "  release:");
+        StringAssert.Contains(identity, "gh api --paginate --slurp \"repos/$repository/releases?per_page=100\"");
+        StringAssert.Contains(identity, "$candidate.tag_name -ceq $tag");
+        StringAssert.Contains(identity, "$tagMatches.Count -ne 1 -or $tagMatches[0].id -le 0");
+        StringAssert.Contains(identity, "gh api \"repos/$repository/releases/$releaseId\"");
+        StringAssert.Contains(identity, "$resolved.id -ne $releaseId -or $resolved.tag_name -cne $tag -or -not $resolved.draft");
+        StringAssert.Contains(identity, "$release = if ($dispatch) {\n          Resolve-DraftRelease $env:GITHUB_REPOSITORY $tag");
         StringAssert.Contains(source, "$release.tag_name -cne $tag -or $release.id -le 0");
         StringAssert.Contains(source, "$dispatch -and -not $release.draft");
         StringAssert.Contains(source, "$env:EVENT_RELEASE_ID");
@@ -90,6 +97,9 @@ public sealed class ReleaseSigningPolicyTests
         StringAssert.Contains(records, "'SHA256SUMS.txt'");
         StringAssert.Contains(records, "'RELEASE-BUILD.json'");
         string upload = Between(source, "    - name: Verify and publish exact release assets", "    - name: Remove signing material");
+        StringAssert.Contains(upload, "$env:RELEASE_ID -cnotmatch '^[1-9][0-9]*$'");
+        StringAssert.Contains(upload, "gh api \"repos/$env:GITHUB_REPOSITORY/releases/$env:RELEASE_ID\"");
+        Assert.IsFalse(upload.Contains("/releases/tags/", StringComparison.Ordinal));
         StringAssert.Contains(upload, "Refusing to overwrite existing release asset:");
         StringAssert.Contains(upload, "Hash -cne $expected[$name]");
         Assert.IsTrue(upload.IndexOf("Hash -cne $expected[$name]", StringComparison.Ordinal) <
@@ -125,5 +135,6 @@ public sealed class ReleaseSigningPolicyTests
     }
 
     private static string Workflow([CallerFilePath] string sourceFile = "") =>
-        File.ReadAllText(Path.GetFullPath(Path.Combine(Path.GetDirectoryName(sourceFile)!, "..", ".github", "workflows", "release.yml")));
+        File.ReadAllText(Path.GetFullPath(Path.Combine(Path.GetDirectoryName(sourceFile)!, "..", ".github", "workflows", "release.yml")))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
 }

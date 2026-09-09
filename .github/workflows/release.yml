@@ -35,10 +35,28 @@ jobs:
       run: |
         $ErrorActionPreference = 'Stop'
         $PSNativeCommandUseErrorActionPreference = $true
+        function Resolve-DraftRelease([string]$repository, [string]$tag) {
+          # The published-by-tag REST endpoint does not return drafts.
+          $pages = @(gh api --paginate --slurp "repos/$repository/releases?per_page=100" | ConvertFrom-Json)
+          $tagMatches = @(foreach ($page in $pages) {
+            foreach ($candidate in $page) {
+              if ($candidate.tag_name -ceq $tag) { $candidate }
+            }
+          })
+          if ($tagMatches.Count -ne 1 -or $tagMatches[0].id -le 0) { throw 'Draft tag must identify exactly one same-repository release.' }
+          $releaseId = $tagMatches[0].id
+          $resolved = gh api "repos/$repository/releases/$releaseId" | ConvertFrom-Json
+          if ($resolved.id -ne $releaseId -or $resolved.tag_name -cne $tag -or -not $resolved.draft) { throw 'Draft release identity changed during lookup.' }
+          return $resolved
+        }
         $dispatch = $env:GITHUB_EVENT_NAME -ceq 'workflow_dispatch'
         $tag = if ($dispatch) { $env:INPUT_TAG } else { $env:EVENT_TAG }
         if ($tag -cnotmatch '^[0-9A-Za-z][0-9A-Za-z._-]{0,79}\z') { throw 'Invalid release tag.' }
-        $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" | ConvertFrom-Json
+        $release = if ($dispatch) {
+          Resolve-DraftRelease $env:GITHUB_REPOSITORY $tag
+        } else {
+          gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" | ConvertFrom-Json
+        }
         if ($release.tag_name -cne $tag -or $release.id -le 0) { throw 'Release identity mismatch.' }
         if ($dispatch -and -not $release.draft) { throw 'Dispatch builds require an existing draft release.' }
         if (-not $dispatch -and ($release.draft -or "$($release.id)" -cne $env:EVENT_RELEASE_ID -or
@@ -282,7 +300,8 @@ jobs:
         $assets = @(Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'ds4windows-release-assets.json') -Raw | ConvertFrom-Json)
         $names = @($assets | ForEach-Object { [IO.Path]::GetFileName($_) })
         if (@($names | Sort-Object -Unique).Count -ne $names.Count) { throw 'Duplicate release asset names.' }
-        $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG" | ConvertFrom-Json
+        if ($env:RELEASE_ID -cnotmatch '^[1-9][0-9]*$') { throw 'Invalid verified release ID.' }
+        $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/$env:RELEASE_ID" | ConvertFrom-Json
         if ("$($release.id)" -cne $env:RELEASE_ID -or $release.tag_name -cne $env:RELEASE_TAG -or
             ($env:GITHUB_EVENT_NAME -ceq 'workflow_dispatch' -and -not $release.draft)) {
           throw 'Release identity/draft state changed before upload.'

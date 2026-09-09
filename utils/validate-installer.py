@@ -31,18 +31,18 @@ REQUIRED_PUBLISH_FILES = {
 VIIPER_RELEASE = {
     "Version": "v0.1.3-rc4.5",
     "Source": "https://github.com/hbashton/VIIPER",
-    "Source commit": "6205074f209e488c237d7eb475383f49d7f3cab9",
+    "Source commit": "a9111494bad3fe56a509fe094792d089fc506f36",
     "Toolchain": "Go 1.27.0 windows/amd64",
     "Build": "GOOS=windows GOARCH=amd64 CGO_ENABLED=0 BUILD_TYPE=Release",
-    "Embedded commit": "6205074",
-    "Embedded build date": "2026-09-09T01:45:53Z",
-    "Embedded VCS revision": "6205074f209e488c237d7eb475383f49d7f3cab9",
-    "Embedded VCS time": "2026-09-09T01:45:22Z",
+    "Embedded commit": "a911149",
+    "Embedded build date": "2026-09-09T10:21:17Z",
+    "Embedded VCS revision": "a9111494bad3fe56a509fe094792d089fc506f36",
+    "Embedded VCS time": "2026-09-09T10:08:56Z",
     "Embedded VCS modified": "false",
     "PE file version": "0.1.3.0",
     "PE product version": "0.1.3-rc4.5",
     "Binary": "VIIPER-0.1.3-rc4.5-x64.exe",
-    "Binary SHA-256": "F4A86C6D00CDD30FACF4F7E2C0FB3C69761576119514678D055E65EA28CDBB95",
+    "Binary SHA-256": "F1ECEF158F02D0BDCD1296C8D5097A281169081D0D59C1A8971592FAC78155EF",
     "Authenticode status at packaging": "NotSigned",
     "License notice": "VIIPER-0.1.3-rc4.5-LICENSES.txt",
     "License notice SHA-256": "7963B998C065CBC0D7900FED9D69D2326638A7355F496E684B14F98FE3174427",
@@ -50,10 +50,10 @@ VIIPER_RELEASE = {
 # Preserve the strict machine-readable provenance tuple and independently bind
 # the complete, unabridged build notes and license documents to this artifact.
 VIIPER_NOTICE_HASHES = {
-    "VIIPER-0.1.3-rc4.5-BUILD-NOTES.txt": "E81BCFD5B113A9C8F917572CECCD861E936A5C7ED1E91374DC73F17F51FB9656",
+    "VIIPER-0.1.3-rc4.5-BUILD-NOTES.txt": "DD57CEE837EF77027FBB3F43E468C56AD0CE922AD8DE65DFDA222A922163A994",
     "LICENSE.txt": "F24EE094842DC3347A7A06B71373573CE18F6DCB935C81E95623723EE22E6CA6",
-    "VIIPER-SYSTRAY-NOTICE.md": "96F9C19B6E30B3EA8AAAF15FECCBC169353389019E4722CF05ECDEEA29BF52FB",
-    "VIIPER-SYSTRAY-LICENSE.txt": "A106BC9F4D5D7D91D5173E86D0864FCF061C33A30CC237710B8F4A05CF127021",
+    "VIIPER-SYSTRAY-NOTICE.md": "6126849BBF404E8172729DAF992DDF7BE43C84F30721883F51C0FA52CC4CD192",
+    "VIIPER-SYSTRAY-LICENSE.txt": "05C55BD8834035C143C17AA218BFF08E22B7A66C5603CBA8F070DCAAFC974B8F",
 }
 VIIPER_INFRASTRUCTURE_MARKER = "VIIPER-0.1.3-rc4.5+USBIP-0.9.7.7"
 
@@ -165,6 +165,12 @@ def validate_release_workflow(release_workflow: str) -> None:
         'EVENT_RELEASE_ID: ${{ github.event.release.id }}',
         'EVENT_PRERELEASE: ${{ github.event.release.prerelease }}',
         'gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag"',
+        'gh api --paginate --slurp "repos/$repository/releases?per_page=100"',
+        '$candidate.tag_name -ceq $tag',
+        '$tagMatches.Count -ne 1 -or $tagMatches[0].id -le 0',
+        'gh api "repos/$repository/releases/$releaseId"',
+        '$resolved.id -ne $releaseId -or $resolved.tag_name -cne $tag -or -not $resolved.draft',
+        '$release = if ($dispatch) {\n          Resolve-DraftRelease $env:GITHUB_REPOSITORY $tag',
         '$release.tag_name -cne $tag -or $release.id -le 0',
         '$dispatch -and -not $release.draft',
         '$release.prerelease.ToString().ToLowerInvariant() -cne $env:EVENT_PRERELEASE',
@@ -198,6 +204,8 @@ def validate_release_workflow(release_workflow: str) -> None:
     ])
     upload = between("    - name: Verify and publish exact release assets", "    - name: Remove signing material")
     require(upload, [
+        "$env:RELEASE_ID -cnotmatch '^[1-9][0-9]*$'",
+        'gh api "repos/$env:GITHUB_REPOSITORY/releases/$env:RELEASE_ID"',
         'Release identity/draft state changed before upload.',
         'Refusing to overwrite existing release asset:',
         'Hash -cne $expected[$name]',

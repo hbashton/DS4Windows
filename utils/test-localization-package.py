@@ -262,6 +262,10 @@ class ReleaseWorkflowValidationTests(unittest.TestCase):
             ('UNSIGNED_RC_RELEASE: ${{ needs.identity.outputs.unsigned_rc }}', 'UNSIGNED_RC_RELEASE: true'),
             ('$release.tag_name -cne $tag -or $release.id -le 0', '$false'),
             ('$dispatch -and -not $release.draft', '$false'),
+            ('gh api --paginate --slurp', 'gh api'),
+            ('$candidate.tag_name -ceq $tag', '$candidate.tag_name -like $tag'),
+            ('$tagMatches.Count -ne 1 -or $tagMatches[0].id -le 0', '$false'),
+            ('repos/$env:GITHUB_REPOSITORY/releases/$env:RELEASE_ID', 'repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG'),
         ])
 
     def test_unsigned_exception_cannot_expand_to_stable_or_unknown_tags(self):

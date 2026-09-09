@@ -201,8 +201,15 @@ records these runs and replacement packages. The earlier
 the initial 4,463-test RC4.5 checkpoint, distinct from the older 4,426-test
 controller checkpoint.
 
+The later publication checkpoint, with release-policy coverage and the verified
+GitHub-built VIIPER artifact, passed **4,536 CI-filtered tests** and then **4,539
+unfiltered local tests**, with zero failures and the same 11 opt-in skips. The
+three extra cases are legacy profile/settings tests. The [publication record](validation/2026-09-09-github-rc45-publication.md)
+distinguishes these final broker pins from the earlier local kit and records
+the complete broker CI and installer lifecycle gates.
+
 All eight opt-in Xbox client/broker process-integration cases also passed
-separately against the current broker source. Those use isolated loopback
+separately at the recorded broker source checkpoints. Those use isolated loopback
 connections and simulated native attachment; they do not count as additional
 physical-controller tests.
 

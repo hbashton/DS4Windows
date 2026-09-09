@@ -92,3 +92,49 @@ physical controller was modified during this investigation.
 
 References: [Microsoft error 995](https://learn.microsoft.com/en-us/windows/win32/debug/system-error-codes--500-999-)
 and [the tested #84 transport requirement](https://github.com/hbashton/DS4Windows/issues/84).
+
+## Published result
+
+The pending-publication statements above are historical validation stages.
+[VIIPERRC4.5.4](https://github.com/hbashton/DS4Windows/releases/tag/VIIPERRC4.5.4)
+was published on 2026-09-09 at 23:05:07 UTC as an unsigned prerelease, release
+`385896773`, from immutable tag/source `f15c3001ccb5ba577a20c9174e252e2835383631`.
+
+- Exact-source [CI 34413872665](https://github.com/hbashton/DS4Windows/actions/runs/34413872665)
+  passed: 4,924 tests and 11 opt-in skips, with the workflow's existing three
+  snapshot exclusions. Those three also passed in the unfiltered local full run.
+  Offline installer layout and hosted MSI install/repair/uninstall gates passed.
+- Twenty additional runs of the six new recovery cases passed: **120 cases,
+  zero failures**. Results are under `rc454-release-verification/repeated/`.
+- [Draft build 34414663236](https://github.com/hbashton/DS4Windows/actions/runs/34414663236)
+  and [public verification 34415309349](https://github.com/hbashton/DS4Windows/actions/runs/34415309349)
+  passed. The public workflow verified the draft's bytes without rebuilding or
+  overwriting assets.
+- All 13 release assets were downloaded and verified. The portable ZIP contains
+  551 files, 296 runtime dependency assets and 23 language satellites. Application
+  and installer versions are `5.0.5.4`; application product/marker is
+  `VIIPERRC4.5.4`. VIIPER, Xbox persona, notices and dependency installers retain
+  their pinned identities; .NET/Desktop runtime is 8.0.30.
+- Portable SHA-256: `3BFCD863B1A4933980091099ADE30B10D6D15406BAC626D2231AC8953546077E`.
+  Installer SHA-256: `B62B456C7542CBD8633D3545BFBE8B5E47660CA91C39A5D4862D09C13F08B04E`.
+- The unchanged compiled updater 2.0.6 resolver accepted **unmodified public**
+  RC4.5.4 metadata and verified the actual receipt, ZIP, EXE/DLL and release marker.
+  No simulated publication envelope was used for this public check. Earlier
+  draft and untagged-URL negative controls both rejected their inputs. No updater
+  worker was launched; this is package acceptance, not a live update transaction.
+
+Local proof: `isolated_results/rc454-verification/final/VERIFICATION.json`
+(SHA-256 `FAABEF99798D29EAA46B92B0C44B7C454F98CDD440A4C38C97DFFB79F9653C06`),
+plus `isolated_results/updater-2.0.6/PUBLIC-RC454-UPDATER-VERIFICATION.json`
+in the sibling updater repository. Downloads are in the Desktop folder
+`DS4Windows-RC4.5.4-Release`. These files were not installed or executed.
+
+The final source review still did not attribute the initiating cancellation.
+The pipelined backend can synthesize 995 for a closed/stale-generation handle;
+DS4's ordinary wrapper can return a close-generation error without explicitly
+setting the caller's ambient native error. Both observations limit diagnostic
+attribution; neither proves a spontaneous active-read cancellation or justifies
+a speculative retry/transport change. Exact-DS4 cleanup coverage is compositional
+(retirement helper plus typed lifecycle tests), not a native end-to-end hardware
+reproduction. The recovered application deadlocks and the initiating read error
+remain separate claims.

@@ -167,6 +167,22 @@ This update supersedes the earlier pending-publication status snapshots above.
   initiating native cancellation and Joy-Con rumble stutter remain unconfirmed.
   See [corrected chronology and recovery evidence](2026-09-09-read-failure-recovery.md).
 
+## RC4.5.4 publication completed
+
+This supersedes the pending CI/publication gates in the preceding snapshot.
+[VIIPERRC4.5.4](https://github.com/hbashton/DS4Windows/releases/tag/VIIPERRC4.5.4)
+is published from `f15c3001ccb5ba577a20c9174e252e2835383631`, with all 13 verified
+release assets. Exact-source CI `34413872665`, draft build `34414663236` and
+post-publication verification `34415309349` all passed. The complete installer
+and ZIP are also in `Desktop/DS4Windows-RC4.5.4-Release`; neither was run.
+
+The unchanged updater 2.0.6 resolver accepted untouched public RC4.5.4 metadata
+and the real receipt/ZIP/PE/marker identities. Twenty further repetitions of the
+six new recovery tests passed (120 cases). Source, test scope, hashes and limits
+are recorded in the [published recovery evidence](2026-09-09-read-failure-recovery.md#published-result).
+The initiating 995 and Joy-Con rumble stutter are still unconfirmed; publication
+does not turn those open questions into hardware-fix claims.
+
 ## Current execution boundaries
 
 - Preserve the earlier source and live-preview changes, now checkpointed in the

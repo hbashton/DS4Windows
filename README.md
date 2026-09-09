@@ -167,8 +167,8 @@ DualSense or DualShock 4 selected by the profile. Supported paths include:
   mute and restore the controller microphone and built-in speaker while their
   recording/playback transports remain active.
 
-Audio, microphone, and advanced haptics support require matching DS4Windows 5
-and VIIPER 0.1.2 builds.
+Audio, microphone, and advanced haptics support require the matching broker
+bundled with DS4Windows; RC4.5 pins VIIPER 0.1.3-rc4.5.
 
 ### Quality of life
 

@@ -3,6 +3,16 @@
 ###############################################################################
 * text=auto
 
+# Release artifact hashes include original document bytes. Do not normalize
+# upstream license or build-note line endings when staging or checking out.
+# These two pinned originals use CRLF; the generated aggregate also ends with
+# blank lines. Preserve those bytes rather than reformatting a release input.
+extras/VIIPER-0.1.3-rc4.5-LICENSES.txt -text whitespace=cr-at-eol,-blank-at-eof
+extras/VIIPER-0.1.3-rc4.5-BUILD-NOTES.txt -text
+extras/LICENSE.txt -text whitespace=cr-at-eol
+extras/VIIPER-SYSTRAY-NOTICE.md -text
+extras/VIIPER-SYSTRAY-LICENSE.txt -text
+
 ###############################################################################
 # Set default behavior for command prompt diff.
 #

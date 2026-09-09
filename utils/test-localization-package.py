@@ -15,8 +15,10 @@ import zipfile
 REPOSITORY = Path(__file__).resolve().parent.parent
 REQUIRED = (
     "DS4Windows.exe", "coreclr.dll", "hostfxr.dll",
-    "extras/install-viiper-backend.ps1", "extras/VIIPER-0.1.2-x64.exe",
-    "extras/VIIPER-0.1.2-LICENSES.txt", "extras/VIIPER-0.1.2-PROVENANCE.txt",
+    "extras/install-viiper-backend.ps1", "extras/VIIPER-0.1.3-rc4.5-x64.exe",
+    "extras/VIIPER-0.1.3-rc4.5-LICENSES.txt", "extras/VIIPER-0.1.3-rc4.5-PROVENANCE.txt",
+    "extras/VIIPER-0.1.3-rc4.5-BUILD-NOTES.txt", "extras/LICENSE.txt",
+    "extras/VIIPER-SYSTRAY-NOTICE.md", "extras/VIIPER-SYSTRAY-LICENSE.txt",
     "extras/USBip-0.9.7.7-x64.exe", "extras/HidHide_1.5.230_x64.exe",
     "extras/FakerInput_0.1.0_x64.msi",
 )
@@ -67,13 +69,13 @@ class LocalizationPackageTests(unittest.TestCase):
             self.assertEqual(deps_text, (package / "DS4Windows.deps.json").read_text(encoding="utf-8"))
             VALIDATOR.validate_localization_package(package)
             owned = set((package / ".ds4windows-managed-files.txt").read_text(encoding="utf-8").splitlines())
-            for relative in SATELLITES:
+            for relative in REQUIRED + SATELLITES:
                 self.assertEqual(("fixture:" + relative).encode("utf-8"), (package / relative).read_bytes())
                 self.assertIn(relative, owned)
 
             archive = publish.parent / "DS4Windows_issue60-regression_x64.zip"
             with zipfile.ZipFile(archive) as packaged:
-                for relative in SATELLITES:
+                for relative in REQUIRED + SATELLITES:
                     self.assertIn("DS4Windows/" + relative, packaged.namelist())
 
             wix = root / "fixture.wxs"
@@ -87,7 +89,7 @@ class LocalizationPackageTests(unittest.TestCase):
                 entry.attrib["Source"].removeprefix("$(var.PublishRoot)\\").replace("\\", "/")
                 for entry in ET.parse(wix).getroot().iter("{http://wixtoolset.org/schemas/v4/wxs}File")
             }
-            for relative in SATELLITES:
+            for relative in REQUIRED + SATELLITES:
                 self.assertIn(relative, paths)
                 self.assertIn(relative, sources)
 

@@ -124,6 +124,92 @@ namespace DS4WindowsTests
             Assert.AreEqual("VIIPERBeta7", selected.TagName);
         }
 
+        [DataTestMethod]
+        [DataRow("VIIPERRC4.5", "VIIPERRC4.3", false)]
+        [DataRow("VIIPERRC4.5", "VIIPERRC4.4", false)]
+        [DataRow("VIIPERRC4.5", "VIIPERRC4.5", false)]
+        [DataRow("VIIPERRC4.5", "VIIPERRC4.6", true)]
+        [DataRow("VIIPERRC4.5", "VIIPERRC4.10", true)]
+        [DataRow("VIIPERRC4.10", "VIIPERRC4.9", false)]
+        [DataRow("VIIPERRC4", "VIIPERRC4.0", false)]
+        [DataRow("VIIPERRC4", "VIIPERRC4.1", true)]
+        [DataRow("VIIPERRC4.5", "VIIPERBeta9", false)]
+        [DataRow("VIIPERBeta9", "VIIPERRC1", true)]
+        [DataRow("VIIPERBeta8", "VIIPERBeta7", false)]
+        [DataRow("VIIPERBeta", "VIIPERBeta2", true)]
+        [DataRow(" viiperrc4.5 ", "VIIPERRC4.3", false)]
+        [DataRow("VIIPERRC4.5", "VIIPERRC4.5-hotfix-unknown", false)]
+        [DataRow("VIIPERRC4.5", "VIIPERRC9999999999999999999", false)]
+        public void NamedPrereleaseOrderingCannotRollBackTesters(
+            string installed, string candidate, bool update)
+        {
+            // A newly published/re-published old release is still a downgrade.
+            var selected = Prerelease(candidate, "2026-09-09T00:00:00Z");
+            Assert.AreEqual(update, ReleaseChannelPolicy.ShouldUpdate(
+                selected, "5.0.5.0", true, installed));
+        }
+
+        [DataTestMethod]
+        [DataRow("v5.0.4.0-beta1", false)]
+        [DataRow("v5.0.5.0-beta1", false)]
+        [DataRow("v5.0.6.0-rc1", true)]
+        public void NamedCandidateCanOnlyMoveToProvablyNewerNumericPrerelease(
+            string candidate, bool update)
+        {
+            Assert.AreEqual(update, ReleaseChannelPolicy.ShouldUpdate(
+                Prerelease(candidate, "2026-09-09T00:00:00Z"),
+                "5.0.5.0", true, "VIIPERRC4.5"));
+        }
+
+        [TestMethod]
+        public void Rc45DoesNotOfferOlderPublicRc43ButCanPromoteToSameVersionStable()
+        {
+            var selected = ReleaseChannelPolicy.SelectPreferredRelease(Releases(
+                Stable("v4.0.3", "2026-07-20T00:00:00Z"),
+                Prerelease("VIIPERRC4.3", "2026-08-21T00:00:00Z")), true);
+            Assert.AreEqual("VIIPERRC4.3", selected.TagName);
+            Assert.IsFalse(ReleaseChannelPolicy.ShouldUpdate(selected,
+                "5.0.5.0", true, "VIIPERRC4.5"));
+            Assert.IsTrue(ReleaseChannelPolicy.ShouldUpdate(
+                Stable("v5.0.5.0", "2026-09-10T00:00:00Z"),
+                "5.0.5.0", true, "VIIPERRC4.5"));
+            Assert.IsTrue(ReleaseChannelPolicy.ShouldUpdate(
+                Stable("v5.0.5", "2026-09-10T00:00:00Z"),
+                "5.0.5.0", true, "VIIPERRC4.5"));
+            Assert.IsFalse(ReleaseChannelPolicy.ShouldUpdate(
+                Stable("v5.0.5.0", "2026-09-10T00:00:00Z"),
+                "5.0.5", false, "v5.0.5"));
+        }
+
+        [DataTestMethod]
+        [DataRow("v5.0.6.0-rc1", "VIIPERRC4.3", false)]
+        [DataRow("v5.0.6.0-rc1", "v5.0.5.0-rc9", false)]
+        [DataRow("v5.0.6.0-rc1", "v5.0.6-rc2", false)]
+        [DataRow("v5.0.6.0-rc1", "v5.0.7.0-rc1", true)]
+        [DataRow(" v5.0.6.0-rc1 ", " v5.0.7.0-rc1 ", true)]
+        [DataRow("v5.0.6.0-rc1", "v5.0.9999999999999-rc1", false)]
+        [DataRow("v5.0.6.0-rc1", "v5.0.7.0.0.0-rc1", false)]
+        [DataRow("v5.0.6.0-rc1", "v5.0.7.0 broken", false)]
+        [DataRow("unrecognized-preview", "VIIPERRC4.3", false)]
+        [DataRow("VIIPERRC4.5-hotfix-unknown", "VIIPERRC4.3", false)]
+        public void MarkedPrereleasesDoNotFallBackToLegacyUnconditionalUpdates(
+            string installed, string candidate, bool update)
+        {
+            Assert.AreEqual(update, ReleaseChannelPolicy.ShouldUpdate(
+                Prerelease(candidate, "2026-09-09T00:00:00Z"),
+                "5.0.6.0", true, installed));
+        }
+
+        [DataTestMethod]
+        [DataRow("v5.0.6.0.0.0-rc1")]
+        [DataRow("v5.0.6.0 broken")]
+        public void NamedPrereleaseRejectsPartiallyParsedNumericCandidate(string candidate)
+        {
+            Assert.IsFalse(ReleaseChannelPolicy.ShouldUpdate(
+                Prerelease(candidate, "2026-09-09T00:00:00Z"),
+                "5.0.5.0", true, "VIIPERRC4.5"));
+        }
+
         private static GithubRelease[] Releases(params GithubRelease[] releases)
         {
             return releases;

@@ -1,9 +1,38 @@
 {
-  "latest_version": "5.0.4.0",
-  "latest_version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 4},
-  "updated_at": "2026-08-27T00:00:00+0000",
+  "latest_version": "5.0.5.0",
+  "latest_version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 5},
+  "updated_at": "2026-09-09T01:58:01+0000",
   "changelog": {
     "versions": [
+    {
+      "version_str": "5.0.5.0",
+      "version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 5},
+      "base_header": "Release Candidate 4.5 - More Ways to Play",
+      "release_date": "2026-09-09T01:58:01+0000",
+      "locales": [
+        {
+          "code": "en",
+          "header": "Release Candidate 4.5 - More Ways to Play",
+          "log_text": [
+            "* **Switch 2 controllers join the lineup** - Switch 2 Pro supports USB and Bluetooth, while Joy-Con 2 supports Bluetooth as a single controller or a joined pair, using the existing profile mapper and supported virtual-pad choices",
+            "* **Xbox One/Series virtual output** - supported physical controllers can select Xbox One/Series emulation through VIIPER and USB/IP, with ordinary rumble and impulse-trigger feedback translated according to each controller's capabilities; real Xbox console authentication is not included",
+            "* **Joy-Cons that fit how you play** - automatic pairing, explicit Link/Unlink controls, standalone activation and sideways/upright layouts make one- and two-controller play easier; linking can retain a suitable existing virtual pad and profile",
+            "* **Mouse and motion controls made clearer** - a dedicated illustrated Switch 2 section groups desk mouse, gyro aiming, two-hand aiming, feedback and button layers, with shortcuts into the existing mapper",
+            "* **More detailed HD rumble** - feedback conversion better preserves channel separation, frequency detail and peaks, with improved sustained-rumble renewal and stop handling; different actuators still cannot reproduce every source effect exactly",
+            "* **Fewer unexpected disconnects** - valid Switch 2 report-counter resets no longer terminate the current controller session; input still requires valid framing, current connection identity and ordered host arrival times",
+            "* **Sharper controller feedback in the interface** - corrected live readings and Pro gyro axes, added C-button remapping highlights, fixed sideways Capture labels and clipped artwork, and made tooltips readable",
+            "* **Profiles know which controller is which** - persistent local Switch 2 IDs replace indistinguishable zero-address labels for display and Link Profile/ID, with a separate identity for each joined pair",
+            "* **Lifecycle and setup fixes** - corrected output-slot collisions, stale controller rows, legacy calibration and profile-loading faults, preview restoration, and uninstall-helper caching; the bundled VIIPER tray can recover when Explorer is not ready at login",
+            "* **USB headphone output, with clear limits** - Switch 2 Pro's native USB headphone output has physical left/right and start/stop evidence; microphone capture is not verified, and Bluetooth headphone/microphone audio remains unsupported",
+            "* **Matching offline backend included** - installer and portable packages pin VIIPER 0.1.3-rc4.5, include complete license/build notices, and use forward-only ordering for known release-candidate updates",
+            "* **Tester candidate, not a latency promise** - the shipping backend remains VIIPER plus USB/IP; native-driver completion, 0.125 ms controller-to-game latency, Joy-Con 2 USB support and a complete controller/game compatibility matrix are not claimed"
+          ],
+          "editor": "hbashton",
+          "editors_note": ["RC4.5 pairs DS4Windows 5.0.5.0 with VIIPER 0.1.3-rc4.5. See the RC4.5 assessment for cumulative changes since RC4.3, physical evidence and remaining tester acceptance."],
+          "updated_at": "2026-09-09T01:58:01+0000"
+        }
+      ]
+    },
     {
       "version_str": "5.0.4.0",
       "version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 4},

@@ -312,7 +312,10 @@ public partial class Switch2ProUsbRuntimeOwnerTests
         FakeLease lease = new FakeLease
         {
             CompleteSynchronously = false,
-            MaximumSuccessfulBegins = 0,
+            // A healthy pending read isolates the deliberately blocked terminal
+            // callback. Rejecting the first begin races activation's health check
+            // and can enter its separate five-second rollback before this test's stop.
+            MaximumSuccessfulBegins = 1,
         };
         CreateOwner(lease, out Switch2ProUsbRuntimeOwner owner,
             out InputControllerRegistration registration);
@@ -327,19 +330,27 @@ public partial class Switch2ProUsbRuntimeOwnerTests
                 releaseTerminal.Wait();
             }
         };
-        Assert.IsTrue(owner.TryActivate(registration, out _));
+        try
+        {
+            Assert.IsTrue(owner.TryActivate(registration,
+                out Switch2ProUsbRuntimeActivationFailure activationFailure),
+                activationFailure.ToString());
 
-        Task<bool> stop = Task.Run(() => registration.TryStopAndQuiesce(40,
-            out _));
-        Assert.IsTrue(terminalEntered.Wait(TimeSpan.FromSeconds(2)));
-        Assert.IsFalse(stop.Result);
-        Assert.AreEqual(Switch2ProUsbRuntimeStopFailureKind.
-            TerminalPublicationTimedOut, owner.LastStopFailure.Kind);
-        Assert.IsTrue(owner.RequiresQuarantine);
-        Assert.AreEqual(Switch2ProUsbRuntimeOwnerState.Quarantined,
-            owner.State);
-
-        releaseTerminal.Set();
+            Task<bool> stop = Task.Run(() => registration.TryStopAndQuiesce(40,
+                out _));
+            Assert.IsTrue(terminalEntered.Wait(TimeSpan.FromSeconds(2)));
+            Assert.IsFalse(stop.Result);
+            Assert.AreEqual(Switch2ProUsbRuntimeStopFailureKind.
+                TerminalPublicationTimedOut, owner.LastStopFailure.Kind);
+            Assert.IsTrue(owner.RequiresQuarantine);
+            Assert.AreEqual(Switch2ProUsbRuntimeOwnerState.Quarantined,
+                owner.State);
+        }
+        finally
+        {
+            // A failed assertion must not strand the test's terminal worker.
+            releaseTerminal.Set();
+        }
         Assert.IsTrue(SpinWait.SpinUntil(() => owner.RuntimeInputDevice.
                 TerminalNeutralCompleted, TimeSpan.FromSeconds(2)));
         Assert.IsFalse(registration.TryStopAndQuiesce(1_000, out _),

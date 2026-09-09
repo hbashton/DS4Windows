@@ -149,6 +149,20 @@ cases passed again using a peer rebuilt from the final tagged `a911149` source;
 its executable hash remained the same `8BA2AA21...` recorded above. No production
 broker was executed or controller touched for these tests.
 
+DS4Windows run `34341486594` at `e320808` then exposed one test-fixture race:
+`BlockingTerminalSubscriberTimesOutWithoutOwnerLockAndQuarantineIsSticky`
+failed at the activation-success assertion, before its explicit shutdown. The
+fake rejected its first native read (`MaximumSuccessfulBegins = 0`). If the
+worker won the race against activation's health check, activation correctly
+rejected and entered rollback, where the intentionally blocked terminal
+subscriber consumed the separate five-second rollback deadline. The fixture
+now permits one healthy pending read, isolating the blocked terminal callback
+it actually tests, and releases that callback in `finally` even if an assertion
+fails. All 80 USB runtime-owner cases pass locally, and the corrected case
+passed 20 consecutive isolated test-process runs. The original 40 ms stop
+deadline and every timeout/quarantine assertion remain unchanged. No production
+activation, input, timeout or shutdown code was changed for this test failure.
+
 At this source checkpoint, DS4Windows publication is in progress. Final tag SHAs, build
 runs, artifact hashes and public URLs are to be verified from GitHub after
 the workflows complete. Earlier local acceptance remains documented in the

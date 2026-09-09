@@ -495,13 +495,13 @@ internal sealed class Switch2ProUsbProductionCoordinator
                 return;
             }
             if (identityDeriver != null &&
-                (magnetometerCalibrationStore != null ||
-                 gyroCalibrationStore != null || rawStickCalibrationStore != null) &&
                 identityDeriver.TryDerive(registration.ContainerIdentity,
                     Switch2ControllerModel.ProController2,
                     Switch2InputProtocolIdentity.ProController2UsbProductId,
                     out Switch2PersistentPeerId peerId))
             {
+                if (!participant.RuntimeOwner.RuntimeInputDevice.TryBindProfileIdentity(peerId))
+                    Diagnostic("Switch 2 Pro USB local profile ID could not bind; profile linking is unavailable for this connection.");
                 if (magnetometerCalibrationStore != null &&
                     !participant.RuntimeOwner.RuntimeInputDevice.
                         TryBindMagnetometerCalibrationPersistence(

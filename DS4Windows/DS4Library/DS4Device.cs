@@ -535,6 +535,11 @@ namespace DS4Windows
         public object removeLocker = new object();
 
         public string MacAddress =>  Mac;
+        // Profile identity need not be a hardware MAC. Transport-owned devices
+        // can supply an independently validated, local-only profile identity.
+        public virtual string ProfileLinkId => !string.IsNullOrWhiteSpace(Mac) &&
+            Mac != BLANK_SERIAL ? Mac : null;
+        public virtual string DisplayIdentity => Mac;
         public event EventHandler MacAddressChanged;
         public string getMacAddress()
         {
@@ -3234,6 +3239,27 @@ namespace DS4Windows
         /// <param name="act">Action to execute in current thread</param>
         public virtual void HaltReportingRunAction(Action act)
             => TryHaltReportingRunAction(act);
+
+        // Optional UI observation must never wait indefinitely for a device
+        // that stopped reporting. Keep the legacy read-window handshake here;
+        // runtimes with different publication ownership override this seam.
+        internal virtual bool TryCopyControllerReadings(DS4State raw,
+            DS4State mapped, DS4StateOwnedSnapshot rawSnapshot,
+            DS4StateOwnedSnapshot mappedSnapshot)
+        {
+            if (IsRemoving || !readWaitEv.Wait(0))
+                return false;
+            readWaitEv.Reset();
+            try
+            {
+                if (IsRemoving)
+                    return false;
+                rawSnapshot.Capture(raw);
+                mappedSnapshot.Capture(mapped);
+                return true;
+            }
+            finally { readWaitEv.Set(); }
+        }
 
         /// <summary>
         /// Attempts a synchronous report pause. Failure never queues the action

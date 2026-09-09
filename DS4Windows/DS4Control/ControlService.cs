@@ -3598,9 +3598,9 @@ namespace DS4Windows
             bool useAutoProfile = useTempProfile[index];
             if (!useAutoProfile)
             {
-                if (device.isValidSerial() && containsLinkedProfile(device.getMacAddress()))
+                if (device.ProfileLinkId is string profileId && containsLinkedProfile(profileId))
                 {
-                    ProfilePath[index] = getLinkedProfile(device.getMacAddress());
+                    ProfilePath[index] = getLinkedProfile(profileId);
                     Global.linkedProfileCheck[index] = true;
                 }
                 else
@@ -6318,12 +6318,22 @@ namespace DS4Windows
 
         public DS4Controls GetActiveInputControl(int ind)
         {
+            if (DS4Controllers[ind] == null) return DS4Controls.None;
             DS4State cState = CurrentState[ind];
-            DS4StateExposed eState = ExposedState[ind];
             Mouse tp = touchPad[ind];
+            return GetActiveInputControl(cState, tp?.leftDown == true,
+                tp?.rightDown == true, tp?.multiDown == true, tp?.upperDown == true);
+        }
+
+        // Used only by the profile editor's press-to-remap readout. It observes
+        // canonical state; it never modifies the input or output mapping.
+        internal static DS4Controls GetActiveInputControl(DS4State cState,
+            bool leftTouch = false, bool rightTouch = false,
+            bool multiTouch = false, bool upperTouch = false)
+        {
             DS4Controls result = DS4Controls.None;
 
-            if (DS4Controllers[ind] != null)
+            if (cState != null)
             {
                 if (Mapping.getBoolButtonMapping(cState.Cross))
                     result = DS4Controls.Cross;
@@ -6359,6 +6369,10 @@ namespace DS4Windows
                     result = DS4Controls.Options;
                 else if (Mapping.getBoolButtonMapping(cState.PS))
                     result = DS4Controls.PS;
+                else if (Mapping.getBoolButtonMapping(cState.Capture))
+                    result = DS4Controls.Capture;
+                else if (DS4StateFieldMapping.GetValidatedSwitch2SourceButton(cState, DS4Controls.Switch2C))
+                    result = DS4Controls.Switch2C;
                 else if (Mapping.getBoolAxisDirMapping(cState.LX, true))
                     result = DS4Controls.LXPos;
                 else if (Mapping.getBoolAxisDirMapping(cState.LX, false))
@@ -6375,13 +6389,13 @@ namespace DS4Windows
                     result = DS4Controls.RYPos;
                 else if (Mapping.getBoolAxisDirMapping(cState.RY, false))
                     result = DS4Controls.RYNeg;
-                else if (Mapping.getBoolTouchMapping(tp.leftDown))
+                else if (Mapping.getBoolTouchMapping(leftTouch))
                     result = DS4Controls.TouchLeft;
-                else if (Mapping.getBoolTouchMapping(tp.rightDown))
+                else if (Mapping.getBoolTouchMapping(rightTouch))
                     result = DS4Controls.TouchRight;
-                else if (Mapping.getBoolTouchMapping(tp.multiDown))
+                else if (Mapping.getBoolTouchMapping(multiTouch))
                     result = DS4Controls.TouchMulti;
-                else if (Mapping.getBoolTouchMapping(tp.upperDown))
+                else if (Mapping.getBoolTouchMapping(upperTouch))
                     result = DS4Controls.TouchUpper;
             }
 
@@ -6584,13 +6598,19 @@ namespace DS4Windows
                     bool useAutoProfile = useTempProfile[slot] || keepsOutput;
                     bool profileLoaded = useAutoProfile;
                     lastPrepareDiagnostic = "profile-selection";
+                    if (keepsOutput)
+                    {
+                        // Keep the active profile and virtual pad, but do not
+                        // inherit the predecessor's profile-link checkbox.
+                        Global.linkedProfileCheck[slot] =
+                            IsRetainedProfileLinked(device, ProfilePath[slot]);
+                    }
                     if (!useAutoProfile)
                     {
-                        if (device.isValidSerial() &&
-                            containsLinkedProfile(device.getMacAddress()))
+                        if (device.ProfileLinkId is string profileId &&
+                            containsLinkedProfile(profileId))
                         {
-                            ProfilePath[slot] = getLinkedProfile(
-                                device.getMacAddress());
+                            ProfilePath[slot] = getLinkedProfile(profileId);
                             Global.linkedProfileCheck[slot] = true;
                         }
                         else

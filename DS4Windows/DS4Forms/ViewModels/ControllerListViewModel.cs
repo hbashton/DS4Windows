@@ -506,16 +506,21 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         {
             get
             {
-                return Global.linkedProfileCheck[devIndex];
+                return device.ProfileLinkId != null && Global.linkedProfileCheck[devIndex];
             }
             set
             {
+                if (value && !CanLinkProfile) return;
                 bool temp = Global.linkedProfileCheck[devIndex];
                 if (temp == value) return;
                 Global.linkedProfileCheck[devIndex] = value;
                 SaveLinked(value);
             }
         }
+
+        public bool CanLinkProfile => PrimaryDevice && device.ProfileLinkId != null;
+        public event EventHandler CanLinkProfileChanged;
+        public event EventHandler LinkedProfileChanged;
 
         public int DevIndex { get => devIndex; }
         public int DisplayDevIndex { get => devIndex + 1; }
@@ -539,7 +544,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public string IdText
         {
-            get => $"{device.DisplayName} ({device.MacAddress})";
+            get => $"{device.DisplayName} ({device.DisplayIdentity})";
         }
         public event EventHandler IdTextChanged;
 
@@ -582,7 +587,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             uiCapabilities = ControllerUiCapabilities.ForDevice(device);
             device.BatteryChanged += (sender, e) => BatteryStateChanged?.Invoke(this, e);
             device.ChargingChanged += (sender, e) => BatteryStateChanged?.Invoke(this, e);
-            device.MacAddressChanged += (sender, e) => IdTextChanged?.Invoke(this, e);
+            device.MacAddressChanged += (sender, e) => RequestUpdatedIdentity();
             this.devIndex = devIndex;
             this.selectedProfile = profile;
             profileListHolder = collection;
@@ -624,7 +629,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             string prof = Global.ProfilePath[devIndex] = targetEntity.Name;
             if (LinkedProfile)
             {
-                Global.changeLinkedProfile(device.getMacAddress(), Global.ProfilePath[devIndex]);
+                Global.changeLinkedProfile(device.ProfileLinkId, Global.ProfilePath[devIndex]);
                 Global.SaveLinkedProfiles();
             }
             else
@@ -872,20 +877,24 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             TooltipIDTextChanged?.Invoke(this, EventArgs.Empty);
         }
 
+        internal void RequestUpdatedIdentity()
+        {
+            IdTextChanged?.Invoke(this, EventArgs.Empty);
+            CanLinkProfileChanged?.Invoke(this, EventArgs.Empty);
+            LinkedProfileChanged?.Invoke(this, EventArgs.Empty);
+        }
+
         private void SaveLinked(bool status)
         {
-            if (device != null && device.isSynced())
+            if (device != null && device.isSynced() && device.ProfileLinkId is string profileId)
             {
                 if (status)
                 {
-                    if (device.isValidSerial())
-                    {
-                        Global.changeLinkedProfile(device.getMacAddress(), Global.ProfilePath[devIndex]);
-                    }
+                    Global.changeLinkedProfile(profileId, Global.ProfilePath[devIndex]);
                 }
                 else
                 {
-                    Global.removeLinkedProfile(device.getMacAddress());
+                    Global.removeLinkedProfile(profileId);
                     Global.ProfilePath[devIndex] = Global.OlderProfilePath[devIndex];
                 }
 

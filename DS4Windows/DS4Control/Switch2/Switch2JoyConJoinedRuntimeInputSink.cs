@@ -171,6 +171,8 @@ internal sealed class Switch2JoyConJoinedRuntimeInputSink :
     private bool publicationInProgress;
     private int publicationThreadId;
     private Switch2JoyConJoinedRuntimeSinkFailure lastFailure;
+    private readonly Switch2InputFailureEvidence inputFailureEvidence = new();
+    internal Switch2InputFailureSnapshot FirstInputFailure => inputFailureEvidence.First;
     private Switch2JoyConJoinedCoordinatorFailure lastCoordinatorFailure;
     private Switch2JoyConPairRejection lastPairRejection;
     private Switch2JoyConProfileInputFailure lastProfileFailure;
@@ -678,6 +680,7 @@ internal sealed class Switch2JoyConJoinedRuntimeInputSink :
         Switch2JoyConJoinedRuntimeSinkFailure failure = default;
         Switch2JoyConJoinedCoordinatorState candidate = default;
         Switch2JoyConJoinedCoordinatorResult coordinatorResult = default;
+        Exception dependencyException = null;
         try
         {
             Switch2JoyConPairEvent pairEvent =
@@ -713,14 +716,15 @@ internal sealed class Switch2JoyConJoinedRuntimeInputSink :
                     CoordinatorRejected;
             }
         }
-        catch
+        catch (Exception exception)
         {
             failure = Switch2JoyConJoinedRuntimeSinkFailure.DependencyThrew;
+            dependencyException = exception;
         }
         finally
         {
             finalized = EndPublication(consumed, published, stateOnly,
-                candidate, coordinatorResult, failure);
+                candidate, coordinatorResult, failure, frame.Model, dependencyException);
         }
 
         if (!consumed || !finalized)
@@ -1127,6 +1131,8 @@ internal sealed class Switch2JoyConJoinedRuntimeInputSink :
                 }
 
                 lastFailure = failure;
+                if (inputFailureEvidence.First == null)
+                    inputFailureEvidence.Record(Switch2InputFailureSnapshot.Joined(frame.Model, failure));
                 throw new InvalidOperationException(
                     "Joined Joy-Con canonical publication was rejected.");
             }
@@ -1137,7 +1143,8 @@ internal sealed class Switch2JoyConJoinedRuntimeInputSink :
         bool stateOnly,
         in Switch2JoyConJoinedCoordinatorState candidate,
         in Switch2JoyConJoinedCoordinatorResult coordinatorResult,
-        Switch2JoyConJoinedRuntimeSinkFailure failure)
+        Switch2JoyConJoinedRuntimeSinkFailure failure,
+        Switch2ControllerModel model, Exception dependencyException)
     {
         lock (sync)
         {
@@ -1149,6 +1156,14 @@ internal sealed class Switch2JoyConJoinedRuntimeInputSink :
             lastPairRejection = coordinatorResult.PairResult.Rejection;
             lastProfileFailure = coordinatorResult.ProfileFailure;
             lastPairDisposition = coordinatorResult.PairResult.Disposition;
+
+            // Pending loss/terminal cleanup changes the ordinary status fields.
+            // Preserve the rejected candidate before those changes erase it.
+            if (!consumed && inputFailureEvidence.First == null)
+                inputFailureEvidence.Record(Switch2InputFailureSnapshot.Joined(model,
+                    failure == default ? Switch2JoyConJoinedRuntimeSinkFailure.DependencyThrew : failure,
+                    coordinatorResult.Failure, coordinatorResult.PairResult.Rejection,
+                    coordinatorResult.ProfileFailure, dependencyException));
 
             bool pendingLossApplied = ApplyPendingLossNoLock();
             publicationInProgress = false;
@@ -1173,6 +1188,9 @@ internal sealed class Switch2JoyConJoinedRuntimeInputSink :
                     failure == default ?
                         Switch2JoyConJoinedRuntimeSinkFailure.DependencyThrew :
                         failure;
+                if (inputFailureEvidence.First == null)
+                    inputFailureEvidence.Record(Switch2InputFailureSnapshot.Joined(model,
+                        lastFailure, lastCoordinatorFailure, lastPairRejection, lastProfileFailure, dependencyException));
             }
             Monitor.PulseAll(sync);
             return pendingLossApplied;

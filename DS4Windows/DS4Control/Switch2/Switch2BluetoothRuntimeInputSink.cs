@@ -134,6 +134,8 @@ internal sealed class Switch2BluetoothRuntimeInputSink :
     private readonly object terminalFence = new();
     private Switch2JoyConProfileMapperState joyConMapper;
     private Switch2BluetoothRuntimeSinkFailure lastFailure;
+    private readonly Switch2InputFailureEvidence inputFailureEvidence = new();
+    internal Switch2InputFailureSnapshot FirstInputFailure => inputFailureEvidence.First;
     private Switch2ProProfileInputFailure lastProMappingFailure;
     private Switch2JoyConProfileInputFailure lastJoyConMappingFailure;
     private bool publicationInProgress;
@@ -506,6 +508,7 @@ internal sealed class Switch2BluetoothRuntimeInputSink :
         bool published = false;
         Switch2BluetoothRuntimeSinkFailure failure = default;
         Switch2ProProfileInputFailure mappingFailure = default;
+        Exception dependencyException = null;
         try
         {
             if (!Switch2ProProfileInputMapper.TryMap(frame,
@@ -526,13 +529,14 @@ internal sealed class Switch2BluetoothRuntimeInputSink :
                 }
             }
         }
-        catch
+        catch (Exception exception)
         {
             failure = Switch2BluetoothRuntimeSinkFailure.DependencyThrew;
+            dependencyException = exception;
         }
         finally
         {
-            EndPublication(published, failure, mappingFailure, default);
+            EndPublication(published, failure, mappingFailure, default, dependencyException);
         }
 
         if (!published)
@@ -560,6 +564,7 @@ internal sealed class Switch2BluetoothRuntimeInputSink :
         bool published = false;
         Switch2BluetoothRuntimeSinkFailure failure = default;
         Switch2JoyConProfileInputFailure mappingFailure = default;
+        Exception dependencyException = null;
         Switch2JoyConProfileMapperState next = default;
         try
         {
@@ -587,9 +592,10 @@ internal sealed class Switch2BluetoothRuntimeInputSink :
                 }
             }
         }
-        catch
+        catch (Exception exception)
         {
             failure = Switch2BluetoothRuntimeSinkFailure.DependencyThrew;
+            dependencyException = exception;
         }
         finally
         {
@@ -600,7 +606,7 @@ internal sealed class Switch2BluetoothRuntimeInputSink :
                     joyConMapper = next;
                 }
             }
-            EndPublication(published, failure, default, mappingFailure);
+            EndPublication(published, failure, default, mappingFailure, dependencyException);
         }
 
         if (!published)
@@ -710,6 +716,8 @@ internal sealed class Switch2BluetoothRuntimeInputSink :
             }
 
             lastFailure = failure;
+            if (inputFailureEvidence.First == null)
+                inputFailureEvidence.Record(Switch2InputFailureSnapshot.Standalone(expectedModel, failure));
         }
 
         throw new InvalidOperationException(
@@ -719,7 +727,8 @@ internal sealed class Switch2BluetoothRuntimeInputSink :
     private void EndPublication(bool published,
         Switch2BluetoothRuntimeSinkFailure failure,
         Switch2ProProfileInputFailure proMappingFailure,
-        Switch2JoyConProfileInputFailure joyConMappingFailure)
+        Switch2JoyConProfileInputFailure joyConMappingFailure,
+        Exception dependencyException)
     {
         lock (sync)
         {
@@ -737,6 +746,9 @@ internal sealed class Switch2BluetoothRuntimeInputSink :
                 lastFailure = failure == default ?
                     Switch2BluetoothRuntimeSinkFailure.DependencyThrew :
                     failure;
+                if (inputFailureEvidence.First == null)
+                    inputFailureEvidence.Record(Switch2InputFailureSnapshot.Standalone(
+                        expectedModel, lastFailure, proMappingFailure, joyConMappingFailure, dependencyException));
             }
             System.Threading.Monitor.PulseAll(sync);
         }

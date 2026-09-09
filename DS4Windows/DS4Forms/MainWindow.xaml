@@ -96,9 +96,15 @@
                                         </Border>
                                         <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                             <TextBlock x:Name="idColumnTxtB" Text="{Binding IdText, Mode=OneWay}"
-                                                       ToolTip="{Binding TooltipIDText, Mode=OneWay}"
                                                        ToolTipOpening="IdColumnTxtB_ToolTipOpening" Tag="{Binding DevIndex, Mode=OneTime}"
-                                                       FontSize="15" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                       FontSize="15" FontWeight="SemiBold" TextTrimming="CharacterEllipsis">
+                                                <TextBlock.ToolTip>
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding IdText}" MaxWidth="450" TextWrapping="Wrap" />
+                                                        <TextBlock Text="{Binding TooltipIDText, Mode=OneWay}" />
+                                                    </StackPanel>
+                                                </TextBlock.ToolTip>
+                                            </TextBlock>
                                             <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
                                                 <Image x:Name="contStatusImg" Source="{Binding StatusSource}" Stretch="Uniform"
                                                        Width="18" Height="18" Margin="0,0,6,0"
@@ -176,7 +182,7 @@
                                             </ComboBox>
                                         </StackPanel>
                                         <CheckBox Grid.Column="1" Content="{lex:Loc LinkProfileId}" IsChecked="{Binding LinkedProfile}"
-                                                  IsEnabled="{Binding PrimaryDevice}" Margin="12,20,12,0" VerticalAlignment="Center"
+                                                  IsEnabled="{Binding CanLinkProfile}" Margin="12,20,12,0" VerticalAlignment="Center"
                                                   ToolTip="Use the same profile whenever this physical controller reconnects." />
                                         <xctk:SplitButton Grid.Column="2" x:Name="ProfEditSBtn" Content="{lex:Loc Edit}"
                                                           MinWidth="84" Height="34" Margin="0,18,10,0"

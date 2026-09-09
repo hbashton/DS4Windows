@@ -40,10 +40,10 @@
             <DockPanel DockPanel.Dock="Bottom" Margin="0,20,0,0">
                 <Label Content="{lex:Loc DetectedControllers}" ContentStringFormat="{}{0}:" DockPanel.Dock="Top" FontWeight="Bold" />
                 <ListBox x:Name="controllerListBox" ItemsSource="{Binding CurrentInputDevices}" SelectedIndex="{Binding ControllerSelectedIndex}"
-                      Margin="0,8,0,0">
+                      Margin="0,8,0,0" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                     <ListBox.ItemTemplate>
                         <DataTemplate>
-                            <TextBlock Text="{Binding IdText}" />
+                            <TextBlock Text="{Binding IdText}" TextTrimming="CharacterEllipsis" ToolTip="{Binding IdText}" />
                         </DataTemplate>
                     </ListBox.ItemTemplate>
                 </ListBox>

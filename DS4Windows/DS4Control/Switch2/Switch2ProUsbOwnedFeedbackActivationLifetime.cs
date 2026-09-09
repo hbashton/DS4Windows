@@ -9,6 +9,7 @@ the Free Software Foundation, either version 3 of the License, or
 */
 
 using System;
+using System.Diagnostics;
 using System.Threading;
 
 namespace DS4Windows.Switch2;
@@ -75,6 +76,40 @@ internal sealed class Switch2ProUsbOwnedFeedbackActivationLifetime :
         Switch2ProUsbInputTransportOwner.MaximumDisposeTimeoutMilliseconds;
 
     private readonly object gate = new();
+    // Serializes complete rich publication transactions, not just individual
+    // physical writes. Input-side drain and periodic maintenance use TryEnter.
+    private readonly object rumbleTransactionGate = new();
+    private Action rumbleMaintenanceWake;
+
+    internal void SetRumbleMaintenanceWake(Action wake)
+    {
+        Volatile.Write(ref rumbleMaintenanceWake, wake);
+        if (wake != null && RequiresRumbleMaintenance) wake();
+    }
+
+    internal bool CanServiceRumbleMaintenance
+    {
+        get { lock (gate) return state == Switch2ProUsbOwnedFeedbackActivationState.Committed; }
+    }
+
+    internal bool RequiresRumbleMaintenance
+    {
+        get
+        {
+            if (!CanServiceRumbleMaintenance) return false;
+            return pump.HasPendingOutput ||
+                (pump.RequiresOutputMaintenance && sink.NeedsSustainedRefresh);
+        }
+    }
+
+    private bool WakeAfterRumblePublication(bool accepted)
+    {
+        // A retained canonical claim still needs service when its immediate
+        // physical receipt was unsuccessful. Preserve that receipt for callers.
+        if (RequiresRumbleMaintenance)
+            Volatile.Read(ref rumbleMaintenanceWake)?.Invoke();
+        return accepted;
+    }
     private readonly object dormantProofFence = new();
     private readonly object credentialFence = new();
     private readonly object terminalProofFence = new();
@@ -325,6 +360,17 @@ internal sealed class Switch2ProUsbOwnedFeedbackActivationLifetime :
         in Switch2HdRumbleImpulseTuning impulseTuning,
         in Switch2HdRumbleBodyTuning bodyTuning)
     {
+        lock (rumbleTransactionGate)
+            return WakeAfterRumblePublication(TryPublishAndPumpCore(session,
+                ingress, wire, policy, impulseTuning, bodyTuning));
+    }
+
+    private bool TryPublishAndPumpCore(Switch2VirtualFeedbackSession session,
+        ControllerFeedbackIngress ingress, ReadOnlySpan<byte> wire,
+        Switch2HdRumbleFeedbackPolicy policy,
+        in Switch2HdRumbleImpulseTuning impulseTuning,
+        in Switch2HdRumbleBodyTuning bodyTuning)
+    {
         wirePublicationStage = "OwnerLifetime";
         lock (gate)
         {
@@ -367,6 +413,13 @@ internal sealed class Switch2ProUsbOwnedFeedbackActivationLifetime :
     public bool TryRefreshXboxOutputPolicy(Switch2VirtualFeedbackSession session,
         in ControllerFeedbackFrame frame, Switch2XboxFeedbackPolicy policy)
     {
+        lock (rumbleTransactionGate)
+            return WakeAfterRumblePublication(TryRefreshXboxOutputPolicyCore(session, frame, policy));
+    }
+
+    private bool TryRefreshXboxOutputPolicyCore(Switch2VirtualFeedbackSession session,
+        in ControllerFeedbackFrame frame, Switch2XboxFeedbackPolicy policy)
+    {
         if (Interlocked.CompareExchange(ref operationActive, 1, 0) != 0) return false;
         try
         {
@@ -395,6 +448,18 @@ internal sealed class Switch2ProUsbOwnedFeedbackActivationLifetime :
         in Switch2HdRumbleImpulseTuning impulseTuning,
         in Switch2HdRumbleBodyTuning bodyTuning,
         ulong expiresAtMicroseconds = 0)
+    {
+        lock (rumbleTransactionGate)
+            return WakeAfterRumblePublication(TryPublishAndPumpCore(session,
+                ingress, feedbackState, policy, impulseTuning, bodyTuning, expiresAtMicroseconds));
+    }
+
+    private bool TryPublishAndPumpCore(Switch2VirtualFeedbackSession session,
+        ControllerFeedbackIngress ingress,
+        in ControllerFeedbackActuatorState feedbackState,
+        Switch2HdRumbleFeedbackPolicy policy,
+        in Switch2HdRumbleImpulseTuning impulseTuning,
+        in Switch2HdRumbleBodyTuning bodyTuning, ulong expiresAtMicroseconds)
     {
         lock (gate)
         {
@@ -438,6 +503,18 @@ internal sealed class Switch2ProUsbOwnedFeedbackActivationLifetime :
         in Switch2HdRumbleGroup left, in Switch2HdRumbleGroup right,
         in Switch2HdRumbleBodyTuning bodyTuning,
         ulong expiresAtMicroseconds = 0)
+    {
+        lock (rumbleTransactionGate)
+            return WakeAfterRumblePublication(TryPublishSourcePreservedAndPumpCore(
+                session, ingress, feedbackState, fidelity, left, right, bodyTuning, expiresAtMicroseconds));
+    }
+
+    private bool TryPublishSourcePreservedAndPumpCore(
+        Switch2VirtualFeedbackSession session, ControllerFeedbackIngress ingress,
+        in ControllerFeedbackActuatorState feedbackState,
+        Switch2HdRumbleFeedbackFidelity fidelity,
+        in Switch2HdRumbleGroup left, in Switch2HdRumbleGroup right,
+        in Switch2HdRumbleBodyTuning bodyTuning, ulong expiresAtMicroseconds)
     {
         lock (gate)
         {
@@ -497,6 +574,7 @@ internal sealed class Switch2ProUsbOwnedFeedbackActivationLifetime :
         in ControllerFeedbackFrame canonicalFrame, ushort leftTrigger,
         ushort rightTrigger, ulong presentationRevision)
     {
+        lock (rumbleTransactionGate)
         lock (gate)
         {
             return state ==
@@ -511,6 +589,15 @@ internal sealed class Switch2ProUsbOwnedFeedbackActivationLifetime :
         Switch2VirtualFeedbackSession session,
         in ControllerFeedbackFrame canonicalFrame,
         ulong presentationRevision)
+    {
+        lock (rumbleTransactionGate)
+            return WakeAfterRumblePublication(TryRefreshCurrentPresentationCore(
+                session, canonicalFrame, presentationRevision));
+    }
+
+    private bool TryRefreshCurrentPresentationCore(
+        Switch2VirtualFeedbackSession session,
+        in ControllerFeedbackFrame canonicalFrame, ulong presentationRevision)
     {
         lock (gate)
         {
@@ -539,13 +626,23 @@ internal sealed class Switch2ProUsbOwnedFeedbackActivationLifetime :
     public bool TryClearImpulseReleasePresentation(
         Switch2VirtualFeedbackSession session)
     {
-        lock (gate)
+        if (session == null) return false;
+        if (session.NonBlockingPhysicalRetirement)
         {
-            return state ==
-                    Switch2ProUsbOwnedFeedbackActivationState.Committed &&
-                ReferenceEquals(activeVirtualFeedbackSession, session) &&
-                sink.TryClearImpulseReleasePresentation();
+            if (!Monitor.TryEnter(rumbleTransactionGate)) return false;
         }
+        else Monitor.Enter(rumbleTransactionGate);
+        try
+        {
+            lock (gate)
+            {
+                return state ==
+                        Switch2ProUsbOwnedFeedbackActivationState.Committed &&
+                    ReferenceEquals(activeVirtualFeedbackSession, session) &&
+                    sink.TryClearImpulseReleasePresentation();
+            }
+        }
+        finally { Monitor.Exit(rumbleTransactionGate); }
     }
 
     public bool TryRequestPlayerLedMask(
@@ -640,6 +737,19 @@ internal sealed class Switch2ProUsbOwnedFeedbackActivationLifetime :
     }
 
     public bool TryRetireSession(Switch2VirtualFeedbackSession session,
+        ControllerFeedbackIngress ingress)
+    {
+        if (session == null) return false;
+        if (session.NonBlockingPhysicalRetirement)
+        {
+            if (!Monitor.TryEnter(rumbleTransactionGate)) return false;
+        }
+        else Monitor.Enter(rumbleTransactionGate);
+        try { return TryRetireSessionCore(session, ingress); }
+        finally { Monitor.Exit(rumbleTransactionGate); }
+    }
+
+    private bool TryRetireSessionCore(Switch2VirtualFeedbackSession session,
         ControllerFeedbackIngress ingress)
     {
         Switch2ProUsbOwnedFeedbackActivationState observed;
@@ -973,6 +1083,16 @@ internal sealed class Switch2ProUsbOwnedFeedbackActivationLifetime :
         ulong nowMicroseconds, out ControllerFeedbackDelivery delivery)
     {
         delivery = default;
+        if (!Monitor.TryEnter(rumbleTransactionGate))
+            return ControllerFeedbackPumpDisposition.Busy;
+        try { return TryPumpOnceCore(nowMicroseconds, out delivery); }
+        finally { Monitor.Exit(rumbleTransactionGate); }
+    }
+
+    private ControllerFeedbackPumpDisposition TryPumpOnceCore(
+        ulong nowMicroseconds, out ControllerFeedbackDelivery delivery)
+    {
+        delivery = default;
         if (Interlocked.CompareExchange(ref operationActive, 1, 0) != 0)
         {
             return ControllerFeedbackPumpDisposition.Busy;
@@ -1012,6 +1132,46 @@ internal sealed class Switch2ProUsbOwnedFeedbackActivationLifetime :
         }
     }
 
+    internal ControllerFeedbackPumpDisposition TryServiceRumbleMaintenance(
+        ulong nowMicroseconds, Action<ulong> renewLocalState)
+    {
+        if (!Monitor.TryEnter(rumbleTransactionGate))
+            return ControllerFeedbackPumpDisposition.Busy;
+        try
+        {
+            // Preserve the activation/retained-write/terminal-operation fence
+            // in addition to the complete-publication transaction fence.
+            if (Interlocked.CompareExchange(ref operationActive, 1, 0) != 0)
+                return ControllerFeedbackPumpDisposition.Busy;
+            try
+            {
+                lock (gate)
+                {
+                    if (state != Switch2ProUsbOwnedFeedbackActivationState.Committed)
+                        return ControllerFeedbackPumpDisposition.None;
+                }
+                renewLocalState?.Invoke(nowMicroseconds);
+                if (!pump.TryRefreshCurrentPresentation(nowMicroseconds,
+                        allowNoFrame: true, applyOnly: true))
+                    return ControllerFeedbackPumpDisposition.Busy;
+                ControllerFeedbackPumpDisposition disposition = pump.PumpOnce(
+                    nowMicroseconds, sink.MaintenanceSink, out _);
+                if (disposition < ControllerFeedbackPumpDisposition.None ||
+                    disposition >= ControllerFeedbackPumpDisposition.Retired ||
+                    bridge.State == Switch2ProUsbOwnedHdRumbleBridgeState.Quarantined)
+                    LatchQuarantine();
+                return disposition;
+            }
+            catch
+            {
+                LatchQuarantine();
+                return ControllerFeedbackPumpDisposition.RetryPending;
+            }
+            finally { Volatile.Write(ref operationActive, 0); }
+        }
+        finally { Monitor.Exit(rumbleTransactionGate); }
+    }
+
     /// <summary>
     /// USB counterpart of the authenticated native ProfileEffect seam. It
     /// shares the activation operation fence and never acquires a second
@@ -1040,6 +1200,22 @@ internal sealed class Switch2ProUsbOwnedFeedbackActivationLifetime :
         in ControllerFeedbackActuatorState feedbackState,
         in Switch2HdRumbleGroup left,
         in Switch2HdRumbleGroup right,
+        ControllerFeedbackPublicationOrigin origin,
+        Switch2HdRumbleFeedbackFidelity fidelity)
+    {
+        if (!Monitor.TryEnter(rumbleTransactionGate)) return false;
+        try
+        {
+            return WakeAfterRumblePublication(TryPublishNativeLocalEffectAndPumpCore(
+                lane, feedbackState, left, right, origin, fidelity));
+        }
+        finally { Monitor.Exit(rumbleTransactionGate); }
+    }
+
+    private bool TryPublishNativeLocalEffectAndPumpCore(
+        ControllerFeedbackStateLanePump.Lane lane,
+        in ControllerFeedbackActuatorState feedbackState,
+        in Switch2HdRumbleGroup left, in Switch2HdRumbleGroup right,
         ControllerFeedbackPublicationOrigin origin,
         Switch2HdRumbleFeedbackFidelity fidelity)
     {
@@ -1099,7 +1275,74 @@ internal sealed class Switch2ProUsbOwnedFeedbackActivationLifetime :
             in Switch2ProUsbOwnedCompositeAuthority candidate,
             int timeoutMilliseconds)
     {
-        long deadline = StartDeadline(timeoutMilliseconds);
+        if (!Monitor.TryEnter(rumbleTransactionGate))
+            return QuiescenceResult(
+                Switch2ProUsbOwnedFeedbackQuiescenceOutcome.ProvenIncomplete);
+        try { return TryNeutralizeAndQuiesceCore(candidate, timeoutMilliseconds,
+            StartDeadline(timeoutMilliseconds)); }
+        finally { Monitor.Exit(rumbleTransactionGate); }
+    }
+
+    // The composite participant owns an absolute Stopwatch.GetTimestamp()
+    // deadline. Keep that exact deadline through producer/transaction admission
+    // and the existing bridge drain/terminal-write proof; never reset its budget.
+    internal Switch2ProUsbOwnedFeedbackQuiescenceResult
+        TryNeutralizeAndQuiesceUntil(
+            in Switch2ProUsbOwnedCompositeAuthority candidate, long deadline)
+    {
+        int remaining = RemainingMilliseconds(deadline, int.MaxValue);
+        if (!Authenticates(candidate) || !IsValidTimeout(remaining) || remaining == 0)
+            return QuiescenceResult(
+                Switch2ProUsbOwnedFeedbackQuiescenceOutcome.ProvenIncomplete);
+
+        Switch2VirtualFeedbackSession session;
+        lock (gate)
+        {
+            if (state == Switch2ProUsbOwnedFeedbackActivationState.Committed)
+            {
+                // Seal new maintenance and publications before waiting for an
+                // already admitted operation, whose native owner is retained.
+                state = Switch2ProUsbOwnedFeedbackActivationState.NeutralizeInProgress;
+                prepareCredentialConsumed = true;
+                dormantProofConsumed = true;
+                if (!TryAdvanceRevisionNoLock())
+                    return QuiescenceResultNoLock(
+                        Switch2ProUsbOwnedFeedbackQuiescenceOutcome.OutcomeUncertain);
+            }
+            session = activeVirtualFeedbackSession;
+        }
+
+        Switch2ProUsbOwnedCompositeAuthority exactAuthority = candidate;
+        Switch2ProUsbOwnedFeedbackQuiescenceResult result = default;
+        bool RunUnderTransaction()
+        {
+            int transactionWait = RemainingMilliseconds(deadline, remaining);
+            if (transactionWait == 0 ||
+                !Monitor.TryEnter(rumbleTransactionGate, transactionWait)) return false;
+            try
+            {
+                int operationWait = RemainingMilliseconds(deadline, remaining);
+                if (operationWait == 0) return false;
+                result = TryNeutralizeAndQuiesceCore(exactAuthority,
+                    operationWait, deadline);
+                return true;
+            }
+            finally { Monitor.Exit(rumbleTransactionGate); }
+        }
+
+        int sessionWait = RemainingMilliseconds(deadline, remaining);
+        bool executed = sessionWait > 0 && (session == null ?
+            RunUnderTransaction() :
+            session.TryRunRetirementOperation(sessionWait, RunUnderTransaction));
+        return executed ? result : QuiescenceResult(
+            Switch2ProUsbOwnedFeedbackQuiescenceOutcome.ProvenIncomplete);
+    }
+
+    private Switch2ProUsbOwnedFeedbackQuiescenceResult
+        TryNeutralizeAndQuiesceCore(
+            in Switch2ProUsbOwnedCompositeAuthority candidate,
+            int timeoutMilliseconds, long deadline)
+    {
         if (!Authenticates(candidate) ||
             !IsValidTimeout(timeoutMilliseconds))
         {
@@ -1400,10 +1643,10 @@ internal sealed class Switch2ProUsbOwnedFeedbackActivationLifetime :
 
     private static long StartDeadline(int timeoutMilliseconds)
     {
-        long now = Environment.TickCount64;
-        return timeoutMilliseconds <= 0 ? now :
-            now > long.MaxValue - timeoutMilliseconds ? long.MaxValue :
-            now + timeoutMilliseconds;
+        long now = Stopwatch.GetTimestamp();
+        long delta = (long)Math.Ceiling(Math.Max(0, timeoutMilliseconds) *
+            (double)Stopwatch.Frequency / 1_000d);
+        return delta >= long.MaxValue - now ? long.MaxValue : now + delta;
     }
 
     private static int RemainingMilliseconds(long deadline,
@@ -1413,9 +1656,10 @@ internal sealed class Switch2ProUsbOwnedFeedbackActivationLifetime :
         {
             return 0;
         }
-        long remaining = deadline - Environment.TickCount64;
-        return remaining <= 0 ? 0 :
-            (int)Math.Min(remaining, originalTimeoutMilliseconds);
+        long now = Stopwatch.GetTimestamp();
+        if (deadline <= now) return 0;
+        double remaining = (deadline - now) * 1_000d / Stopwatch.Frequency;
+        return (int)Math.Min(Math.Ceiling(remaining), originalTimeoutMilliseconds);
     }
 
     private static ulong CurrentMicroseconds() =>

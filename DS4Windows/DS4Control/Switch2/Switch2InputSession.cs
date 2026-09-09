@@ -987,17 +987,19 @@ public enum Switch2CounterSequenceKind : byte
 
 internal static class Switch2CounterSequence
 {
-    // The evidenced Pro USB and BLE Common05 counter resets below uint.MaxValue
-    // while reports continue. Its modular classification is diagnostic only:
+    // The evidenced Pro USB/BLE and Joy-Con BLE Common05 counters reset below
+    // uint.MaxValue while reports continue. Modular classification is diagnostic only:
     // exact read/notification leases and host QPC establish delivery order. Keep
     // the discontinuity visible and compare the next arrival against it.
     // Live callers first validate the exact USB or GATT protocol identity;
     // the offline fixture format carries only this model/transport/report tuple.
     internal static bool UsesArrivalOrdering(Switch2ControllerModel model,
         Switch2Transport transport, Switch2InputReportKind kind) =>
-        model == Switch2ControllerModel.ProController2 &&
-        (transport == Switch2Transport.Usb || transport == Switch2Transport.BluetoothLe) &&
-        kind == Switch2InputReportKind.Common05;
+        kind == Switch2InputReportKind.Common05 &&
+        (model == Switch2ControllerModel.ProController2 &&
+            (transport == Switch2Transport.Usb || transport == Switch2Transport.BluetoothLe) ||
+         (model is Switch2ControllerModel.JoyCon2Left or Switch2ControllerModel.JoyCon2Right) &&
+            transport == Switch2Transport.BluetoothLe);
 
     internal static Switch2CounterSequenceKind Classify(uint current,
         uint previous, byte widthBits, out uint delta)

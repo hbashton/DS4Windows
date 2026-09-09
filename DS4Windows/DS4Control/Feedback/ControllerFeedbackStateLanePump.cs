@@ -381,6 +381,10 @@ namespace DS4Windows
 
         internal bool IsStopping => Volatile.Read(ref stopping) != 0;
 
+        internal bool HasPendingOutput => !IsRetired && runtime.HasPendingOutput(writer);
+
+        internal bool RequiresOutputMaintenance => !IsRetired && runtime.RequiresOutputMaintenance(writer);
+
         internal static bool TryCreate(ulong deviceGeneration,
             ulong transportGeneration,
             out ControllerFeedbackStateLanePump pump)
@@ -532,7 +536,7 @@ namespace DS4Windows
         /// as physical delivery and does not affect controller input cadence.
         /// </summary>
         internal bool TryRefreshCurrentPresentation(ulong nowMicroseconds,
-            bool allowNoFrame = false)
+            bool allowNoFrame = false, bool applyOnly = false)
         {
             if (IsStopping || IsRetired ||
                 Interlocked.CompareExchange(ref pumpActive, 1, 0) != 0)
@@ -544,7 +548,7 @@ namespace DS4Windows
             {
                 return !IsStopping && !IsRetired &&
                     runtime.TryRefreshCurrentPresentation(writer,
-                        nowMicroseconds, allowNoFrame);
+                        nowMicroseconds, allowNoFrame, applyOnly);
             }
             finally
             {

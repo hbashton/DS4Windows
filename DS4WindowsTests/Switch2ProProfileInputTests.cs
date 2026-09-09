@@ -1,5 +1,7 @@
 using System.Buffers.Binary;
+using System.Reflection;
 using DS4Windows;
+using DS4Windows.DS4Control;
 using DS4Windows.Switch2;
 
 namespace DS4WindowsTests;
@@ -366,12 +368,136 @@ public class Switch2ProProfileInputTests
         Assert.AreEqual(14.285714f,
             Switch2ProMotionProjection.NativeGyroLsbPerDegreeSecond,
             0.000001f);
-        Assert.AreEqual(-1146.88, state.Motion.angVelYaw, 0.01);
+        Assert.AreEqual(1146.88, state.Motion.angVelYaw, 0.01);
         Assert.AreEqual(1146.88, state.Motion.angVelPitch, 0.01);
-        Assert.AreEqual(-573.44, state.Motion.angVelRoll, 0.01);
-        Assert.AreEqual(1.0, state.Motion.accelXG, 0.0001);
-        Assert.AreEqual(0.25, state.Motion.accelYG, 0.0001);
-        Assert.AreEqual(-0.5, state.Motion.accelZG, 0.0001);
+        Assert.AreEqual(573.44, state.Motion.angVelRoll, 0.01);
+        Assert.AreEqual(-1.0, state.Motion.accelXG, 0.0001);
+        Assert.AreEqual(-0.25, state.Motion.accelYG, 0.0001);
+        Assert.AreEqual(0.5, state.Motion.accelZG, 0.0001);
+    }
+
+    [DataTestMethod]
+    [DataRow(false, 0, 1)]
+    [DataRow(false, 0, -1)]
+    [DataRow(false, 1, 1)]
+    [DataRow(false, 1, -1)]
+    [DataRow(false, 2, 1)]
+    [DataRow(false, 2, -1)]
+    [DataRow(true, 0, 1)]
+    [DataRow(true, 0, -1)]
+    [DataRow(true, 1, 1)]
+    [DataRow(true, 1, -1)]
+    [DataRow(true, 2, 1)]
+    [DataRow(true, 2, -1)]
+    public void ProSensorBasisMatchesNativeDsReportBeforeSixAxis(bool bluetooth, int axis, int sign)
+    {
+        // Independent donor oracle: SDL physical Switch 2 report and
+        // Switch2Connect native DS4/WinUHid report both use (x,z,-y).
+        // Cemuhook's already-semantic tuple must NOT be passed to populate.
+        short gx = (short)(axis == 0 ? 1600 * sign : 0);
+        short gy = (short)(axis == 1 ? 1600 * sign : 0);
+        short gz = (short)(axis == 2 ? 1600 * sign : 0);
+        short ax = (short)(axis == 0 ? 4096 * sign : 0);
+        short ay = (short)(axis == 1 ? 4096 * sign : 0);
+        short az = (short)(axis == 2 ? 4096 * sign : 0);
+        var canonical = CreateUsbMotionFrame(new(ax, ay, az),
+            new(gx, gy, gz), default, 1, bluetooth: bluetooth);
+        Assert.IsTrue(Switch2ProProfileInputMapper.TryMap(canonical, out var frame, out _));
+        var projection = new Switch2ProMotionProjection();
+        var state = new DS4State();
+        Assert.IsTrue(projection.TryApply(frame, state, false, 0.0));
+
+        int scaled = 1792 * sign; // 1600 * (16 / 14.285714), rounded.
+        Assert.AreEqual(axis == 2 ? -scaled : 0, state.Motion.gyroYawFull, "Canonical yaw");
+        Assert.AreEqual(axis == 0 ? scaled : 0, state.Motion.gyroPitchFull, "Canonical pitch");
+        Assert.AreEqual(axis == 1 ? scaled : 0, state.Motion.gyroRollFull, "Canonical roll");
+        Assert.AreEqual(axis == 0 ? -8192 * sign : 0, state.Motion.accelXFull, "Canonical acceleration X");
+        Assert.AreEqual(axis == 2 ? -8192 * sign : 0, state.Motion.accelYFull, "Canonical acceleration Y");
+        Assert.AreEqual(axis == 1 ? -8192 * sign : 0, state.Motion.accelZFull, "Canonical acceleration Z");
+    }
+
+    [DataTestMethod]
+    [DoNotParallelize]
+    [DataRow(false, 0)]
+    [DataRow(false, 1)]
+    [DataRow(true, 0)]
+    [DataRow(true, 1)]
+    public void ProProjectedMouseUsesReferenceDirectionAndPreservesProfileInversions(bool bluetooth, int horizontalAxis)
+    {
+        // Production decoder/projection and MouseCursor, but never an OS
+        // input handler, physical device, persistent profile or live runtime.
+        FieldInfo storeField = typeof(Global).GetField("m_Config", BindingFlags.Static | BindingFlags.NonPublic);
+        BackingStore savedStore = Global.store;
+        VirtualKBMBase savedHandler = Global.outputKBMHandler;
+        try
+        {
+            storeField.SetValue(null, new BackingStore());
+            var capture = new CapturedMouse();
+            Global.outputKBMHandler = capture;
+            Global.GyroSensitivity[0] = 100;
+            Global.GyroMouseHorizontalAxis[0] = horizontalAxis;
+            Global.GyroMouseInfo[0].enableSmoothing = false;
+            Global.GyroMouseInfo[0].jitterCompensation = false;
+            Global.GyroMouseInfo[0].minThreshold = 1.0;
+            var projection = new Switch2ProMotionProjection();
+            var state = new DS4State();
+            foreach (long timestamp in new[] { 1L, 50_001L })
+            {
+                var canonical = CreateUsbMotionFrame(new(0, 0, 4096),
+                    new(1600, 1600, 1600), default, 1, timestamp, bluetooth);
+                Assert.IsTrue(Switch2ProProfileInputMapper.TryMap(canonical, out var frame, out _));
+                Assert.IsTrue(projection.TryApply(frame, state, false, 0.0));
+            }
+
+            for (int invert = 0; invert <= 3; invert++)
+            {
+                Global.GyroInvert[0] = invert;
+                var cursor = new MouseCursor(0, null, new DS4Device.GyroMouseSens())
+                    { GyroCursorDeadZone = 0 };
+                capture.Calls = 0;
+                try
+                {
+                    cursor.sixaxisMoved(new SixAxisEventArgs(DateTime.UnixEpoch, state.Motion));
+                    Assert.AreEqual(1, capture.Calls);
+                    int expectedX = horizontalAxis == 0 ? -1 : 1;
+                    if ((invert & 2) != 0) expectedX = -expectedX;
+                    int expectedY = (invert & 1) == 0 ? -1 : 1;
+                    Assert.AreEqual(expectedX, Math.Sign(capture.X), "Mouse horizontal direction");
+                    Assert.AreEqual(expectedY, Math.Sign(capture.Y), "Mouse vertical direction");
+                    Assert.AreEqual(invert, Global.GyroInvert[0]);
+                    Assert.AreEqual(horizontalAxis, Global.GyroMouseHorizontalAxis[0]);
+                }
+                finally
+                {
+                    Global.GyroMouseInfo[0].RemoveRefreshEvents();
+                }
+            }
+        }
+        finally
+        {
+            Global.outputKBMHandler = savedHandler;
+            storeField.SetValue(null, savedStore);
+        }
+    }
+
+    private sealed class CapturedMouse : VirtualKBMBase
+    {
+        internal int X, Y, Calls;
+        public override void MoveRelativeMouse(int x, int y) { X = x; Y = y; Calls++; }
+        public override bool Connect() => throw new InvalidOperationException("No OS input permitted");
+        public override bool Disconnect() => throw new InvalidOperationException("No OS input permitted");
+        public override void MoveAbsoluteMouse(double x, double y) => Assert.Fail("Unexpected absolute mouse");
+        public override void PerformMouseWheelEvent(int vertical, int horizontal) => Assert.Fail("Unexpected wheel");
+        public override void PerformMouseButtonEvent(uint button) => Assert.Fail("Unexpected button");
+        public override void PerformMouseButtonPress(uint button) => Assert.Fail("Unexpected button");
+        public override void PerformMouseButtonRelease(uint button) => Assert.Fail("Unexpected button");
+        public override void PerformKeyPress(uint key) => Assert.Fail("Unexpected key");
+        public override void PerformKeyPressAlt(uint key) => Assert.Fail("Unexpected key");
+        public override void PerformKeyRelease(uint key) => Assert.Fail("Unexpected key");
+        public override void PerformKeyReleaseAlt(uint key) => Assert.Fail("Unexpected key");
+        public override string GetDisplayName() => "Captured mouse only";
+        public override string GetIdentifier() => "pro-motion-test-only";
+        public override string GetFullDisplayName() => GetDisplayName();
     }
 
     [TestMethod]
@@ -629,10 +755,19 @@ public class Switch2ProProfileInputTests
     private static Switch2CanonicalInputFrame CreateUsbMotionFrame(
         Switch2Vector3Raw accelerometer, Switch2Vector3Raw gyroscope,
         Switch2Vector3Raw magnetometer, uint motionTimestamp,
-        long completionTimestampQpc = 1)
+        long completionTimestampQpc = 1, bool bluetooth = false)
     {
         Switch2InputSessionDescriptor descriptor = CreateUsbDescriptor(1, 1,
             10_000_000);
+        if (bluetooth)
+        {
+            Assert.IsTrue(Switch2InputProtocolIdentity.TryCreateBluetoothLe(
+                Switch2InputCodec.ServiceUuid, Switch2InputCodec.Common05CharacteristicUuid,
+                Switch2GattProperty.Read | Switch2GattProperty.Notify,
+                Switch2ControllerModel.ProController2, out var identity));
+            Assert.IsTrue(Switch2InputSessionDescriptor.TryCreate(identity, 1, 1,
+                10_000_000, out descriptor));
+        }
         var session = new Switch2InputSession(descriptor,
             CreateCalibration(1, null));
         byte[] packet = BuildUsbPacket(1, 0, 0x800, 0x800, 0x800, 0x800);
@@ -641,7 +776,7 @@ public class Switch2ProProfileInputTests
             motionTimestamp);
         WriteVector(packet, 1 + 0x30, accelerometer);
         WriteVector(packet, 1 + 0x36, gyroscope);
-        Assert.IsTrue(session.TryProcess(descriptor, packet,
+        Assert.IsTrue(session.TryProcess(descriptor, bluetooth ? packet.AsSpan(1) : packet,
             completionTimestampQpc,
             out var frame, out var failure), failure.ToString());
         return frame;

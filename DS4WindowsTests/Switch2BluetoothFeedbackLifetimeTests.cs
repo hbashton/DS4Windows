@@ -8,6 +8,21 @@ namespace DS4WindowsTests;
 [TestClass]
 public class Switch2BluetoothFeedbackLifetimeTests
 {
+    private readonly List<Switch2RuntimeInputDevice> startedRuntimes = new();
+
+    private void StartRuntime(Switch2RuntimeInputDevice runtime)
+    {
+        startedRuntimes.Add(runtime);
+        ((DS4Device)runtime).StartUpdate();
+    }
+
+    [TestCleanup]
+    public void StopFakeRuntimeWorkers()
+    {
+        // Also quiesce timer/cue workers when a regression assertion fails.
+        foreach (var runtime in startedRuntimes) runtime.StopUpdate();
+    }
+
     private const ulong DeviceGeneration = 17;
     private const ulong TransportGeneration = 23;
 
@@ -37,6 +52,43 @@ public class Switch2BluetoothFeedbackLifetimeTests
         Assert.AreEqual(rejectSurvivor ? 3 : 1, survivor.WriteAttempts);
         Assert.IsTrue(session.WasRetiredDisconnected);
         Assert.IsFalse(session.TryPublish(Wire(1, session.OwnershipEpoch, 1000, 1000, 0, 0)));
+    }
+
+    [DataTestMethod]
+    [DataRow(true, 50, true)]
+    [DataRow(false, 50, false)]
+    [DataRow(false, 180, true)]
+    public void JoinedPhysicalLossColdBudgetCountsOnlySurvivingTargets(
+        bool bothReleased, int budgetMilliseconds, bool expectedComplete)
+    {
+        var left = new RecordingLease(Switch2ControllerModel.JoyCon2Left, 31, 37);
+        var right = new RecordingLease(Switch2ControllerModel.JoyCon2Right, 41, 47);
+        Assert.IsTrue(Switch2BluetoothFeedbackLifetime.TryCreateJoined(left, right,
+            DeviceGeneration, TransportGeneration, 31, 37, 41, 47, out var feedback));
+        Assert.IsTrue(feedback.TryActivate());
+        Assert.IsTrue(feedback.TryCreateVirtualFeedbackSession(
+            ControllerFeedbackSource.XboxOneVirtualDevice, out var session));
+        left.DisconnectedReleased = true;
+        right.DisconnectedReleased = bothReleased;
+        try
+        {
+            Assert.AreEqual(expectedComplete,
+                feedback.TryStopJoinedAfterPhysicalLossUntil(
+                    Environment.TickCount64 + budgetMilliseconds, maxAttempts: 3));
+            Assert.AreEqual(expectedComplete, feedback.IsRetired);
+            Assert.IsTrue(session.WasRetiredDisconnected);
+            Assert.AreEqual(0, left.WriteAttempts,
+                "An exact released-target proof never requires a fabricated Stop write.");
+            Assert.AreEqual(expectedComplete && !bothReleased ? 1 : 0,
+                right.WriteAttempts,
+                "Reserve 100 ms only for a live survivor, and do not start it with a smaller budget.");
+            if (expectedComplete && !bothReleased) AssertJoyConNeutral(right.LastPayload);
+        }
+        finally
+        {
+            Assert.IsTrue(feedback.TryStopJoinedAfterPhysicalLossUntil(
+                Environment.TickCount64 + 1000, maxAttempts: 3));
+        }
     }
 
     [DataTestMethod]
@@ -471,7 +523,7 @@ public class Switch2BluetoothFeedbackLifetimeTests
             "Feedback must remain fenced until runtime activation.");
 
         runtime.DeviceSlotNumber = 2;
-        runtime.StartUpdate();
+        StartRuntime(runtime);
         Assert.AreEqual((byte)3, lease.LastPlayerLedNumber);
         Assert.IsTrue(session.TryPublish(apply,
             mapImpulseTriggersToHdRumble: true));
@@ -504,7 +556,7 @@ public class Switch2BluetoothFeedbackLifetimeTests
             ownershipEpoch: successor.OwnershipEpoch, bodyLow: 10_000,
             bodyHigh: 5_000,
             leftTrigger: 0, rightTrigger: 0)));
-        Assert.IsTrue(feedback.TryStopAndRetire(maxAttempts: 3),
+        Assert.IsTrue(feedback.TryStopAndRetireUntil(Environment.TickCount64 + 1_000, maxAttempts: 3),
             $"{feedback.LastRetirementFailure}/" +
             feedback.LastPhysicalWriteFailure);
         Assert.IsTrue(feedback.IsRetired);
@@ -585,7 +637,7 @@ public class Switch2BluetoothFeedbackLifetimeTests
                 Switch2ControllerModel.ProController2, DeviceGeneration,
                 TransportGeneration, feedback));
             runtime.DeviceSlotNumber = 0;
-            runtime.StartUpdate();
+            StartRuntime(runtime);
 
             Assert.IsTrue(runtime.TryStartConnectionHaptic());
             Assert.IsTrue(SpinWait.SpinUntil(
@@ -593,20 +645,22 @@ public class Switch2BluetoothFeedbackLifetimeTests
                 TimeSpan.FromSeconds(1)));
             runtime.setRumble(0, 0);
             Assert.IsTrue(SpinWait.SpinUntil(
-                () => lease.PayloadCount >= 4,
+                () => RumbleTransitions(lease).Count >= 4,
                 TimeSpan.FromSeconds(3)));
             Assert.IsFalse(runtime.TryStartConnectionHaptic(),
                 "One logical controller generation must play at most one connection cue.");
 
-            AssertGroup(lease.PayloadAt(0),
+            var transitions = RumbleTransitions(lease);
+            Assert.AreEqual(4, transitions.Count);
+            AssertGroup(transitions[0],
                 Switch2ConnectionHaptic.ProBassGroup);
-            AssertNeutral(lease.PayloadAt(1));
-            AssertGroup(lease.PayloadAt(2),
+            AssertNeutral(transitions[1]);
+            AssertGroup(transitions[2],
                 Switch2ConnectionHaptic.ProSharpClickGroup);
-            AssertNeutral(lease.PayloadAt(3));
+            AssertNeutral(transitions[3]);
 
             Assert.IsTrue(runtime.TryPublishTerminalNeutral());
-            Assert.IsTrue(feedback.TryStopAndRetire(maxAttempts: 3));
+            Assert.IsTrue(feedback.TryStopAndRetireUntil(Environment.TickCount64 + 1_000, maxAttempts: 3));
         }
         finally
         {
@@ -634,7 +688,7 @@ public class Switch2BluetoothFeedbackLifetimeTests
                 Switch2ControllerModel.ProController2, DeviceGeneration,
                 TransportGeneration, feedback));
             runtime.DeviceSlotNumber = 0;
-            runtime.StartUpdate();
+            StartRuntime(runtime);
             Assert.IsTrue(runtime.TryStartConnectionHaptic());
             Assert.IsTrue(SpinWait.SpinUntil(
                 () => lease.PayloadCount >= 1,
@@ -660,7 +714,7 @@ public class Switch2BluetoothFeedbackLifetimeTests
 
             runtime.ClearRumblePreview();
             Assert.IsTrue(runtime.TryPublishTerminalNeutral());
-            Assert.IsTrue(feedback.TryStopAndRetire(maxAttempts: 3));
+            Assert.IsTrue(feedback.TryStopAndRetireUntil(Environment.TickCount64 + 1_000, maxAttempts: 3));
         }
         finally
         {
@@ -684,21 +738,23 @@ public class Switch2BluetoothFeedbackLifetimeTests
             Switch2ControllerModel.ProController2, DeviceGeneration,
             TransportGeneration, feedback));
         runtime.DeviceSlotNumber = 0;
-        runtime.StartUpdate();
+        StartRuntime(runtime);
 
         Assert.IsTrue(runtime.TryStartIdentificationHaptic());
         Assert.IsTrue(SpinWait.SpinUntil(
-            () => lease.PayloadCount >= 4,
+            () => RumbleTransitions(lease).Count >= 4,
             TimeSpan.FromSeconds(2)));
-        AssertGroup(lease.PayloadAt(0),
+        var transitions = RumbleTransitions(lease);
+        Assert.AreEqual(4, transitions.Count);
+        AssertGroup(transitions[0],
             Switch2IdentificationHaptic.ProPulseGroup);
-        AssertNeutral(lease.PayloadAt(1));
-        AssertGroup(lease.PayloadAt(2),
+        AssertNeutral(transitions[1]);
+        AssertGroup(transitions[2],
             Switch2IdentificationHaptic.ProPulseGroup);
-        AssertNeutral(lease.PayloadAt(3));
+        AssertNeutral(transitions[3]);
 
         Assert.IsTrue(runtime.TryPublishTerminalNeutral());
-        Assert.IsTrue(feedback.TryStopAndRetire(maxAttempts: 3));
+        Assert.IsTrue(feedback.TryStopAndRetireUntil(Environment.TickCount64 + 1_000, maxAttempts: 3));
     }
 
     [TestMethod]
@@ -721,32 +777,36 @@ public class Switch2BluetoothFeedbackLifetimeTests
             Assert.IsTrue(runtime.TryAttachBluetoothFeedbackLifetime(model,
                 DeviceGeneration, TransportGeneration, feedback));
             runtime.DeviceSlotNumber = 0;
-            runtime.StartUpdate();
+            StartRuntime(runtime);
 
             Assert.IsTrue(runtime.TryStartConnectionHaptic());
             Assert.IsTrue(SpinWait.SpinUntil(
-                () => lease.PayloadCount >= 4,
+                () => RumbleTransitions(lease).Count >= 4,
                 TimeSpan.FromSeconds(3)));
-            AssertJoyConGroup(lease.PayloadAt(0),
+            var transitions = RumbleTransitions(lease);
+            Assert.AreEqual(4, transitions.Count);
+            AssertJoyConGroup(transitions[0],
                 Switch2ConnectionHaptic.JoyConBassGroup);
-            AssertJoyConNeutral(lease.PayloadAt(1));
-            AssertJoyConGroup(lease.PayloadAt(2),
+            AssertJoyConNeutral(transitions[1]);
+            AssertJoyConGroup(transitions[2],
                 Switch2ConnectionHaptic.JoyConSharpClickGroup);
-            AssertJoyConNeutral(lease.PayloadAt(3));
+            AssertJoyConNeutral(transitions[3]);
 
             Assert.IsTrue(runtime.TryStartIdentificationHaptic());
             Assert.IsTrue(SpinWait.SpinUntil(
-                () => lease.PayloadCount >= 8,
+                () => RumbleTransitions(lease).Count >= 8,
                 TimeSpan.FromSeconds(2)));
-            AssertJoyConGroup(lease.PayloadAt(4),
+            transitions = RumbleTransitions(lease);
+            Assert.AreEqual(8, transitions.Count);
+            AssertJoyConGroup(transitions[4],
                 Switch2IdentificationHaptic.JoyConPulseGroup);
-            AssertJoyConNeutral(lease.PayloadAt(5));
-            AssertJoyConGroup(lease.PayloadAt(6),
+            AssertJoyConNeutral(transitions[5]);
+            AssertJoyConGroup(transitions[6],
                 Switch2IdentificationHaptic.JoyConPulseGroup);
-            AssertJoyConNeutral(lease.PayloadAt(7));
+            AssertJoyConNeutral(transitions[7]);
 
             Assert.IsTrue(runtime.TryPublishTerminalNeutral());
-            Assert.IsTrue(feedback.TryStopAndRetire(maxAttempts: 3));
+            Assert.IsTrue(feedback.TryStopAndRetireUntil(Environment.TickCount64 + 1_000, maxAttempts: 3));
         }
         finally
         {
@@ -768,7 +828,7 @@ public class Switch2BluetoothFeedbackLifetimeTests
         Assert.IsTrue(runtime.TryAttachBluetoothFeedbackLifetime(
             Switch2ControllerModel.ProController2, DeviceGeneration,
             TransportGeneration, feedback));
-        runtime.StartUpdate();
+        StartRuntime(runtime);
         Assert.IsTrue(runtime.TryCreateVirtualFeedbackSession(
             ControllerFeedbackSource.XboxOneVirtualDevice,
             DeviceGeneration, TransportGeneration,
@@ -790,10 +850,10 @@ public class Switch2BluetoothFeedbackLifetimeTests
         Assert.IsTrue(session.TryPublish(
             new ControllerFeedbackActuatorState(30_000, 15_000, 0, 0),
             rumbleDelayMilliseconds: 0, profileRevision: 2));
-        Assert.AreEqual(2, lease.PayloadCount,
+        Assert.AreEqual(2, RumbleTransitions(lease).Count,
             "Zero remains the allocation-free direct publication behavior.");
         Assert.IsTrue(session.TryRetire());
-        Assert.IsTrue(feedback.TryStopAndRetire(maxAttempts: 3));
+        Assert.IsTrue(feedback.TryStopAndRetireUntil(Environment.TickCount64 + 1_000, maxAttempts: 3));
     }
 
     [TestMethod]
@@ -810,7 +870,7 @@ public class Switch2BluetoothFeedbackLifetimeTests
         Assert.IsTrue(runtime.TryAttachBluetoothFeedbackLifetime(
             Switch2ControllerModel.ProController2, DeviceGeneration,
             TransportGeneration, feedback));
-        runtime.StartUpdate();
+        StartRuntime(runtime);
         Assert.IsTrue(runtime.TryCreateVirtualFeedbackSession(
             ControllerFeedbackSource.Xbox360VirtualDevice,
             DeviceGeneration, TransportGeneration,
@@ -823,7 +883,7 @@ public class Switch2BluetoothFeedbackLifetimeTests
             new ControllerFeedbackActuatorState(0, 20_000, 0, 0),
             rumbleDelayMilliseconds: 150, profileRevision: 11));
         Thread.Sleep(220);
-        Assert.AreEqual(1, lease.PayloadCount,
+        Assert.AreEqual(1, RumbleTransitions(lease).Count,
             "A profile revision must discard delayed feedback from the old mapping epoch.");
 
         Assert.IsTrue(session.TryPublish(
@@ -832,12 +892,12 @@ public class Switch2BluetoothFeedbackLifetimeTests
         Assert.IsTrue(session.TryPublish(
             new ControllerFeedbackActuatorState(25_000, 25_000, 0, 0),
             rumbleDelayMilliseconds: 0, profileRevision: 12));
-        Assert.AreEqual(2, lease.PayloadCount);
+        Assert.AreEqual(2, RumbleTransitions(lease).Count);
         Thread.Sleep(220);
-        Assert.AreEqual(2, lease.PayloadCount,
+        Assert.AreEqual(2, RumbleTransitions(lease).Count,
             "Returning to zero delay must synchronously fence the old timer queue.");
         Assert.IsTrue(session.TryRetire());
-        Assert.IsTrue(feedback.TryStopAndRetire(maxAttempts: 3));
+        Assert.IsTrue(feedback.TryStopAndRetireUntil(Environment.TickCount64 + 1_000, maxAttempts: 3));
     }
 
     [TestMethod]
@@ -854,7 +914,7 @@ public class Switch2BluetoothFeedbackLifetimeTests
         Assert.IsTrue(runtime.TryAttachBluetoothFeedbackLifetime(
             Switch2ControllerModel.ProController2, DeviceGeneration,
             TransportGeneration, feedback));
-        runtime.StartUpdate();
+        StartRuntime(runtime);
         Assert.IsTrue(runtime.TryCreateVirtualFeedbackSession(
             ControllerFeedbackSource.Switch2VirtualDevice,
             DeviceGeneration, TransportGeneration,
@@ -883,7 +943,7 @@ public class Switch2BluetoothFeedbackLifetimeTests
         AssertGroup(lease.PayloadAt(0), first);
         AssertGroup(lease.PayloadAt(1), second);
         Assert.IsTrue(session.TryRetire());
-        Assert.IsTrue(feedback.TryStopAndRetire(maxAttempts: 3));
+        Assert.IsTrue(feedback.TryStopAndRetireUntil(Environment.TickCount64 + 1_000, maxAttempts: 3));
     }
 
     [TestMethod]
@@ -900,7 +960,7 @@ public class Switch2BluetoothFeedbackLifetimeTests
         Assert.IsTrue(runtime.TryAttachBluetoothFeedbackLifetime(
             Switch2ControllerModel.ProController2, DeviceGeneration,
             TransportGeneration, feedback));
-        runtime.StartUpdate();
+        StartRuntime(runtime);
         Assert.IsTrue(runtime.TryCreateVirtualFeedbackSession(
             ControllerFeedbackSource.Xbox360VirtualDevice,
             DeviceGeneration, TransportGeneration,
@@ -912,7 +972,7 @@ public class Switch2BluetoothFeedbackLifetimeTests
         Thread.Sleep(220);
         Assert.AreEqual(0, lease.PayloadCount,
             "A copied timer callback cannot cross successful session retirement.");
-        Assert.IsTrue(feedback.TryStopAndRetire(maxAttempts: 3));
+        Assert.IsTrue(feedback.TryStopAndRetireUntil(Environment.TickCount64 + 1_000, maxAttempts: 3));
     }
 
     [TestMethod]
@@ -929,7 +989,7 @@ public class Switch2BluetoothFeedbackLifetimeTests
         Assert.IsTrue(runtime.TryAttachBluetoothFeedbackLifetime(
             Switch2ControllerModel.ProController2, DeviceGeneration,
             TransportGeneration, feedback));
-        runtime.StartUpdate();
+        StartRuntime(runtime);
         Assert.IsTrue(runtime.TryCreateVirtualFeedbackSession(
             ControllerFeedbackSource.XboxOneVirtualDevice,
             DeviceGeneration, TransportGeneration,
@@ -993,7 +1053,7 @@ public class Switch2BluetoothFeedbackLifetimeTests
         }
         Assert.IsTrue(sawIntermediate);
         Assert.IsTrue(session.TryRetire());
-        Assert.IsTrue(feedback.TryStopAndRetire(maxAttempts: 3));
+        Assert.IsTrue(feedback.TryStopAndRetireUntil(Environment.TickCount64 + 1_000, maxAttempts: 3));
     }
 
     [TestMethod]
@@ -1010,7 +1070,7 @@ public class Switch2BluetoothFeedbackLifetimeTests
         Assert.IsTrue(runtime.TryAttachBluetoothFeedbackLifetime(
             Switch2ControllerModel.ProController2, DeviceGeneration,
             TransportGeneration, feedback));
-        runtime.StartUpdate();
+        StartRuntime(runtime);
         Assert.IsTrue(runtime.TryCreateVirtualFeedbackSession(
             ControllerFeedbackSource.XboxOneVirtualDevice,
             DeviceGeneration, TransportGeneration,
@@ -1028,7 +1088,7 @@ public class Switch2BluetoothFeedbackLifetimeTests
         Thread.Sleep(150);
         Assert.AreEqual(afterRetirement, lease.PayloadCount,
             "A copied release callback cannot write after session retirement.");
-        Assert.IsTrue(feedback.TryStopAndRetire(maxAttempts: 3));
+        Assert.IsTrue(feedback.TryStopAndRetireUntil(Environment.TickCount64 + 1_000, maxAttempts: 3));
     }
 
     private static void AssertGroup(byte[] payload,
@@ -1040,6 +1100,26 @@ public class Switch2BluetoothFeedbackLifetimeTests
                 out Switch2HdRumbleGroup right, out _));
         Assert.AreEqual(expected, left);
         Assert.AreEqual(expected, right);
+    }
+
+    // Physical HD groups are finite and now correctly repeat while active.
+    // Cue/delay assertions compare exact decoded transitions, not the number
+    // of keepalive packets; all three subframes and both sides stay checked.
+    private static List<byte[]> RumbleTransitions(RecordingLease lease)
+    {
+        var result = new List<byte[]>();
+        int count = lease.PayloadCount;
+        for (int index = 0; index < count; index++)
+        {
+            byte[] current = lease.PayloadAt(index);
+            byte[] previous = result.Count == 0 ? null : result[^1];
+            bool same = previous != null && current.Length == previous.Length &&
+                current.AsSpan(2, 15).SequenceEqual(previous.AsSpan(2, 15)) &&
+                (current.Length == Switch2BluetoothHdRumbleCodec.JoyConPayloadLength ||
+                 current.AsSpan(18, 15).SequenceEqual(previous.AsSpan(18, 15)));
+            if (!same) result.Add(current);
+        }
+        return result;
     }
 
     private static void AssertNeutral(byte[] payload)
@@ -1080,7 +1160,7 @@ public class Switch2BluetoothFeedbackLifetimeTests
         Assert.IsTrue(runtime.TryAttachBluetoothFeedbackLifetime(
             Switch2ControllerModel.ProController2, DeviceGeneration,
             TransportGeneration, feedback));
-        runtime.StartUpdate();
+        StartRuntime(runtime);
 
         Assert.IsTrue(runtime.TryCreateVirtualFeedbackSession(
             ControllerFeedbackSource.Xbox360VirtualDevice,
@@ -1104,7 +1184,7 @@ public class Switch2BluetoothFeedbackLifetimeTests
         Assert.AreEqual(3, lease.WriteCount,
             "A later virtual output must not be rejected as an older owner.");
         Assert.IsTrue(successor.TryRetire());
-        Assert.IsTrue(feedback.TryStopAndRetire(maxAttempts: 3));
+        Assert.IsTrue(feedback.TryStopAndRetireUntil(Environment.TickCount64 + 1_000, maxAttempts: 3));
     }
 
     [TestMethod]
@@ -1120,7 +1200,7 @@ public class Switch2BluetoothFeedbackLifetimeTests
         Assert.IsTrue(runtime.TryAttachBluetoothFeedbackLifetime(
             Switch2ControllerModel.ProController2, DeviceGeneration,
             TransportGeneration, feedback));
-        runtime.StartUpdate();
+        StartRuntime(runtime);
 
         runtime.setRumble(rightLightFastMotor: 64,
             leftHeavySlowMotor: 128);
@@ -1158,7 +1238,7 @@ public class Switch2BluetoothFeedbackLifetimeTests
         Assert.AreEqual(6, lease.WriteCount);
         AssertHdRumble(lease.LastPayload, expectAmplitude: false,
             out _, out _);
-        Assert.IsTrue(feedback.TryStopAndRetire(maxAttempts: 3));
+        Assert.IsTrue(feedback.TryStopAndRetireUntil(Environment.TickCount64 + 1_000, maxAttempts: 3));
     }
 
     [TestMethod]
@@ -1174,7 +1254,7 @@ public class Switch2BluetoothFeedbackLifetimeTests
         Assert.IsTrue(runtime.TryAttachBluetoothFeedbackLifetime(
             Switch2ControllerModel.ProController2, DeviceGeneration,
             TransportGeneration, feedback));
-        runtime.StartUpdate();
+        StartRuntime(runtime);
         Assert.IsTrue(runtime.TryCreateVirtualFeedbackSession(
             ControllerFeedbackSource.Switch2VirtualDevice,
             DeviceGeneration, TransportGeneration,
@@ -1269,7 +1349,7 @@ public class Switch2BluetoothFeedbackLifetimeTests
         Assert.AreEqual(right, deliveredRight,
             "A changed rich payload must traverse the BLE owner even when its canonical marker is unchanged.");
         Assert.IsTrue(dualSense.TryRetire());
-        Assert.IsTrue(feedback.TryStopAndRetire(maxAttempts: 3));
+        Assert.IsTrue(feedback.TryStopAndRetireUntil(Environment.TickCount64 + 1_000, maxAttempts: 3));
     }
 
     private static void AssertXboxBodyCarriers(
@@ -1308,7 +1388,7 @@ public class Switch2BluetoothFeedbackLifetimeTests
             DeviceGeneration, TransportGeneration,
             out Switch2VirtualFeedbackSession session));
         runtime.DeviceSlotNumber = 1;
-        runtime.StartUpdate();
+        StartRuntime(runtime);
 
         Assert.IsTrue(session.TryPublish(Wire(sequence: 1,
             ownershipEpoch: session.OwnershipEpoch, bodyLow: 0, bodyHigh: 0,
@@ -1389,7 +1469,7 @@ public class Switch2BluetoothFeedbackLifetimeTests
             out Switch2VirtualFeedbackSession session));
 
         runtime.DeviceSlotNumber = 3;
-        runtime.StartUpdate();
+        StartRuntime(runtime);
         Assert.AreEqual((byte)4, left.LastPlayerLedNumber);
         Assert.AreEqual((byte)4, right.LastPlayerLedNumber);
         Assert.IsTrue(session.TryRequestPlayerLedMask(0x0A));

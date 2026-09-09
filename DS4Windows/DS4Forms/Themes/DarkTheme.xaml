@@ -4,11 +4,15 @@
                     xmlns:local="clr-namespace:DS4WinWPF.DS4Forms.Themes" xmlns:system="clr-namespace:System;assembly=mscorlib"
                     xmlns:themes="clr-namespace:Xceed.Wpf.Toolkit.Themes;assembly=DotNetProjects.Wpf.Extended.Toolkit"
                     xmlns:themes1="clr-namespace:Microsoft.Windows.Themes;assembly=PresentationFramework.Aero">
-
+    <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="ToolTipStyles.xaml" />
+    </ResourceDictionary.MergedDictionaries>
     <!-- Brushes -->
     <SolidColorBrush x:Key="BackgroundColor" Color="#FF070D15" />
     <SolidColorBrush x:Key="BorderColor" Color="#FF223041" />
     <SolidColorBrush x:Key="ForegroundColor" Color="#FFF4F7FB" />
+    <SolidColorBrush x:Key="ToolTipBackgroundColor" Color="#FF0E1926" />
+    <SolidColorBrush x:Key="ToolTipForegroundColor" Color="#FFF4F7FB" />
     <SolidColorBrush x:Key="SecondaryColor" Color="#FF153B6E" />
     <SolidColorBrush x:Key="AccentColor" Color="#FF2C7DF7" />
     <SolidColorBrush x:Key="SurfaceBackgroundColor" Color="#FF070D15" />
@@ -1322,10 +1326,6 @@
         </Style.Triggers>
     </Style>
 
-    <Style x:Key="ToolTipStyle" TargetType="{x:Type ToolTip}">
-        <Setter Property="Background" Value="{StaticResource BackgroundColor}" />
-        <Setter Property="Foreground" Value="{StaticResource ForegroundColor}" />
-    </Style>
 
 
     <Style x:Key="RectangleStyle" TargetType="{x:Type Rectangle}">
@@ -1932,7 +1932,6 @@
     <Style BasedOn="{StaticResource ContextMenuStyle}" TargetType="{x:Type ContextMenu}" />
     <Style BasedOn="{StaticResource MenuStyle}" TargetType="{x:Type Menu}" />
     <Style BasedOn="{StaticResource MenuItemStyle}" TargetType="{x:Type MenuItem}" />
-    <Style BasedOn="{StaticResource ToolTipStyle}" TargetType="{x:Type ToolTip}" />
     <Style BasedOn="{StaticResource GroupBoxStyle}" TargetType="{x:Type GroupBox}" />
     <Style BasedOn="{StaticResource ThumbStyle}" TargetType="{x:Type Thumb}" />
     <Style BasedOn="{StaticResource ScrollViewerStyle}" TargetType="{x:Type ScrollViewer}" />

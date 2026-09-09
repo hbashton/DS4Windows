@@ -943,8 +943,10 @@ public static class Switch2JoyConProfileInputMapper
             failure = Switch2JoyConProfileInputFailure.InvalidCalibration;
             return false;
         }
+        bool arrivalOrdered = Switch2CounterSequence.UsesArrivalOrdering(
+            canonical.Model, canonical.Transport, canonical.Report.Kind);
         if (canonical.CounterWidthBits != 32 ||
-            canonical.CounterSequence ==
+            !arrivalOrdered && canonical.CounterSequence ==
                 Switch2CounterSequenceKind.BackwardOrOutOfOrder)
         {
             failure = Switch2JoyConProfileInputFailure.BackwardOrOutOfOrder;
@@ -957,11 +959,9 @@ public static class Switch2JoyConProfileInputMapper
                 failure = Switch2JoyConProfileInputFailure.StaleObservation;
                 return false;
             }
-            Switch2CounterSequenceKind localSequence =
-                Switch2CounterSequence.Classify(canonical.DeviceCounterRaw,
-                    lastCounter, 32, out _);
-            if (localSequence ==
-                Switch2CounterSequenceKind.BackwardOrOutOfOrder)
+            if (!arrivalOrdered && Switch2CounterSequence.Classify(
+                    canonical.DeviceCounterRaw, lastCounter, 32, out _) ==
+                    Switch2CounterSequenceKind.BackwardOrOutOfOrder)
             {
                 failure =
                     Switch2JoyConProfileInputFailure.BackwardOrOutOfOrder;

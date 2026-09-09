@@ -893,7 +893,7 @@ internal sealed class Switch2ProUsbOwnedCompositeRegistrationParticipant :
             remaining = RemainingMilliseconds(deadline, originalTimeout);
             if (remaining > 0)
             {
-                TryNeutralizeFeedback(remaining);
+                TryNeutralizeFeedback(deadline, originalTimeout);
             }
             FinishOperation(quarantine: true);
             return Uncertain(operation,
@@ -1021,8 +1021,8 @@ internal sealed class Switch2ProUsbOwnedCompositeRegistrationParticipant :
                 Switch2RuntimeRegistrationParticipantFailureKind.
                     OwnerAuthenticationLost);
         }
-        if (!feedbackQuiesced && !TryNeutralizeFeedback(
-                RemainingMilliseconds(deadline, timeoutMilliseconds)))
+        if (!feedbackQuiesced && !TryNeutralizeFeedback(deadline,
+                timeoutMilliseconds))
         {
             lock (gate)
             {
@@ -1489,14 +1489,20 @@ internal sealed class Switch2ProUsbOwnedCompositeRegistrationParticipant :
         return succeeded;
     }
 
-    private bool TryNeutralizeFeedback(int timeoutMilliseconds)
+    private bool TryNeutralizeFeedback(long deadline, int originalTimeout)
     {
         Switch2ProUsbOwnedFeedbackQuiescenceResult quiescence = default;
         bool threw = false;
         try
         {
-            quiescence = feedback.TryNeutralizeAndQuiesce(authority,
-                timeoutMilliseconds);
+            // A healthy admitted maintenance write can hold the physical
+            // transaction briefly. Cold teardown may wait for that exact owner
+            // within its existing deadline; immediate input/safety entry points
+            // remain nonblocking. Preserve the interface path for other owners.
+            quiescence = feedback is Switch2ProUsbOwnedFeedbackActivationLifetime concrete ?
+                concrete.TryNeutralizeAndQuiesceUntil(authority, deadline) :
+                feedback.TryNeutralizeAndQuiesce(authority,
+                    RemainingMilliseconds(deadline, originalTimeout));
         }
         catch
         {

@@ -290,6 +290,7 @@ internal sealed class Switch2HdRumbleDeliverySink :
     private readonly ulong transportGeneration;
 
     private ControllerFeedbackDelivery lastDelivered;
+    private bool lastDeliveredNeedsSustain;
     private ControllerFeedbackDelivery unresolvedDelivery;
     private Switch2HdRumbleFeedbackPolicy selectedPolicy;
     private Switch2HdRumbleFeedbackPolicy unresolvedPolicy;
@@ -309,6 +310,12 @@ internal sealed class Switch2HdRumbleDeliverySink :
     private Switch2HdRumbleGroup sourcePreservedLeft;
     private Switch2HdRumbleGroup sourcePreservedRight;
     private Switch2HdRumbleFeedbackFidelity sourcePreservedFidelity;
+    private bool hasDeliveredSourceSynthesis;
+    private ControllerFeedbackFrame deliveredSourceFrame;
+    private Switch2HdRumbleGroup deliveredSourceLeft;
+    private Switch2HdRumbleGroup deliveredSourceRight;
+    private Switch2HdRumbleFeedbackFidelity deliveredSourceFidelity;
+    private readonly IControllerFeedbackDeliverySink maintenanceSink;
     private ControllerFeedbackFrame impulseReleaseFrame;
     private ushort impulseReleaseLeftTrigger;
     private ushort impulseReleaseRightTrigger;
@@ -360,9 +367,25 @@ internal sealed class Switch2HdRumbleDeliverySink :
         selectedPolicy = policy;
         selectedImpulseTuning = Switch2HdRumbleImpulseTuning.Default;
         selectedBodyTuning = Switch2HdRumbleBodyTuning.Default;
+        maintenanceSink = new SustainedDeliverySink(this);
     }
 
     internal bool IsRetired => Volatile.Read(ref retired) != 0;
+
+    // Used only by the physical lifetime's serialized maintenance worker.
+    // Ordinary publisher retries retain their exact idempotence contract.
+    internal IControllerFeedbackDeliverySink MaintenanceSink => maintenanceSink;
+
+    internal bool NeedsSustainedRefresh
+    {
+        get { lock (gate) return !IsRetired && lastDeliveredNeedsSustain; }
+    }
+
+    private sealed class SustainedDeliverySink(Switch2HdRumbleDeliverySink owner) : IControllerFeedbackDeliverySink
+    {
+        public bool TryDeliver(in ControllerFeedbackDelivery delivery) =>
+            owner.TryDeliverCore(delivery, sustain: true);
+    }
 
     internal bool HasUncertainWrite => Volatile.Read(ref uncertain) != 0;
 
@@ -672,6 +695,9 @@ internal sealed class Switch2HdRumbleDeliverySink :
     }
 
     public bool TryDeliver(in ControllerFeedbackDelivery delivery)
+        => TryDeliverCore(delivery, sustain: false);
+
+    private bool TryDeliverCore(in ControllerFeedbackDelivery delivery, bool sustain)
     {
         if (IsRetired || !delivery.HasValidInvariants() ||
             delivery.DeviceGeneration != deviceGeneration ||
@@ -741,6 +767,23 @@ internal sealed class Switch2HdRumbleDeliverySink :
                 preservedLeft = sourcePreservedLeft;
                 preservedRight = sourcePreservedRight;
                 preservedFidelity = sourcePreservedFidelity;
+                bool newSourcePreservedSynthesis = useSourcePreservedSynthesis;
+                bool retainedSource = !useSourcePreservedSynthesis && hasDeliveredSourceSynthesis &&
+                    delivery.Disposition == ControllerFeedbackDeliveryDisposition.Frame &&
+                    delivery.Frame == deliveredSourceFrame;
+                // Keep an exact already-presented rich design, not its lossy
+                // canonical marker. Streamed sample groups are not latched:
+                // replaying them after their source goes quiet stretches peaks.
+                bool streamedSource = retainedSource && deliveredSourceFidelity is
+                    Switch2HdRumbleFeedbackFidelity.DualSensePcmDualBand or
+                    Switch2HdRumbleFeedbackFidelity.NativeSwitch2PassThrough;
+                if ((sustain || exactUnresolvedRetry) && retainedSource && !streamedSource)
+                {
+                    useSourcePreservedSynthesis = true;
+                    preservedLeft = deliveredSourceLeft;
+                    preservedRight = deliveredSourceRight;
+                    preservedFidelity = deliveredSourceFidelity;
+                }
                 useImpulseReleaseSynthesis = exactUnresolvedRetry ?
                     unresolvedUsesImpulseRelease :
                     hasImpulseReleasePresentation &&
@@ -768,7 +811,9 @@ internal sealed class Switch2HdRumbleDeliverySink :
                             lastDeliveredImpulseTuning ||
                         deliveryBodyTuning != lastDeliveredBodyTuning ||
                         deliveryXboxPolicyRevision != lastDeliveredXboxPolicyRevision ||
-                        useSourcePreservedSynthesis ||
+                        newSourcePreservedSynthesis ||
+                        sustain && lastDeliveredNeedsSustain && !streamedSource &&
+                            delivery.Frame.Command == ControllerFeedbackCommand.Apply ||
                         useImpulseReleaseSynthesis &&
                             releasePresentationRevision !=
                                 lastDeliveredImpulseReleaseRevision);
@@ -902,6 +947,32 @@ internal sealed class Switch2HdRumbleDeliverySink :
                 currentEpochStopped = delivery.Disposition ==
                     ControllerFeedbackDeliveryDisposition.Stop;
                 lastDelivered = delivery;
+                // A profile can deliberately render Apply as silence. Only
+                // actual nonzero held output needs transport keepalives; never
+                // replay a finite PCM/native streaming slice as a held effect.
+                lastDeliveredNeedsSustain = submission.Command == ControllerFeedbackCommand.Apply &&
+                    submission.Fidelity is not (Switch2HdRumbleFeedbackFidelity.DualSensePcmDualBand or
+                        Switch2HdRumbleFeedbackFidelity.NativeSwitch2PassThrough) &&
+                    (submission.Left.First.HasNonzeroAmplitude || submission.Left.Second.HasNonzeroAmplitude ||
+                     submission.Left.Third.HasNonzeroAmplitude || submission.Right.First.HasNonzeroAmplitude ||
+                     submission.Right.Second.HasNonzeroAmplitude || submission.Right.Third.HasNonzeroAmplitude);
+                if (useSourcePreservedSynthesis)
+                {
+                    hasDeliveredSourceSynthesis = true;
+                    deliveredSourceFrame = delivery.Frame;
+                    deliveredSourceLeft = preservedLeft;
+                    deliveredSourceRight = preservedRight;
+                    deliveredSourceFidelity = preservedFidelity;
+                }
+                else if (delivery.Disposition == ControllerFeedbackDeliveryDisposition.Stop ||
+                         delivery.Frame != deliveredSourceFrame)
+                {
+                    hasDeliveredSourceSynthesis = false;
+                    deliveredSourceFrame = default;
+                    deliveredSourceLeft = default;
+                    deliveredSourceRight = default;
+                    deliveredSourceFidelity = default;
+                }
                 lastDeliveredXboxPolicyRevision = deliveryXboxPolicyRevision;
                 if (delivery.Disposition ==
                     ControllerFeedbackDeliveryDisposition.Frame)

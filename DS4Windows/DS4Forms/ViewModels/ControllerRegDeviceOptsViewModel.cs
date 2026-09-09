@@ -81,8 +81,6 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         private List<DeviceListItem> currentInputDevices = new List<DeviceListItem>();
         public List<DeviceListItem> CurrentInputDevices { get => currentInputDevices; }
 
-        // Serial, ControllerOptionsStore instance
-        private Dictionary<string, ControllerOptionsStore> inputDeviceSettings = new Dictionary<string, ControllerOptionsStore>();
         private List<ControllerOptionsStore> controllerOptionsStores = new List<ControllerOptionsStore>();
 
         private int controllerSelectedIndex = -1;
@@ -142,7 +140,6 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 if (device != null)
                 {
                     currentInputDevices.Add(new DeviceListItem(device));
-                    inputDeviceSettings.Add(device.MacAddress, device.optionsStore);
                     controllerOptionsStores.Add(device.optionsStore);
                 }
                 idx++;
@@ -154,6 +151,9 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public int FindTabOptionsIndex()
         {
+            if ((uint)controllerSelectedIndex >= (uint)controllerOptionsStores.Count ||
+                controllerOptionsStores[controllerSelectedIndex] == null)
+                return 0; // Transport-owned devices have profile-level options.
             ControllerOptionsStore currentStore =
                 controllerOptionsStores[controllerSelectedIndex];
 
@@ -187,6 +187,10 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public void FindFittingDataContext()
         {
+            dataContextObject = null;
+            if ((uint)controllerSelectedIndex >= (uint)controllerOptionsStores.Count ||
+                controllerOptionsStores[controllerSelectedIndex] == null)
+                return;
             ControllerOptionsStore currentStore =
                 controllerOptionsStores[controllerSelectedIndex];
 
@@ -214,10 +218,14 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         }
 
         public void SaveControllerConfigs()
+            => SaveControllerConfigs(device => Global.SaveControllerConfigs(device));
+
+        internal void SaveControllerConfigs(Action<DS4Device> save)
         {
             foreach (DeviceListItem item in currentInputDevices)
             {
-                Global.SaveControllerConfigs(item.Device);
+                if (item.Device.optionsStore != null)
+                    save(item.Device);
             }
         }
     }
@@ -229,7 +237,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public string IdText
         {
-            get => $"{device.DisplayName} ({device.MacAddress})";
+            get => $"{device.DisplayName} ({device.DisplayIdentity})";
         }
 
         public DeviceListItem(DS4Device device)

@@ -1504,8 +1504,8 @@ internal sealed class Switch2JoyConJoinedRuntimeOwner :
         int remaining = RemainingMilliseconds(deadline);
         if (feedbackLifetime != null &&
             (remaining <= 0 || !(leftDisconnected || rightDisconnected ?
-                feedbackLifetime.TryStopJoinedAfterPhysicalLoss(Math.Min(3, Math.Max(1, remaining / 100))) :
-                feedbackLifetime.TryStopAndRetire(Math.Min(3, Math.Max(1, remaining / 100))))))
+                feedbackLifetime.TryStopJoinedAfterPhysicalLossUntil(deadline, Math.Min(3, Math.Max(1, remaining / 100))) :
+                feedbackLifetime.TryStopAndRetireUntil(deadline, Math.Min(3, Math.Max(1, remaining / 100))))))
         {
             failure = new Switch2JoyConJoinedRuntimeStopFailure(
                 Switch2BluetoothRuntimeStopFailureKind.

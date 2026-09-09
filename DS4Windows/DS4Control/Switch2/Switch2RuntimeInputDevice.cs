@@ -179,6 +179,18 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
     private bool identificationHapticOwnsPreviewLane;
     private byte profileLightFastRumble;
     private byte profileHeavySlowRumble;
+    private bool profileRumbleHeld;
+    private bool previewRumbleHeld;
+    private struct PendingLocalRumble
+    {
+        internal bool Withdraw;
+        internal bool Apply;
+        internal ControllerFeedbackActuatorState State;
+    }
+    private PendingLocalRumble pendingProfileRumble;
+    private PendingLocalRumble pendingPreviewRumble;
+    private Switch2RumbleMaintenanceWorker rumbleMaintenanceWorker;
+    private readonly Action<ulong> renewLocalRumbleLeases;
     private ReportHandler<EventArgs> reportHandlers;
     private EventHandler batteryChangedHandlers;
     private ReportHandler<EventArgs>[] reportSubscribers =
@@ -212,6 +224,7 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
         : base(displayName, inputDeviceType, connectionType)
     {
         this.transport = transport;
+        renewLocalRumbleLeases = RenewLocalRumbleLeases;
         // Only the opt-in portable probing session suppresses automatic idle
         // closure. No profile setting is changed; manual Stop/disconnect works.
         labAudioProbeKeepConnected = inputDeviceType == InputDeviceType.Switch2Pro &&
@@ -2027,6 +2040,7 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
         // Stop returns, a concurrent report can no longer resurrect or extend
         // mouse motion from this logical generation.
         highRateMousePresenter.Stop();
+        rumbleMaintenanceWorker?.Stop();
         lock (localFeedbackGate)
         {
             CancelConnectionHapticNoLock();
@@ -2045,6 +2059,9 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
             CancelRawStickCalibrationNoLock();
             terminalNeutralSubscribers = reportSubscribers;
             runtimeState = Switch2RuntimeInputDeviceState.Terminal;
+            // StartUpdate can have installed the dormant worker while this
+            // terminal request was waiting for publicationGate.
+            rumbleMaintenanceWorker?.Stop();
             if (publicationInProgress)
             {
                 terminalNeutralPending = true;
@@ -2134,6 +2151,17 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
             absoluteSessionQpcFrequency = Stopwatch.Frequency;
             absoluteSessionTimestampInitialized = true;
             runtimeState = Switch2RuntimeInputDeviceState.Active;
+            if (bluetoothFeedbackLifetime != null || usbFeedbackLifetime != null)
+            {
+                rumbleMaintenanceWorker = new Switch2RumbleMaintenanceWorker(ServiceRumbleMaintenance,
+                    transport == Switch2Transport.BluetoothLe ?
+                        Switch2RumbleMaintenanceWorker.BluetoothIntervalMilliseconds :
+                        Switch2RumbleMaintenanceWorker.UsbIntervalMilliseconds);
+                if (bluetoothFeedbackLifetime != null)
+                    bluetoothFeedbackLifetime.SetRumbleMaintenanceWake(rumbleMaintenanceWorker.Wake);
+                else
+                    usbFeedbackLifetime.SetRumbleMaintenanceWake(rumbleMaintenanceWorker.Wake);
+            }
             if (bluetoothFeedbackLifetime != null && DeviceSlotNumber >= 0 &&
                 DeviceSlotNumber < 8)
             {
@@ -2212,6 +2240,7 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
         if (aborted)
         {
             highRateMousePresenter.Stop();
+            rumbleMaintenanceWorker?.Stop();
             lock (localFeedbackGate)
             {
                 CancelConnectionHapticNoLock();
@@ -2281,6 +2310,27 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
 
     public override bool TryHaltReportingRunAction(Action act)
         => HaltReportingRunActionCore(act, queueOnFailure: false);
+
+    internal override bool TryCopyControllerReadings(DS4State raw,
+        DS4State mapped, DS4StateOwnedSnapshot rawSnapshot,
+        DS4StateOwnedSnapshot mappedSnapshot)
+    {
+        // Switch 2 has no legacy HID read-window event. Borrow the already
+        // mapped state only between serialized publications, and skip a UI
+        // tick if busy. Never pause/queue controller work to render readings.
+        if (!System.Threading.Monitor.TryEnter(publicationGate))
+            return false;
+        try
+        {
+            if (runtimeState != Switch2RuntimeInputDeviceState.Active ||
+                publicationInProgress || terminalNeutralReserved)
+                return false;
+            rawSnapshot.Capture(raw);
+            mappedSnapshot.Capture(mapped);
+            return true;
+        }
+        finally { System.Threading.Monitor.Exit(publicationGate); }
+    }
 
     private bool HaltReportingRunActionCore(Action act, bool queueOnFailure)
     {
@@ -2538,15 +2588,112 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
         if (!TryGetOrCreateLocalFeedbackLaneNoLock(origin,
                 out ControllerFeedbackStateLanePump.Lane lane) ||
             !ControllerFeedbackClock.TryGetTimestampMicroseconds(
-                out ulong nowMicroseconds) ||
-            !lane.TryPublish(new ControllerFeedbackActuatorState(
-                (ushort)(heavySlow * 257),
-                (ushort)(lightFast * 257), 0, 0), nowMicroseconds))
+                out ulong nowMicroseconds))
         {
             return false;
         }
 
+        var state = new ControllerFeedbackActuatorState((ushort)(heavySlow * 257),
+            (ushort)(lightFast * 257), 0, 0);
+        ref PendingLocalRumble pending = ref GetPendingLocalRumbleNoLock(origin);
+        if (!TryCompletePendingWithdrawalNoLock(ref pending, lane, nowMicroseconds))
+        {
+            if (rumbleMaintenanceWorker == null || rumbleMaintenanceWorker.IsStopped) return false;
+            pending.Apply = true;
+            pending.State = state;
+            rumbleMaintenanceWorker.Wake();
+            return true;
+        }
+        pending.Apply = false;
+        if (!lane.TryPublish(state, nowMicroseconds)) return false;
+
+        if (origin == ControllerFeedbackPublicationOrigin.TestPreview) previewRumbleHeld = true;
+        else profileRumbleHeld = true;
+        rumbleMaintenanceWorker?.Wake();
         return TryDrainLocalFeedbackNoLock(nowMicroseconds);
+    }
+
+    internal void RenewLocalRumbleLeases(ulong nowMicroseconds)
+    {
+        // A local publisher may already be in a bounded output call. The
+        // maintenance thread must not wait on it or create a lock-order cycle.
+        if (!Monitor.TryEnter(localFeedbackGate)) return;
+        try
+        {
+            ServicePendingLocalRumbleNoLock(ControllerFeedbackPublicationOrigin.ProfileEffect,
+                profileFeedbackLane, nowMicroseconds);
+            ServicePendingLocalRumbleNoLock(ControllerFeedbackPublicationOrigin.TestPreview,
+                previewFeedbackLane, nowMicroseconds);
+            // Connection/identify cues have independent finite durations;
+            // their leases must expire if their cue task fails to stop them.
+            if (profileRumbleHeld && !connectionHapticOwnsProfileLane)
+                profileFeedbackLane?.ServiceLease(nowMicroseconds);
+            if (previewRumbleHeld && !identificationHapticOwnsPreviewLane)
+                previewFeedbackLane?.ServiceLease(nowMicroseconds);
+        }
+        finally { Monitor.Exit(localFeedbackGate); }
+    }
+
+    private ref PendingLocalRumble GetPendingLocalRumbleNoLock(ControllerFeedbackPublicationOrigin origin)
+    {
+        if (origin == ControllerFeedbackPublicationOrigin.TestPreview) return ref pendingPreviewRumble;
+        return ref pendingProfileRumble;
+    }
+
+    private static bool TryCompletePendingWithdrawalNoLock(ref PendingLocalRumble pending,
+        ControllerFeedbackStateLanePump.Lane lane, ulong nowMicroseconds)
+    {
+        if (!pending.Withdraw) return true;
+        if (lane == null || !lane.TryWithdraw(nowMicroseconds)) return false;
+        pending.Withdraw = false;
+        return true;
+    }
+
+    private void ServicePendingLocalRumbleNoLock(ControllerFeedbackPublicationOrigin origin,
+        ControllerFeedbackStateLanePump.Lane lane, ulong nowMicroseconds)
+    {
+        ref PendingLocalRumble pending = ref GetPendingLocalRumbleNoLock(origin);
+        if (!TryCompletePendingWithdrawalNoLock(ref pending, lane, nowMicroseconds) || !pending.Apply) return;
+        // Withdrawal reserves the required Stop before a successor Apply is
+        // published. Canonical arbitration still completes that Stop first.
+        if (lane != null && lane.TryPublish(pending.State, nowMicroseconds))
+        {
+            pending.Apply = false;
+            if (origin == ControllerFeedbackPublicationOrigin.TestPreview) previewRumbleHeld = true;
+            else profileRumbleHeld = true;
+        }
+    }
+
+    private bool HasPendingLocalRumble => Volatile.Read(ref pendingProfileRumble.Withdraw) ||
+        Volatile.Read(ref pendingProfileRumble.Apply) || Volatile.Read(ref pendingPreviewRumble.Withdraw) ||
+        Volatile.Read(ref pendingPreviewRumble.Apply);
+
+    private bool ServiceRumbleMaintenance(ulong nowMicroseconds)
+    {
+        Switch2BluetoothFeedbackLifetime bluetooth;
+        Switch2ProUsbOwnedFeedbackActivationLifetime usb;
+        if (!Monitor.TryEnter(publicationGate)) return true;
+        try
+        {
+            if (runtimeState != Switch2RuntimeInputDeviceState.Active || terminalNeutralReserved)
+                return false;
+            bluetooth = bluetoothFeedbackLifetime;
+            usb = usbFeedbackLifetime;
+        }
+        finally { Monitor.Exit(publicationGate); }
+        if (bluetooth != null)
+        {
+            var disposition = bluetooth.TryServiceRumbleMaintenance(nowMicroseconds, renewLocalRumbleLeases);
+            return disposition is ControllerFeedbackPumpDisposition.Busy or ControllerFeedbackPumpDisposition.RetryPending ||
+                bluetooth.RequiresRumbleMaintenance || bluetooth.CanServiceRumbleMaintenance && HasPendingLocalRumble;
+        }
+        if (usb != null)
+        {
+            var disposition = usb.TryServiceRumbleMaintenance(nowMicroseconds, renewLocalRumbleLeases);
+            return disposition is ControllerFeedbackPumpDisposition.Busy or ControllerFeedbackPumpDisposition.RetryPending ||
+                usb.RequiresRumbleMaintenance || usb.CanServiceRumbleMaintenance && HasPendingLocalRumble;
+        }
+        return false;
     }
 
     /// <summary>
@@ -2612,8 +2759,8 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
                     Switch2ConnectionHaptic.UsbInitialDelayMilliseconds,
                     token).ConfigureAwait(false);
             }
-            if (!TryPublishConnectionHapticStage(cancellation,
-                    bassMarker, bassGroup))
+            if (!await TryPublishCueWithRetryAsync(() => TryPublishConnectionHapticStage(cancellation,
+                    bassMarker, bassGroup), token).ConfigureAwait(false))
             {
                 return;
             }
@@ -2625,8 +2772,8 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
             }
             await Task.Delay(Switch2ConnectionHaptic.NeutralGapMilliseconds,
                 token).ConfigureAwait(false);
-            if (!TryPublishConnectionHapticStage(cancellation,
-                    sharpMarker, sharpGroup))
+            if (!await TryPublishCueWithRetryAsync(() => TryPublishConnectionHapticStage(cancellation,
+                    sharpMarker, sharpGroup), token).ConfigureAwait(false))
             {
                 return;
             }
@@ -2680,6 +2827,12 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
                 bluetoothFeedback = bluetoothFeedbackLifetime;
                 usbFeedback = usbFeedbackLifetime;
             }
+            if (!ControllerFeedbackClock.TryGetTimestampMicroseconds(out ulong now) ||
+                !TryCompletePendingWithdrawalNoLock(ref pendingProfileRumble, lane, now)) return false;
+            pendingProfileRumble.Apply = false;
+            // Intent, not output success, distinguishes this finite cue from
+            // a held profile value if a physical write becomes uncertain.
+            profileRumbleHeld = false;
             bool published = bluetoothFeedback != null ?
                 bluetoothFeedback.TryPublishNativeProfileEffectAndPump(
                     lane, marker, group, group) :
@@ -2759,7 +2912,8 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
         CancellationToken token = cancellation.Token;
         try
         {
-            if (!TryPublishIdentificationHapticStage(cancellation))
+            if (!await TryPublishCueWithRetryAsync(() => TryPublishIdentificationHapticStage(cancellation),
+                    token).ConfigureAwait(false))
             {
                 return;
             }
@@ -2771,7 +2925,8 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
             }
             await Task.Delay(Switch2IdentificationHaptic.
                 PulseGapMilliseconds, token).ConfigureAwait(false);
-            if (!TryPublishIdentificationHapticStage(cancellation))
+            if (!await TryPublishCueWithRetryAsync(() => TryPublishIdentificationHapticStage(cancellation),
+                    token).ConfigureAwait(false))
             {
                 return;
             }
@@ -2794,6 +2949,23 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
             }
             cancellation.Dispose();
         }
+    }
+
+    private async Task<bool> TryPublishCueWithRetryAsync(Func<bool> publish, CancellationToken token)
+    {
+        // Finite cues run off the input thread. A maintained write may own the
+        // transaction briefly; retry the same stage without skipping its Stop
+        // boundary or extending it indefinitely when the transport is stuck.
+        for (int attempt = 0; attempt < 16; attempt++)
+        {
+            token.ThrowIfCancellationRequested();
+            if (publish()) return true;
+            lock (publicationGate)
+                if (runtimeState != Switch2RuntimeInputDeviceState.Active || terminalNeutralReserved) return false;
+            if (attempt != 15) await Task.Delay(Switch2RumbleMaintenanceWorker.BluetoothIntervalMilliseconds,
+                token).ConfigureAwait(false);
+        }
+        return false;
     }
 
     private bool TryPublishIdentificationHapticStage(
@@ -2831,6 +3003,10 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
                 bluetoothFeedback = bluetoothFeedbackLifetime;
                 usbFeedback = usbFeedbackLifetime;
             }
+            if (!ControllerFeedbackClock.TryGetTimestampMicroseconds(out ulong now) ||
+                !TryCompletePendingWithdrawalNoLock(ref pendingPreviewRumble, lane, now)) return false;
+            pendingPreviewRumble.Apply = false;
+            previewRumbleHeld = false;
             bool published = bluetoothFeedback != null ?
                 bluetoothFeedback.TryPublishNativePreviewAndPump(lane,
                     marker, group, group) :
@@ -2874,19 +3050,36 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
     private bool TryWithdrawLocalRumbleNoLock(
         ControllerFeedbackPublicationOrigin origin)
     {
+        // An explicit Stop must also stop renewal when immediate output is busy.
+        if (origin == ControllerFeedbackPublicationOrigin.TestPreview) previewRumbleHeld = false;
+        else profileRumbleHeld = false;
+        ref PendingLocalRumble pending = ref GetPendingLocalRumbleNoLock(origin);
+        pending.Apply = false;
         ControllerFeedbackStateLanePump.Lane lane = origin ==
                 ControllerFeedbackPublicationOrigin.TestPreview ?
             previewFeedbackLane : profileFeedbackLane;
         if (lane == null)
         {
+            pending.Withdraw = false;
             return true;
         }
         if (!ControllerFeedbackClock.TryGetTimestampMicroseconds(
-                out ulong nowMicroseconds) ||
-            !lane.TryWithdraw(nowMicroseconds))
+                out ulong nowMicroseconds))
         {
             return false;
         }
+        if (!lane.TryWithdraw(nowMicroseconds))
+        {
+            // A physical claim cannot be revoked while it is in flight.
+            // Retain only the local Stop intent for the existing live worker;
+            // never treat it as an already completed canonical/physical Stop.
+            var worker = rumbleMaintenanceWorker;
+            if (worker == null || worker.IsStopped) return false;
+            pending.Withdraw = true;
+            worker.Wake();
+            return true;
+        }
+        pending.Withdraw = false;
         return TryDrainLocalFeedbackNoLock(nowMicroseconds);
     }
 
@@ -2974,6 +3167,19 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
                 case ControllerFeedbackPumpDisposition.Delivered:
                 case ControllerFeedbackPumpDisposition.Superseded:
                     continue;
+                case ControllerFeedbackPumpDisposition.Busy:
+                case ControllerFeedbackPumpDisposition.RetryPending:
+                    // The caller has already published/withdrawn its canonical
+                    // lane. Contention is not a rejected cue transition: the
+                    // live output worker will drain it without blocking input.
+                    // This is enqueue acceptance, not physical-write evidence.
+                    var worker = rumbleMaintenanceWorker;
+                    if (worker != null && !worker.IsStopped)
+                    {
+                        worker.Wake();
+                        return true;
+                    }
+                    return false;
                 default:
                     return false;
             }
@@ -3128,13 +3334,14 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
                 // modes observe same-report controls and motion.
                 sixAxis.FireProjectedSixAxisEvent(cState);
             }
-            catch
+            catch (Exception exception)
             {
                 // A mapping observer may reject this publication, but must not
                 // strand the serialized runtime or suppress later Report
                 // subscribers and terminal-neutral delivery.
                 reported = false;
                 handlersSucceeded = false;
+                RecordPublicationFailure("GyroObserver", exception);
             }
         }
         Switch2RuntimeReportEventArgs reportEventArgs = isTerminalNeutral ?
@@ -3151,10 +3358,11 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
                     subscribers[index](this, reportEventArgs);
                     delivered = true;
                 }
-                catch
+                catch (Exception exception)
                 {
                     reported = false;
                     handlersSucceeded = false;
+                    RecordPublicationFailure("ReportSubscriber", exception);
                 }
             }
         }
@@ -3225,9 +3433,10 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
             {
                 action?.Invoke();
             }
-            catch
+            catch (Exception exception)
             {
                 succeeded = false;
+                RecordPublicationFailure("QueuedAction", exception);
             }
         }
 

@@ -250,6 +250,7 @@
                                        Margin="0,5,0,3" FontSize="22" FontWeight="SemiBold"
                                        Foreground="{DynamicResource ForegroundColor}" />
                             <TextBlock Text="{Binding SelectedController.IdText}"
+                                       ToolTip="{Binding SelectedController.IdText}"
                                        Foreground="{DynamicResource MutedForegroundColor}"
                                        TextTrimming="CharacterEllipsis" />
                             <StackPanel Orientation="Horizontal" Margin="0,10,0,0">

@@ -1007,10 +1007,7 @@ namespace DS4WinWPF.DS4Forms
 
         public void ApplyPersistentEffects()
         {
-            TriggerLabProfileSettings settings = CurrentSettings;
-            if (settings == null) return;
-            ApplyEffect(TriggerId.LeftTrigger, settings.Left, settings.Enabled && settings.LeftActive);
-            ApplyEffect(TriggerId.RightTrigger, settings.Right, settings.Enabled && settings.RightActive);
+            ApplyProfileEffects(deviceIndex);
         }
 
         public void RestorePhysicalProfileEffects()
@@ -1022,13 +1019,18 @@ namespace DS4WinWPF.DS4Forms
             }
 
             previewResetTimer.Stop();
-            TriggerLabProfileSettings settings =
-                Global.store.triggerLabSettings[physicalDeviceIndex];
-            if (settings == null) return;
-            ApplyEffect(TriggerId.LeftTrigger, settings.Left,
-                settings.Enabled && settings.LeftActive);
-            ApplyEffect(TriggerId.RightTrigger, settings.Right,
-                settings.Enabled && settings.RightActive);
+            ApplyProfileEffects(physicalDeviceIndex);
+        }
+
+        private void ApplyProfileEffects(int profileIndex)
+        {
+            if (profileIndex < 0 || profileIndex >= Global.TEST_PROFILE_ITEM_COUNT ||
+                physicalDeviceIndex < 0 ||
+                physicalDeviceIndex >= ControlService.CURRENT_DS4_CONTROLLER_LIMIT) return;
+            if (App.rootHub?.DS4Controllers[physicalDeviceIndex] is not DualSenseDevice device) return;
+            TriggerLabProfileEffectRestoration.ApplyToDevice(device,
+                Global.store.triggerLabSettings[profileIndex],
+                Global.L2OutputSettings[profileIndex], Global.R2OutputSettings[profileIndex]);
         }
 
         private void ApplyEffect(TriggerId trigger, TriggerLabEffectSettings settings, bool active)

@@ -11,7 +11,8 @@ namespace DS4WinWPF.DS4Forms
 {
     internal enum JoyConView { Pair, UprightLeft, UprightRight, SidewaysLeft, SidewaysRight }
 
-    internal readonly record struct JoyConMapTarget(DS4Controls Control, Rect Bounds, Geometry Highlight);
+    internal readonly record struct JoyConMapTarget(DS4Controls Control, Rect Bounds,
+        Geometry Highlight, string DisplayName = null);
 
     // Original vector artwork. Shared by the controller list and mapping view;
     // frozen drawings remain crisp at both icon size and desktop scaling.
@@ -131,16 +132,16 @@ namespace DS4WinWPF.DS4Forms
             var result = new List<JoyConMapTarget>();
             var transform = new MatrixTransform(ViewTransform(view));
             bool horizontal = IsSideways(view);
-            void Add(DS4Controls control, Geometry shape)
+            void Add(DS4Controls control, Geometry shape, string displayName)
             {
                 var transformed = new GeometryGroup { Transform = transform };
                 transformed.Children.Add(shape);
                 transformed.Freeze();
                 // Preserve the canonical double-precision layout. WPF's path
                 // bounds may round to float when it flattens a rotated shape.
-                result.Add(new(control, transform.TransformBounds(shape.Bounds), transformed));
+                result.Add(new(control, transform.TransformBounds(shape.Bounds), transformed, displayName));
             }
-            void Button(DS4Controls control, string name) => Add(control, ButtonShape(name));
+            void Button(DS4Controls control, string name) => Add(control, ButtonShape(name), name);
             DS4Controls Face(bool west = false, bool north = false, bool south = false, bool east = false)
             {
                 Switch2FaceButtonLayoutProjection.TryProject(layout, west, north, south, east,
@@ -173,8 +174,8 @@ namespace DS4WinWPF.DS4Forms
             if (horizontal)
             {
                 bool left = view == JoyConView.SidewaysLeft;
-                Add(DS4Controls.L1, new RectangleGeometry(RailBounds(left, true), 3, 3));
-                Add(DS4Controls.R1, new RectangleGeometry(RailBounds(left, false), 3, 3));
+                Add(DS4Controls.L1, new RectangleGeometry(RailBounds(left, true), 3, 3), "SL");
+                Add(DS4Controls.R1, new RectangleGeometry(RailBounds(left, false), 3, 3), "SR");
             }
             return result.AsReadOnly();
         }

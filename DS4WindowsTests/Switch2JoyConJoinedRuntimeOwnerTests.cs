@@ -16,6 +16,79 @@ public sealed class Switch2JoyConJoinedRuntimeOwnerTests
     private const long QpcFrequency = 10_000_000;
     private const int TimeoutMilliseconds = 2_000;
 
+    [DataTestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public void MaintenanceContentionUsesColdStopDeadlineBeforeDecidingQuarantine(bool releaseWithinDeadline)
+    {
+        PairFixture fixture = CreateFixture(1_099);
+        fixture.Left.HasHdRumbleOutput = fixture.Right.HasHdRumbleOutput = true;
+        Assert.IsTrue(TryCreate(fixture, Switch2BluetoothRuntimeDrainPumpFactory.Instance,
+            Switch2RuntimeTerminalScheduler.Instance, out var owner, out var registration, out _));
+        var table = OpenTable(1);
+        var token = Activate(owner, registration, table);
+        InputControllerRetirementClaim retirement = default;
+        owner.RuntimeDevice.Report += (sender, args) =>
+        {
+            if (((Switch2RuntimeReportEventArgs)args).Kind == Switch2RuntimeReportKind.TerminalNeutral &&
+                table.TryAcquireTerminalReportLease(retirement, sender, out var lease, out _))
+            {
+                lease.TryAcknowledgeTerminalNeutral(out _);
+                lease.Dispose();
+            }
+        };
+        Task<bool> stop = null;
+        using var stopStarted = new ManualResetEventSlim();
+        try
+        {
+            Assert.IsTrue(owner.FeedbackLifetime.TryCreateVirtualFeedbackSession(
+                ControllerFeedbackSource.Xbox360VirtualDevice, out var session));
+            Assert.IsTrue(session.TryPublish(new ControllerFeedbackActuatorState(20_000, 10_000, 0, 0)));
+            fixture.Left.BlockNextOutput = 1;
+            Assert.IsTrue(fixture.Left.OutputEntered.Wait(1_000), "The active runtime maintenance worker must reach the physical writer.");
+            Assert.IsTrue(table.TryBeginRetire(token, out retirement, out _));
+            Assert.IsTrue(owner.TryArmRetirement(retirement, out _));
+            stop = Task.Factory.StartNew(() =>
+            {
+                stopStarted.Set();
+                return registration.TryStopAndQuiesce(releaseWithinDeadline ? 1_000 : 50, out _);
+            }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+            Assert.IsTrue(stopStarted.Wait(1_000));
+            if (releaseWithinDeadline)
+            {
+                Assert.IsFalse(stop.Wait(25), "Transient transaction admission must not immediately quarantine a live pair.");
+                fixture.Left.AllowOutput.Set();
+            }
+            Assert.IsTrue(stop.Wait(1_500), "Cold retirement must retain its existing bounded deadline.");
+            Assert.AreEqual(releaseWithinDeadline, stop.Result);
+            Assert.AreEqual(!releaseWithinDeadline, owner.RequiresQuarantine);
+            if (releaseWithinDeadline)
+            {
+                Assert.AreEqual(Switch2BluetoothRuntimeOwnerState.Stopped, owner.State);
+                Assert.IsTrue(owner.LeftReleaseProven && owner.RightReleaseProven);
+                Assert.IsTrue(table.TryWaitForDrain(retirement, 0, out _));
+                Assert.IsTrue(table.TryMarkQuiesced(retirement, out _));
+                Assert.IsTrue(registration.TryRemove(out _));
+                Assert.IsTrue(table.TryCompleteRemoval(retirement, out _), "A transient collision must not strand the logical slot.");
+            }
+            else
+            {
+                Assert.AreEqual(Switch2BluetoothRuntimeOwnerState.Quarantined, owner.State);
+                Assert.AreEqual(Switch2BluetoothRuntimeStopFailureKind.TerminalDeliveryRejected, owner.LastStopFailure.Kind);
+            }
+        }
+        finally
+        {
+            fixture.Left.AllowOutput.Set();
+            if (stop != null) Assert.IsTrue(stop.Wait(2_000));
+            owner.RuntimeDevice.StopUpdate();
+            owner.LeftInputOwner.Stop();
+            owner.RightInputOwner.Stop();
+            _ = owner.LeftDrainPump.TryStopAndJoin(1_000, out _);
+            _ = owner.RightDrainPump.TryStopAndJoin(1_000, out _);
+        }
+    }
+
     [TestMethod]
     public void FullLifecycleOwnsOneLogicalSlotAndProvesBothPhysicalReleases()
     {
@@ -769,7 +842,8 @@ public sealed class Switch2JoyConJoinedRuntimeOwnerTests
     }
 
     private sealed class FakeLease : ISwitch2BluetoothInputLease,
-        ISwitch2BluetoothInputLeaseReleaseProof
+        ISwitch2BluetoothInputLeaseReleaseProof,
+        ISwitch2BluetoothHdRumbleBindableTransportLease
     {
         private Switch2BluetoothInputDisconnected disconnected;
 
@@ -788,6 +862,34 @@ public sealed class Switch2JoyConJoinedRuntimeOwnerTests
         internal int SubscribeCount { get; private set; }
         internal int UnsubscribeCount { get; private set; }
         internal int ReleaseWaitCount { get; private set; }
+        public bool HasHdRumbleOutput { get; set; }
+        internal int BlockNextOutput;
+        internal readonly ManualResetEventSlim OutputEntered = new();
+        internal readonly ManualResetEventSlim AllowOutput = new();
+
+        public bool Authenticates(Switch2ControllerModel model, ulong deviceGeneration, ulong transportGeneration) =>
+            HasHdRumbleOutput && model == Admission.Model &&
+            deviceGeneration == (model == Switch2ControllerModel.JoyCon2Left ? LeftDeviceGeneration : RightDeviceGeneration) &&
+            transportGeneration == (model == Switch2ControllerModel.JoyCon2Left ? LeftTransportGeneration : RightTransportGeneration);
+
+        public bool TryBindHdRumbleLifetime(Switch2ControllerModel model, ulong deviceGeneration, ulong transportGeneration) =>
+            Authenticates(model, deviceGeneration, transportGeneration);
+
+        public Switch2BluetoothHdRumbleTransportWriteResult TryWritePayload(ReadOnlySpan<byte> payload,
+            Switch2ControllerModel model, ulong deviceGeneration, ulong transportGeneration)
+        {
+            if (!Authenticates(model, deviceGeneration, transportGeneration))
+                return Switch2BluetoothHdRumbleTransportWriteResult.Reject(model, deviceGeneration, transportGeneration,
+                    Switch2BluetoothHdRumbleTransportWriteFailure.StaleLifetime);
+            if (Interlocked.Exchange(ref BlockNextOutput, 0) != 0)
+            {
+                OutputEntered.Set();
+                if (!AllowOutput.Wait(5_000))
+                    return Switch2BluetoothHdRumbleTransportWriteResult.Reject(model, deviceGeneration, transportGeneration,
+                        Switch2BluetoothHdRumbleTransportWriteFailure.TimedOut);
+            }
+            return Switch2BluetoothHdRumbleTransportWriteResult.Complete(model, deviceGeneration, transportGeneration, payload.Length);
+        }
 
         public bool TrySubscribeCccdNotify(ulong transportGeneration,
             Switch2BluetoothInputNotification notification,

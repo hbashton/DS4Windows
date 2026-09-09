@@ -131,12 +131,16 @@ public sealed class Switch2ProUsbCounterRolloverTests
     [DataTestMethod]
     [DataRow(Switch2ControllerModel.JoyCon2Left)]
     [DataRow(Switch2ControllerModel.JoyCon2Right)]
-    public void ProCounterPolicyDoesNotBroadenJoyConAdmission(Switch2ControllerModel model)
+    public void JoyConCounterPolicyIsLimitedToEvidencedBluetoothCommonReports(Switch2ControllerModel model)
     {
-        Assert.IsFalse(Switch2CounterSequence.UsesArrivalOrdering(model,
+        Assert.IsTrue(Switch2CounterSequence.UsesArrivalOrdering(model,
             Switch2Transport.BluetoothLe, Switch2InputReportKind.Common05));
         Assert.IsFalse(Switch2CounterSequence.UsesArrivalOrdering(model,
             Switch2Transport.Usb, Switch2InputReportKind.Common05));
+        Assert.IsFalse(Switch2CounterSequence.UsesArrivalOrdering(model,
+            Switch2Transport.BluetoothLe, Switch2InputReportKind.JoyCon2Left07));
+        Assert.IsFalse(Switch2CounterSequence.UsesArrivalOrdering(model,
+            Switch2Transport.BluetoothLe, Switch2InputReportKind.JoyCon2Right08));
     }
 
     private static Switch2InputSession CreateSession(bool usb)

@@ -13,6 +13,72 @@ public sealed class Switch2BluetoothRuntimeOwnerTests
     private const int LifecycleTimeoutMilliseconds = 1_000;
 
     [DataTestMethod]
+    [DoNotParallelize]
+    [DataRow(Switch2ControllerModel.ProController2, false)]
+    [DataRow(Switch2ControllerModel.JoyCon2Left, false)]
+    [DataRow(Switch2ControllerModel.JoyCon2Right, false)]
+    [DataRow(Switch2ControllerModel.ProController2, true)]
+    public void ColdOwnerStopUsesItsDeadlineForAnAdmittedMaintenanceWrite(
+        Switch2ControllerModel model, bool timeout)
+    {
+        var lease = CreateLease(model, 907);
+        lease.HasHdRumbleOutput = true;
+        Assert.IsTrue(TryCreate(lease, out var owner, out var registration, out _));
+        var table = OpenTable(1);
+        var token = Activate(owner, registration, table);
+        Assert.IsTrue(owner.RuntimeDevice.TryCreateVirtualFeedbackSession(
+            ControllerFeedbackSource.XboxOneVirtualDevice,
+            DeviceGeneration, TransportGeneration, out var session));
+        InputControllerRetirementClaim retirement = default;
+        owner.RuntimeDevice.Report += (sender, args) =>
+        {
+            if (((Switch2RuntimeReportEventArgs)args).Kind == Switch2RuntimeReportKind.TerminalNeutral &&
+                table.TryAcquireTerminalReportLease(retirement, (DS4Device)sender, out var terminal, out _))
+            {
+                terminal.TryAcknowledgeTerminalNeutral(out _);
+                terminal.Dispose();
+            }
+        };
+        Task<bool> stopping = null;
+        try
+        {
+            Assert.IsTrue(session.TryPublish(new ControllerFeedbackActuatorState(20000, 10000, 0, 0)));
+            lease.BlockFeedback = true;
+            Assert.IsTrue(lease.FeedbackEntered.Wait(TimeSpan.FromSeconds(2)), "Maintenance never entered the fake physical writer.");
+            Assert.IsTrue(table.TryBeginRetire(token, out retirement, out _));
+            Assert.IsTrue(owner.TryArmRetirement(retirement, out _));
+            stopping = Task.Factory.StartNew(() => registration.TryStopAndQuiesce(timeout ? 50 : 1000, out _),
+                CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+            if (timeout)
+            {
+                Assert.IsTrue(stopping.Wait(TimeSpan.FromSeconds(1)),
+                    $"The cold admission timeout was not bounded; owner={owner.State}, feedbackAdmits={owner.FeedbackLifetime.CanServiceRumbleMaintenance}, nonblocking={session.NonBlockingPhysicalRetirement}.");
+                Assert.IsFalse(stopping.Result);
+                Assert.IsTrue(owner.RequiresQuarantine, "A real timeout must not manufacture quiescence.");
+            }
+            else
+            {
+                Assert.IsFalse(stopping.Wait(30), "Transient admitted output must be drained inside the existing stop deadline.");
+                lease.BlockFeedback = false;
+                lease.FeedbackRelease.Set();
+                Assert.IsTrue(stopping.Wait(TimeSpan.FromSeconds(2)));
+                Assert.IsTrue(stopping.Result, owner.LastStopFailure.Kind.ToString());
+                Assert.IsFalse(owner.RequiresQuarantine, "An ordinary in-flight maintenance packet must not permanently quarantine a healthy owner.");
+                Assert.AreEqual(Switch2BluetoothRuntimeOwnerState.Stopped, owner.State);
+            }
+        }
+        finally
+        {
+            lease.BlockFeedback = false;
+            lease.FeedbackRelease.Set();
+            if (stopping != null) Assert.IsTrue(stopping.Wait(TimeSpan.FromSeconds(2)));
+            owner.RuntimeDevice.StopUpdate();
+            lease.Disconnect();
+            Assert.IsTrue(owner.DrainPump.TryStopAndJoin(1000, out _));
+        }
+    }
+
+    [DataTestMethod]
     [DataRow(Switch2ControllerModel.ProController2)]
     [DataRow(Switch2ControllerModel.JoyCon2Left)]
     [DataRow(Switch2ControllerModel.JoyCon2Right)]
@@ -1208,6 +1274,9 @@ public sealed class Switch2BluetoothRuntimeOwnerTests
         internal int FeedbackWriteCount { get; private set; }
         internal bool Disconnected { get; private set; }
         internal bool RejectFeedback { get; set; }
+        internal volatile bool BlockFeedback;
+        internal readonly ManualResetEventSlim FeedbackEntered = new();
+        internal readonly ManualResetEventSlim FeedbackRelease = new();
         public bool IsDisconnectedAndReleased(Switch2ControllerModel model,
             ulong deviceGeneration, ulong transportGeneration) =>
             Disconnected && ReleaseWaitCount > 0 &&
@@ -1224,6 +1293,14 @@ public sealed class Switch2BluetoothRuntimeOwnerTests
             ReadOnlySpan<byte> payload, Switch2ControllerModel expectedModel,
             ulong expectedDeviceGeneration, ulong expectedTransportGeneration)
         {
+            if (BlockFeedback)
+            {
+                FeedbackEntered.Set();
+                if (!FeedbackRelease.Wait(TimeSpan.FromSeconds(3)))
+                    return Switch2BluetoothHdRumbleTransportWriteResult.Uncertain(expectedModel,
+                        expectedDeviceGeneration, expectedTransportGeneration,
+                        Switch2BluetoothHdRumbleTransportWriteFailure.TimedOut);
+            }
             FeedbackWriteCount++;
             return Disconnected || RejectFeedback ? Switch2BluetoothHdRumbleTransportWriteResult.Reject(
                 expectedModel, expectedDeviceGeneration, expectedTransportGeneration,

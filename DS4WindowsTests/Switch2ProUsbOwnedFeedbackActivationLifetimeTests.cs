@@ -14,6 +14,248 @@ public sealed class Switch2ProUsbOwnedFeedbackActivationLifetimeTests
     private const ulong DeviceGeneration = 401;
     private const ulong TransportGeneration = 409;
 
+    [TestMethod]
+    public void MaintenanceRepeatsExactRichUsbGroupsWithNewCountersButNeverRenewsExpiry()
+    {
+        var composition = CreateCommitted(ContainerA);
+        Assert.IsTrue(composition.Feedback.TryCreateVirtualFeedbackSession(
+            ControllerFeedbackSource.DualSenseVirtualDevice, out var session));
+        var left = new Switch2HdRumbleGroup(new(101, 201, 301, 401),
+            new(102, 202, 302, 402), new(103, 203, 303, 403));
+        var right = new Switch2HdRumbleGroup(new(111, 211, 311, 411),
+            new(112, 212, 312, 412), new(113, 213, 313, 413));
+        try
+        {
+            Assert.IsTrue(session.TryPublishSourcePreserved(new(1, 0, 0, 0),
+                Switch2HdRumbleFeedbackFidelity.DualSenseAdaptiveTriggerApproximation, left, right));
+            Assert.IsTrue(ControllerFeedbackClock.TryGetTimestampMicroseconds(out ulong now));
+            int wakeCount = 0;
+            composition.Feedback.SetRumbleMaintenanceWake(() => wakeCount++);
+            Assert.AreEqual(1, wakeCount, "Binding after an active frame must wake the dormant worker.");
+            Assert.IsTrue(composition.Feedback.RequiresRumbleMaintenance);
+            for (int index = 1; index <= 2; index++)
+                Assert.AreEqual(ControllerFeedbackPumpDisposition.Delivered,
+                    composition.Feedback.TryServiceRumbleMaintenance(now + (ulong)index * 12_000, null));
+            Assert.AreEqual(3, composition.Lease.ReportCount);
+            for (int index = 0; index < 3; index++)
+            {
+                Assert.IsTrue(Switch2UsbHdRumbleCodec.TryDecodeProController(
+                    composition.Lease.ReportAt(index), out byte counter, out var actualLeft, out var actualRight, out _));
+                Assert.AreEqual((byte)index, counter);
+                Assert.AreEqual(left, actualLeft);
+                Assert.AreEqual(right, actualRight);
+            }
+
+            Assert.AreEqual(ControllerFeedbackPumpDisposition.Delivered,
+                composition.Feedback.TryServiceRumbleMaintenance(now + 300_000, null));
+            AssertReport(composition.Lease.ReportAt(3), 3, true);
+            Assert.AreEqual(ControllerFeedbackPumpDisposition.None,
+                composition.Feedback.TryServiceRumbleMaintenance(now + 320_000, null));
+            Assert.AreEqual(4, composition.Lease.ReportCount, "Expired source data cannot be replayed or renewed.");
+            Assert.IsFalse(composition.Feedback.RequiresRumbleMaintenance);
+        }
+        finally
+        {
+            composition.Feedback.SetRumbleMaintenanceWake(null);
+            _ = session.TryRetire();
+        }
+    }
+
+    [DataTestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void UsbMaintenanceDoesNotStretchAStreamedSampleAfterItsProducerGoesQuiet(bool nativeSwitch2)
+    {
+        var composition = CreateCommitted(ContainerA);
+        Assert.IsTrue(composition.Feedback.TryCreateVirtualFeedbackSession(nativeSwitch2 ?
+            ControllerFeedbackSource.Switch2VirtualDevice : ControllerFeedbackSource.DualSenseVirtualDevice,
+            out var session));
+        var group = new Switch2HdRumbleGroup(new(101, 201, 301, 401),
+            new(102, 202, 302, 402), new(103, 203, 303, 403));
+        try
+        {
+            Assert.IsTrue(session.TryPublishSourcePreserved(new(1, 0, 0, 0), nativeSwitch2 ?
+                Switch2HdRumbleFeedbackFidelity.NativeSwitch2PassThrough :
+                Switch2HdRumbleFeedbackFidelity.DualSensePcmDualBand, group, group));
+            Assert.IsTrue(ControllerFeedbackClock.TryGetTimestampMicroseconds(out ulong now));
+            _ = composition.Feedback.TryServiceRumbleMaintenance(now + 12_000, null);
+            _ = composition.Feedback.TryServiceRumbleMaintenance(now + 24_000, null);
+            Assert.AreEqual(1, composition.Lease.ReportCount,
+                "A captured PCM/native sample group is not a held oscillator design.");
+            Assert.AreEqual(ControllerFeedbackPumpDisposition.Delivered,
+                composition.Feedback.TryServiceRumbleMaintenance(now + 300_000, null));
+            AssertReport(composition.Lease.ReportAt(1), 1, true);
+            Assert.IsFalse(composition.Feedback.RequiresRumbleMaintenance);
+        }
+        finally { _ = session.TryRetire(); }
+    }
+
+    [TestMethod]
+    public void CompletedUsbNeutralAndTerminalRetirementLeaveMaintenanceIdle()
+    {
+        var composition = CreateCommitted(ContainerA);
+        Assert.IsTrue(composition.Feedback.TryCreateVirtualFeedbackSession(
+            ControllerFeedbackSource.XboxOneVirtualDevice, out var session));
+        int wakes = 0;
+        composition.Feedback.SetRumbleMaintenanceWake(() => wakes++);
+        Assert.AreEqual(0, wakes);
+        Assert.IsTrue(session.TryPublish(XboxWire(1, session.OwnershipEpoch, 20_000, 0, 0, 0)));
+        Assert.AreEqual(1, wakes);
+        Assert.IsTrue(session.TryPublish(XboxWire(2, session.OwnershipEpoch,
+            0, 0, 0, 0, ControllerFeedbackCommand.Neutral)));
+        Assert.AreEqual(1, wakes, "Completed Neutral must not wake a parked timer.");
+        Assert.IsTrue(ControllerFeedbackClock.TryGetTimestampMicroseconds(out ulong now));
+        int reports = composition.Lease.ReportCount;
+        Assert.IsFalse(composition.Feedback.RequiresRumbleMaintenance);
+        Assert.AreEqual(ControllerFeedbackPumpDisposition.None,
+            composition.Feedback.TryServiceRumbleMaintenance(now + 12_000, null));
+        Assert.AreEqual(reports, composition.Lease.ReportCount, "Completed Neutral is not a rumble keepalive.");
+        Assert.IsTrue(session.TryRetire());
+        Assert.AreEqual(Switch2ProUsbOwnedFeedbackQuiescenceOutcome.ExactNeutralAndQuiescent,
+            composition.Feedback.TryNeutralizeAndQuiesce(composition.Authority, 100).Outcome);
+        reports = composition.Lease.ReportCount;
+        bool renewed = false;
+        Assert.AreEqual(ControllerFeedbackPumpDisposition.None,
+            composition.Feedback.TryServiceRumbleMaintenance(now + 24_000, _ => renewed = true));
+        Assert.IsFalse(renewed);
+        Assert.IsFalse(composition.Feedback.RequiresRumbleMaintenance);
+        Assert.AreEqual(reports, composition.Lease.ReportCount);
+        composition.Feedback.SetRumbleMaintenanceWake(null);
+    }
+
+    [TestMethod]
+    public void UsbMaintenanceHonorsActivationOperationFenceBeforeRenewalOrWrite()
+    {
+        var composition = CreateCommitted(ContainerA);
+        Publish(composition, out ulong now);
+        Assert.AreEqual(ControllerFeedbackPumpDisposition.Delivered,
+            composition.Feedback.TryPumpOnce(now, out _));
+        var field = typeof(Switch2ProUsbOwnedFeedbackActivationLifetime).GetField(
+            "operationActive", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        bool renewed = false;
+        field.SetValue(composition.Feedback, 1);
+        try
+        {
+            Assert.AreEqual(ControllerFeedbackPumpDisposition.Busy,
+                composition.Feedback.TryServiceRumbleMaintenance(now + 12_000, _ => renewed = true));
+            Assert.IsFalse(renewed);
+            Assert.AreEqual(1, composition.Lease.ReportCount);
+        }
+        finally { field.SetValue(composition.Feedback, 0); }
+        Assert.AreEqual(ControllerFeedbackPumpDisposition.Delivered,
+            composition.Feedback.TryServiceRumbleMaintenance(now + 24_000, null));
+        Assert.AreEqual(Switch2ProUsbOwnedFeedbackQuiescenceOutcome.ExactNeutralAndQuiescent,
+            composition.Feedback.TryNeutralizeAndQuiesce(composition.Authority, 100).Outcome);
+    }
+
+    [DataTestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void HeldUsbMaintenanceCannotMakeInputDrainOrQuiescenceWaitForItsWrite(bool withSession)
+    {
+        var composition = CreateCommitted(ContainerA);
+        Switch2VirtualFeedbackSession session = null;
+        ulong now;
+        if (withSession)
+        {
+            Assert.IsTrue(composition.Feedback.TryCreateVirtualFeedbackSession(
+                ControllerFeedbackSource.XboxOneVirtualDevice, out session));
+            Assert.IsTrue(session.TryPublish(XboxWire(1, session.OwnershipEpoch, 20_000, 0, 0, 0)));
+            Assert.IsTrue(ControllerFeedbackClock.TryGetTimestampMicroseconds(out now));
+        }
+        else
+        {
+            Publish(composition, out now);
+            Assert.AreEqual(ControllerFeedbackPumpDisposition.Delivered,
+                composition.Feedback.TryPumpOnce(now, out _));
+        }
+        composition.Lease.BlockWrite = true;
+        var maintenance = Task.Factory.StartNew(
+            () => composition.Feedback.TryServiceRumbleMaintenance(now + 12_000, null),
+            CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        Task admission = null;
+        try
+        {
+            Assert.IsTrue(composition.Lease.WriteEntered.Wait(1_000));
+            admission = Task.Factory.StartNew(() =>
+            {
+                Assert.AreEqual(ControllerFeedbackPumpDisposition.Busy,
+                    composition.Feedback.TryPumpOnce(now + 13_000, out _));
+                Assert.AreEqual(ControllerFeedbackPumpDisposition.Busy,
+                    composition.Feedback.TryServiceRumbleMaintenance(now + 13_000,
+                        _ => Assert.Fail("Busy maintenance cannot renew state")));
+                Assert.AreEqual(Switch2ProUsbOwnedFeedbackQuiescenceOutcome.ProvenIncomplete,
+                    composition.Feedback.TryNeutralizeAndQuiesce(composition.Authority, 100).Outcome);
+                if (withSession)
+                    Assert.IsFalse(session.TryRetireWithoutWaiting(),
+                        "Session timer cleanup must not hide a blocking owner transaction acquisition.");
+            }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+            Assert.IsTrue(admission.Wait(500), "No new gate wait may delay input or bounded physical retirement.");
+        }
+        finally
+        {
+            composition.Lease.BlockWrite = false;
+            composition.Lease.AllowWrite.Set();
+            Assert.IsTrue(maintenance.Wait(1_000));
+            if (admission != null) Assert.IsTrue(admission.Wait(1_000));
+        }
+        Assert.AreEqual(ControllerFeedbackPumpDisposition.Delivered, maintenance.Result);
+        if (withSession) Assert.IsTrue(session.TryRetire());
+        Assert.AreEqual(Switch2ProUsbOwnedFeedbackQuiescenceOutcome.ExactNeutralAndQuiescent,
+            composition.Feedback.TryNeutralizeAndQuiesce(composition.Authority, 100).Outcome);
+        int reports = composition.Lease.ReportCount;
+        Assert.AreEqual(ControllerFeedbackPumpDisposition.None,
+            composition.Feedback.TryServiceRumbleMaintenance(now + 36_000, null));
+        Assert.AreEqual(reports, composition.Lease.ReportCount);
+    }
+
+    [TestMethod]
+    public void OrdinaryUsbSessionRetirementWaitsForMaintenanceThenAllowsReplacement()
+    {
+        var composition = CreateCommitted(ContainerA);
+        Assert.IsTrue(composition.Feedback.TryCreateVirtualFeedbackSession(
+            ControllerFeedbackSource.XboxOneVirtualDevice, out var session));
+        Assert.IsTrue(session.TryPublish(XboxWire(1, session.OwnershipEpoch, 20_000, 0, 0, 0)));
+        Assert.IsTrue(ControllerFeedbackClock.TryGetTimestampMicroseconds(out ulong now));
+        composition.Lease.BlockWrite = true;
+        var maintenance = Task.Run(() => composition.Feedback.TryServiceRumbleMaintenance(now + 12_000, null));
+        using var retirementStarted = new ManualResetEventSlim();
+        Task<bool> retirement = null;
+        try
+        {
+            Assert.IsTrue(composition.Lease.WriteEntered.Wait(1_000));
+            // ViiperOutDevice.Disconnect drops its session reference after one
+            // ordinary TryRetire call. A maintenance collision must not turn
+            // that call into a false return that strands activeSession.
+            retirement = Task.Run(() =>
+            {
+                retirementStarted.Set();
+                return session.TryRetire();
+            });
+            Assert.IsTrue(retirementStarted.Wait(1_000));
+            Assert.IsFalse(retirement.Wait(20), "Ordinary output teardown must serialize with the admitted write.");
+        }
+        finally
+        {
+            composition.Lease.BlockWrite = false;
+            composition.Lease.AllowWrite.Set();
+            Assert.IsTrue(maintenance.Wait(1_000));
+            if (retirement != null) Assert.IsTrue(retirement.Wait(1_000));
+        }
+        Assert.IsTrue(retirement.Result);
+        Assert.IsTrue(session.IsRetired);
+        Assert.IsFalse(composition.Feedback.RequiresRumbleMaintenance);
+        Assert.IsTrue(composition.Feedback.TryCreateVirtualFeedbackSession(
+            ControllerFeedbackSource.DualSenseVirtualDevice, out var replacement));
+        int reports = composition.Lease.ReportCount;
+        Assert.AreEqual(ControllerFeedbackPumpDisposition.None,
+            composition.Feedback.TryServiceRumbleMaintenance(now + 36_000, null));
+        Assert.AreEqual(reports, composition.Lease.ReportCount, "Retired source state must not cross into its successor.");
+        Assert.IsTrue(replacement.TryRetire());
+        Assert.AreEqual(Switch2ProUsbOwnedFeedbackQuiescenceOutcome.ExactNeutralAndQuiescent,
+            composition.Feedback.TryNeutralizeAndQuiesce(composition.Authority, 100).Outcome);
+    }
+
     [DataTestMethod]
     [DataRow(false)]
     [DataRow(true)]
@@ -806,38 +1048,72 @@ public sealed class Switch2ProUsbOwnedFeedbackActivationLifetimeTests
             Switch2ProUsbOwnedFeedbackActivationOutcome.Succeeded,
             composition.Feedback.TryCommitPrepared(credential, 0).Outcome);
         runtime.StartUpdate();
+        try
+        {
+            runtime.setRumble(rightLightFastMotor: 64, leftHeavySlowMotor: 128);
+            WaitForTransitions(1);
+            DecodeSustained(Transitions()[0], out var profileLeft, out var profileRight);
 
-        runtime.setRumble(rightLightFastMotor: 64,
-            leftHeavySlowMotor: 128);
-        Assert.AreEqual(1, composition.Lease.WriteCount);
-        DecodeSustained(composition.Lease.Reports[0],
-            out Switch2HdRumbleGroup profileLeft,
-            out Switch2HdRumbleGroup profileRight);
+            runtime.SetRumblePreview(lightMotorActive: true, lightMotorStrength: 200,
+                heavyMotorActive: true, heavyMotorStrength: 100);
+            WaitForTransitions(3);
+            var transitions = Transitions();
+            DecodeSustained(transitions[2], out var previewLeft, out var previewRight);
+            Assert.AreNotEqual(profileLeft, previewLeft);
+            Assert.AreNotEqual(profileRight, previewRight);
+            AssertNeutral(transitions[1]);
 
-        runtime.SetRumblePreview(lightMotorActive: true,
-            lightMotorStrength: 200, heavyMotorActive: true,
-            heavyMotorStrength: 100);
-        Assert.AreEqual(3, composition.Lease.WriteCount,
-            "Preview takeover must serialize the old owner's Stop and the new effect through the adopted writer.");
-        DecodeSustained(composition.Lease.Reports[2],
-            out Switch2HdRumbleGroup previewLeft,
-            out Switch2HdRumbleGroup previewRight);
-        Assert.AreNotEqual(profileLeft, previewLeft);
-        Assert.AreNotEqual(profileRight, previewRight);
+            runtime.ClearRumblePreview();
+            WaitForTransitions(5);
+            transitions = Transitions();
+            DecodeSustained(transitions[4], out var restoredLeft, out var restoredRight);
+            Assert.AreEqual(profileLeft, restoredLeft);
+            Assert.AreEqual(profileRight, restoredRight);
+            AssertNeutral(transitions[3]);
 
-        runtime.ClearRumblePreview();
-        Assert.AreEqual(5, composition.Lease.WriteCount);
-        DecodeSustained(composition.Lease.Reports[4],
-            out Switch2HdRumbleGroup restoredLeft,
-            out Switch2HdRumbleGroup restoredRight);
-        Assert.AreEqual(profileLeft, restoredLeft);
-        Assert.AreEqual(profileRight, restoredRight);
+            runtime.setRumble(rightLightFastMotor: 0, leftHeavySlowMotor: 0);
+            WaitForTransitions(6);
+            transitions = Transitions();
+            Assert.AreEqual(6, transitions.Count);
+            AssertNeutral(transitions[5]);
+        }
+        finally { runtime.StopUpdate(); }
 
-        runtime.setRumble(rightLightFastMotor: 0,
-            leftHeavySlowMotor: 0);
-        Assert.AreEqual(6, composition.Lease.WriteCount);
-        AssertReport(composition.Lease.Reports[5], expectedCounter: 5,
-            expectNeutral: true);
+        // Every physical keepalive still consumes exactly the next native counter.
+        for (int index = 0; index < composition.Lease.ReportCount; index++)
+        {
+            Assert.IsTrue(Switch2UsbHdRumbleCodec.TryDecodeProController(composition.Lease.ReportAt(index),
+                out byte counter, out _, out _, out _));
+            Assert.AreEqual((byte)(index & 0x0F), counter);
+        }
+
+        void WaitForTransitions(int expected) => Assert.IsTrue(SpinWait.SpinUntil(
+            () => Transitions().Count >= expected, 1_000), "Local ownership transition must finish through its output worker.");
+
+        List<byte[]> Transitions()
+        {
+            var transitions = new List<byte[]>();
+            Switch2HdRumbleGroup priorLeft = default, priorRight = default;
+            int count = composition.Lease.ReportCount;
+            for (int index = 0; index < count; index++)
+            {
+                byte[] report = composition.Lease.ReportAt(index);
+                Assert.IsTrue(Switch2UsbHdRumbleCodec.TryDecodeProController(report,
+                    out _, out var left, out var right, out _));
+                if (transitions.Count != 0 && left.Equals(priorLeft) && right.Equals(priorRight)) continue;
+                transitions.Add(report);
+                priorLeft = left;
+                priorRight = right;
+            }
+            return transitions;
+        }
+
+        static void AssertNeutral(byte[] report)
+        {
+            Assert.IsTrue(Switch2UsbHdRumbleCodec.TryDecodeProController(report,
+                out byte counter, out _, out _, out _));
+            AssertReport(report, counter, expectNeutral: true);
+        }
     }
 
     [TestMethod]

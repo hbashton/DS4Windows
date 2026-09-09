@@ -154,13 +154,18 @@ public sealed class Switch2RawStickCalibrationCollectorTests
     [DataTestMethod]
     [DataRow(Switch2ControllerModel.JoyCon2Left, Switch2StickSide.Left)]
     [DataRow(Switch2ControllerModel.JoyCon2Right, Switch2StickSide.Right)]
-    public void ProCounterCorrectionDoesNotBroadenJoyConCalibrationAdmission(
+    public void JoyConCounterDiscontinuityRetainsCalibrationSampleButNotDuplicateHostTime(
         Switch2ControllerModel model, Switch2StickSide side)
     {
         var ble = new Fixture(model, usb: false, side);
         Assert.IsTrue(ble.Collector.TryObserve(ble.Frame(300, 450, counter: 20)));
-        Assert.IsFalse(ble.Collector.TryObserve(ble.Frame(3700, 3450, counter: 19)));
-        Assert.AreEqual(0.0, ble.Collector.RotationProgress);
+        var reset = ble.Frame(3700, 3450, counter: 19);
+        Assert.AreEqual(Switch2CounterSequenceKind.BackwardOrOutOfOrder, reset.CounterSequence);
+        Assert.IsTrue(ble.Collector.TryObserve(reset));
+        Assert.IsTrue(ble.Collector.RotationProgress > 0);
+        double progress = ble.Collector.RotationProgress;
+        Assert.IsFalse(ble.Collector.TryObserve(reset), "Counter policy cannot bypass calibration's host-time fence.");
+        Assert.AreEqual(progress, ble.Collector.RotationProgress);
     }
 
     [TestMethod]

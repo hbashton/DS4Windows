@@ -1616,7 +1616,7 @@ internal sealed class Switch2BluetoothRuntimeOwner :
             Switch2BluetoothInputEndReason.Disconnected;
         int remaining = RemainingMilliseconds(deadline);
         if (!disconnected && feedbackLifetime != null &&
-            (remaining <= 0 || !feedbackLifetime.TryStopAndRetire(
+            (remaining <= 0 || !feedbackLifetime.TryStopAndRetireUntil(deadline,
                 maxAttempts: Math.Min(3, Math.Max(1, remaining / 100)))))
         {
             failure = new Switch2BluetoothRuntimeStopFailure(
@@ -1695,7 +1695,7 @@ internal sealed class Switch2BluetoothRuntimeOwner :
         // lease's complete native release first, then retire locally without an
         // ACK. Virtual input still must publish/commit its terminal neutral.
         if (disconnected && feedbackLifetime != null &&
-            !feedbackLifetime.TryRetireDisconnectedTarget())
+            !feedbackLifetime.TryRetireDisconnectedTargetUntil(deadline))
         {
             failure = new Switch2BluetoothRuntimeStopFailure(
                 Switch2BluetoothRuntimeStopFailureKind.TerminalDeliveryRejected,

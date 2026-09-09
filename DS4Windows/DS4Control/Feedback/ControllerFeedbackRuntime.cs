@@ -522,15 +522,35 @@ namespace DS4Windows
             }
         }
 
+        internal bool HasPendingOutput(ControllerFeedbackWriterLease writer)
+        {
+            lock (syncRoot)
+            {
+                return IsCurrentWriter(writer) && hasEvent &&
+                    writer.CompletedEventRevision != currentEventRevision;
+            }
+        }
+
+        internal bool RequiresOutputMaintenance(ControllerFeedbackWriterLease writer)
+        {
+            lock (syncRoot)
+            {
+                return IsCurrentWriter(writer) && hasEvent &&
+                    (currentEvent.Disposition == ControllerFeedbackDeliveryDisposition.Frame &&
+                         currentEvent.Frame.Command == ControllerFeedbackCommand.Apply ||
+                     writer.CompletedEventRevision != currentEventRevision);
+            }
+        }
+
         /// <summary>
-        /// Re-presents the newest canonical frame only when its downstream
-        /// renderer changed. Ordinary lease renewals remain deduplicated; this
-        /// explicit call is reserved for a profile-controlled translation
-        /// policy transition. It never fabricates a frame, owner, or epoch.
+        /// Re-presents the newest canonical frame for an explicit downstream
+        /// renderer change or transport-owned finite-packet maintenance.
+        /// Ordinary lease renewals remain deduplicated. This never fabricates
+        /// a frame, owner, epoch, or fresh lease for an expired source.
         /// </summary>
         internal bool TryRefreshCurrentPresentation(
             ControllerFeedbackWriterLease writer, ulong nowMicroseconds,
-            bool allowNoFrame = false)
+            bool allowNoFrame = false, bool applyOnly = false)
         {
             lock (syncRoot)
             {
@@ -553,6 +573,13 @@ namespace DS4Windows
                         ControllerFeedbackDeliveryDisposition.Stop);
                 }
 
+                // Switch 2's finite physical packets need a sustained Apply
+                // refresh. Neutral/Stop stay one-shot, and Reevaluate above
+                // remains authoritative for external lease expiry.
+                if (applyOnly && owner.Frame.Command != ControllerFeedbackCommand.Apply)
+                {
+                    return allowNoFrame;
+                }
                 if (writer.CompletedEventRevision == currentEventRevision)
                 {
                     SetFrameEvent();

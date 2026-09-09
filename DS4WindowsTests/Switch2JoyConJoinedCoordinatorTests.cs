@@ -131,15 +131,17 @@ public class Switch2JoyConJoinedCoordinatorTests
     }
 
     [TestMethod]
-    public void CounterTimestampAndDescriptorChangesFailWithoutMutation()
+    public void CounterResetIsAdmittedButTimestampAndDescriptorChangesFailWithoutMutation()
     {
         CreateJoinedState(out var joined, out var leftDescriptor,
             out var rightDescriptor);
 
         Switch2CanonicalInputFrame backward = CreateBackwardCommonFrame(
             leftDescriptor, 110, 90, 1_010, 1_011);
-        AssertAdmissionRejected(joined, backward,
-            Switch2JoyConProfileInputFailure.BackwardOrOutOfOrder);
+        Assert.IsTrue(Process(joined, Switch2JoyConPairEvent.Input(PairEpoch, backward),
+            out var reset, out var resetResult));
+        Assert.AreEqual(90u, reset.MapperState.LastLeftCounter);
+        Assert.IsTrue(resetResult.HasProfileFrame);
 
         Switch2CanonicalInputFrame staleTimestamp = CreateCommonFrame(
             rightDescriptor, 201, 999);

@@ -199,6 +199,108 @@ public sealed class SwitchProCalibrationProtocolTests
         Assert.IsNull(Field<object>(device, "rumbleOutput"));
     }
 
+    [DataTestMethod]
+    [DataRow(0x603D, 0)]
+    [DataRow(0x603D, 1)]
+    [DataRow(0x603D, 2)]
+    [DataRow(0x603D, 3)]
+    [DataRow(0x6046, 0)]
+    [DataRow(0x6046, 1)]
+    [DataRow(0x6046, 2)]
+    [DataRow(0x6046, 3)]
+    [DataRow(0x6020, 0)]
+    [DataRow(0x6020, 1)]
+    [DataRow(0x6020, 2)]
+    [DataRow(0x6020, 3)]
+    public void BluetoothCalibrationFailureCannotReannounceRemovedController(
+        int factoryAddress, int failureKind)
+    {
+        // #68 reports a Bluetooth Switch Pro null reference immediately after
+        // virtual-output association. Exercise actual StartUpdate through each
+        // calibration stage, not just an isolated calibration decoder call.
+        var device = CalibratedDevice(user: false);
+        device.AutoAcknowledgeCommands = true;
+        device.TransformSpiReply = (address, reply) =>
+        {
+            if (address != factoryAddress) return reply;
+            switch (failureKind)
+            {
+                case 0: return null; // no reply
+                case 1: return reply[..19]; // missing SPI payload
+                case 2: reply[13] = 0; return reply; // negative acknowledgement
+                case 3: reply[15] ^= 1; return reply; // different SPI address
+                default: throw new AssertFailedException("Unknown calibration failure fixture.");
+            }
+        };
+
+        // Use the production post-preparation publication guard, but fake its
+        // removal subscriber: no service constructor, virtual pad, or HID IO.
+        var service = (ControlService)RuntimeHelpers.GetUninitializedObject(typeof(ControlService));
+        service.DS4Controllers = new DS4Device[Global.MAX_DS4_CONTROLLER_COUNT];
+        service.DS4Controllers[0] = device;
+        int removals = 0;
+        int publications = 0;
+        device.Removal += (_, _) =>
+        {
+            removals++;
+            service.DS4Controllers[0] = null;
+        };
+        service.HotplugController += (_, _, _) => publications++;
+
+        device.StartUpdate();
+        service.PublishPreparedHotplug(device, 0);
+
+        Assert.AreEqual(1, removals);
+        Assert.AreEqual(0, publications);
+        Assert.IsFalse(device.IsAlive());
+        Assert.IsFalse(device.HasInputWorker);
+        Assert.IsNull(Field<object>(device, "rumbleOutput"));
+        Assert.AreEqual(3, device.SpiAddresses.Count(address => address == factoryAddress));
+        Assert.IsFalse(device.Writes.Any(report => report[0] == 0x80),
+            "Bluetooth initialization must not depend on USB setup commands.");
+    }
+
+    [DataTestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void BluetoothInitializationPreservesValidUserOrFactoryCalibration(bool user)
+    {
+        var device = CalibratedDevice(user);
+        device.AutoAcknowledgeCommands = true;
+        device.SetOperational();
+
+        Assert.IsTrue(device.IsAlive());
+        Assert.IsFalse(device.HasInputWorker);
+        Assert.IsFalse(device.Writes.Any(report => report[0] == 0x80));
+        Assert.AreEqual(user ? 2000 : 1960,
+            (int)Field<SwitchProDevice.StickAxisData>(device, "leftStickXData").mid);
+        Assert.AreEqual(user ? 2100 : 2060,
+            (int)Field<SwitchProDevice.StickAxisData>(device, "rightStickXData").mid);
+        Assert.IsTrue(Field<double[]>(device, "accelCoeff").All(double.IsFinite));
+        Assert.IsTrue(Field<double[]>(device, "gyroCoeff").All(double.IsFinite));
+    }
+
+    [DataTestMethod]
+    [DataRow(0x603D)]
+    [DataRow(0x6046)]
+    [DataRow(0x6020)]
+    public void BluetoothInitializationRecoversTransientFactoryReadFailure(int factoryAddress)
+    {
+        var device = CalibratedDevice(user: false);
+        device.AutoAcknowledgeCommands = true;
+        int failedStageReads = 0;
+        device.TransformSpiReply = (address, reply) =>
+            address == factoryAddress && failedStageReads++ == 0 ? null : reply;
+
+        device.SetOperational();
+
+        Assert.IsTrue(device.IsAlive());
+        Assert.IsFalse(device.HasInputWorker);
+        Assert.AreEqual(2, device.SpiAddresses.Count(address => address == factoryAddress));
+        Assert.IsTrue(Field<double[]>(device, "accelCoeff").All(double.IsFinite));
+        Assert.IsTrue(Field<double[]>(device, "gyroCoeff").All(double.IsFinite));
+    }
+
     [TestMethod]
     public void UsbInitializationUsesBoundedTransportSeamAndKeepsHandshakeOrder()
     {
@@ -377,6 +479,7 @@ public sealed class SwitchProCalibrationProtocolTests
         internal readonly List<uint> ReadTimeouts = new();
         internal readonly List<ushort> SpiAddresses = new();
         internal Func<ushort, byte, byte[]> SpiData;
+        internal Func<ushort, byte[], byte[]> TransformSpiReply;
         internal Func<ushort, bool> RejectAddress;
         internal byte[] RepeatReply;
         internal int? ForcedReadResult;
@@ -409,7 +512,11 @@ public sealed class SwitchProCalibrationProtocolTests
                 if (!AcceptWrite || RejectAddress?.Invoke(address) == true)
                     return false;
                 if (SpiData != null)
-                    Replies.Enqueue(SpiReply(address, SpiData(address, report[15])));
+                {
+                    byte[] reply = SpiReply(address, SpiData(address, report[15]));
+                    if (TransformSpiReply != null) reply = TransformSpiReply(address, reply);
+                    if (reply != null) Replies.Enqueue(reply);
+                }
             }
             else if (AutoAcknowledgeCommands && report[0] == 0x01 && AcceptWrite)
             {

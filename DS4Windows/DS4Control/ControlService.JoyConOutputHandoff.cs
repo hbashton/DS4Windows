@@ -8,6 +8,11 @@ public partial class ControlService
 {
     private JoyConOutputHandoff joyConOutputHandoff;
 
+    internal static bool IsRetainedProfileLinked(DS4Device successor, string retainedProfile) =>
+        successor?.ProfileLinkId is string successorId && retainedProfile != null &&
+        containsLinkedProfile(successorId) &&
+        string.Equals(getLinkedProfile(successorId), retainedProfile, StringComparison.Ordinal);
+
     internal ISwitch2JoyConOutputHandoff BeginJoyConOutputHandoff(InputControllerSlotToken token)
     {
         JoyConOutputHandoff handoff;

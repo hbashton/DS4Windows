@@ -785,10 +785,10 @@ public class Switch2JoyConProfileInputTests
         Assert.AreEqual(11u, next.LastLeftCounter);
 
         Switch2CanonicalInputFrame replay = CreateCommonFrame(descriptor,
-            10, 0, 0x800, 0x800, 120);
+            10, 0, 0x800, 0x800, 109);
         Assert.IsFalse(Switch2JoyConProfileInputMapper.TryMapStandalone(next,
             replay, out _, out _, out var replayFailure));
-        Assert.AreEqual(Switch2JoyConProfileInputFailure.BackwardOrOutOfOrder,
+        Assert.AreEqual(Switch2JoyConProfileInputFailure.StaleObservation,
             replayFailure);
     }
 
@@ -911,7 +911,7 @@ public class Switch2JoyConProfileInputTests
     }
 
     [TestMethod]
-    public void MapperRejectsEpochLifetimeTimestampAndCounterRegressions()
+    public void MapperRejectsEpochLifetimeAndTimestampButAcceptsCounterReset()
     {
         Switch2InputSessionDescriptor leftDescriptor = CreateCommonDescriptor(
             Switch2ControllerModel.JoyCon2Left, 1, 7);
@@ -938,8 +938,9 @@ public class Switch2JoyConProfileInputTests
 
         Switch2JoyConPairSnapshot backward = CreateSnapshot(44,
             leftDescriptor, rightDescriptor, 90, 201, 1002, 1002);
-        AssertRejected(accepted, backward,
-            Switch2JoyConProfileInputFailure.BackwardOrOutOfOrder);
+        Assert.IsTrue(Switch2JoyConProfileInputMapper.TryMapJoined(accepted,
+            backward, out var afterReset, out _, out var resetFailure), resetFailure.ToString());
+        Assert.AreEqual(90u, afterReset.LastLeftCounter);
 
         Switch2InputSessionDescriptor newLeftGeneration =
             CreateCommonDescriptor(Switch2ControllerModel.JoyCon2Left, 2, 1);
@@ -1220,7 +1221,7 @@ public class Switch2JoyConProfileInputTests
     }
 
     [TestMethod]
-    public void MapperCounterFenceAcceptsWrapAndRejectsPreWrapReplay()
+    public void MapperArrivalFenceAcceptsWrapAndRejectsOlderHostObservation()
     {
         Switch2InputSessionDescriptor descriptor = CreateCommonDescriptor(
             Switch2ControllerModel.JoyCon2Left, 3, 4);
@@ -1240,11 +1241,11 @@ public class Switch2JoyConProfileInputTests
         Assert.AreEqual(0u, afterWrap.LastLeftCounter);
 
         Switch2CanonicalInputFrame replay = CreateCommonFrame(descriptor,
-            0xFFFFFFF0, 0, 0x800, 0x800, 102);
+            0xFFFFFFF0, 0, 0x800, 0x800, 100);
         Assert.IsFalse(Switch2JoyConProfileInputMapper.TryMapStandalone(
             afterWrap, replay, out var unchanged, out _, out var failure));
         Assert.AreEqual(
-            Switch2JoyConProfileInputFailure.BackwardOrOutOfOrder, failure);
+            Switch2JoyConProfileInputFailure.StaleObservation, failure);
         Assert.AreEqual(afterWrap.LastLeftCounter,
             unchanged.LastLeftCounter);
     }

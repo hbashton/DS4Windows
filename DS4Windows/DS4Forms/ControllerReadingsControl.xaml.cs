@@ -51,7 +51,9 @@ namespace DS4WinWPF.DS4Forms
         private int profileDeviceNum;
         private event EventHandler DeviceNumChanged;
         private NonFormTimer readingTimer;
-        private bool useTimer;
+        private volatile bool useTimer;
+        private int readingInProgress;
+        private readonly object readingTimerGate = new();
         private double lsDeadX;
         private double lsDeadY;
         private double rsDeadX;
@@ -203,8 +205,10 @@ namespace DS4WinWPF.DS4Forms
 
         private LatencyWarnMode warnMode;
         private LatencyWarnMode prevWarnMode;
-        private DS4State baseState = new DS4State();
-        private DS4State interState = new DS4State();
+        private readonly DS4StateOwnedSnapshot baseSnapshot = new();
+        private readonly DS4StateOwnedSnapshot interSnapshot = new();
+        private DS4State baseState => baseSnapshot.State;
+        private DS4State interState => interSnapshot.State;
         private DS4StateExposed exposeState;
         private const int CANVAS_WIDTH = 130;
         private const int CANVAS_MIDPOINT = CANVAS_WIDTH / 2;
@@ -242,7 +246,7 @@ namespace DS4WinWPF.DS4Forms
 
         private void ControllerReadingsControl_DeviceNumChanged(object sender, EventArgs e)
         {
-            inputContNum.Content = $"#{deviceNum + 1}";
+            inputContNum.Content = deviceNum >= 0 ? $"#{deviceNum + 1}" : "—";
         }
 
         private void ChangeSixAxisDeadControls(object sender, EventArgs e)
@@ -294,52 +298,76 @@ namespace DS4WinWPF.DS4Forms
 
         public void EnableControl(bool state)
         {
-            if (state)
+            IsEnabled = state;
+            lock (readingTimerGate)
             {
-                IsEnabled = true;
-                useTimer = true;
-                readingTimer.Elapsed += ControllerReadingTimer_Elapsed;
-                readingTimer.Start();
-            }
-            else
-            {
-                IsEnabled = false;
-                useTimer = false;
-                readingTimer.Elapsed -= ControllerReadingTimer_Elapsed;
-                readingTimer.Stop();
+                if (useTimer == state)
+                    return;
+                useTimer = state;
+                if (state)
+                {
+                    readingTimer.Elapsed += ControllerReadingTimer_Elapsed;
+                    readingTimer.Start();
+                }
+                else
+                {
+                    readingTimer.Elapsed -= ControllerReadingTimer_Elapsed;
+                    readingTimer.Stop();
+                }
             }
         }
 
         private void ControllerReadingTimer_Elapsed(object sender, System.Timers.ElapsedEventArgs e)
         {
-            readingTimer.Stop();
+            if (System.Threading.Interlocked.CompareExchange(ref readingInProgress, 1, 0) != 0)
+                return;
+            lock (readingTimerGate)
+                readingTimer.Stop();
+            try
+            {
+                if (useTimer)
+                    UpdateReadings();
+            }
+            finally
+            {
+                System.Threading.Volatile.Write(ref readingInProgress, 0);
+                lock (readingTimerGate)
+                {
+                    if (useTimer)
+                        readingTimer.Start();
+                }
+            }
+        }
 
-            DS4Device ds = Program.rootHub.DS4Controllers[deviceNum];
+        private void UpdateReadings()
+        {
+            int inputIndex = deviceNum;
+            int profileIndex = profileDeviceNum;
+            DS4Device ds = (uint)inputIndex < (uint)Program.rootHub.DS4Controllers.Length
+                ? Program.rootHub.DS4Controllers[inputIndex] : null;
             if (ds != null)
             {
                 // Don't bother waiting for UI thread to grab references
                 //DS4StateExposed tmpexposeState = Program.rootHub.ExposedState[deviceNum];
-                DS4State tmpbaseState = Program.rootHub.getDS4State(deviceNum);
-                DS4State tmpinterState = Program.rootHub.getDS4StateTemp(deviceNum);
+                DS4State tmpbaseState = Program.rootHub.getDS4State(inputIndex);
+                DS4State tmpinterState = Program.rootHub.getDS4StateTemp(inputIndex);
                 long cntCalibrating =
                     ds.ContinuousGyroCalibrationElapsedMilliseconds;
 
-                // Wait for controller to be in a wait period
-                ds.ReadWaitEv.Wait();
-                ds.ReadWaitEv.Reset();
+                if (!ds.TryCopyControllerReadings(tmpbaseState, tmpinterState,
+                        baseSnapshot, interSnapshot))
+                    return;
 
-                // Make copy of current state values for UI thread
-                tmpbaseState.CopyTo(baseState);
-                tmpinterState.CopyTo(interState);
-
-                if (deviceNum != profileDeviceNum)
-                    Mapping.SetCurveAndDeadzone(profileDeviceNum, baseState, interState, ds);
-
-                // Done with copying. Allow input thread to resume
-                ds.ReadWaitEv.Set();
+                // Preview mapping and WPF work use owned motion copies, after
+                // releasing publication ownership, never the input buffers.
+                if (inputIndex != profileIndex)
+                    Mapping.SetCurveAndDeadzone(profileIndex, baseState, interState, ds);
 
                 Dispatcher.Invoke(() =>
                 {
+                    if (!useTimer || inputIndex != deviceNum || profileIndex != profileDeviceNum ||
+                        !ReferenceEquals(ds, Program.rootHub.DS4Controllers[inputIndex]))
+                        return;
                     int x = baseState.LX;
                     int y = baseState.LY;
 
@@ -439,10 +467,6 @@ namespace DS4WinWPF.DS4Forms
                 });
             }
 
-            if (useTimer)
-            {
-                readingTimer.Start();
-            }
         }
 
         private void UpdateCoordLabels(DS4State inState, DS4State mapState,

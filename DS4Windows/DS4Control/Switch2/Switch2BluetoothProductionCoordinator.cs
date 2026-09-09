@@ -1077,6 +1077,10 @@ internal sealed partial class Switch2BluetoothProductionCoordinator
                 return Switch2BluetoothWindowsAssociationResult.Failed(
                     Switch2BluetoothWindowsAssociationFailure.RuntimePreparationRejected);
             }
+            Switch2InputFailureDiagnostics.Observe(owner, ReportDiagnostic);
+            if (lease.PersistentPeerId.IsValid &&
+                !owner.RuntimeDevice.TryBindProfileIdentity(lease.PersistentPeerId))
+                diagnostic?.Invoke("Switch 2 Pro local profile ID could not bind; profile linking is unavailable for this connection.");
             if (magnetometerCalibrationStore != null &&
                 lease.PersistentPeerId.IsValid &&
                 !owner.RuntimeDevice.TryBindMagnetometerCalibrationPersistence(
@@ -1562,6 +1566,9 @@ internal sealed partial class Switch2BluetoothProductionCoordinator
                 Switch2JoyConPairActivationFailure.RuntimeRejected);
         }
         left.RuntimeOwnerHoldsLease = right.RuntimeOwnerHoldsLease = true;
+        Switch2InputFailureDiagnostics.Observe(owner, ReportDiagnostic);
+        if (!owner.RuntimeDevice.TryBindProfileIdentity(left.PeerId, right.PeerId))
+            diagnostic?.Invoke("Switch 2 joined Joy-Con local profile ID could not bind; profile linking is unavailable for this connection.");
         if (magnetometerCalibrationStore != null &&
             !owner.RuntimeDevice.TryBindMagnetometerCalibrationPersistence(
                 magnetometerCalibrationStore, left.PeerId, right.PeerId))
@@ -1671,6 +1678,12 @@ internal sealed partial class Switch2BluetoothProductionCoordinator
                 Switch2JoyConStandaloneActivationFailure.RuntimeRejected);
         }
         pending.RuntimeOwnerHoldsLease = true;
+        Switch2InputFailureDiagnostics.Observe(owner, ReportDiagnostic);
+        bool isLeftIdentity = pending.Model == Switch2ControllerModel.JoyCon2Left;
+        if (!owner.RuntimeDevice.TryBindProfileIdentity(
+                isLeftIdentity ? pending.PeerId : default,
+                isLeftIdentity ? default : pending.PeerId))
+            diagnostic?.Invoke("Switch 2 standalone Joy-Con local profile ID could not bind; profile linking is unavailable for this connection.");
         if (magnetometerCalibrationStore != null)
         {
             bool left = pending.Model == Switch2ControllerModel.JoyCon2Left;

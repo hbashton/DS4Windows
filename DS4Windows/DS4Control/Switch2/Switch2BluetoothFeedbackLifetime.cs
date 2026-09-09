@@ -110,6 +110,7 @@ internal sealed class Switch2VirtualFeedbackSession
     private bool terminalBrokerStop;
     private bool disconnectedRetired;
     private bool active = true;
+    private bool nonBlockingPhysicalRetirement;
 
     internal Switch2VirtualFeedbackSession(
         ISwitch2VirtualFeedbackSessionOwner owner,
@@ -124,6 +125,10 @@ internal sealed class Switch2VirtualFeedbackSession
 
     internal bool WasRetiredDisconnected => Volatile.Read(ref disconnectedRetired);
     internal bool IsRetired => !Volatile.Read(ref active) || WasRetiredDisconnected;
+    // Only read by the owner during TryRetireSession, with this session's
+    // gate already held. Output-device teardown keeps serialized admission;
+    // an outer physical-lifetime attempt must return promptly on contention.
+    internal bool NonBlockingPhysicalRetirement => nonBlockingPhysicalRetirement;
 
     internal string DescribeWirePublication()
     {
@@ -477,6 +482,52 @@ internal sealed class Switch2VirtualFeedbackSession
             Volatile.Write(ref active, false);
         }
         return true;
+    }
+
+    // Physical teardown must not wait for a session producer that is already
+    // queued behind a bounded maintenance write. Ordinary session retirement
+    // keeps its existing serialized behavior; the owner can retry this entry.
+    internal bool TryRetireWithoutWaiting()
+    {
+        if (!Monitor.TryEnter(gate)) return false;
+        try
+        {
+            nonBlockingPhysicalRetirement = true;
+            return TryRetire();
+        }
+        finally
+        {
+            nonBlockingPhysicalRetirement = false;
+            Monitor.Exit(gate);
+        }
+    }
+
+    internal bool TryRetireDisconnectedTargetWithoutWaiting()
+    {
+        if (!Monitor.TryEnter(gate)) return false;
+        try
+        {
+            nonBlockingPhysicalRetirement = true;
+            RetireDisconnectedTarget();
+            return true;
+        }
+        finally
+        {
+            nonBlockingPhysicalRetirement = false;
+            Monitor.Exit(gate);
+        }
+    }
+
+    // Cold owners acquire the producer gate before their physical transaction
+    // gate, just like ordinary publication. The callback retains both locks
+    // through retirement, so a delayed producer cannot enter between them.
+    internal bool TryRunRetirementOperation(int timeoutMilliseconds,
+        Func<bool> operation)
+    {
+        if (timeoutMilliseconds < 0 || operation == null ||
+            !Monitor.TryEnter(gate, timeoutMilliseconds)) return false;
+        try { return operation(); }
+        finally { Monitor.Exit(gate); }
     }
 
     // Only the physical lifetime owner calls this after exact disconnect/drain
@@ -912,6 +963,45 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
     ISwitch2VirtualFeedbackSessionOwner
 {
     private readonly object gate = new();
+    // Covers publish/configure/stage/pump as one output transaction. The
+    // lifecycle gate stays short; no session callback is made under this
+    // fence during physical retirement (session -> transaction is the order).
+    private readonly object rumbleTransactionGate = new();
+    // Only read/written under the transaction gate. Ordinary session teardown
+    // retains its existing retry policy; a cold physical owner supplies one
+    // deadline for admission AND all subsequent terminal-write attempts.
+    private long coldRetirementDeadline = long.MaxValue;
+    private Action rumbleMaintenanceWake;
+
+    internal void SetRumbleMaintenanceWake(Action wake)
+    {
+        Volatile.Write(ref rumbleMaintenanceWake, wake);
+        if (wake != null && RequiresRumbleMaintenance) wake();
+    }
+
+    internal bool CanServiceRumbleMaintenance
+    {
+        get { lock (gate) return activated && !stopping && !retired; }
+    }
+
+    internal bool RequiresRumbleMaintenance
+    {
+        get
+        {
+            if (!CanServiceRumbleMaintenance) return false;
+            return pump.HasPendingOutput ||
+                (pump.RequiresOutputMaintenance && sink.NeedsSustainedRefresh);
+        }
+    }
+
+    private bool WakeAfterRumblePublication(bool accepted)
+    {
+        // A retained canonical claim still needs service when its immediate
+        // physical receipt was unsuccessful. Preserve that receipt for callers.
+        if (RequiresRumbleMaintenance)
+            Volatile.Read(ref rumbleMaintenanceWake)?.Invoke();
+        return accepted;
+    }
     private readonly Switch2ControllerModel model;
     private readonly Switch2ControllerModel secondaryModel;
     private readonly ulong deviceGeneration;
@@ -1139,6 +1229,16 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
         ulong nowMicroseconds, out ControllerFeedbackDelivery delivery)
     {
         delivery = default;
+        if (!Monitor.TryEnter(rumbleTransactionGate))
+            return ControllerFeedbackPumpDisposition.Busy;
+        try { return TryPumpOnceCore(nowMicroseconds, out delivery); }
+        finally { Monitor.Exit(rumbleTransactionGate); }
+    }
+
+    private ControllerFeedbackPumpDisposition TryPumpOnceCore(
+        ulong nowMicroseconds, out ControllerFeedbackDelivery delivery)
+    {
+        delivery = default;
         lock (gate)
         {
             if (!activated || stopping || retired)
@@ -1148,6 +1248,32 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
         }
 
         return pump.PumpOnce(nowMicroseconds, sink, out delivery);
+    }
+
+    internal ControllerFeedbackPumpDisposition TryServiceRumbleMaintenance(
+        ulong nowMicroseconds, Action<ulong> renewLocalState)
+    {
+        if (!Monitor.TryEnter(rumbleTransactionGate))
+            return ControllerFeedbackPumpDisposition.Busy;
+        try
+        {
+            lock (gate)
+            {
+                if (!activated || stopping || retired)
+                    return ControllerFeedbackPumpDisposition.None;
+            }
+            renewLocalState?.Invoke(nowMicroseconds);
+            lock (gate)
+            {
+                if (!activated || stopping || retired)
+                    return ControllerFeedbackPumpDisposition.None;
+            }
+            if (!pump.TryRefreshCurrentPresentation(nowMicroseconds,
+                    allowNoFrame: true, applyOnly: true))
+                return ControllerFeedbackPumpDisposition.Busy;
+            return pump.PumpOnce(nowMicroseconds, sink.MaintenanceSink, out _);
+        }
+        finally { Monitor.Exit(rumbleTransactionGate); }
     }
 
     /// <summary>
@@ -1179,6 +1305,22 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
         in ControllerFeedbackActuatorState state,
         in Switch2HdRumbleGroup left,
         in Switch2HdRumbleGroup right,
+        ControllerFeedbackPublicationOrigin origin,
+        Switch2HdRumbleFeedbackFidelity fidelity)
+    {
+        if (!Monitor.TryEnter(rumbleTransactionGate)) return false;
+        try
+        {
+            return WakeAfterRumblePublication(TryPublishNativeLocalEffectAndPumpCore(
+                lane, state, left, right, origin, fidelity));
+        }
+        finally { Monitor.Exit(rumbleTransactionGate); }
+    }
+
+    private bool TryPublishNativeLocalEffectAndPumpCore(
+        ControllerFeedbackStateLanePump.Lane lane,
+        in ControllerFeedbackActuatorState state,
+        in Switch2HdRumbleGroup left, in Switch2HdRumbleGroup right,
         ControllerFeedbackPublicationOrigin origin,
         Switch2HdRumbleFeedbackFidelity fidelity)
     {
@@ -1295,7 +1437,7 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
         Switch2VirtualFeedbackSession session;
         lock (gate)
         {
-            if (stopping || retired || activated)
+            if (retired || activated)
             {
                 return false;
             }
@@ -1303,18 +1445,23 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
             session = activeSession;
         }
 
-        if (session != null && !session.TryRetire())
+        if (session != null && !session.TryRetireWithoutWaiting())
         {
             return false;
         }
-        bool complete = pump.SealPublications() &&
-            pump.TryStopAndRetire(0, sink, maxAttempts: 0) &&
-            pump.IsRetired && sink.TryRetire() && sink.IsRetired;
-        lock (gate)
+        if (!Monitor.TryEnter(rumbleTransactionGate)) return false;
+        try
         {
-            retired = complete;
+            bool complete = pump.SealPublications() &&
+                pump.TryStopAndRetire(0, sink, maxAttempts: 0) &&
+                pump.IsRetired && sink.TryRetire() && sink.IsRetired;
+            lock (gate)
+            {
+                retired = complete;
+            }
+            return complete;
         }
-        return complete;
+        finally { Monitor.Exit(rumbleTransactionGate); }
     }
 
     internal bool TryRetireDisconnectedTarget()
@@ -1333,16 +1480,123 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
             session = activeSession;
         }
         if (!pump.SealPublications()) return false;
-        session?.RetireDisconnectedTarget();
-        if (!pump.TryRetireDisconnectedTarget() || !sink.TryRetireDisconnectedTarget())
-            return false;
+        if (session != null && !session.TryRetireDisconnectedTargetWithoutWaiting()) return false;
+        if (!Monitor.TryEnter(rumbleTransactionGate)) return false;
+        try
+        {
+            if (!pump.TryRetireDisconnectedTarget() || !sink.TryRetireDisconnectedTarget())
+                return false;
+            lock (gate)
+            {
+                activeSession = null;
+                retired = true;
+                lastRetirementFailure = Switch2BluetoothFeedbackRetirementFailure.None;
+            }
+            return true;
+        }
+        finally { Monitor.Exit(rumbleTransactionGate); }
+    }
+
+    // These cold lifecycle entries use an absolute Environment.TickCount64
+    // deadline. Immediate entries below deliberately remain nonblocking.
+    internal bool TryStopAndRetireUntil(long deadline, int maxAttempts) =>
+        TryRunColdRetirement(deadline, maxAttempts,
+            () => TryStopAndRetire(maxAttempts));
+
+    internal bool TryRetireDisconnectedTargetUntil(long deadline)
+    {
+        if (joinedPair || disconnectedOutputProof == null ||
+            !disconnectedOutputProof.IsDisconnectedAndReleased(model,
+                deviceGeneration, transportGeneration)) return false;
+        return TryRunColdRetirement(deadline, 1,
+            TryRetireDisconnectedTarget, requireActivated: false);
+    }
+
+    internal bool TryStopJoinedAfterPhysicalLossUntil(long deadline,
+        int maxAttempts)
+    {
+        if (!joinedPair || joinedPhysicalWriter == null ||
+            !(joinedLeftReleaseProof?.IsDisconnectedAndReleased(
+                Switch2ControllerModel.JoyCon2Left, playerLedDeviceGeneration,
+                playerLedTransportGeneration) == true ||
+              joinedRightReleaseProof?.IsDisconnectedAndReleased(
+                Switch2ControllerModel.JoyCon2Right, secondaryDeviceGeneration,
+                secondaryTransportGeneration) == true)) return false;
+        return TryRunColdRetirement(deadline, maxAttempts,
+            () => TryStopJoinedAfterPhysicalLoss(maxAttempts));
+    }
+
+    private bool TryRunColdRetirement(long deadline, int maxAttempts,
+        Func<bool> operation, bool requireActivated = true)
+    {
+        Switch2VirtualFeedbackSession session;
         lock (gate)
         {
-            activeSession = null;
-            retired = true;
-            lastRetirementFailure = Switch2BluetoothFeedbackRetirementFailure.None;
+            if (retired) return true;
+            if ((requireActivated && !activated) || maxAttempts <= 0)
+            {
+                lastRetirementFailure = Switch2BluetoothFeedbackRetirementFailure.InvalidState;
+                return false;
+            }
+            // Fence future producer/maintenance admission before waiting. A
+            // previously admitted write still owns its resources until it ends.
+            stopping = true;
+            session = activeSession;
         }
-        return true;
+
+        bool RunUnderTransaction()
+        {
+            int remaining = RemainingColdRetirementMilliseconds(deadline);
+            if (remaining == 0 ||
+                !Monitor.TryEnter(rumbleTransactionGate, remaining)) return false;
+            long previousDeadline = coldRetirementDeadline;
+            try
+            {
+                coldRetirementDeadline = Math.Min(previousDeadline, deadline);
+                return RemainingColdRetirementMilliseconds(deadline) > 0 &&
+                    operation();
+            }
+            finally
+            {
+                coldRetirementDeadline = previousDeadline;
+                Monitor.Exit(rumbleTransactionGate);
+            }
+        }
+
+        int sessionWait = RemainingColdRetirementMilliseconds(deadline);
+        bool complete = sessionWait > 0 && (session == null ?
+            RunUnderTransaction() :
+            session.TryRunRetirementOperation(sessionWait, RunUnderTransaction));
+        if (!complete)
+        {
+            lock (gate)
+            {
+                if (lastRetirementFailure == Switch2BluetoothFeedbackRetirementFailure.None)
+                    lastRetirementFailure = Switch2BluetoothFeedbackRetirementFailure.TerminalDeliveryRejected;
+            }
+        }
+        return complete;
+    }
+
+    private static int RemainingColdRetirementMilliseconds(long deadline)
+    {
+        long now = Environment.TickCount64;
+        return deadline <= now ? 0 : (int)Math.Min(deadline - now, int.MaxValue);
+    }
+
+    private int RemainingColdRetirementAttempts(int requested,
+        int physicalTargetCount = -1)
+    {
+        if (coldRetirementDeadline == long.MaxValue) return requested;
+        // The canonical Windows Bluetooth lease bounds each physical write at
+        // 100 ms; a joined write can submit both halves serially. Do not start a
+        // terminal attempt unless its complete transport budget still fits.
+        int attemptMilliseconds = physicalTargetCount >= 0 ?
+            physicalTargetCount * 100 : joinedPair ? 200 : 100;
+        if (attemptMilliseconds == 0) return requested;
+        return Math.Min(requested,
+            RemainingColdRetirementMilliseconds(coldRetirementDeadline) /
+                attemptMilliseconds);
     }
 
     internal bool TryStopJoinedAfterPhysicalLoss(int maxAttempts)
@@ -1357,25 +1611,32 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
         lock (gate)
         {
             if (retired) return true;
-            if (stopping || !activated) return false;
+            if (!activated) return false;
             stopping = true;
             session = activeSession;
         }
-        if (!pump.SealPublications()) return false;
         // Seal delayed producers without claiming a feedback ACK from the
         // absent target. The joined writer admits only survivor Stops now.
-        session?.RetireDisconnectedTarget();
-        bool stopped = false;
-        for (int attempt = 0; attempt < maxAttempts && !stopped; attempt++)
-            stopped = joinedPhysicalWriter.TryStopSurvivingTargets(leftReleased, rightReleased);
-        if (!stopped || !pump.TryRetireDisconnectedTarget() || !sink.TryRetireDisconnectedTarget()) return false;
-        lock (gate)
+        if (!pump.SealPublications()) return false;
+        if (session != null && !session.TryRetireDisconnectedTargetWithoutWaiting()) return false;
+        if (!Monitor.TryEnter(rumbleTransactionGate)) return false;
+        try
         {
-            activeSession = null;
-            retired = true;
-            lastRetirementFailure = Switch2BluetoothFeedbackRetirementFailure.None;
+            bool stopped = false;
+            for (int attempt = 0; attempt < maxAttempts && !stopped &&
+                    RemainingColdRetirementAttempts(1,
+                        (leftReleased ? 0 : 1) + (rightReleased ? 0 : 1)) > 0; attempt++)
+                stopped = joinedPhysicalWriter.TryStopSurvivingTargets(leftReleased, rightReleased);
+            if (!stopped || !pump.TryRetireDisconnectedTarget() || !sink.TryRetireDisconnectedTarget()) return false;
+            lock (gate)
+            {
+                activeSession = null;
+                retired = true;
+                lastRetirementFailure = Switch2BluetoothFeedbackRetirementFailure.None;
+            }
+            return true;
         }
-        return true;
+        finally { Monitor.Exit(rumbleTransactionGate); }
     }
 
     internal bool TryStopAndRetire(int maxAttempts)
@@ -1387,7 +1648,7 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
             {
                 return true;
             }
-            if (stopping || !activated || maxAttempts <= 0)
+            if (!activated || maxAttempts <= 0)
             {
                 lastRetirementFailure =
                     Switch2BluetoothFeedbackRetirementFailure.InvalidState;
@@ -1397,7 +1658,7 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
             session = activeSession;
         }
 
-        if (session != null && !session.TryRetire())
+        if (session != null && !session.TryRetireWithoutWaiting())
         {
             lock (gate)
             {
@@ -1409,46 +1670,63 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
         }
         Switch2BluetoothFeedbackRetirementFailure retirementFailure =
             Switch2BluetoothFeedbackRetirementFailure.None;
-        if (!pump.SealPublications())
+        if (!Monitor.TryEnter(rumbleTransactionGate)) return false;
+        try
         {
-            retirementFailure =
-                Switch2BluetoothFeedbackRetirementFailure.SealRejected;
+            maxAttempts = RemainingColdRetirementAttempts(maxAttempts);
+            if (!pump.SealPublications())
+            {
+                retirementFailure =
+                    Switch2BluetoothFeedbackRetirementFailure.SealRejected;
+            }
+            else if (!(sink.HasExactTerminalStop ?
+                    pump.TryStopAndRetire(CurrentMicroseconds(), sink,
+                        maxAttempts) :
+                    pump.TryTerminalNeutralAndRetire(CurrentMicroseconds(), sink,
+                        maxAttempts)))
+            {
+                retirementFailure = Switch2BluetoothFeedbackRetirementFailure.
+                    TerminalDeliveryRejected;
+            }
+            else if (!pump.IsRetired)
+            {
+                retirementFailure =
+                    Switch2BluetoothFeedbackRetirementFailure.PumpNotRetired;
+            }
+            else if (!sink.HasExactTerminalStop)
+            {
+                retirementFailure = Switch2BluetoothFeedbackRetirementFailure.
+                    SinkMissingTerminal;
+            }
+            else if (!sink.TryRetire() || !sink.IsRetired)
+            {
+                retirementFailure = Switch2BluetoothFeedbackRetirementFailure.
+                    SinkRetirementRejected;
+            }
+            bool complete = retirementFailure ==
+                Switch2BluetoothFeedbackRetirementFailure.None;
+            lock (gate)
+            {
+                retired = complete;
+                lastRetirementFailure = retirementFailure;
+            }
+            return complete;
         }
-        else if (!(sink.HasExactTerminalStop ?
-                pump.TryStopAndRetire(CurrentMicroseconds(), sink,
-                    maxAttempts) :
-                pump.TryTerminalNeutralAndRetire(CurrentMicroseconds(), sink,
-                    maxAttempts)))
-        {
-            retirementFailure = Switch2BluetoothFeedbackRetirementFailure.
-                TerminalDeliveryRejected;
-        }
-        else if (!pump.IsRetired)
-        {
-            retirementFailure =
-                Switch2BluetoothFeedbackRetirementFailure.PumpNotRetired;
-        }
-        else if (!sink.HasExactTerminalStop)
-        {
-            retirementFailure = Switch2BluetoothFeedbackRetirementFailure.
-                SinkMissingTerminal;
-        }
-        else if (!sink.TryRetire() || !sink.IsRetired)
-        {
-            retirementFailure = Switch2BluetoothFeedbackRetirementFailure.
-                SinkRetirementRejected;
-        }
-        bool complete = retirementFailure ==
-            Switch2BluetoothFeedbackRetirementFailure.None;
-        lock (gate)
-        {
-            retired = complete;
-            lastRetirementFailure = retirementFailure;
-        }
-        return complete;
+        finally { Monitor.Exit(rumbleTransactionGate); }
     }
 
     public bool TryPublishAndPump(Switch2VirtualFeedbackSession session,
+        ControllerFeedbackIngress ingress, ReadOnlySpan<byte> wire,
+        Switch2HdRumbleFeedbackPolicy policy,
+        in Switch2HdRumbleImpulseTuning impulseTuning,
+        in Switch2HdRumbleBodyTuning bodyTuning)
+    {
+        lock (rumbleTransactionGate)
+            return WakeAfterRumblePublication(TryPublishAndPumpCore(session,
+                ingress, wire, policy, impulseTuning, bodyTuning));
+    }
+
+    private bool TryPublishAndPumpCore(Switch2VirtualFeedbackSession session,
         ControllerFeedbackIngress ingress, ReadOnlySpan<byte> wire,
         Switch2HdRumbleFeedbackPolicy policy,
         in Switch2HdRumbleImpulseTuning impulseTuning,
@@ -1501,6 +1779,19 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
         in Switch2HdRumbleBodyTuning bodyTuning,
         ulong expiresAtMicroseconds = 0)
     {
+        lock (rumbleTransactionGate)
+            return WakeAfterRumblePublication(TryPublishAndPumpCore(session,
+                ingress, state, policy, impulseTuning, bodyTuning, expiresAtMicroseconds));
+    }
+
+    private bool TryPublishAndPumpCore(Switch2VirtualFeedbackSession session,
+        ControllerFeedbackIngress ingress,
+        in ControllerFeedbackActuatorState state,
+        Switch2HdRumbleFeedbackPolicy policy,
+        in Switch2HdRumbleImpulseTuning impulseTuning,
+        in Switch2HdRumbleBodyTuning bodyTuning,
+        ulong expiresAtMicroseconds)
+    {
         lock (gate)
         {
             if (stopping || retired || !activated ||
@@ -1541,6 +1832,18 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
         in Switch2HdRumbleGroup left, in Switch2HdRumbleGroup right,
         in Switch2HdRumbleBodyTuning bodyTuning,
         ulong expiresAtMicroseconds = 0)
+    {
+        lock (rumbleTransactionGate)
+            return WakeAfterRumblePublication(TryPublishSourcePreservedAndPumpCore(
+                session, ingress, state, fidelity, left, right, bodyTuning, expiresAtMicroseconds));
+    }
+
+    private bool TryPublishSourcePreservedAndPumpCore(
+        Switch2VirtualFeedbackSession session, ControllerFeedbackIngress ingress,
+        in ControllerFeedbackActuatorState state,
+        Switch2HdRumbleFeedbackFidelity fidelity,
+        in Switch2HdRumbleGroup left, in Switch2HdRumbleGroup right,
+        in Switch2HdRumbleBodyTuning bodyTuning, ulong expiresAtMicroseconds)
     {
         lock (gate)
         {
@@ -1600,6 +1903,7 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
         in ControllerFeedbackFrame canonicalFrame, ushort leftTrigger,
         ushort rightTrigger, ulong presentationRevision)
     {
+        lock (rumbleTransactionGate)
         lock (gate)
         {
             return !stopping && !retired && activated &&
@@ -1613,6 +1917,15 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
         Switch2VirtualFeedbackSession session,
         in ControllerFeedbackFrame canonicalFrame,
         ulong presentationRevision)
+    {
+        lock (rumbleTransactionGate)
+            return WakeAfterRumblePublication(TryRefreshCurrentPresentationCore(
+                session, canonicalFrame, presentationRevision));
+    }
+
+    private bool TryRefreshCurrentPresentationCore(
+        Switch2VirtualFeedbackSession session,
+        in ControllerFeedbackFrame canonicalFrame, ulong presentationRevision)
     {
         lock (gate)
         {
@@ -1639,12 +1952,22 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
     public bool TryClearImpulseReleasePresentation(
         Switch2VirtualFeedbackSession session)
     {
-        lock (gate)
+        if (session == null) return false;
+        if (session.NonBlockingPhysicalRetirement)
         {
-            return !stopping && !retired && activated &&
-                ReferenceEquals(activeSession, session) &&
-                sink.TryClearImpulseReleasePresentation();
+            if (!Monitor.TryEnter(rumbleTransactionGate)) return false;
         }
+        else Monitor.Enter(rumbleTransactionGate);
+        try
+        {
+            lock (gate)
+            {
+                return !stopping && !retired && activated &&
+                    ReferenceEquals(activeSession, session) &&
+                    sink.TryClearImpulseReleasePresentation();
+            }
+        }
+        finally { Monitor.Exit(rumbleTransactionGate); }
     }
 
     public bool TryRequestPlayerLedMask(
@@ -1690,6 +2013,13 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
     public bool TryRefreshXboxOutputPolicy(Switch2VirtualFeedbackSession session,
         in ControllerFeedbackFrame frame, Switch2XboxFeedbackPolicy policy)
     {
+        lock (rumbleTransactionGate)
+            return WakeAfterRumblePublication(TryRefreshXboxOutputPolicyCore(session, frame, policy));
+    }
+
+    private bool TryRefreshXboxOutputPolicyCore(Switch2VirtualFeedbackSession session,
+        in ControllerFeedbackFrame frame, Switch2XboxFeedbackPolicy policy)
+    {
         lock (gate)
         {
             if (stopping || retired || !activated ||
@@ -1700,6 +2030,19 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
     }
 
     public bool TryRetireSession(Switch2VirtualFeedbackSession session,
+        ControllerFeedbackIngress ingress)
+    {
+        if (session == null) return false;
+        if (session.NonBlockingPhysicalRetirement)
+        {
+            if (!Monitor.TryEnter(rumbleTransactionGate)) return false;
+        }
+        else Monitor.Enter(rumbleTransactionGate);
+        try { return TryRetireSessionCore(session, ingress); }
+        finally { Monitor.Exit(rumbleTransactionGate); }
+    }
+
+    private bool TryRetireSessionCore(Switch2VirtualFeedbackSession session,
         ControllerFeedbackIngress ingress)
     {
         bool shouldPump;
@@ -1719,7 +2062,8 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
         }
 
         bool neutral = !shouldPump;
-        for (int attempt = 0; attempt < 3 && !neutral; attempt++)
+        for (int attempt = 0; attempt < 3 && !neutral &&
+                RemainingColdRetirementAttempts(1) > 0; attempt++)
         {
             ControllerFeedbackPumpDisposition result = pump.PumpOnce(
                 nowMicroseconds, sink, out _);

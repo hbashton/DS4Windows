@@ -63,6 +63,7 @@ namespace DS4WinWPF.DS4Forms
         private ControllerDiagramKind controllerDiagramKind;
         private readonly DS4Device diagramPhysicalController;
         private readonly Dictionary<Button, DS4Controls> joyConDiagramButtons = new();
+        private readonly Dictionary<DS4Controls, string> controllerDiagramControlNames = new();
         private bool controllerDiagramSelectorReady;
         private double controllerCoordinateScale = 1.0;
         private double controllerCoordinateOffsetX;
@@ -192,11 +193,13 @@ namespace DS4WinWPF.DS4Forms
             foreach (Button button in joyConDiagramButtons.Keys)
                 conCanvas.Children.Remove(button);
             joyConDiagramButtons.Clear();
+            controllerDiagramControlNames.Clear();
             foreach (Button button in ControllerDiagramButtons())
                 button.Visibility = Visibility.Visible;
 
             muteConBtn.Visibility = Visibility.Collapsed;
             captureConBtn.Visibility = Visibility.Collapsed;
+            switch2CConBtn.Visibility = Visibility.Collapsed;
             fnlConBtn.Visibility = Visibility.Collapsed;
             fnrConBtn.Visibility = Visibility.Collapsed;
             blpConBtn.Visibility = Visibility.Collapsed;
@@ -466,6 +469,9 @@ namespace DS4WinWPF.DS4Forms
             SetCanvasButtonBounds(guideConBtn, 231, 82, 21, 22);
             SetCanvasButtonBounds(captureConBtn, 185, 82, 21, 21);
             captureConBtn.Visibility = Visibility.Visible;
+            SetCanvasButtonBounds(switch2CConBtn, 210, 166, 16, 16);
+            switch2CConBtn.Visibility = Visibility.Visible;
+            controllerDiagramControlNames[DS4Controls.Switch2C] = "C";
 
             SetCanvasButtonBounds(l3ConBtn, 93, 67, 50, 52);
             SetCanvasButtonBounds(lsuConBtn, 108, 67, 20, 15);
@@ -539,14 +545,15 @@ namespace DS4WinWPF.DS4Forms
                 button.Visibility = Visibility.Collapsed;
             ds4LightbarColorBtn.Visibility = Visibility.Collapsed;
 
-            void Target(DS4Controls control, Rect bounds, Geometry geometry)
+            void Target(DS4Controls control, Rect bounds, Geometry geometry, string displayName = null)
             {
                 var button = new Button { Content = string.Empty, Style = crossConBtn.Style };
                 button.Click += HoverConBtn_Click;
                 button.MouseEnter += ContBtn_MouseEnter;
                 button.MouseLeave += ContBtn_MouseLeave;
                 button.MouseRightButtonUp += ConBtn_MouseRightButtonUp;
-                System.Windows.Automation.AutomationProperties.SetName(button, control.ToString());
+                System.Windows.Automation.AutomationProperties.SetName(button, displayName ?? control.ToString());
+                if (displayName != null) controllerDiagramControlNames[control] = displayName;
                 SetCanvasButtonBounds(button, bounds.X, bounds.Y, bounds.Width, bounds.Height);
                 joyConDiagramButtons.Add(button, control);
                 vectorHoverGeometries[button] = geometry;
@@ -555,7 +562,7 @@ namespace DS4WinWPF.DS4Forms
             foreach (var target in JoyConArtwork.Targets(view, Global.Switch2FaceButtonLayout[deviceNum]))
             {
                 Rect bounds = target.Bounds;
-                Target(target.Control, bounds, target.Highlight);
+                Target(target.Control, bounds, target.Highlight, target.DisplayName);
             }
             void Stick(bool physicalLeft, bool logicalLeft)
             {
@@ -841,6 +848,9 @@ namespace DS4WinWPF.DS4Forms
             vectorHoverGeometries[optionsConBtn] = EllipseHighlight(251, 57, 21, 21);
             vectorHoverGeometries[guideConBtn] = EllipseHighlight(231, 82, 21, 22);
             vectorHoverGeometries[captureConBtn] = RoundedHighlight(185, 82, 21, 21, 4);
+            // The atlas predates the C button. Share this small vector surface
+            // between pointer clipping and selection painting, in artwork space.
+            vectorHoverGeometries[switch2CConBtn] = RoundedHighlight(210, 166, 16, 16, 3);
             AddStickHighlights(l3ConBtn, lsuConBtn, lsrConBtn, lsdConBtn, lslConBtn,
                 93, 67, 50, 52);
             AddStickHighlights(r3ConBtn, rsuConBtn, rsrConBtn, rsdConBtn, rslConBtn,
@@ -1025,6 +1035,16 @@ namespace DS4WinWPF.DS4Forms
             return -1;
         }
 
+        internal static int ResolveReadingsDeviceIndex(int profileDevice,
+            int controllerContextDevice)
+        {
+            if (profileDevice >= 0 && profileDevice < ControlService.CURRENT_DS4_CONTROLLER_LIMIT)
+                return profileDevice;
+            return profileDevice == Global.TEST_PROFILE_INDEX && controllerContextDevice >= 0 &&
+                controllerContextDevice < ControlService.CURRENT_DS4_CONTROLLER_LIMIT
+                    ? controllerContextDevice : -1;
+        }
+
         private void SetCanvasButtonBounds(Button button, double left, double top,
             double width, double height)
         {
@@ -1055,6 +1075,7 @@ namespace DS4WinWPF.DS4Forms
             yield return optionsConBtn;
             yield return guideConBtn;
             yield return captureConBtn;
+            yield return switch2CConBtn;
             yield return muteConBtn;
             yield return leftTouchConBtn;
             yield return multiTouchConBtn;
@@ -1414,6 +1435,7 @@ namespace DS4WinWPF.DS4Forms
             hoverIndexes[r3ConBtn] = 17;
             hoverIndexes[captureConBtn] =
                 mappingListVM.ControlIndexMap[DS4Controls.Capture];
+            hoverIndexes[switch2CConBtn] = mappingListVM.ControlIndexMap[DS4Controls.Switch2C];
 
             hoverIndexes[leftTouchConBtn] = mappingListVM.ControlIndexMap[DS4Controls.TouchLeft]; // 21
             hoverIndexes[rightTouchConBtn] = mappingListVM.ControlIndexMap[DS4Controls.TouchRight]; // 22
@@ -1620,6 +1642,7 @@ namespace DS4WinWPF.DS4Forms
             optionsConBtn.Content = "";
             guideConBtn.Content = "";
             captureConBtn.Content = "";
+            switch2CConBtn.Content = "";
             muteConBtn.Content = "";
             leftTouchConBtn.Content = "";
             multiTouchConBtn.Content = "";
@@ -1931,17 +1954,17 @@ namespace DS4WinWPF.DS4Forms
 
             ColorByBatteryPerCheck();
 
-            if (device < Global.TEST_PROFILE_INDEX)
+            int readingsDevice = ResolveReadingsDeviceIndex(device, triggerPreviewDeviceIndex);
+            if (readingsDevice >= 0)
             {
-                useControllerUD.Value = device + 1;
-                conReadingsUserCon.UseDevice(device, device);
+                useControllerUD.Value = readingsDevice + 1;
+                conReadingsUserCon.UseDevice(readingsDevice, device);
                 contReadingsTab.IsEnabled = true;
             }
             else
             {
                 useControllerUD.Value = 1;
-                conReadingsUserCon.UseDevice(0, Global.TEST_PROFILE_INDEX);
-                contReadingsTab.IsEnabled = true;
+                contReadingsTab.IsEnabled = false;
             }
 
             conReadingsUserCon.EnableControl(false);
@@ -2132,14 +2155,21 @@ namespace DS4WinWPF.DS4Forms
 
         private void UpdateHighlightLabel(MappedControl mapped)
         {
-            string display = $"{mapped.ControlName}: {mapped.MappingName}";
+            controllerDiagramControlNames.TryGetValue(mapped.Control, out string physicalControlName);
+            highlightControlDisplayLb.Content = FormatHighlightLabel(mapped, physicalControlName);
+        }
+
+        internal static string FormatHighlightLabel(MappedControl mapped,
+            string physicalControlName = null)
+        {
+            string display = $"{physicalControlName ?? mapped.ControlName}: {mapped.MappingName}";
             if (mapped.HasShiftAction())
             {
                 display += "\nShift: ";
                 display += mapped.ShiftMappingName;
             }
 
-            highlightControlDisplayLb.Content = display;
+            return display;
         }
 
         private void ContBtn_MouseEnter(object sender, MouseEventArgs e)
@@ -2856,6 +2886,10 @@ namespace DS4WinWPF.DS4Forms
             profileSettingsVM.UpdateMainColor(dialog.colorPicker.SelectedColor.GetValueOrDefault());
         }
 
+        internal static int GetInputControlMappingIndex(MappingListViewModel mappings,
+            DS4Controls control) => mappings.ControlIndexMap.TryGetValue(control, out int index)
+                ? index : -1;
+
         private void InputDS4(object sender, System.Timers.ElapsedEventArgs e)
         {
             inputTimer.Stop();
@@ -2870,51 +2904,13 @@ namespace DS4WinWPF.DS4Forms
 
             if (activeWin && profileSettingsVM.UseControllerReadout)
             {
-                int index = -1;
-                switch(Program.rootHub.GetActiveInputControl(tempDeviceNum))
-                {
-                    case DS4Controls.None: break;
-                    case DS4Controls.Cross: index = 0; break;
-                    case DS4Controls.Circle: index = 1; break;
-                    case DS4Controls.Square: index = 2; break;
-                    case DS4Controls.Triangle: index = 3; break;
-                    case DS4Controls.Options: index = 4; break;
-                    case DS4Controls.Share: index = 5; break;
-                    case DS4Controls.DpadUp: index = 6; break;
-                    case DS4Controls.DpadDown: index = 7; break;
-                    case DS4Controls.DpadLeft: index = 8; break;
-                    case DS4Controls.DpadRight: index = 9; break;
-                    case DS4Controls.PS: index = 10; break;
-                    case DS4Controls.Mute: index = 11; break;
-                    case DS4Controls.L1: index = 12; break;
-                    case DS4Controls.R1: index = 13; break;
-                    case DS4Controls.L2: index = 14; break;
-                    case DS4Controls.R2: index = 15; break;
-                    case DS4Controls.L3: index = 16; break;
-                    case DS4Controls.R3: index = 17; break;
-                    case DS4Controls.TouchLeft: index = 18; break;
-                    case DS4Controls.TouchRight: index = 19; break;
-                    case DS4Controls.TouchMulti: index = 20; break;
-                    case DS4Controls.TouchUpper: index = 21; break;
-                    case DS4Controls.LYNeg: index = 22; break;
-                    case DS4Controls.LYPos: index = 23; break;
-                    case DS4Controls.LXNeg: index = 24; break;
-                    case DS4Controls.LXPos: index = 25; break;
-                    case DS4Controls.RYNeg: index = 26; break;
-                    case DS4Controls.RYPos: index = 27; break;
-                    case DS4Controls.RXNeg: index = 28; break;
-                    case DS4Controls.RXPos: index = 29; break;
-                    case DS4Controls.FnL: index = 30; break;
-                    case DS4Controls.FnR: index = 31; break;
-                    case DS4Controls.BLP: index = 32; break;
-                    case DS4Controls.BRP: index = 33; break;
-                    default: break;
-                }
-
-                if (index >= 0)
+                DS4Controls activeControl = Program.rootHub.GetActiveInputControl(tempDeviceNum);
+                if (activeControl != DS4Controls.None)
                 {
                     Dispatcher.BeginInvoke((Action)(() =>
                     {
+                        int index = GetInputControlMappingIndex(mappingListVM, activeControl);
+                        if (index < 0) return;
                         mappingListVM.SelectedIndex = index;
                         ShowControlBindingWindow();
                     }));

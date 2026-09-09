@@ -8,10 +8,11 @@ the Free Software Foundation, either version 3 of the License, or
 (at your option) any later version.
 
 Axis orientation and native sensor scales are adapted from the GPL-3.0
-Switch2Connect project, commit 4487322a306f04efa27682e3f3a508635a84fd98,
-src/virtual_controller.py lines 3022-3043, with the Pro gyro scale corrected
-from commit 61ac6642ce12fe7217e38a860b14863b18ca7e28 src/controller.py. The result
-enters DS4Windows' existing SixAxis mapping path.
+Switch2Connect project, commit 61ac6642ce12fe7217e38a860b14863b18ca7e28,
+src/virtual_controller.py native DS report projection (3750-3756) and
+src/controller.py Pro gyro scale. The report basis also agrees with SDL's
+physical Switch 2 sensor projection. The result enters DS4Windows' existing
+SixAxis mapping path; Cemuhook's semantic axes are not DS report axes.
 */
 
 using System;
@@ -133,24 +134,25 @@ internal sealed class Switch2ProMotionProjection
         rawGyroscope = Switch2MotionSoftDeadzone.Apply(rawGyroscope,
             virtualGyroSoftDeadzone, horizontal: false);
 
-        // Pinned donor transform: base gyro=(x,-y,-z),
-        // base accel=(-x,-y,-z), then DS motion order=(x,z,-y).
+        // Native DS report XYZ = (x,z,-y) for BOTH sensors. SixAxis.populate
+        // applies the canonical yaw/roll and acceleration signs below; using
+        // the donor's already-semantic Cemuhook tuple here inverted them twice.
         const float gyroScale = Ds4WindowsGyroLsbPerDegreeSecond /
             NativeGyroLsbPerDegreeSecond;
         const float accelerometerScale =
             Ds4WindowsAccelerometerLsbPerG / NativeAccelerometerLsbPerG;
         int gyroX = ClampRound(rawGyroscope.X * gyroScale);
-        int gyroY = ClampRound(-rawGyroscope.Z * gyroScale);
-        int gyroZ = ClampRound(rawGyroscope.Y * gyroScale);
-        int accelX = ClampRound(-rawAccelerometer.X * accelerometerScale);
-        int accelY = ClampRound(-rawAccelerometer.Z * accelerometerScale);
-        int accelZ = ClampRound(rawAccelerometer.Y * accelerometerScale);
+        int gyroY = ClampRound(rawGyroscope.Z * gyroScale);
+        int gyroZ = ClampRound(-rawGyroscope.Y * gyroScale);
+        int accelX = ClampRound(rawAccelerometer.X * accelerometerScale);
+        int accelY = ClampRound(rawAccelerometer.Z * accelerometerScale);
+        int accelZ = ClampRound(-rawAccelerometer.Y * accelerometerScale);
 
         SixAxis swap = previous;
         previous = current;
         current = swap;
-        // populate consumes semantic yaw/pitch/roll. The transform above is
-        // already in DS report X/Y/Z order.
+        // populate accepts the DS report's yaw/pitch/roll input order and
+        // produces canonical semantic fields used by mouse, DSU and VIIPER.
         current.populate(gyroY, gyroX, gyroZ, accelX, accelY, accelZ,
             elapsed, previous);
         destination.Motion = current;

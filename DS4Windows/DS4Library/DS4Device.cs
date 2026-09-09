@@ -327,6 +327,7 @@ namespace DS4Windows
         protected bool exitOutputThread = false;
         public bool ExitOutputThread => exitOutputThread;
         protected bool exitInputThread = false;
+        private int administrativeInputReadCancellationRequested;
         protected object exitLocker = new object();
         protected ExclusiveStatus exclusiveStatus = ExclusiveStatus.Shared;
 
@@ -1085,6 +1086,7 @@ namespace DS4Windows
 
             if (ds4Input == null)
             {
+                ResetAdministrativeInputReadCancellation();
                 ResetWorkerStartCommitWitnesses();
                 if (conType != ConnectionType.BT)
                 {
@@ -1117,10 +1119,16 @@ namespace DS4Windows
             {
                 try
                 {
-                    exitInputThread = true;
+                    Volatile.Write(ref exitInputThread, true);
                     //ds4Input.Interrupt();
-                    if (!abortInputThread)
+                    if (!abortInputThread &&
+                        !ReferenceEquals(ds4Input, Thread.CurrentThread))
                     {
+                        // Only this public lifecycle path requests handle-wide
+                        // read cancellation. A coincident, expected 995 must
+                        // not manufacture a physical-removal callback.
+                        Volatile.Write(
+                            ref administrativeInputReadCancellationRequested, 1);
                         hDevice.CancelIO();
                         ds4Input.Join();
                     }
@@ -1134,6 +1142,15 @@ namespace DS4Windows
             ResetBluetoothControllerClock();
             StopOutputUpdate();
         }
+
+        protected void ResetAdministrativeInputReadCancellation() =>
+            Volatile.Write(ref administrativeInputReadCancellationRequested, 0);
+
+        internal bool IsExpectedAdministrativeInputReadCancellation(
+            HidDevice.ReadStatus status, int winError) =>
+            status == HidDevice.ReadStatus.ReadError && winError == 995 &&
+            Volatile.Read(ref administrativeInputReadCancellationRequested) != 0 &&
+            Volatile.Read(ref exitInputThread);
 
         private void ResetBluetoothControllerClock()
         {
@@ -1153,6 +1170,8 @@ namespace DS4Windows
                     try
                     {
                         exitOutputThread = true;
+                        if (ReferenceEquals(ds4Output, Thread.CurrentThread))
+                            return;
                         ds4Output.Interrupt();
                         ds4Output.Join();
                     }
@@ -1895,6 +1914,14 @@ namespace DS4Windows
                         // firmware entered its Bluetooth audio report mode.
                         HidDevice.ReadStatus res = hDevice.ReadFile(
                             btInputReport, READ_STREAM_TIMEOUT);
+                        int readWinError = res == HidDevice.ReadStatus.ReadError ?
+                            Marshal.GetLastWin32Error() : 0;
+                        if (IsExpectedAdministrativeInputReadCancellation(res,
+                                readWinError))
+                        {
+                            readWaitEv.Reset();
+                            break;
+                        }
                         if (res == HidDevice.ReadStatus.Success)
                         {
                             int bluetoothReportLength =
@@ -2007,7 +2034,8 @@ namespace DS4Windows
                             }
                             else
                             {
-                                int winError = Marshal.GetLastWin32Error();
+                                int winError = res == HidDevice.ReadStatus.ReadError ?
+                                    readWinError : Marshal.GetLastWin32Error();
                                 Console.WriteLine($"{Mac} {DateTime.UtcNow.ToString("o")}> disconnect due to read failure: {winError.ToString("x8")}");
                                 //Log.LogToGui(Mac.ToString() + " disconnected due to read failure: " + winError, true);
                                 AppLogger.LogToGui(Mac.ToString() + " disconnected due to read failure: " + winError, true);
@@ -2030,6 +2058,14 @@ namespace DS4Windows
                         //HidDevice.ReadStatus res = hDevice.ReadAsyncWithFileStream(inputReport, READ_STREAM_TIMEOUT);
                         HidDevice.ReadStatus res = hDevice.ReadFile(inputReport,
                             conType == ConnectionType.BT ? READ_STREAM_TIMEOUT : uint.MaxValue);
+                        int readWinError = res == HidDevice.ReadStatus.ReadError ?
+                            Marshal.GetLastWin32Error() : 0;
+                        if (IsExpectedAdministrativeInputReadCancellation(res,
+                                readWinError))
+                        {
+                            readWaitEv.Reset();
+                            break;
+                        }
                         if (res != HidDevice.ReadStatus.Success)
                         {
                             if (res == HidDevice.ReadStatus.WaitTimedOut)
@@ -2038,7 +2074,8 @@ namespace DS4Windows
                             }
                             else
                             {
-                                int winError = Marshal.GetLastWin32Error();
+                                int winError = res == HidDevice.ReadStatus.ReadError ?
+                                    readWinError : Marshal.GetLastWin32Error();
                                 Console.WriteLine($"{Mac} {DateTime.UtcNow.ToString("o")}> disconnect due to read failure: {winError.ToString("x8")}");
                                 //Log.LogToGui(Mac.ToString() + " disconnected due to read failure: " + winError, true);
                             }

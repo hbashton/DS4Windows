@@ -4533,6 +4533,7 @@ namespace DS4Windows.InputDevices
             }
             if (ds4Input == null)
             {
+                ResetAdministrativeInputReadCancellation();
                 StartPhysicalWorkers();
                 if (conType == ConnectionType.BT)
                 {
@@ -4658,6 +4659,12 @@ namespace DS4Windows.InputDevices
                         out byte[] completedReport, out int readWinError,
                         out long physicalReadObservedAt,
                         out long readRearmDuration);
+                    if (IsExpectedAdministrativeInputReadCancellation(res,
+                            readWinError))
+                    {
+                        readWaitEv.Reset();
+                        break;
+                    }
                     if (res == HidDevice.ReadStatus.Success)
                     {
                         inputReport = completedReport;

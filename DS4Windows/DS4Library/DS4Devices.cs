@@ -666,11 +666,33 @@ namespace DS4Windows
         {
             if (device != null)
             {
-                device.HidDevice.CloseDevice();
-                Devices.Remove(device.HidDevice.DevicePath);
-                DevicePaths.Remove(device.HidDevice.DevicePath);
-                deviceSerials.Remove(device.MacAddress);
-                serialDevices.Remove(device.MacAddress);
+                HidDevice hid = device.HidDevice;
+                string path = hid.DevicePath;
+                string serial = device.MacAddress;
+                Devices.TryGetValue(path, out DS4Device pathOwner);
+                serialDevices.TryGetValue(serial, out DS4Device serialOwner);
+
+                // Removal can arrive after a same-path reconnect or a same-MAC
+                // transport replacement. Close only this retired handle, never
+                // a HidDevice now shared with the replacement connection.
+                bool sharedWithReplacement =
+                    (!ReferenceEquals(pathOwner, device) &&
+                     ReferenceEquals(pathOwner?.HidDevice, hid)) ||
+                    (!ReferenceEquals(serialOwner, device) &&
+                     ReferenceEquals(serialOwner?.HidDevice, hid));
+                if (!sharedWithReplacement)
+                    hid.CloseDevice();
+
+                if (ReferenceEquals(pathOwner, device))
+                {
+                    Devices.Remove(path);
+                    DevicePaths.Remove(path);
+                }
+                if (ReferenceEquals(serialOwner, device))
+                {
+                    deviceSerials.Remove(serial);
+                    serialDevices.Remove(serial);
+                }
                 //purgeHiddenExclusiveDevices();
             }
         }

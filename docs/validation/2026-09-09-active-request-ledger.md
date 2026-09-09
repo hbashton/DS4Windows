@@ -101,6 +101,20 @@ Release publication is authorized as **VIIPERRC4.5.2 — Joy-Con 1 & Nintendo Op
   native pressure control covered 1,280 strictly zero measurement windows.
   Final source must still pass its independent CI before release tagging.
 
+## Post-release follow-ups
+
+- Reddit RC4.5 Stop/read-failure-995 hang: a matching fallback-worker/service-lock
+  deadlock was reproduced with four failing-first tests. Source fix implemented;
+  **152 focused and 4,915 full-suite tests passed**, zero failures and 11 existing
+  full-suite opt-in skips. Added 29 regressions covering removal/cancellation,
+  reconnect ownership and hotplug publication. Not installed or published;
+  reporter hardware confirmation remains open. See
+  [Stop/removal regression](2026-09-09-stop-removal-deadlock.md).
+- Consistent small Joy-Con L vibration-test stutters remain open. Earlier
+  traces did not establish an active sustained-rumble window; they are not
+  evidence that the stutter is fixed. The Stop report takes priority in this
+  pass; running apps and controllers are left untouched.
+
 ## Current execution boundaries
 
 - Preserve the earlier source and live-preview changes, now checkpointed in the

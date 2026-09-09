@@ -3287,10 +3287,11 @@ namespace DS4Windows
         internal void PublishPreparedHotplug(DS4Device device, int index)
         {
             // HotPlugCore holds serviceLifecycleLock. StartUpdate may raise
-            // Removal synchronously (for example, failed Switch Pro calibration)
-            // and clear this slot before preparation returns. Do not announce
-            // that retired object to consumers after its removal notification.
-            if (device != null && ReferenceEquals(DS4Controllers[index], device))
+            // Removal synchronously (for example, failed Switch Pro calibration).
+            // Removal claims the source immediately, but its cold cleanup may
+            // still be waiting for this lock. Do not announce that dying source.
+            if (device != null && !device.IsRemoving && !device.IsRemoved &&
+                ReferenceEquals(DS4Controllers[index], device))
                 HotplugController?.Invoke(this, device, index);
         }
 
@@ -3358,7 +3359,9 @@ namespace DS4Windows
                 diagnosticsSource?.Retire();
                 On_DS4Removal(sender, e);
             };
-            device.Removal += DS4Devices.On_Removal;
+            // Registry retirement belongs to the same cold removal transaction.
+            // A second synchronous subscriber would still let Stop's worker join
+            // wait on the registry lock held by DS4Devices.stopControllers.
             device.SyncChange += this.On_SyncChange;
             device.SyncChange += DS4Devices.UpdateSerial;
             device.SerialChange += this.On_SerialChange;
@@ -4425,6 +4428,22 @@ namespace DS4Windows
                 mouseCallbackRegistry.RevokeSourceFromCallback(device);
                 return;
             }
+            Util.LogAssistBackgroundTask(QueueLegacyControllerRetirement(device));
+        }
+
+        internal Task QueueLegacyControllerRetirement(DS4Device device)
+        {
+            // Stop holds serviceLifecycleLock while joining physical workers.
+            // Their removal notifications must return without acquiring it (or
+            // the HID registry lock). Revoke presentation now; only a cold worker
+            // may wait for serialized, exact-connection cleanup.
+            TryClaimControllerRemoval(device);
+            mouseCallbackRegistry.RevokeSourceFromCallback(device);
+            return Task.Run(() => RetireLegacyController(device));
+        }
+
+        private void RetireLegacyController(DS4Device device)
+        {
             lock (serviceLifecycleLock)
             {
                 int ind = FindExactControllerSlot(device);
@@ -4435,6 +4454,7 @@ namespace DS4Windows
                     RetireControllerPresentation(device, ind,
                         commitNeutralMapping: true);
                     if (!ClearExactControllerSlot(device, ind)) return;
+                    DS4Devices.RemoveDevice(device);
                 }
             }
 

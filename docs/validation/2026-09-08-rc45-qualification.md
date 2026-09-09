@@ -2,6 +2,12 @@
 
 Local date: 2026-09-08; build work continues into 2026-09-09 UTC.
 
+This records the initial `12b2485` RC4.5 checkpoint, before normal portable
+broker auto-start was added. Its package hashes and counts below are historical.
+The [portable startup follow-up](2026-09-08-portable-broker-startup.md) records
+the replacement packages and their qualification. The current distribution's
+`SHA256SUMS.txt` identifies the files to distribute.
+
 ## Candidate identity
 
 - Release/channel marker: `VIIPERRC4.5`.

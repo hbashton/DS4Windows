@@ -144,6 +144,31 @@ separate where a trustworthy cross-transport match is unavailable.
   multiple Switch 2 controllers. Steam/HidHide reclaim no longer uses the
   identified restart-loop path.
 
+## The portable ZIP brings its own broker
+
+The portable ZIP now includes `viiper.exe` beside DS4Windows. Opening that
+portable package starts its matching broker automatically when needed. A
+verified, compatible instance already running from the same portable folder
+can be reused; simply being already open is not an error.
+
+A different or incompatible broker produces a clear close-and-relaunch
+message. DS4Windows does not terminate that other instance. It stops only a
+broker it started itself when its own session ends, after controller cleanup;
+a reused broker remains running. The portable session uses local broker data
+and leaves the installed broker and its startup task alone. USB/IP drivers
+still need to be installed and pass the existing checks. If Windows denies
+driver access, the portable app may need to be run as administrator.
+
+This behavior belongs to the normal portable ZIP, not a special lab launch.
+The managed installer retains its normal backend layout.
+
+Portable updates currently use a fresh ZIP extracted into a new folder after
+closing both apps. The older standalone updater can kill DS4Windows before
+broker cleanup and cannot safely replace the bundled running broker in place;
+the app explains the safe manual update path instead of launching it. Normal
+managed-install update behavior is preserved, including recognition of an
+installed folder if an older ZIP updater copied a portable marker into it.
+
 ## USB headset output: verified, with clear limits
 
 The Switch 2 Pro's native Windows USB headphone output was physically verified
@@ -158,13 +183,15 @@ and experimental packet writes did not establish audible output.
 
 ## What the testing does—and does not—say
 
-The final RC4.5 source passed **4,463 tests twice**, with zero failures and
+The final RC4.5 source passed **4,516 tests twice**, with zero failures and
 11 existing opt-in skips each time. A separate run passed all **152
 allocation-named tests**. Existing CI exclusions remained unchanged; failed
 intermediate runs led to investigated fixes, not relaxed assertions. The
-[qualification record](validation/2026-09-08-rc45-qualification.md) distinguishes
-these runs from the earlier 4,426-test source checkpoint and records packaging
-results separately.
+[portable startup qualification](validation/2026-09-08-portable-broker-startup.md)
+records these runs and replacement packages. The earlier
+[qualification record](validation/2026-09-08-rc45-qualification.md) preserves
+the initial 4,463-test RC4.5 checkpoint, distinct from the older 4,426-test
+controller checkpoint.
 
 All eight opt-in Xbox client/broker process-integration cases also passed
 separately against the current broker source. Those use isolated loopback

@@ -1227,7 +1227,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public bool LauchDS4Updater(string releaseTag = null)
         {
-            if (PortableLabContext.IsActive) return false;
+            if (PortableLabContext.IsActive || PortableBrokerContext.IsActive) return false;
             bool launch = false;
             using (Process p = new Process())
             {

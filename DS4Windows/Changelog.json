@@ -25,6 +25,7 @@
             "* **Lifecycle and setup fixes** - corrected output-slot collisions, stale controller rows, legacy calibration and profile-loading faults, preview restoration, and uninstall-helper caching; the bundled VIIPER tray can recover when Explorer is not ready at login",
             "* **USB headphone output, with clear limits** - Switch 2 Pro's native USB headphone output has physical left/right and start/stop evidence; microphone capture is not verified, and Bluetooth headphone/microphone audio remains unsupported",
             "* **Matching offline backend included** - installer and portable packages pin VIIPER 0.1.3-rc4.5, include complete license/build notices, and use forward-only ordering for known release-candidate updates",
+            "* **A self-starting portable broker** - the portable ZIP includes viiper.exe beside DS4Windows, starts it when needed and reuses a verified matching instance; conflicting brokers produce a clear close-and-relaunch message instead of being terminated",
             "* **Tester candidate, not a latency promise** - the shipping backend remains VIIPER plus USB/IP; native-driver completion, 0.125 ms controller-to-game latency, Joy-Con 2 USB support and a complete controller/game compatibility matrix are not claimed"
           ],
           "editor": "hbashton",

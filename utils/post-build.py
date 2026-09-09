@@ -5,11 +5,15 @@ import shutil
 import hashlib
 import re
 import stat
+import tempfile
+import zipfile
 
 
 def is_reparse_point(path: Path) -> bool:
     attributes = getattr(path.lstat(), "st_file_attributes", 0)
-    return bool(attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
+    return path.is_symlink() or bool(
+        attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    )
 
 
 if len(sys.argv) != 4:
@@ -25,6 +29,32 @@ if not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z._-]{0,79}", version):
     )
 if not target_dir.is_dir() or is_reparse_point(target_dir):
     raise SystemExit(f"Publish directory is missing or unsafe: {target_dir}")
+
+# These belong to the portable archive only. The unchanged publish tree is
+# also recursively harvested into the MSI, which uses its managed backend.
+portable_files = ("viiper.exe", "viiper.exe.sha256", "DS4Windows.portable")
+portable_names = {name.casefold() for name in portable_files}
+package_entries = list(target_dir.rglob("*"))
+reparse_entry = next(
+    (entry for entry in package_entries if is_reparse_point(entry)), None
+)
+if reparse_entry is not None:
+    raise SystemExit(
+        "Published package contains a reparse point: "
+        + reparse_entry.relative_to(target_dir).as_posix()
+    )
+relative_entries = [entry.relative_to(target_dir) for entry in package_entries]
+portable_collision = next(
+    (entry for entry in relative_entries if entry.parts[0].casefold() in portable_names),
+    None,
+)
+if portable_collision is not None:
+    raise SystemExit(
+        "Published package contains a reserved portable path: "
+        + portable_collision.as_posix()
+    )
+if len({entry.as_posix().casefold() for entry in relative_entries}) != len(relative_entries):
+    raise SystemExit("Published package contains case-insensitive duplicate paths.")
 
 
 # A published DS4Windows build is an offline installer. Fail package
@@ -71,6 +101,7 @@ viiper_hash_path = viiper_path.with_name(viiper_name + ".sha256")
 viiper_hash_path.write_text(
     f"{viiper_hasher.hexdigest()} *{viiper_name}\n",
     encoding="ascii",
+    newline="\n",
 )
 
 # Keep the SDK's <culture>/*.resources.dll layout and generated deps.json.
@@ -102,7 +133,7 @@ if reparse_entry is not None:
 managed_files = sorted(
     file.relative_to(target_dir).as_posix()
     for file in package_entries
-    if file.is_file() and file.name != manifest_name
+    if file.is_file() and file != manifest_path
 )
 if len({path.casefold() for path in managed_files}) != len(managed_files):
     raise SystemExit("Published package contains case-insensitive duplicate paths.")
@@ -131,18 +162,28 @@ os.rename(target_dir, renamed_dir)
 arch = target_dir.parents[1].name
 zip_name = f"DS4Windows_{version}_{arch}"
 target_zip_path = target_dir.parent / f"{zip_name}.zip"
-if target_zip_path.exists():
-    os.remove(target_zip_path)
-
 # Archive only the newly composed DS4Windows directory. Using the whole
 # Release directory could recursively include an older ZIP from a prior local
-# build and silently double the artifact size.
-zip_dir = shutil.make_archive(
-    zip_name,
-    "zip",
-    root_dir=renamed_dir.parent,
-    base_dir=renamed_dir.name,
-)
-
-# move the zip to the build directory
-shutil.move(zip_dir, target_zip_path)
+# build and silently double the artifact size. Stream the same pinned broker
+# as a root alias without placing it in the MSI's source tree. Override only
+# the archive's ownership manifest, so DS4Updater owns the portable additions.
+# The existing archive is replaced only after the new one closes successfully.
+portable_manifest = "\n".join(sorted(managed_files + list(portable_files))) + "\n"
+with tempfile.NamedTemporaryFile(
+    prefix=f".{zip_name}-", suffix=".tmp", dir=target_zip_path.parent, delete=False
+) as temporary_archive:
+    temporary_zip_path = Path(temporary_archive.name)
+try:
+    with zipfile.ZipFile(temporary_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for relative in managed_files:
+            archive.write(renamed_dir / relative, f"DS4Windows/{relative}")
+        archive.writestr(f"DS4Windows/{manifest_name}", portable_manifest.encode("utf-8"))
+        archive.write(renamed_dir / "extras" / viiper_name, "DS4Windows/viiper.exe")
+        archive.writestr(
+            "DS4Windows/viiper.exe.sha256",
+            f"{viiper_hasher.hexdigest()} *viiper.exe\n".encode("ascii"),
+        )
+        archive.writestr("DS4Windows/DS4Windows.portable", b"DS4Windows portable package v1\n")
+    os.replace(temporary_zip_path, target_zip_path)
+finally:
+    temporary_zip_path.unlink(missing_ok=True)

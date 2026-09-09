@@ -337,6 +337,7 @@ namespace DS4WinWPF.DS4Forms
 
             if (result == MessageBoxResult.Yes)
             {
+                if (!CanStartPortableUpdate()) return;
                 bool launch = true;
                 launch = mainWinVM.RunUpdaterCheck(launch, out string newUpdaterVersion);
 
@@ -362,6 +363,17 @@ namespace DS4WinWPF.DS4Forms
                     });
                 }
             }
+        }
+
+        private bool CanStartPortableUpdate()
+        {
+            if (!PortableBrokerContext.IsActive) return true;
+            // The legacy updater can kill DS4Windows before owned-broker
+            // cleanup and does not retire VIIPER before replacing its image.
+            Dispatcher.Invoke(() => MessageBox.Show(
+                "To update this portable copy, download the new portable ZIP from the DS4Windows GitHub releases page. Save your profiles, close DS4Windows and VIIPER, then extract the ZIP into a new folder. The older updater cannot safely replace the bundled broker in place. No files or running apps were changed.",
+                "DS4Windows portable update", MessageBoxButton.OK, MessageBoxImage.Information));
+            return false;
         }
 
         private void Check_Version(bool showstatus = false)
@@ -395,6 +407,7 @@ namespace DS4WinWPF.DS4Forms
 
                 if (result == MessageBoxResult.Yes)
                 {
+                    if (!CanStartPortableUpdate()) return;
                     bool launch = true;
                     launch = mainWinVM.RunUpdaterCheck(launch, out string newUpdaterVersion);
 

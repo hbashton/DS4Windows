@@ -33,7 +33,7 @@ API contract must be verified first.
     preflight, elevated helper, PowerShell phase, and reboot resume. In-app
     repair creates the same kind of transaction ID. Bounded append retries
     preserve diagnostics when a log reader briefly owns the file.
-11. The backend always lives under Program Files. "Keep DS4Windows portable"
+11. The installer-managed backend lives under Program Files. "Keep DS4Windows portable"
     changes only the UI/package location; it never creates an elevated task for
     a LocalAppData VIIPER executable.
 12. Start-menu and optional desktop shortcuts are all-users shell integration
@@ -41,6 +41,14 @@ API contract must be verified first.
 13. Program Files ACL normalization is a required safety gate for both the
     managed application and VIIPER backend; setup never registers an elevated
     task against a directory it could not protect.
+
+The RC4.5 portable ZIP additionally has an explicit, separate
+[local broker startup contract](validation/2026-09-08-portable-broker-startup.md).
+It starts its verified sibling broker without installing it or registering an
+elevated task. The ZIP-only marker and alias are not harvested by the MSI.
+This does not change the installer transaction rules or remove driver checks.
+A registered managed installation ignores portable-mode assets if an older
+ZIP-based updater copies them there; they cannot change its broker ownership.
 
 ## Pinned runtime contract
 

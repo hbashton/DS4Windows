@@ -222,10 +222,27 @@ namespace DS4WinWPF
                 return;
             }
 
-            // Do this before the single-instance probe. Opening a portable
-            // copy while another instance is active must still make the
-            // portable executable the user's explicit startup choice.
-            StartupMethods.RetargetExistingTaskToCurrentExecutable();
+            // The ZIP's explicit marker selects normal portable broker
+            // ownership. Resolve conflicts before tasks, profiles or devices
+            // can be changed; development lab mode remains externally owned.
+            if (!DS4Windows.PortableLabContext.IsActive)
+            {
+                try
+                {
+                    DS4Windows.PortableBrokerContext.Initialize(
+                        Path.GetDirectoryName(DS4Windows.Global.exelocation));
+                }
+                catch (DS4Windows.PortableBrokerStartupException exception)
+                {
+                    CancelPortableStartup(exception.Message);
+                    return;
+                }
+            }
+
+            // Preserve legacy startup retargeting before the instance probe,
+            // but a marked portable package must leave installed tasks alone.
+            if (!DS4Windows.PortableBrokerContext.IsActive)
+                StartupMethods.RetargetExistingTaskToCurrentExecutable();
 
             try
             {
@@ -283,11 +300,12 @@ namespace DS4WinWPF
             try
             {
                 threadComEvent = CreateSingleAppComEvent(SingleAppComEventName,
-                    requireNew: DS4Windows.PortableLabContext.IsActive);
+                    requireNew: DS4Windows.PortableLabContext.IsActive ||
+                        DS4Windows.PortableBrokerContext.IsActive);
                 if (threadComEvent == null)
                 {
-                    MessageBox.Show("Another DS4Windows instance started first. Portable lab startup was cancelled.",
-                        "Portable controller lab", MessageBoxButton.OK, MessageBoxImage.Information);
+                    MessageBox.Show("Another DS4Windows instance started first. This startup was cancelled.",
+                        "DS4Windows", MessageBoxButton.OK, MessageBoxImage.Information);
                     runShutdown = false;
                     Current.Shutdown(1);
                     return;
@@ -301,6 +319,9 @@ namespace DS4WinWPF
                 Current.Shutdown(DS4Windows.PortableLabContext.IsActive ? 1 : 0);
                 return;
             }
+
+            // Never spawn a broker until this process owns the mapper gate.
+            if (!StartPortableBroker()) return;
 
             CreateTempWorkerThread();
 
@@ -472,6 +493,49 @@ namespace DS4WinWPF
             StartupDiag(logger, "MainWindow.LateChecks begin");
             window.LateChecks(parser);
             StartupDiag(logger, "MainWindow.LateChecks returned");
+        }
+
+        private void CancelPortableStartup(string message)
+        {
+            MessageBox.Show(message, "DS4Windows portable",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            runShutdown = false;
+            Current.Shutdown(1);
+        }
+
+        private bool StartPortableBroker()
+        {
+            DS4Windows.PortableBrokerContext portable =
+                DS4Windows.PortableBrokerContext.Current;
+            if (portable == null) return true;
+            try
+            {
+                portable.Start();
+                Stopwatch startup = Stopwatch.StartNew();
+                const int startupBudgetMilliseconds = 8000;
+                while (startup.ElapsedMilliseconds < startupBudgetMilliseconds)
+                {
+                    if (!portable.InspectOwnedProcess(out bool running, out string failure) || !running)
+                        throw new DS4Windows.PortableBrokerStartupException(failure ??
+                            "The portable VIIPER process stopped before it was ready. Check that USB/IP 0.9.7.7 is installed and available, then restart DS4Windows.");
+
+                    int remaining = startupBudgetMilliseconds - (int)startup.ElapsedMilliseconds;
+                    if (DS4Windows.ViiperSetupManager.ProbeServer(
+                            DS4Windows.ViiperSetupManager.ApiHost,
+                            DS4Windows.ViiperSetupManager.ApiPort, authenticated: true,
+                            out _, totalTimeoutMilliseconds: Math.Max(1, Math.Min(1000, remaining))) &&
+                        portable.InspectOwnedProcess(out running, out _) && running)
+                        return true;
+                    Thread.Sleep(50);
+                }
+                throw new DS4Windows.PortableBrokerStartupException(
+                    "Portable VIIPER did not become ready. Close any conflicting VIIPER, check USB/IP 0.9.7.7, then restart DS4Windows. If Windows denied driver access, try Run as administrator.");
+            }
+            catch (DS4Windows.PortableBrokerStartupException exception)
+            {
+                CancelPortableStartup(exception.Message);
+                return false;
+            }
         }
 
         private static void ShowStartupDialog(Window dialog)
@@ -1111,7 +1175,11 @@ namespace DS4WinWPF
                     CleanShutdown();
                 }
             }
-            finally { DS4Windows.PortableLabContext.Current?.Dispose(); }
+            finally
+            {
+                DS4Windows.PortableBrokerContext.Current?.Dispose();
+                DS4Windows.PortableLabContext.Current?.Dispose();
+            }
         }
 
         private void Application_SessionEnding(object sender, SessionEndingCancelEventArgs e)
@@ -1241,6 +1309,9 @@ namespace DS4WinWPF
 
             if (shutdownTimedOut)
             {
+                // Environment.Exit bypasses the outer Application_Exit
+                // finally. Retire only our child after the attempted drain.
+                DS4Windows.PortableBrokerContext.Current?.Dispose();
                 Environment.Exit(0);
             }
         }

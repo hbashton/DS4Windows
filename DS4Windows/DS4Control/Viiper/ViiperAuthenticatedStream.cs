@@ -44,7 +44,8 @@ namespace DS4Windows
         private static long cachedLength;
         private static byte[] cachedDerivedKey;
 
-        internal static string DefaultKeyFilePath => PortableLabContext.Current?.KeyPath ?? Path.Combine(
+        internal static string DefaultKeyFilePath => PortableLabContext.Current?.KeyPath ??
+            PortableBrokerContext.Current?.KeyPath ?? Path.Combine(
             Environment.GetFolderPath(
                 Environment.SpecialFolder.ApplicationData),
             "VIIPER", KeyFileName);
@@ -150,7 +151,7 @@ namespace DS4Windows
         private static byte[] CopyDerivedDeploymentKey()
         {
             string path = DefaultKeyFilePath;
-            if (PortableLabContext.IsActive)
+            if (PortableLabContext.IsActive || PortableBrokerContext.IsActive)
                 PortableLabContext.ValidateNoReparsePoints(path);
             FileInfo info = new(path);
             if (!info.Exists)

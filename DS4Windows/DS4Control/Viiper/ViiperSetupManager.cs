@@ -244,7 +244,8 @@ namespace DS4Windows
             // candidate still has to pass the same SHA-256 package check as
             // the protected Program Files copy before it can be selected.
             PortableLabContext lab = PortableLabContext.Current;
-            string viiperPath = lab?.ViiperPath ?? ResolveRuntimeViiperPath(
+            PortableBrokerContext portable = PortableBrokerContext.Current;
+            string viiperPath = lab?.ViiperPath ?? portable?.ViiperPath ?? ResolveRuntimeViiperPath(
                 canonicalViiperPath, Global.PreferredViiperPath,
                 FindAlternativeViiperPath(canonicalViiperPath));
             string bundledViiperPath = GetBundledViiperPath();
@@ -289,18 +290,20 @@ namespace DS4Windows
             // Verify both the protected location and exact package identity.
             bool viiperPackageCurrent = lab != null
                 ? lab.IsVerifiedBackend(viiperPath)
+                : portable != null ? portable.IsVerifiedBackend(viiperPath)
                 : IsBundledViiperAuthentic() && FilesHaveSameSha256(viiperPath, bundledViiperPath);
             bool startupEnabled = DS4WinWPF.StartupMethods.
                 IsRunAtStartupEnabled();
-            bool viiperStartupTaskReady = !startupEnabled ||
+            bool viiperStartupTaskReady = portable != null || !startupEnabled ||
                 IsViiperStartupTaskValid(viiperPath, out _);
             bool canonicalViiperRunning;
             string viiperProcessConflictMessage;
-            bool viiperProcessOwnershipReady = InspectViiperProcessOwnership(
-                viiperPath, out canonicalViiperRunning,
-                out viiperProcessConflictMessage);
+            bool viiperProcessOwnershipReady = portable != null
+                ? portable.InspectOwnedProcess(out canonicalViiperRunning, out viiperProcessConflictMessage)
+                : InspectViiperProcessOwnership(viiperPath, out canonicalViiperRunning,
+                    out viiperProcessConflictMessage);
 
-            if (lab == null && tryStartServer && File.Exists(viiperPath) &&
+            if (lab == null && portable == null && tryStartServer && File.Exists(viiperPath) &&
                 viiperPackageCurrent && usbipRuntimeReady &&
                 !citrixUsbMonitorConflict)
             {
@@ -318,7 +321,7 @@ namespace DS4Windows
             string serverProbeFailure = null;
             bool viiperServerRunning = viiperProcessOwnershipReady &&
                 canonicalViiperRunning && ProbeServer(ApiHost, ApiPort,
-                    authenticated: lab != null, out serverProbeFailure);
+                    authenticated: lab != null || portable != null, out serverProbeFailure);
 
             ViiperPrerequisiteStatus status = new ViiperPrerequisiteStatus
             {
@@ -344,7 +347,7 @@ namespace DS4Windows
                 UsbipProbeMessage = usbipProbeMessage,
                 ServerRunning = viiperServerRunning,
                 ServerProbeMessage = serverProbeFailure == null ? null :
-                    "VIIPER is running, but its " + (lab != null ? "authenticated " : "") +
+                    "VIIPER is running, but its " + (lab != null || portable != null ? "authenticated " : "") +
                     $"connection check failed ({serverProbeFailure})",
                 CitrixUsbMonitorConflict = citrixUsbMonitorConflict,
                 CitrixUsbMonitorConflictMessage =
@@ -357,6 +360,14 @@ namespace DS4Windows
         public static bool EnsureReadyWithPrompt(Window owner, bool forcePrompt = false)
         {
             ViiperPrerequisiteStatus status = GetStatus(tryStartServer: true);
+            if (PortableBrokerContext.IsActive)
+            {
+                if (!status.Ready || forcePrompt)
+                    ShowInstallerMessage(owner, status.DisplayText +
+                        "\n\nThis portable copy uses its bundled VIIPER. It does not replace an installed broker or change its startup task. Close conflicting VIIPER instances and restart DS4Windows. If the USB/IP drivers need setup, close this portable session and use the full installer.",
+                        "DS4Windows portable", status.Ready ? MessageBoxImage.Information : MessageBoxImage.Warning);
+                return status.Ready;
+            }
             if (PortableLabContext.IsActive)
             {
                 if (!status.Ready || forcePrompt)
@@ -495,7 +506,7 @@ namespace DS4Windows
 
         public static void RefreshSelectedStartupTaskOnLaunch()
         {
-            if (PortableLabContext.IsActive) return;
+            if (PortableLabContext.IsActive || PortableBrokerContext.IsActive) return;
             string canonicalPath = GetCanonicalViiperExePath();
             string selectedPath = ResolveRuntimeViiperPath(canonicalPath,
                 Global.PreferredViiperPath,
@@ -529,7 +540,7 @@ namespace DS4Windows
 
         public static void RefreshSelectedStartupTaskAfterRunAtStartupChange()
         {
-            if (PortableLabContext.IsActive) return;
+            if (PortableLabContext.IsActive || PortableBrokerContext.IsActive) return;
             if (!DS4WinWPF.StartupMethods.IsRunAtStartupEnabled())
             {
                 if (!RemoveViiperStartupTask(requestElevation: true))
@@ -543,6 +554,13 @@ namespace DS4Windows
             Window owner = null, bool portableInstallation = false)
         {
             if (PortableLabContext.IsActive) return false;
+            if (PortableBrokerContext.IsActive)
+            {
+                ShowInstallerMessage(owner,
+                    "Close this portable session before running the full installer. The portable broker will not replace installed components or change their startup tasks.",
+                    "DS4Windows portable", MessageBoxImage.Information);
+                return false;
+            }
             status ??= GetStatus();
             if (!status.SetupScriptFound)
             {
@@ -2737,7 +2755,7 @@ namespace DS4Windows
 
         private static bool TryStartServer(string viiperPath)
         {
-            if (PortableLabContext.IsActive) return false;
+            if (PortableLabContext.IsActive || PortableBrokerContext.IsActive) return false;
             try
             {
                 // When startup is enabled, use its verified elevated task.
@@ -2808,7 +2826,7 @@ namespace DS4Windows
             => ProbeServer(host, port, authenticated, out _);
 
         internal static bool ProbeServer(string host, int port, bool authenticated,
-            out string failure)
+            out string failure, int totalTimeoutMilliseconds = 3000)
         {
             failure = null;
             string phase = "Connect";
@@ -2820,6 +2838,15 @@ namespace DS4Windows
                     SendTimeout = 500,
                     ReceiveTimeout = 1000,
                 };
+
+                // Bound the whole connection, including a trickled auth reply,
+                // rather than resetting the budget after each successful byte.
+                using var totalDeadline = new CancellationTokenSource(
+                    Math.Clamp(totalTimeoutMilliseconds, 1, 3000));
+                using var cancelTransport = totalDeadline.Token.Register(() =>
+                {
+                    try { tcp.Dispose(); } catch (ObjectDisposedException) { }
+                });
 
                 IAsyncResult result = tcp.BeginConnect(host, port, null, null);
                 using (result.AsyncWaitHandle)

@@ -104,3 +104,28 @@ compiled updater acceptance remain mandatory publication gates.
 This hotfix does not claim to identify the initiating read error 995 reported
 separately, fix Joy-Con rumble stutter, or prevent every possible setup failure.
 Those limits are unchanged by the successful setup repair.
+
+## Published result
+
+The publication gates above subsequently passed. RC4.5.5 was published from
+`2b24e0994819ca939fa00e44e15e0509ae7f0053` with 13 byte-verified assets.
+Exact-source CI `34432374338`, draft build `34433022241`, and post-publication
+verification `34433548343` succeeded. The public assets match the draft bytes;
+the verification run did not rebuild or overwrite them.
+
+The unchanged compiled updater 2.0.6 accepted the untouched public metadata and
+the actual package, receipt, executable and portable marker identities. No
+updater worker was executed. Local downloads are in
+`Desktop/DS4Windows-RC4.5.5-Release`; verification evidence is retained in
+`isolated_results/rc455-verification/final/VERIFICATION.json` and the sibling
+updater's `isolated_results/updater-2.0.6/PUBLIC-RC455-UPDATER-VERIFICATION.json`.
+
+Main downloads:
+
+- `DS4Windows_VIIPER_x64.zip`: SHA-256
+  `6806E2DAE93E6050853205310BE11C0887158DB959133AA56ED7B68053E74EDB`.
+- `DS4Windows_5.0.5.5_Setup_x64.exe`: SHA-256
+  `5DCA513CE521DD660BADAC0DD6A23FDCE8A3192930397C4A6C45D44A69B8ED74`.
+
+The separate later haptics investigation does not change these published bytes
+or this release's setup-only claims.

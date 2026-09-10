@@ -207,6 +207,44 @@ does not turn those open questions into hardware-fix claims.
   The initial 995 cause and Joy-Con rumble stutter remain open; this installer
   correction does not change input or haptic transport.
 
+## RC4.5.5 publication completed
+
+The preceding publication gates are complete. `VIIPERRC4.5.5` is published as
+**Release Candidate 4.5.5 Hotfix — Reliable Setup & Startup**, from immutable
+source `2b24e0994819ca939fa00e44e15e0509ae7f0053`. Exact-source CI `34432374338`,
+draft build `34433022241`, and post-publication verification `34433548343` passed.
+All 13 public assets were checked against the successful draft's byte identities.
+The untouched public release metadata and actual ZIP/receipt/PE identities were
+accepted by the compiled, unchanged updater 2.0.6. This was package acceptance,
+not execution of the updater worker. Complete downloads are retained in
+`Desktop/DS4Windows-RC4.5.5-Release`. Published assets are not to be overwritten.
+
+## New haptics reports: investigation in progress
+
+- **Joy-Con / Switch 2 Test Heavy and Test Light:** user reports consistent slight
+  stutter and crackling, over USB and Bluetooth. Live inspection found installed
+  RC4.5.4, a Bluetooth Joy-Con 2 (L), and profile `ds`. The test-preview lane
+  bypasses the native DualSense feedback queues. No physical fix is claimed.
+  Two bounded event-263 observer sessions returned no events (one idle, one
+  during Test Heavy); those captures do not establish absence or timing of
+  physical writes. The subsequent event-402 capture recorded 1,438 active
+  writes, one unchanged waveform, continuous counters, median 15.5632 ms and
+  maximum 17.5856 ms, with no ETW loss. The user confirmed this captured run
+  still stuttered. This is host-write evidence, not motor/radio delivery proof.
+- **GTA V Enhanced rapid-fire haptics:** third-party report affects physical
+  DualSense emulating DualSense over either USB or Bluetooth. Failing-first
+  fixtures reproduce loss of closely spaced exact native commands in VIIPER's
+  latest-state latch, and eviction/expiry in DS4Windows' ordered dispatch queue.
+  Broker bounded admission and downstream retained-head fixes now pass focused
+  regression tests and independent review. Full combined validation and a
+  complete private hardware candidate remain required before delivery.
+  These are confirmed source defects, not yet a captured attribution of the
+  reporter's GTA session. They are not included in RC4.5.5.
+- Preserve finite PCM/one-shot behavior, immediate explicit stops, independent
+  input processing, bounded queues, and lifecycle cancellation. Do not solve
+  command loss by silently overwriting, growing unbounded queues, or routinely
+  disconnecting controllers. Validate any candidate portably, not in Program Files.
+
 ## Current execution boundaries
 
 - Preserve the earlier source and live-preview changes, now checkpointed in the

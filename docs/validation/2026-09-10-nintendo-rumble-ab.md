@@ -4,6 +4,20 @@ This is a private validation record, not release notes or a smoothness claim.
 The user extended unattended work to one hour at approximately 12:56 UTC;
 the current work window ends at 13:56 UTC on September 10, 2026.
 
+## Latest status
+
+- Complete private D is prepared from `c6a763d`, with all 551 files verified;
+  neither app is running and no installed files were changed.
+- SDL-style first-active held-body output and two bounded Bluetooth lifetime/
+  retry corrections are implemented. The final full suite passed 5,074 with
+  11 gated skips, twice. Strict allocation checks remained enabled.
+- The environment-gated B experiment below is historical and has been removed
+  from current production code. The later first-active section supersedes it.
+- Physical smoothness still needs a controlled hands-on comparison. A separate
+  exact-native Bluetooth burst-coalescing defect is reproduced and remains open.
+
+The sections below preserve the chronological evidence and its limitations.
+
 ## Established starting point
 
 - The September 9 installed RC4.5.4 Bluetooth left Joy-Con Heavy trace had one
@@ -34,7 +48,7 @@ layout:
 
 | Source | Ordinary held group |
 | --- | --- |
-| DS4Windows | Three identical active subframes |
+| DS4Windows baseline A, before this change | Three identical active subframes |
 | [Switch2Connect](https://github.com/TommyWabg/Switch2Connect/blob/61ac6642ce12fe7217e38a860b14863b18ca7e28/src/virtual_controller.py), lines 2323–2327 and 2391–2393 | Held fallback repeats all three |
 | [Hifi SDL BLE](https://github.com/hifihedgehog/SDL/blob/d98c5804a9d20b0d96e993741797878c86b8f1e1/src/joystick/windows/SDL_ble_switch2joystick.c), `BLE_WriteRumble` | One active, two neutral-amplitude tails |
 | [SDL USB](https://github.com/libsdl-org/SDL/blob/c71abd08605b8bb7078372307a93274725c99fe0/src/joystick/hidapi/SDL_hidapi_switch2.c), `UpdateRumble` | One active, remaining bytes zero |

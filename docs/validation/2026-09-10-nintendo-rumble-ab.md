@@ -359,3 +359,40 @@ for these tests. The complete C candidate predates this narrow correction.
 An independent repeat of the full suite produced the same counts. Durable TRX:
 `isolated_results/dualsense-native-bt-ordering/full-suite/native-idle-retry-full.trx`,
 SHA-256 `27C3762397622F12BC955FC493C0F1F635EE15757A8608CEE159060B49640E44`.
+
+## Final private D candidate and work-window handoff
+
+Complete portable D contains all three corrections from this window, including
+the narrow idle retry fix, built from clean source
+`c6a763ddf7ecfa151fd055f10249e23519c89b4c`. Independent review found no concrete
+blocker in the final idle-retry guard, its concurrent microphone-boundary
+preservation, or the first-active policy's rich/impulse/finite protections.
+
+- Portable: `Desktop/DS4Windows-Haptics-Lab-20260910-D/portable/DS4Windows`.
+- App SHA-256: `F80F1378A80F927E8C730DBE77EFCDC1A5DAFD01F2BEF80A4AEB77EF04331803`.
+- Broker SHA-256: `DC2D47B49F94FA827903FD24F18AE0289EBE682F09D6EF67A09EE7A6A8005EB7`.
+- Manifest SHA-256: `4B60033271DE26D3E517D97727D5A5F37B4537E5EB56069C474ACF31BB50DF10`.
+
+Both full composition and the separate preflight verified all 551 files,
+including the bundled broker, self-contained runtime and Xbox identity. Fresh
+isolated data was prepared without launching either application. D is a private
+test candidate, not a published release or a claim of production haptics parity.
+The composition's base ZIP is an intermediate with the released broker and is
+**not** the final lab or a handoff artifact; only the final portable directory
+contains the pinned candidate broker.
+
+The pinned D binary also passed the same cross-process native USB burst check:
+32 accepted commands, 32 synthetic physical publications, zero compatibility
+fallbacks or callback failures, with an observed full-queue stall of 42.8868 ms.
+Workers joined, private device removal succeeded, the owned broker exited, and
+the generated key was removed. Evidence:
+`Desktop/Controller-Diagnostics-2026-09-10/native-burst-D-1351/SUMMARY.json`.
+This still does not cover the confirmed Bluetooth native-command coalescing
+defect, physical GTA gameplay, PCM fairness, or actuator smoothness.
+
+No installed files, drivers, profiles or public releases were changed during
+this window. No controller wake or further manual test was requested after the
+user left. All owned captures and synthetic runs ended; both applications are
+left closed. Hands-on comparison of D's rumble remains outstanding. The next
+software task is the explicitly bounded native-command credit/ordering design,
+not an unvalidated FIFO or a claim that the GTA report is fully resolved.

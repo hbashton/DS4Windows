@@ -3862,15 +3862,19 @@ namespace DS4Windows.InputDevices
                                     {
                                         if (pendingControllerStateAvailable)
                                         {
-                                            // A saturated control must not
-                                            // monopolize the oldest physical
-                                            // credit. Give one due media frame
-                                            // the next attempt, then retry the
-                                            // same uncommitted state write.
-                                            controllerStateReportsAhead =
-                                                Math.Max(
-                                                    controllerStateReportsAhead,
-                                                    1);
+                                            // Yield to an actual queued media
+                                            // frame, not an imaginary future
+                                            // one. An idle native command must
+                                            // retry once physical credit returns
+                                            // without requiring new source data.
+                                            bool mediaQueued = reservoir.TryPeek(
+                                                out QueuedReport queuedMedia) &&
+                                                IsQueuedSpeakerReport(queuedMedia);
+                                            if (mediaQueued)
+                                            {
+                                                controllerStateReportsAhead =
+                                                    Math.Max(controllerStateReportsAhead, 1);
+                                            }
                                         }
                                     }
                                 }

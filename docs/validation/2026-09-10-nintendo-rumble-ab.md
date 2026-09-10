@@ -236,3 +236,126 @@ this change replaces the per-call CTS/timer with a drain completion source and
 an observer for incomplete operations. No real-adapter zero-allocation or net
 allocation improvement is claimed. The existing strict fake-lease hot-path
 allocation tests remained enabled and passed.
+
+## Complete portable C and repeated native burst check
+
+The complete private C candidate was built from clean source
+`fd4ac13c4b7887f56517fa17162d3f8ab609cac9`, with the first-active-frame and
+native Bluetooth write-lifetime fixes. Its 551-file manifest passed the full
+runtime/dependency/Xbox-identity closure verifier. It is prepared, not launched;
+no new hardware or tactile result is implied. Location:
+`Desktop/DS4Windows-Haptics-Lab-20260910-C/portable/DS4Windows`.
+
+- DS4 assembly: `E7534285182DAEC6B6F3703B29FBE2DA752A63359FED1D118BE838FD2405588D`.
+- Candidate broker: `DC2D47B49F94FA827903FD24F18AE0289EBE682F09D6EF67A09EE7A6A8005EB7`.
+- Private manifest: `122C634B9267A1F8A0A6D11DFBEF1EC84907B17023570EC422227E1C174BDF72`.
+
+The same native cross-process harness passed against C: 32 accepted commands,
+32 ordered synthetic USB physical publications, zero compatibility fallbacks
+or callback failures, and a measured forced-full stall of 55.9739 ms. Owned
+workers and broker exited and the private device was removed. Evidence:
+`Desktop/Controller-Diagnostics-2026-09-10/native-burst-C-1323/SUMMARY.json`.
+The Bluetooth-helper and PCM/gameplay limitations of the A run also apply to C.
+
+Reference cadence mechanics differ beyond nominal interval constants. SDL
+USB's shared HID rumble thread adds a 10 ms sleep after a write; the BLE donor's
+10 ms gate runs inside its update pump, not an autonomous 100 Hz timer. Our
+worker anchors its next held refresh to successful write start plus the
+interval, subtracts service time once, and does not emit catch-up bursts. No
+firmware subframe playback duration or periodic silent gap was established.
+
+## Actual-worker cadence isolation, without a physical transport
+
+The separate hash-pinned harness executed C then A for about 30 seconds each.
+It composes the real runtime, preview renewal, lifetime, sink and maintenance
+worker, substituting only a successful generation-bound BLE lease. The dormant
+worker is replaced with the same worker wrapping the actual service delegate
+for bounded observations. It requests and releases the same scoped 1 ms timer
+period as app startup; both APIs returned success. No controller, broker, UI,
+Windows transport or input slot is opened. Raw heavy strength is byte 100, not
+the UI's 100 percent setting. Each condition lasts 7.5 seconds.
+
+| Candidate / model / condition | Writes | Median interval | p99 | Maximum |
+| --- | ---: | ---: | ---: | ---: |
+| C Pro / quiet | 489 | 15.2945 ms | 16.0310 ms | 16.4322 ms |
+| C Pro / neutral mapper publications | 489 | 15.2836 ms | 16.1443 ms | 16.7868 ms |
+| C standalone right Joy-Con / quiet | 720 | 10.3301 ms | 11.5054 ms | 12.1671 ms |
+| C standalone right Joy-Con / neutral mapper publications | 716 | 10.5478 ms | 11.1519 ms | 11.7050 ms |
+| A Pro / quiet | 485 | 15.4184 ms | 16.2973 ms | 16.4341 ms |
+| A Pro / neutral mapper publications | 484 | 15.5010 ms | 16.3102 ms | 16.5038 ms |
+| A standalone right Joy-Con / quiet | 717 | 10.4811 ms | 11.3201 ms | 11.4958 ms |
+| A standalone right Joy-Con / neutral mapper publications | 717 | 10.5142 ms | 11.3156 ms | 11.4981 ms |
+
+Every phase had zero write intervals above 20 ms, zero neutral payloads,
+counter discontinuities, waveform changes, overflow or worker failures.
+C's Pro groups each had one active subframe; its right Joy-Con group had one.
+A retained three per group. Publishers joined and fake lifetimes retired; no
+writes were observed in the subsequent 40 ms. That bounded observation and
+idle wrapped service are not proof of joining every Timer callback.
+
+These short sequential trials do not establish a performance advantage for C,
+radio/firmware continuity, tactile smoothness or behavior under arbitrary load.
+They did not reproduce a preview-renewal or composed scheduling stall under
+the tested quiet and neutral-publication conditions. The full WinRT adapter,
+GATT completion and physical input workload are intentionally absent.
+
+Evidence (folder labels are not authoritative timestamps; JSON records UTC):
+`Desktop/Controller-Diagnostics-2026-09-10/actual-schedule-C-1334/SUMMARY.json`
+(13:32:48-13:33:18 UTC) and
+`Desktop/Controller-Diagnostics-2026-09-10/actual-schedule-A-1335/SUMMARY.json`
+(13:33:29-13:34:00 UTC). Harness SHA-256:
+`6BB2FE21855FFB5A092A98A8AE844FDF013BE3C6F08989B67690F8E27F3CCCA9`.
+
+## Open native Bluetooth ordering defect reproduced independently
+
+The C USB burst result does not cover the physical Bluetooth helper. A separate
+isolated fixture invokes the real `HelperHost.ReceiveGameStateAndTemplate`,
+actual pacer loop and physical writer, with synthetic native I/O and no device
+handle. Both exact commands are admitted while presentation is paused, then
+the real presenter is started. C reproduces two ordering failures:
+
+- Rumble pulse 91/173 followed by Stop: only the zero-motor Stop is submitted.
+- Right-trigger A followed by B: only B is submitted.
+
+Both spaced positive controls submit the two expected reports in order. The
+helper's `pendingControllerState` accumulator merges the commands before
+presentation; the existing validity composer intentionally replaces an earlier
+valid field with a later valid field. This is a confirmed native-command loss
+boundary, not proof of the GTA reporter's cause or of USB PCM behavior.
+
+Evidence: `isolated_results/dualsense-native-bt-ordering/baseline-c.jsonl`,
+hash-pinned to the same C assembly above. These deliberately failing diagnostic
+cases are isolated from the normal test suite; they must not be represented as
+fixed because the existing main suite is green.
+
+A correct fix needs a bounded exact-native admission/acknowledgement domain,
+unchanged local latest-state behavior, immutable head/retry ownership, both idle
+0x31 and media-piggyback coverage, and lifecycle cancellation. Merely blocking
+the shared helper command reader on a full FIFO risks starving Clear/Stop,
+templates and media. This larger correction is not included in C.
+
+## Narrow idle native Bluetooth retry correction after C
+
+A fifth isolated C case reproduced a separate retry stall: one accepted native
+command encounters an occupied oldest physical-writer slot, that credit later
+returns, but the helper emits nothing for one second. Its rejected-write path
+had manufactured `controllerStateReportsAhead = 1` without any queued media,
+so the command could only recover when another source command or media arrived.
+Evidence: `isolated_results/dualsense-native-bt-ordering/baseline-c-idle-retry.jsonl`.
+
+The correction grants the one-media-frame fairness yield only when an actual
+speaker report is queued at the head. With no queued media it leaves the current
+ordering boundary unchanged, normally zero for an idle claim. In particular,
+it must not clear a newer microphone boundary published concurrently during
+physical I/O. This is separate from the still-open exact-native coalescing defect.
+
+Five normal-suite tests exercise the actual helper/pacer/physical writer with
+synthetic native I/O: recovered idle credit, real queued-media fairness and
+subsequent piggyback, Clear into a new epoch, Stop joining before late credit,
+and preservation of a concurrent two-media-frame microphone boundary. They
+passed 5/5. The unfiltered Release x64 suite passed **5,074**, failed **0**, and
+skipped the same **11** gated cases (total 5,085). No real controller was opened
+for these tests. The complete C candidate predates this narrow correction.
+An independent repeat of the full suite produced the same counts. Durable TRX:
+`isolated_results/dualsense-native-bt-ordering/full-suite/native-idle-retry-full.trx`,
+SHA-256 `27C3762397622F12BC955FC493C0F1F635EE15757A8608CEE159060B49640E44`.

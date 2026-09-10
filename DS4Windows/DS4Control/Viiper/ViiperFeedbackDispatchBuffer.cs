@@ -14,13 +14,17 @@ using System.Threading;
 
 namespace DS4Windows
 {
+    internal readonly record struct ViiperNativeCommandContext(
+        object Target, long BindingRevision, long ProfileRevision,
+        long PendingBoundaryRevision);
+
     /// <summary>
     /// Preallocated hand-off between VIIPER's framed TCP reader and the
     /// potentially blocking physical-controller feedback paths. Speaker PCM
-    /// and native haptics retain order only inside explicit live-latency
-    /// budgets; expired frames are never replayed after a stall. Ordinary
-    /// controller state can intentionally coalesce because only the newest
-    /// rumble/light/trigger state matters.
+    /// retain order only inside explicit live-latency budgets. Native HID
+    /// commands instead retain their accepted head until physical admission;
+    /// their validity-masked deltas cannot be coalesced or aged like PCM.
+    /// Legacy cumulative controller state retains its newest-state policy.
     /// </summary>
     internal sealed class ViiperFeedbackDispatchBuffer
     {
@@ -39,6 +43,9 @@ namespace DS4Windows
         private readonly long[] orderedControlGenerations;
         private readonly int[] orderedControlDeviceIndexes;
         private readonly long[] orderedControlEnqueueTimestamps;
+        private readonly bool[] orderedControlNativeCommands;
+        private readonly long[] orderedControlAdmissionRevisions;
+        private readonly ViiperNativeCommandContext[] orderedControlNativeContexts;
         private readonly long orderedControlMaximumAgeTicks;
         private int speakerReadIndex;
         private int speakerWriteIndex;
@@ -67,6 +74,7 @@ namespace DS4Windows
         private long orderedControlHighWater;
         private long orderedControlMaximumQueueAgeTicks;
         private long controlAdmissionRevision;
+        private long pendingBoundaryRevision;
 
         internal ViiperFeedbackDispatchBuffer(int speakerCapacity,
             int speakerSlotLength, int controlSlotLength,
@@ -122,6 +130,9 @@ namespace DS4Windows
             orderedControlDeviceIndexes = new int[orderedControlCapacity];
             orderedControlEnqueueTimestamps =
                 new long[orderedControlCapacity];
+            orderedControlNativeCommands = new bool[orderedControlCapacity];
+            orderedControlAdmissionRevisions = new long[orderedControlCapacity];
+            orderedControlNativeContexts = new ViiperNativeCommandContext[orderedControlCapacity];
             if (orderedControlMaximumAgeMilliseconds < 0)
             {
                 throw new ArgumentOutOfRangeException(
@@ -191,6 +202,10 @@ namespace DS4Windows
                     return controlAdmissionRevision;
                 }
             }
+        }
+        internal long PendingBoundaryRevision
+        {
+            get { lock (syncRoot) return pendingBoundaryRevision; }
         }
         internal double OrderedControlMaximumQueueAgeMilliseconds =>
             StopwatchTicksToMilliseconds(
@@ -343,7 +358,9 @@ namespace DS4Windows
         }
 
         internal bool TryEnqueueOrderedControl(byte[] source, int length,
-            long generation, int deviceIndex)
+            long generation, int deviceIndex, bool nativeCommand = false,
+            long? expectedBoundaryRevision = null,
+            ViiperNativeCommandContext nativeContext = default)
         {
             if (source == null)
             {
@@ -359,9 +376,16 @@ namespace DS4Windows
 
             lock (syncRoot)
             {
-                controlAdmissionRevision++;
+                if (expectedBoundaryRevision.HasValue &&
+                    expectedBoundaryRevision.Value != pendingBoundaryRevision)
+                    return false;
                 if (orderedControlCount == orderedControlSlots.Length)
                 {
+                    // A raw HID command is a validity-masked delta, not PCM.
+                    // Reject before admission so its producer can retain and
+                    // retry it. Never evict an already accepted native head.
+                    if (nativeCommand || orderedControlNativeCommands[orderedControlReadIndex])
+                        return false;
                     // Advanced haptics are also real-time data. If the physical
                     // transport cannot keep up, keep the newest bounded window
                     // instead of replaying stale actuator samples indefinitely.
@@ -377,6 +401,7 @@ namespace DS4Windows
                     Interlocked.Increment(ref orderedControlDropped);
                 }
 
+                controlAdmissionRevision++;
                 Buffer.BlockCopy(source, 0,
                     orderedControlSlots[orderedControlWriteIndex], 0, length);
                 orderedControlLengths[orderedControlWriteIndex] = length;
@@ -386,6 +411,9 @@ namespace DS4Windows
                     deviceIndex;
                 orderedControlEnqueueTimestamps[orderedControlWriteIndex] =
                     Stopwatch.GetTimestamp();
+                orderedControlNativeCommands[orderedControlWriteIndex] = nativeCommand;
+                orderedControlAdmissionRevisions[orderedControlWriteIndex] = controlAdmissionRevision;
+                orderedControlNativeContexts[orderedControlWriteIndex] = nativeContext;
                 orderedControlWriteIndex = (orderedControlWriteIndex + 1) %
                     orderedControlSlots.Length;
                 orderedControlCount++;
@@ -407,7 +435,7 @@ namespace DS4Windows
             lock (syncRoot)
             {
                 DropExpiredOrderedControlFrames(Stopwatch.GetTimestamp());
-                if (orderedControlCount == 0)
+                if (orderedControlCount == 0 || orderedControlNativeCommands[orderedControlReadIndex])
                 {
                     length = 0;
                     generation = 0;
@@ -442,8 +470,80 @@ namespace DS4Windows
                 orderedControlReadIndex = (orderedControlReadIndex + 1) %
                     orderedControlSlots.Length;
                 orderedControlCount--;
+                Monitor.PulseAll(syncRoot);
                 Interlocked.Increment(ref orderedControlDequeued);
                 return true;
+            }
+        }
+
+        internal bool TryPeekNativeCommand(byte[] destination, out int length,
+            out long generation, out int deviceIndex, out long admissionRevision,
+            out ViiperNativeCommandContext context)
+        {
+            ArgumentNullException.ThrowIfNull(destination);
+            lock (syncRoot)
+            {
+                DropExpiredOrderedControlFrames(Stopwatch.GetTimestamp());
+                if (orderedControlCount == 0 || !orderedControlNativeCommands[orderedControlReadIndex])
+                {
+                    length = 0;
+                    generation = 0;
+                    deviceIndex = -1;
+                    admissionRevision = 0;
+                    context = default;
+                    return false;
+                }
+                length = orderedControlLengths[orderedControlReadIndex];
+                if (destination.Length < length)
+                    throw new ArgumentException("The native command destination is too small.", nameof(destination));
+                Buffer.BlockCopy(orderedControlSlots[orderedControlReadIndex], 0, destination, 0, length);
+                generation = orderedControlGenerations[orderedControlReadIndex];
+                deviceIndex = orderedControlDeviceIndexes[orderedControlReadIndex];
+                admissionRevision = orderedControlAdmissionRevisions[orderedControlReadIndex];
+                context = orderedControlNativeContexts[orderedControlReadIndex];
+                RecordMaximum(ref orderedControlMaximumQueueAgeTicks,
+                    Stopwatch.GetTimestamp() - orderedControlEnqueueTimestamps[orderedControlReadIndex]);
+                return true;
+            }
+        }
+
+        internal bool TryCommitNativeCommand(long expectedAdmissionRevision)
+        {
+            lock (syncRoot)
+            {
+                if (orderedControlCount == 0 || !orderedControlNativeCommands[orderedControlReadIndex] ||
+                    orderedControlAdmissionRevisions[orderedControlReadIndex] != expectedAdmissionRevision)
+                    return false;
+                orderedControlLengths[orderedControlReadIndex] = 0;
+                orderedControlGenerations[orderedControlReadIndex] = 0;
+                orderedControlDeviceIndexes[orderedControlReadIndex] = -1;
+                orderedControlEnqueueTimestamps[orderedControlReadIndex] = 0;
+                orderedControlNativeCommands[orderedControlReadIndex] = false;
+                orderedControlAdmissionRevisions[orderedControlReadIndex] = 0;
+                orderedControlNativeContexts[orderedControlReadIndex] = default;
+                orderedControlReadIndex = (orderedControlReadIndex + 1) % orderedControlSlots.Length;
+                orderedControlCount--;
+                Interlocked.Increment(ref orderedControlDequeued);
+                Monitor.PulseAll(syncRoot);
+                return true;
+            }
+        }
+
+        // Only the dedicated framed feedback reader waits here. A successful
+        // consumer commit wakes it; ClearPending invalidates the exact wait.
+        // The bounded slice lets its owner recheck stop/stream generation.
+        internal bool WaitForOrderedControlSpace(long expectedBoundaryRevision,
+            int maximumWaitMilliseconds)
+        {
+            if (maximumWaitMilliseconds is < 1 or > 100)
+                throw new ArgumentOutOfRangeException(nameof(maximumWaitMilliseconds));
+            lock (syncRoot)
+            {
+                if (pendingBoundaryRevision != expectedBoundaryRevision) return false;
+                if (orderedControlCount == orderedControlSlots.Length)
+                    Monitor.Wait(syncRoot, maximumWaitMilliseconds);
+                return pendingBoundaryRevision == expectedBoundaryRevision &&
+                    orderedControlCount < orderedControlSlots.Length;
             }
         }
 
@@ -457,7 +557,13 @@ namespace DS4Windows
 
             lock (syncRoot)
             {
-                if (!controlPending)
+                // The legacy newest-state mailbox cannot consume or erase
+                // an accepted command waiting for physical-owner admission.
+                bool nativePending = false;
+                for (int index = 0; index < orderedControlCount; index++)
+                    nativePending |= orderedControlNativeCommands[
+                        (orderedControlReadIndex + index) % orderedControlSlots.Length];
+                if (!controlPending || nativePending)
                 {
                     length = 0;
                     generation = 0;
@@ -489,10 +595,13 @@ namespace DS4Windows
                     Array.Fill(orderedControlDeviceIndexes, -1);
                     Array.Clear(orderedControlEnqueueTimestamps, 0,
                         orderedControlEnqueueTimestamps.Length);
+                    Array.Clear(orderedControlNativeContexts);
+                    Array.Clear(orderedControlAdmissionRevisions);
                 }
                 orderedControlReadIndex = 0;
                 orderedControlWriteIndex = 0;
                 orderedControlCount = 0;
+                Monitor.PulseAll(syncRoot);
                 Interlocked.Increment(ref controlDequeued);
                 return true;
             }
@@ -512,6 +621,7 @@ namespace DS4Windows
             lock (syncRoot)
             {
                 controlAdmissionRevision++;
+                pendingBoundaryRevision++;
                 Array.Clear(speakerLengths, 0, speakerLengths.Length);
                 Array.Clear(speakerGenerations, 0,
                     speakerGenerations.Length);
@@ -533,9 +643,13 @@ namespace DS4Windows
                 Array.Fill(orderedControlDeviceIndexes, -1);
                 Array.Clear(orderedControlEnqueueTimestamps, 0,
                     orderedControlEnqueueTimestamps.Length);
+                Array.Clear(orderedControlNativeCommands);
+                Array.Clear(orderedControlAdmissionRevisions);
+                Array.Clear(orderedControlNativeContexts);
                 orderedControlReadIndex = 0;
                 orderedControlWriteIndex = 0;
                 orderedControlCount = 0;
+                Monitor.PulseAll(syncRoot);
             }
         }
 
@@ -584,6 +698,7 @@ namespace DS4Windows
         private void DropExpiredOrderedControlFrames(long nowTimestamp)
         {
             while (orderedControlCount > 0 &&
+                !orderedControlNativeCommands[orderedControlReadIndex] &&
                 orderedControlMaximumAgeTicks > 0 &&
                 nowTimestamp - orderedControlEnqueueTimestamps[
                     orderedControlReadIndex] >

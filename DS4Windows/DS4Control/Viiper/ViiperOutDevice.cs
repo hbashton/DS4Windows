@@ -231,10 +231,9 @@ namespace DS4Windows
         internal const int DualSenseFeedbackSpeakerMaximumAgeMilliseconds = 0;
         internal const int DualShock4FeedbackSpeakerQueueCapacity = 16;
         internal const int DualShock4FeedbackSpeakerMaximumAgeMilliseconds = 0;
-        // Native DualSense feedback arrives at roughly 150 Hz and is valid for
-        // only 30 ms in the physical combined transport. Four ordered reports
-        // preserve waveform continuity while preventing a stalled callback
-        // from turning old game effects into almost a second of input lag.
+        // Keep the existing bounded legacy/media window. Exact physical
+        // DualSense HID commands use retained admission in these same four
+        // slots: they are validity-masked deltas, not expiring PCM samples.
         internal const int FeedbackOrderedControlQueueCapacity = 4;
         internal const int FeedbackOrderedControlMaximumAgeMilliseconds = 20;
 
@@ -553,6 +552,7 @@ namespace DS4Windows
         private int activeFeedbackLength;
         private string physicalDualSenseIdentityPath;
         private bool physicalDualSenseIdentityVerified;
+        private long physicalControllerBindingRevision;
         private readonly byte[] lastR2TriggerFeedback = new byte[DualSenseTriggerEffectLength];
         private readonly byte[] lastL2TriggerFeedback = new byte[DualSenseTriggerEffectLength];
 
@@ -1064,6 +1064,7 @@ namespace DS4Windows
                     Volatile.Write(
                         ref publishedPhysicalControllerTargetDevice,
                         targetDevice);
+                    Interlocked.Increment(ref physicalControllerBindingRevision);
                 }
             }
         }
@@ -3817,7 +3818,7 @@ namespace DS4Windows
 
         private void StartFeedbackDispatchWorkers()
         {
-            if (!activeStreamSupportsDirectSpeaker || !connected ||
+            if ((!activeStreamSupportsDirectSpeaker && !IsDualSenseType()) || !connected ||
                 feedbackDispatchStopRequested)
             {
                 return;
@@ -3833,8 +3834,8 @@ namespace DS4Windows
                     feedbackDispatchThreadGeneration = generation;
                 }
 
-                if (newGeneration || feedbackSpeakerDispatchThread == null ||
-                    !feedbackSpeakerDispatchThread.IsAlive)
+                if (activeStreamSupportsDirectSpeaker && (newGeneration ||
+                    feedbackSpeakerDispatchThread == null || !feedbackSpeakerDispatchThread.IsAlive))
                 {
                     Thread thread = new Thread(() =>
                         FeedbackSpeakerDispatchLoop(generation))
@@ -4182,10 +4183,13 @@ namespace DS4Windows
                         RefreshSwitch2DualSenseConversionPolicy(
                             Volatile.Read(ref lastInputDeviceIndex));
                     }
-                    bool dequeued = feedbackDispatchBuffer
-                        .TryDequeueOrderedControl(payload, out int length,
-                            out long streamItemGeneration,
-                            out int targetDeviceIndex);
+                    bool nativeCommand = feedbackDispatchBuffer.TryPeekNativeCommand(
+                        payload, out int length, out long streamItemGeneration,
+                        out int targetDeviceIndex, out long admissionRevision,
+                        out ViiperNativeCommandContext nativeContext);
+                    bool dequeued = nativeCommand || feedbackDispatchBuffer
+                        .TryDequeueOrderedControl(payload, out length,
+                            out streamItemGeneration, out targetDeviceIndex);
                     if (!dequeued)
                     {
                         dequeued = feedbackDispatchBuffer.TryTakeControl(
@@ -4201,9 +4205,19 @@ namespace DS4Windows
                         continue;
                     }
 
-                    DispatchFeedbackControl(payload, length,
+                    bool consumed = DispatchFeedbackControl(payload, length,
                         streamItemGeneration, targetDeviceIndex, generation,
-                        nativeOutputScratch);
+                        nativeOutputScratch, nativeContext);
+                    if (nativeCommand)
+                    {
+                        if (consumed)
+                            feedbackDispatchBuffer.TryCommitNativeCommand(admissionRevision);
+                        else
+                            // The physical owner rejected before admission.
+                            // Retain the exact head; do not spin or fall back
+                            // to scalar rumble while its fixed ring is full.
+                            feedbackControlSignal.WaitOne(4);
+                    }
                 }
             }
             finally
@@ -4219,25 +4233,34 @@ namespace DS4Windows
             }
         }
 
-        private void DispatchFeedbackControl(byte[] payload, int length,
+        private bool DispatchFeedbackControl(byte[] payload, int length,
             long streamItemGeneration, int targetDeviceIndex,
-            long dispatchGeneration, byte[] nativeOutputScratch)
+            long dispatchGeneration, byte[] nativeOutputScratch,
+            ViiperNativeCommandContext nativeContext = default)
         {
             if (!TryBeginFeedbackDispatchCallback(dispatchGeneration,
                     streamItemGeneration, targetDeviceIndex,
                     validateTargetDevice: true))
             {
                 Interlocked.Increment(ref feedbackControlStale);
-                return;
+                return true;
             }
             try
             {
                 try
                 {
-                    ApplyFeedback(payload, length, targetDeviceIndex,
-                        freshNativeOutput: true, nativeOutputScratch,
-                        nativeOutputStreamGeneration: streamItemGeneration);
+                    if (nativeContext.Target != null)
+                    {
+                        if (!TryApplyRetainedNativeCommand(payload, length,
+                            targetDeviceIndex, streamItemGeneration,
+                            nativeContext, nativeOutputScratch)) return false;
+                    }
+                    else
+                        ApplyFeedback(payload, length, targetDeviceIndex,
+                            freshNativeOutput: true, nativeOutputScratch,
+                            nativeOutputStreamGeneration: streamItemGeneration);
                     Interlocked.Increment(ref feedbackControlDelivered);
+                    return true;
                 }
                 catch (Exception ex)
                 {
@@ -4249,6 +4272,7 @@ namespace DS4Windows
                             $"VIIPER {viiperType} control dispatch failed: {ex.GetType().Name}: {ex.Message}",
                             true);
                     }
+                    return false;
                 }
             }
             finally
@@ -6102,7 +6126,13 @@ namespace DS4Windows
                             {
                                 int targetDeviceIndex = Volatile.Read(
                                     ref lastInputDeviceIndex);
-                                bool queued = IsDualSenseType() ?
+                                bool queued = TryCaptureNativeCommandContext(
+                                    framedPayload, payloadLength, targetDeviceIndex,
+                                    out ViiperNativeCommandContext nativeContext) ?
+                                    EnqueueNativeCommandUntilCancelled(stream,
+                                        readStreamGeneration, framedPayload,
+                                        payloadLength, targetDeviceIndex, nativeContext) :
+                                    IsDualSenseType() ?
                                     feedbackDispatchBuffer
                                         .TryEnqueueOrderedControl(
                                             framedPayload, payloadLength,
@@ -6229,7 +6259,16 @@ namespace DS4Windows
                                 $"VIIPER feedback stream active: bus={stream.BusId} device={stream.DevId} port={stream.UsbipPort} sidecar={audioOnlySidecar} gamepadOnly={gamepadOnly} rawPayload={feedbackLength} sequenceCount={frameNumber}",
                                 false);
                         }
-                        if (TryBeginFeedbackReaderCallback(stream,
+                        int targetDeviceIndex = Volatile.Read(ref lastInputDeviceIndex);
+                        if (TryCaptureNativeCommandContext(buffer, feedbackLength,
+                            targetDeviceIndex, out ViiperNativeCommandContext nativeContext))
+                        {
+                            if (EnqueueNativeCommandUntilCancelled(stream,
+                                readStreamGeneration, buffer, feedbackLength,
+                                targetDeviceIndex, nativeContext))
+                                feedbackControlSignal.Set();
+                        }
+                        else if (TryBeginFeedbackReaderCallback(stream,
                                 readStreamGeneration))
                         {
                             try
@@ -6373,6 +6412,107 @@ namespace DS4Windows
                     out ControllerFeedbackFrame frame) && frame.IsStop;
         }
 
+        internal static bool IsExactNativeDualSenseCommand(byte[] feedback, int length) =>
+            feedback != null && length >= DualSenseBluetoothHapticsReportOffset &&
+            length <= feedback.Length &&
+            feedback[DualSenseNativeOutputReportOffset] == 0x02 &&
+            (length <= DualSenseCombinedBluetoothReportOffset ||
+                (feedback[DualSenseCombinedBluetoothReportOffset] != 0x36 &&
+                 feedback[DualSenseCombinedBluetoothReportOffset] != 0x32));
+
+        internal bool TryCaptureNativeCommandContext(byte[] feedback, int length,
+            int deviceIndex, out ViiperNativeCommandContext context)
+        {
+            context = default;
+            if (audioOnlySidecar || !IsDualSenseType() ||
+                !IsExactNativeDualSenseCommand(feedback, length)) return false;
+            lock (feedbackCallbackAdmissionLock)
+            {
+                DualSenseDevice target = ResolvePhysicalControllerTarget(deviceIndex);
+                if (deviceIndex != Volatile.Read(ref lastInputDeviceIndex) ||
+                    target == null || !IsNativeDualSenseFeedbackCompatible(target)) return false;
+                context = new(target, Interlocked.Read(ref physicalControllerBindingRevision),
+                    Global.ReadProfileSwitchRevision(deviceIndex), feedbackDispatchBuffer.PendingBoundaryRevision);
+                return true;
+            }
+        }
+
+        private bool IsNativeCommandTargetCurrent(int deviceIndex,
+            in ViiperNativeCommandContext context) =>
+            context.Target is DualSenseDevice target &&
+            !target.IsDisconnecting && !target.IsRemoving && !target.IsRemoved &&
+            deviceIndex == Volatile.Read(ref lastInputDeviceIndex) &&
+            context.BindingRevision == Interlocked.Read(ref physicalControllerBindingRevision) &&
+            context.ProfileRevision == Global.ReadProfileSwitchRevision(deviceIndex) &&
+            context.PendingBoundaryRevision == feedbackDispatchBuffer.PendingBoundaryRevision &&
+            ReferenceEquals(target, ResolvePhysicalControllerTarget(deviceIndex)) &&
+            ReferenceEquals(target, Volatile.Read(ref publishedPhysicalControllerTargetDevice));
+
+        internal bool EnqueueNativeCommandUntilCancelled(ViiperDeviceStream stream,
+            long sourceGeneration, byte[] payload, int length, int deviceIndex,
+            in ViiperNativeCommandContext context)
+        {
+            if (length > feedbackDispatchBuffer.ControlSlotLength) return false;
+            long boundary = feedbackDispatchBuffer.PendingBoundaryRevision;
+            while (true)
+            {
+                lock (feedbackCallbackAdmissionLock)
+                {
+                    if (!connected || feedbackDispatchStopRequested ||
+                        sourceGeneration != Interlocked.Read(ref streamGeneration) ||
+                        !ReferenceEquals(stream, Volatile.Read(ref deviceStream)) ||
+                        !IsNativeCommandTargetCurrent(deviceIndex, context) ||
+                        boundary != feedbackDispatchBuffer.PendingBoundaryRevision) return false;
+                    if (feedbackDispatchBuffer.TryEnqueueOrderedControl(payload,
+                        length, sourceGeneration, deviceIndex, nativeCommand: true,
+                        expectedBoundaryRevision: boundary, nativeContext: context)) return true;
+                }
+                // Only this dedicated feedback reader waits, outside callback
+                // admission. TCP input writes and physical input are independent.
+                // Later media on this same feedback stream can be delayed under
+                // native-command saturation; V5 supplies no per-command credits.
+                feedbackControlSignal.Set();
+                feedbackDispatchBuffer.WaitForOrderedControlSpace(boundary, 10);
+            }
+        }
+
+        // True means consumed (admitted, or cancelled at an ownership boundary).
+        // False means the exact current command remains pending for retry.
+        internal bool TryApplyRetainedNativeCommand(byte[] feedback, int length,
+            int deviceIndex, long sourceGeneration, in ViiperNativeCommandContext context,
+            byte[] nativeOutputScratch)
+        {
+            long revision;
+            DualSenseDevice target;
+            lock (feedbackCallbackAdmissionLock)
+            {
+                if (!connected || feedbackDispatchStopRequested ||
+                    sourceGeneration != Interlocked.Read(ref streamGeneration) ||
+                    !IsNativeCommandTargetCurrent(deviceIndex, context) ||
+                    !Global.EnableOutputDataToDS4[deviceIndex]) return true;
+                if (!IsExactNativeDualSenseCommand(feedback, length)) return true;
+                target = (DualSenseDevice)context.Target;
+                PrepareNativeDualSenseOutputReportForProfileInto(feedback,
+                    deviceIndex, nativeOutputScratch);
+                if (!target.WriteRawOutputReportFromGame(nativeOutputScratch, 0,
+                    DualSenseNativeOutputReportLength, out revision)) return false;
+            }
+            // Foreground/process diagnostics must not extend the short physical
+            // target admission boundary or prevent a stop from sealing it.
+            try
+            {
+                TraceNativeGameOutput(feedback, DualSenseNativeOutputReportOffset,
+                    revision, target, sourceGeneration);
+            }
+            catch
+            {
+                // Physical admission is irrevocable. A diagnostic failure
+                // cannot report rejection and replay the already-owned delta.
+                Interlocked.Increment(ref feedbackControlCallbackFailures);
+            }
+            return true;
+        }
+
         private void ApplyFeedback(byte[] feedback, int feedbackLength,
             int expectedDeviceIndex = -1,
             bool freshNativeOutput = true,
@@ -6472,6 +6612,18 @@ namespace DS4Windows
                     if (feedbackLength >= DualSenseBaseFeedbackLength)
                     {
                         bool nativeForwardingAllowed = IsNativeDualSenseFeedbackCompatible(device);
+                        if (nativeForwardingAllowed && freshNativeOutput &&
+                            IsExactNativeDualSenseCommand(feedback, feedbackLength))
+                        {
+                            // Reader/dispatcher admission retains this command
+                            // until the physical ring accepts it. A direct
+                            // compatibility caller must likewise never turn
+                            // temporary rejection into scalar motor/LED state.
+                            TryApplyNativeDualSenseOutputReport(device, deviceIndex,
+                                feedback, feedbackLength, nativeOutputScratch,
+                                nativeOutputStreamGeneration);
+                            break;
+                        }
                         if (nativeForwardingAllowed &&
                             TryApplyBluetoothCombinedHapticsOutputReport(device,
                                 deviceIndex, feedback, feedbackLength,

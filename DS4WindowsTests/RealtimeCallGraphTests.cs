@@ -660,7 +660,7 @@ namespace DS4WindowsTests
                 "private bool TryReleaseExitedForegroundOwnerLedOwnership(",
                 "private bool IsCurrentNativeOutputTarget(");
             string controlDispatch = Extract(source,
-                "private void DispatchFeedbackControl(",
+                "private bool DispatchFeedbackControl(",
                 "private void StartStateWriter(");
             string directReader = Extract(source,
                 "private void FeedbackReadLoop(",
@@ -855,10 +855,13 @@ namespace DS4WindowsTests
                 "ViiperOutDevice.cs"));
             string controlOwner = Extract(source,
                 "private void FeedbackControlDispatchLoop",
-                "private void DispatchFeedbackControl");
+                "private bool DispatchFeedbackControl");
             string nativeApply = Extract(source,
                 "private bool TryApplyNativeDualSenseOutputReport",
                 "internal static void PrepareNativeDualSenseOutputReportForProfileInto");
+            string retainedApply = Extract(source,
+                "internal bool TryApplyRetainedNativeCommand",
+                "private void ApplyFeedback(");
             string buildInto = Extract(source,
                 "internal static void PrepareNativeDualSenseOutputReportForProfileInto",
                 "internal static void CopyPreparedNativeDualSenseStateIntoCombinedCarrier");
@@ -871,8 +874,11 @@ namespace DS4WindowsTests
             Assert.IsTrue(scratch >= 0 && loop > scratch,
                 "The dispatch owner must allocate its fixed native scratch before entering the work loop.");
             AssertDoesNotContain(nativeApply, "new byte[");
+            AssertDoesNotContain(retainedApply, "new byte[");
             AssertDoesNotContain(buildInto, "new byte[");
             StringAssert.Contains(nativeApply,
+                "PrepareNativeDualSenseOutputReportForProfileInto");
+            StringAssert.Contains(retainedApply,
                 "PrepareNativeDualSenseOutputReportForProfileInto");
         }
 

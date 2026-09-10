@@ -177,3 +177,62 @@ PID/start-time/path/hash checks scoped termination to that private session.
 No installed files changed. This ended the old host output stream; it is not
 a clean Stop test or physical neutral acknowledgement. No new build has been
 launched, and no user wake/manual test is requested while the user is away.
+
+## Native DualSense rapid-fire: new cross-process software evidence
+
+The bounded synthetic harness ran against the actual A mapper assembly
+(`FA2F033F7A5375B662D8DC6885C05B24681A7FBACE0AC9AF26397F93CBA84B45`)
+and reviewed VIIPER binary
+(`DC2D47B49F94FA827903FD24F18AE0289EBE682F09D6EF67A09EE7A6A8005EB7`).
+It uses the authenticated production client, USB/IP input commands, V5 reader,
+four-slot native lane and 64-slot physical ring, terminating at a synthetic
+USB physical-writer hook with no HID handle or Windows controller attach.
+
+All **32** broker-accepted commands reached that hook exactly once, in order,
+through a deliberately observed full queue held for at least 40 ms. Short
+stops, duplicates, independent trigger/LED validity and truncated trigger
+groups passed. There were zero compatibility fallbacks and callback failures.
+The feedback workers joined, the private device was removed, the owned broker
+exited, and its generated key was deleted. Result:
+`Desktop/Controller-Diagnostics-2026-09-10/native-burst-A-1312/SUMMARY.json`.
+Harness assembly hash:
+`CB4B9776200039C3A19CCE347617D05D15914B26EFE1026D84DF74CD351853E5`.
+
+This is stronger cross-process software evidence for the prior burst fixes,
+not a GTA V Enhanced gameplay test, physical actuator confirmation, Bluetooth
+transport test, media-fairness result or arbitrary-overload guarantee. These
+private fixes remain outside published RC4.5.5.
+
+## Confirmed BLE write-lifetime defect, separate from perceived crackle
+
+The adapter formerly passed its 100 ms cancellation token into the WinRT
+write and marked output idle as soon as that managed wait ended. The pinned
+[CsWinRT bridge](https://github.com/microsoft/CsWinRT/blob/8649ee3eeb2445ca2a36d80d878ef60b96a6c65d/src/cswinrt/strings/additions/Windows.Foundation/Windows.Foundation.cs#L267-L290)
+cancels its managed task separately from native completion. Read-only metadata
+inspection corroborated that mechanism in our compiled SDK projection. Thus
+timeout could admit another send or teardown while the original native write
+was still pending. The captured steady rumble windows do **not** establish
+that this timeout path caused their tactile skips.
+
+The correction retains the uncancelled operation and copied payload while
+bounding the output caller's wait to 100 ms. An exact retry consumes the late
+receipt without duplicating the native call; another payload cannot overtake
+a pending operation. Admission and its drain obligation share the short lease
+state lock, but neither platform entry nor waiting holds that input-facing
+lock. Teardown's public observer stays bounded while actual resource release
+waits asynchronously for native completion. No global WinRT semantics or
+cadence constants changed.
+
+Eight reproductions failed before the correction. The initial combined lane
+passed 135/135; six additional immediate-completion/admission-race/physical-
+counter cases brought the focused set to 14/14. Independent concurrency review
+found no concrete blocker. The unfiltered combined full run passed **5,069**,
+failed **0**, and skipped the same **11** gated cases. Evidence:
+`isolated_results/rumble-completion/full/completion-full.trx`, SHA-256
+`BD46AE162CD7B8F91A4510D572EA603F424346693CFA74F3EC35245ECCFCA725`.
+
+The real WinRT adapter already allocates detached buffers and projected tasks;
+this change replaces the per-call CTS/timer with a drain completion source and
+an observer for incomplete operations. No real-adapter zero-allocation or net
+allocation improvement is claimed. The existing strict fake-lease hot-path
+allocation tests remained enabled and passed.

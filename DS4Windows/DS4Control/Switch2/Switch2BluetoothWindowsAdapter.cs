@@ -1937,7 +1937,7 @@ internal sealed class Switch2BluetoothWindowsInputLease :
     private Switch2BluetoothLabProbe labProbe;
     private readonly TimeSpan teardownTimeout;
     private readonly Switch2CallbackDrainGate callbackGate = new();
-    private readonly ManualResetEventSlim outputWritesIdle = new(true);
+    private TaskCompletionSource<bool> outputWritesDrained;
     private readonly Switch2BluetoothWindowsValueChangedHandler valueChanged;
     private readonly Switch2BluetoothWindowsDisconnectedHandler disconnected;
     private LeaseState state;
@@ -1953,6 +1953,8 @@ internal sealed class Switch2BluetoothWindowsInputLease :
     private bool outputBound;
     private bool disconnectObserved;
     private int outputWriteActive;
+    private Task<bool> pendingOutputWrite;
+    private byte[] pendingOutputPayload;
     private Task playerLedOperation = Task.CompletedTask;
     private bool playerLedOperationActive;
     private bool playerLedRequestPending;
@@ -2204,12 +2206,17 @@ internal sealed class Switch2BluetoothWindowsInputLease :
     {
         lock (sync)
         {
-            return outputCharacteristic != null && outputBound &&
-                state == LeaseState.Active && outputModel == model &&
-                outputDeviceGeneration == deviceGeneration &&
-                outputTransportGeneration == candidateTransportGeneration;
+            return AuthenticatesOutputNoLock(model, deviceGeneration,
+                candidateTransportGeneration);
         }
     }
+
+    private bool AuthenticatesOutputNoLock(Switch2ControllerModel model,
+        ulong deviceGeneration, ulong candidateTransportGeneration) =>
+        outputCharacteristic != null && outputBound &&
+        state == LeaseState.Active && outputModel == model &&
+        outputDeviceGeneration == deviceGeneration &&
+        outputTransportGeneration == candidateTransportGeneration;
 
     public Switch2BluetoothHdRumbleTransportWriteResult TryWritePayload(
         ReadOnlySpan<byte> payload, Switch2ControllerModel expectedModel,
@@ -2225,55 +2232,106 @@ internal sealed class Switch2BluetoothWindowsInputLease :
                 expectedTransportGeneration,
                 Switch2BluetoothHdRumbleTransportWriteFailure.InvalidPayload);
         }
-        if (!Authenticates(expectedModel, expectedDeviceGeneration,
-                expectedTransportGeneration))
+        lock (sync)
         {
-            return Switch2BluetoothHdRumbleTransportWriteResult.Reject(
-                expectedModel, expectedDeviceGeneration,
-                expectedTransportGeneration,
-                Switch2BluetoothHdRumbleTransportWriteFailure.StaleLifetime);
-        }
-        if (Interlocked.CompareExchange(ref outputWriteActive, 1, 0) != 0)
-        {
-            return Switch2BluetoothHdRumbleTransportWriteResult.Reject(
-                expectedModel, expectedDeviceGeneration,
-                expectedTransportGeneration,
-                Switch2BluetoothHdRumbleTransportWriteFailure.Busy);
-        }
-
-        outputWritesIdle.Reset();
-        try
-        {
-            if (!Authenticates(expectedModel, expectedDeviceGeneration,
+            if (!AuthenticatesOutputNoLock(expectedModel, expectedDeviceGeneration,
                     expectedTransportGeneration))
             {
                 return Switch2BluetoothHdRumbleTransportWriteResult.Reject(
                     expectedModel, expectedDeviceGeneration,
                     expectedTransportGeneration,
-                    Switch2BluetoothHdRumbleTransportWriteFailure.
-                        StaleLifetime);
+                    Switch2BluetoothHdRumbleTransportWriteFailure.StaleLifetime);
             }
-
-            // The WinRT adapter detaches this value before returning from its
-            // async boundary. One bounded feedback-lane call may therefore
-            // block only this output writer, never the BLE input callback.
-            byte[] detachedPayload = payload.ToArray();
-            try
+            if (outputWriteActive != 0)
             {
-                using var deadline = new CancellationTokenSource(
-                    HdRumbleWriteTimeoutMilliseconds);
-                bool completed = outputCharacteristic.WriteValueAsync(
-                        detachedPayload, writeWithoutResponse: true,
-                        deadline.Token).AsTask().GetAwaiter().GetResult();
-                return completed ?
-                    Switch2BluetoothHdRumbleTransportWriteResult.Complete(
-                        expectedModel, expectedDeviceGeneration,
-                        expectedTransportGeneration, detachedPayload.Length) :
-                    Switch2BluetoothHdRumbleTransportWriteResult.Reject(
+                return Switch2BluetoothHdRumbleTransportWriteResult.Reject(
+                    expectedModel, expectedDeviceGeneration,
+                    expectedTransportGeneration,
+                    Switch2BluetoothHdRumbleTransportWriteFailure.Busy);
+            }
+            outputWriteActive = 1;
+            // Admission and the drain obligation share teardown's state lock.
+            // Never publish an admitted writer while teardown can observe idle.
+            if (outputWritesDrained == null || outputWritesDrained.Task.IsCompleted)
+                outputWritesDrained = new TaskCompletionSource<bool>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+
+        try
+        {
+            Task<bool> operation = pendingOutputWrite;
+            if (operation != null && !payload.SequenceEqual(pendingOutputPayload))
+            {
+                if (!operation.IsCompleted)
+                {
+                    return Switch2BluetoothHdRumbleTransportWriteResult.Reject(
                         expectedModel, expectedDeviceGeneration,
                         expectedTransportGeneration,
-                        Switch2BluetoothHdRumbleTransportWriteFailure.
-                            TransportRejected);
+                        Switch2BluetoothHdRumbleTransportWriteFailure.Busy);
+                }
+                // A different command (including Stop) may supersede a drained
+                // receipt, but never an operation still owned by Windows.
+                lock (sync)
+                {
+                    pendingOutputWrite = null;
+                    pendingOutputPayload = null;
+                }
+                operation = null;
+            }
+
+            try
+            {
+                if (operation == null)
+                {
+                    byte[] detachedPayload = payload.ToArray();
+                    // CsWinRT AsTask(token) can cancel its managed proxy before
+                    // the native operation completes. Retain the uncancelled
+                    // task and owned bytes; bound only this output-lane wait.
+                    operation = outputCharacteristic.WriteValueAsync(
+                        detachedPayload, writeWithoutResponse: true,
+                        CancellationToken.None).AsTask();
+                    lock (sync)
+                    {
+                        pendingOutputPayload = detachedPayload;
+                        pendingOutputWrite = operation;
+                    }
+                    _ = ObserveOutputWriteCompletionAsync(operation);
+                }
+                try
+                {
+                    if (!operation.Wait(HdRumbleWriteTimeoutMilliseconds))
+                    {
+                        return Switch2BluetoothHdRumbleTransportWriteResult.Uncertain(
+                            expectedModel, expectedDeviceGeneration,
+                            expectedTransportGeneration,
+                            Switch2BluetoothHdRumbleTransportWriteFailure.TimedOut);
+                    }
+                }
+                catch (AggregateException)
+                {
+                    // The actual task is terminal. Unwrap its original failure
+                    // below and consume this receipt exactly once.
+                }
+                try
+                {
+                    bool completed = operation.GetAwaiter().GetResult();
+                    return completed ?
+                        Switch2BluetoothHdRumbleTransportWriteResult.Complete(
+                            expectedModel, expectedDeviceGeneration,
+                            expectedTransportGeneration, pendingOutputPayload.Length) :
+                        Switch2BluetoothHdRumbleTransportWriteResult.Reject(
+                            expectedModel, expectedDeviceGeneration,
+                            expectedTransportGeneration,
+                            Switch2BluetoothHdRumbleTransportWriteFailure.TransportRejected);
+                }
+                finally
+                {
+                    lock (sync)
+                    {
+                        pendingOutputWrite = null;
+                        pendingOutputPayload = null;
+                    }
+                }
             }
             catch (OperationCanceledException)
             {
@@ -2293,9 +2351,33 @@ internal sealed class Switch2BluetoothWindowsInputLease :
         }
         finally
         {
-            Volatile.Write(ref outputWriteActive, 0);
-            outputWritesIdle.Set();
+            lock (sync)
+            {
+                outputWriteActive = 0;
+                CompleteOutputDrainNoLock();
+            }
         }
+    }
+
+    private async Task ObserveOutputWriteCompletionAsync(Task<bool> operation)
+    {
+        try { await operation.ConfigureAwait(false); }
+        catch { /* Retain the terminal receipt for the exact caller retry. */ }
+        finally
+        {
+            lock (sync)
+            {
+                if (ReferenceEquals(pendingOutputWrite, operation))
+                    CompleteOutputDrainNoLock();
+            }
+        }
+    }
+
+    private void CompleteOutputDrainNoLock()
+    {
+        if (outputWriteActive == 0 &&
+            (pendingOutputWrite == null || pendingOutputWrite.IsCompleted))
+            outputWritesDrained?.TrySetResult(true);
     }
 
     public Switch2BluetoothPlayerLedRequestResult TryRequestPlayerLed(
@@ -2914,24 +2996,12 @@ internal sealed class Switch2BluetoothWindowsInputLease :
             }
         }
 
-        bool outputDrained;
-        try
-        {
-            outputDrained = outputWritesIdle.Wait(teardownTimeout);
-        }
-        catch
-        {
-            outputDrained = false;
-        }
-        if (!outputDrained)
-        {
-            // The in-flight WinRT write may still retain the vibration
-            // characteristic. Preserve the complete graph; the bounded
-            // teardown observer reports failure and the runtime owner keeps
-            // this lifetime quarantined rather than disposing beneath it.
-            await Task.Delay(Timeout.InfiniteTimeSpan).ConfigureAwait(false);
-            return false;
-        }
+        Task outputDrain;
+        lock (sync) outputDrain = outputWritesDrained?.Task ?? Task.CompletedTask;
+        // The public teardown observer remains bounded. Actual late completion
+        // can still release this exact graph; timeout never proves native idle.
+        // No blocking wait is added to the input/disconnect callback.
+        await outputDrain.ConfigureAwait(false);
 
         Task characteristicDrain = null;
         Task deviceDrain = null;
@@ -3011,7 +3081,6 @@ internal sealed class Switch2BluetoothWindowsInputLease :
         bool characteristicDisposed = TryDispose(characteristic);
         bool serviceDisposed = TryDispose(service);
         bool deviceDisposed = TryDispose(device);
-        bool outputGateDisposed = TryDispose(outputWritesIdle);
         lock (sync)
         {
             state = LeaseState.Released;
@@ -3019,7 +3088,7 @@ internal sealed class Switch2BluetoothWindowsInputLease :
         bool resourcesReleased = playerLedClean && responseDisposed &&
             commandDisposed &&
             cccdSucceeded && outputDisposed && characteristicDisposed &&
-            serviceDisposed && deviceDisposed && outputGateDisposed;
+            serviceDisposed && deviceDisposed;
         if (resourcesReleased)
         {
             // Rearming discovery is deliberately downstream of the complete

@@ -1,8 +1,9 @@
 # DualSense Bluetooth native command ordering, 2026-09-10
 
 Final source validation: **5,185 passed, 0 failed, 11 gated skips** (5,196 total).
-The identified native-command coalescing defect is corrected in source; physical
-GTA V Enhanced gameplay confirmation and a packaged candidate remain separate.
+The identified native-command coalescing defect is corrected in source. Complete
+portable E has subsequently been built and launched; physical GTA V Enhanced
+gameplay confirmation remains outstanding.
 
 ## Scope and original failure
 
@@ -108,8 +109,28 @@ No physical controller, installed application, driver, profile, or public releas
 was changed or launched for this validation. Synthetic I/O demonstrates software
 ordering and lifetime behavior, not actuator feel or successful GTA V Enhanced
 rapid-fire feedback. Hardware gameplay confirmation remains outstanding.
-This is source/test work; the earlier private D portable and public downloads
-have not been replaced and do not contain this new command-ordering fix.
+The earlier private D portable and public downloads have not been replaced and
+do not contain this new command-ordering fix. The later E launch is recorded below.
+
+## Complete portable E launch
+
+At the user's request, the complete private E candidate was built from clean
+source `3d45895593de6608769982a469bd25ad8c636dd6` and launched on September 10,
+2026 at 22:28 UTC. Both composition checks and an independent inventory audit
+verified all 551 immutable package files, including the self-contained runtime,
+Xbox identity, and pinned compatible VIIPER. This is not a public release.
+
+- Directory: `Desktop/DS4Windows-Haptics-Lab-20260910-E/portable/DS4Windows`.
+- App SHA-256: `9EDE7163392006ADC14FA5E473FCCA5C726E61EC05B32D6FCC7D2415DB927FB8`.
+- Broker SHA-256: `DC2D47B49F94FA827903FD24F18AE0289EBE682F09D6EF67A09EE7A6A8005EB7`.
+- Manifest SHA-256: `557DECC7777882DB44CEFD32DBED18A44AB78881A6618C49630D881AA69F78BE`.
+
+The isolated `ds` profile selects DualSense emulation. Existing profiles,
+Program Files installations, drivers, and HidHide policy were not changed.
+The application log reports the VIIPER backend ready; its visible UI is running
+and waiting for a controller. No controller or game-feedback success is claimed
+from this launch. The base ZIP remains an intermediate with the released broker;
+only the verified final portable directory is the private testing candidate.
 
 ## Remaining hardware acceptance
 

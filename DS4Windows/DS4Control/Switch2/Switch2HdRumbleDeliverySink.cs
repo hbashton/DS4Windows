@@ -386,7 +386,7 @@ internal sealed class Switch2HdRumbleDeliverySink :
 
         this.deviceGeneration = deviceGeneration;
         this.transportGeneration = transportGeneration;
-        if (minimumMaintenanceIntervalMicroseconds is not (0 or 12000 or 15000))
+        if (minimumMaintenanceIntervalMicroseconds is not (0 or 10000 or 12000 or 15000))
             throw new ArgumentOutOfRangeException(nameof(minimumMaintenanceIntervalMicroseconds));
         this.minimumMaintenanceIntervalMicroseconds = minimumMaintenanceIntervalMicroseconds;
         this.hostWriteStartClock = hostWriteStartClock;

@@ -996,6 +996,9 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
 
     internal ulong NextRumbleMaintenanceDueMicroseconds => sink.NextMaintenanceDueMicroseconds;
 
+    internal int RumbleMaintenanceIntervalMilliseconds =>
+        Switch2RumbleMaintenanceWorker.BluetoothIntervalFor(model, joinedPair);
+
     private bool WakeAfterRumblePublication(bool accepted)
     {
         // A retained canonical claim still needs service when its immediate
@@ -1097,7 +1100,9 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
                 model, deviceGeneration, transportGeneration);
             var sink = new Switch2HdRumbleDeliverySink(writer,
                 deviceGeneration, transportGeneration, policy,
-                minimumMaintenanceIntervalMicroseconds: 15000, hostWriteStartClock: hostWriteStartClock);
+                minimumMaintenanceIntervalMicroseconds: (ulong)Switch2RumbleMaintenanceWorker.
+                    BluetoothIntervalFor(model, joinedPair: false) * 1000,
+                hostWriteStartClock: hostWriteStartClock);
             owner = new Switch2BluetoothFeedbackLifetime(model,
                 deviceGeneration, transportGeneration, pump, sink,
                 lease as ISwitch2BluetoothPlayerLedTransportLease,
@@ -1151,7 +1156,8 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
                     rightTransportGeneration);
             var sink = new Switch2HdRumbleDeliverySink(joinedWriter,
                 logicalDeviceGeneration, logicalTransportGeneration, policy,
-                minimumMaintenanceIntervalMicroseconds: 15000);
+                minimumMaintenanceIntervalMicroseconds: (ulong)Switch2RumbleMaintenanceWorker.
+                    BluetoothIntervalFor(Switch2ControllerModel.JoyCon2Left, joinedPair: true) * 1000);
             owner = new Switch2BluetoothFeedbackLifetime(
                 Switch2ControllerModel.JoyCon2Left,
                 logicalDeviceGeneration, logicalTransportGeneration, pump,

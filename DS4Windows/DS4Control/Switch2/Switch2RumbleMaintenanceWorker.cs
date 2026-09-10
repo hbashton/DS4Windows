@@ -16,6 +16,15 @@ internal sealed class Switch2RumbleMaintenanceWorker
     // RUMBLE_INTERVAL=12; Switch2Connect 61ac6642 BT_RUMBLE_MIN_INTERVAL=.015.
     internal const int UsbIntervalMilliseconds = 12;
     internal const int BluetoothIntervalMilliseconds = 15;
+    // Controlled standalone Joy-Con candidate: hifihedgehog/SDL d98c5804a,
+    // SDL_ble_switch2joystick.c BLE_RUMBLE_INTERVAL_MS=10. Keep the shared-link
+    // joined cadence and the unmeasured Pro cadence unchanged. This only feeds
+    // a held effect; it does not resample PCM or impose a delay on new commands.
+    internal const int StandaloneJoyConBluetoothIntervalMilliseconds = 10;
+
+    internal static int BluetoothIntervalFor(Switch2ControllerModel model, bool joinedPair) =>
+        !joinedPair && model is Switch2ControllerModel.JoyCon2Left or Switch2ControllerModel.JoyCon2Right ?
+            StandaloneJoyConBluetoothIntervalMilliseconds : BluetoothIntervalMilliseconds;
     private const int Dormant = 0, Scheduled = 1, Running = 2, Signaled = 3, Stopped = 4;
     private readonly Func<ulong, Switch2RumbleMaintenanceResult> service;
     private readonly Timer timer;
@@ -28,7 +37,8 @@ internal sealed class Switch2RumbleMaintenanceWorker
         int intervalMilliseconds, bool automaticTimer = true)
     {
         this.service = service ?? throw new ArgumentNullException(nameof(service));
-        if (intervalMilliseconds is not (UsbIntervalMilliseconds or BluetoothIntervalMilliseconds))
+        if (intervalMilliseconds is not (UsbIntervalMilliseconds or BluetoothIntervalMilliseconds or
+            StandaloneJoyConBluetoothIntervalMilliseconds))
             throw new ArgumentOutOfRangeException(nameof(intervalMilliseconds));
         this.intervalMilliseconds = intervalMilliseconds;
         if (automaticTimer) timer = new Timer(TimerTick, null, Timeout.Infinite, Timeout.Infinite);

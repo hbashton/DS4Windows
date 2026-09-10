@@ -38,11 +38,28 @@ internal sealed class Switch2BluetoothLabProbe
     private readonly string directory;
     private readonly ulong generation;
     private readonly Task worker;
+    private readonly Func<Switch2InputGapSnapshot> inputGapSnapshot;
     private long reports, lastReport, maximumReportGap;
     private bool audioSetupAcknowledged;
 
     internal static bool IsEnabled => PortableLabContext.IsActive &&
         Environment.GetEnvironmentVariable("DS4WINDOWS_SWITCH2_AUDIO_PROBE") == "1";
+
+    internal static bool IsInputGapEnabled => ShouldEnableInputGapProbe(
+        PortableLabContext.IsActive,
+        Environment.GetEnvironmentVariable("DS4WINDOWS_SWITCH2_INPUT_GAP_PROBE"));
+
+    internal static bool ShouldEnableInputGapProbe(bool portableLab, string value) =>
+        portableLab && value == "1";
+
+    internal static Switch2BluetoothLabProbe TryCreateInputGapProbe(
+        Func<Switch2InputGapSnapshot> snapshot)
+    {
+        if (!IsInputGapEnabled || PortableLabContext.Current is not { } lab || snapshot == null)
+            return null;
+        return new Switch2BluetoothLabProbe(Path.Combine(lab.DataPath, "Switch2InputProbe"),
+            null, static () => true, null, 0, inputGapSnapshot: snapshot);
+    }
 
     internal static Switch2BluetoothLabProbe TryCreate(Switch2ControllerModel model,
         ISwitch2BluetoothWindowsGattService service, ulong generation,
@@ -62,7 +79,8 @@ internal sealed class Switch2BluetoothLabProbe
     internal Switch2BluetoothLabProbe(string directory, ISwitch2BluetoothLabAudioAccess access,
         Func<bool> connected, Func<CancellationToken, Task<string>> configure, ulong generation,
         Func<CancellationToken, Task<string>> queryAudioState = null,
-        Func<Switch2BluetoothLabReceiverPlan, CancellationToken, Task<string>> runReceiver = null)
+        Func<Switch2BluetoothLabReceiverPlan, CancellationToken, Task<string>> runReceiver = null,
+        Func<Switch2InputGapSnapshot> inputGapSnapshot = null)
     {
         this.directory = directory;
         this.access = access;
@@ -71,7 +89,9 @@ internal sealed class Switch2BluetoothLabProbe
         this.queryAudioState = queryAudioState;
         this.runReceiver = runReceiver;
         this.generation = generation;
-        PipeName = $"ds4w-s2audio-{Environment.ProcessId}-{Guid.NewGuid():N}";
+        this.inputGapSnapshot = inputGapSnapshot;
+        string prefix = inputGapSnapshot == null ? "ds4w-s2audio" : "ds4w-s2input";
+        PipeName = $"{prefix}-{Environment.ProcessId}-{Guid.NewGuid():N}";
         worker = Task.Run(RunAsync);
     }
 
@@ -97,16 +117,22 @@ internal sealed class Switch2BluetoothLabProbe
         return worker;
     }
 
-    private object Status(string state) => new
+    private object Status(string state)
     {
-        State = state, ProcessId = Environment.ProcessId, PipeName, TransportGeneration = generation, PacketPlanProtocol = 1,
-        ReceiverPlanProtocol = runReceiver != null ? 1 : 0,
-        Connected = connected(), Reports = Interlocked.Read(ref reports),
-        MaximumReportGapMs = 1000.0 * Interlocked.Read(ref maximumReportGap) / Stopwatch.Frequency,
-        LastReportAgeMs = Interlocked.Read(ref lastReport) is var last && last > 0
-            ? (double?)(1000.0 * (Stopwatch.GetTimestamp() - last) / Stopwatch.Frequency) : null,
-        BluetoothPlaybackConfirmed = false,
-    };
+        if (inputGapSnapshot != null)
+            return new { State = state, ProcessId = Environment.ProcessId, PipeName,
+                InputGapProtocol = 1, Input = inputGapSnapshot() };
+        return new
+        {
+            State = state, ProcessId = Environment.ProcessId, PipeName, TransportGeneration = generation, PacketPlanProtocol = 1,
+            ReceiverPlanProtocol = runReceiver != null ? 1 : 0,
+            Connected = connected(), Reports = Interlocked.Read(ref reports),
+            MaximumReportGapMs = 1000.0 * Interlocked.Read(ref maximumReportGap) / Stopwatch.Frequency,
+            LastReportAgeMs = Interlocked.Read(ref lastReport) is var last && last > 0
+                ? (double?)(1000.0 * (Stopwatch.GetTimestamp() - last) / Stopwatch.Frequency) : null,
+            BluetoothPlaybackConfirmed = false,
+        };
+    }
 
     private async Task RunAsync()
     {
@@ -128,7 +154,8 @@ internal sealed class Switch2BluetoothLabProbe
                     using var deadline = CancellationTokenSource.CreateLinkedTokenSource(stopping.Token);
                     deadline.CancelAfter(TimeSpan.FromSeconds(3));
                     string command = await ReadCommandAsync(pipe, deadline.Token).ConfigureAwait(false);
-                    if (!Switch2BluetoothLabAudioProtocol.IsAllowed(command))
+                    if ((inputGapSnapshot != null && command is not ("status" or "stop-probe")) ||
+                        !Switch2BluetoothLabAudioProtocol.IsAllowed(command))
                         operation = Task.FromResult("{\"Error\":\"Unknown or oversized command\"}");
                     else if (command is "status" or "stop-probe")
                     {

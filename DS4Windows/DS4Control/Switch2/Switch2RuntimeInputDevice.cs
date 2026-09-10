@@ -1307,6 +1307,7 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
             }
             if (publicationInProgress)
             {
+                if (inputGapTelemetryEnabled) inputGapTelemetry.ObservePublicationBusy();
                 return Switch2RuntimePublicationResult.PublicationBusy;
             }
             var calibratedFrame = rawStickCalibration?.ApplyPro(frame) ?? frame;
@@ -1350,6 +1351,7 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
 
             if (!TryReserveStagingNoLock(out subscribers))
             {
+                if (inputGapTelemetryEnabled) inputGapTelemetry.ObservePublicationBusy();
                 return Switch2RuntimePublicationResult.PublicationBusy;
             }
             ObservePhysicalInputNoLock(frame.CompletionTimestampQpc,
@@ -1448,6 +1450,7 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
             }
             if (publicationInProgress)
             {
+                if (inputGapTelemetryEnabled) inputGapTelemetry.ObservePublicationBusy();
                 return Switch2RuntimePublicationResult.PublicationBusy;
             }
             var calibratedFrame = rawStickCalibration?.ApplyJoyCon(frame) ?? frame;
@@ -1484,6 +1487,7 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
 
             if (!TryReserveStagingNoLock(out subscribers))
             {
+                if (inputGapTelemetryEnabled) inputGapTelemetry.ObservePublicationBusy();
                 return Switch2RuntimePublicationResult.PublicationBusy;
             }
             ObservePhysicalInputNoLock(frame.CompletionTimestampQpc,
@@ -1528,6 +1532,7 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
             }
             if (publicationInProgress)
             {
+                if (inputGapTelemetryEnabled) inputGapTelemetry.ObservePublicationBusy();
                 return Switch2RuntimePublicationResult.PublicationBusy;
             }
             var calibratedFrame = rawStickCalibration?.ApplyJoyCon(frame) ?? frame;
@@ -1570,6 +1575,7 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
 
             if (!TryReserveStagingNoLock(out subscribers))
             {
+                if (inputGapTelemetryEnabled) inputGapTelemetry.ObservePublicationBusy();
                 return Switch2RuntimePublicationResult.PublicationBusy;
             }
             ObservePhysicalInputNoLock(frame.CompletionTimestampQpc,
@@ -2059,6 +2065,7 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
             CancelRawStickCalibrationNoLock();
             terminalNeutralSubscribers = reportSubscribers;
             runtimeState = Switch2RuntimeInputDeviceState.Terminal;
+            StopInputGapProbeNoLock();
             // StartUpdate can have installed the dormant worker while this
             // terminal request was waiting for publicationGate.
             rumbleMaintenanceWorker?.Stop();
@@ -2151,11 +2158,12 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
             absoluteSessionQpcFrequency = Stopwatch.Frequency;
             absoluteSessionTimestampInitialized = true;
             runtimeState = Switch2RuntimeInputDeviceState.Active;
+            StartInputGapProbeNoLock();
             if (bluetoothFeedbackLifetime != null || usbFeedbackLifetime != null)
             {
                 rumbleMaintenanceWorker = new Switch2RumbleMaintenanceWorker(ServiceRumbleMaintenance,
-                    transport == Switch2Transport.BluetoothLe ?
-                        Switch2RumbleMaintenanceWorker.BluetoothIntervalMilliseconds :
+                    bluetoothFeedbackLifetime != null ?
+                        bluetoothFeedbackLifetime.RumbleMaintenanceIntervalMilliseconds :
                         Switch2RumbleMaintenanceWorker.UsbIntervalMilliseconds);
                 if (bluetoothFeedbackLifetime != null)
                     bluetoothFeedbackLifetime.SetRumbleMaintenanceWake(rumbleMaintenanceWorker.Wake);
@@ -2233,6 +2241,7 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
 
             runtimeState =
                 Switch2RuntimeInputDeviceState.AbortedUnpublished;
+            StopInputGapProbeNoLock();
             CancelRawStickCalibrationNoLock();
             aborted = true;
         }
@@ -3204,6 +3213,7 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
     private void ObservePhysicalInputNoLock(long timestampQpc,
         long qpcFrequency)
     {
+        if (inputGapTelemetryEnabled) inputGapTelemetry.Observe(timestampQpc, qpcFrequency);
         hasObservedPhysicalInput = true;
         if (timestampQpc < 0 || qpcFrequency <= 0)
         {

@@ -410,3 +410,11 @@ user left. All owned captures and synthetic runs ended; both applications are
 left closed. Hands-on comparison of D's rumble remains outstanding. The next
 software task is the explicitly bounded native-command credit/ordering design,
 not an unvalidated FIFO or a claim that the GTA report is fully resolved.
+
+## Later Bluetooth source follow-up
+
+The subsequently requested Bluetooth command-ordering work is recorded in
+[the dedicated validation ledger](2026-09-10-dualsense-bluetooth-native-ordering.md).
+It corrects the identified native coalescing boundary and passes the expanded
+5,185-test suite. D and public downloads still predate that source checkpoint;
+hardware GTA/Bluetooth confirmation remains outstanding.

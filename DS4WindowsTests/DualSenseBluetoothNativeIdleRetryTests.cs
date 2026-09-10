@@ -107,7 +107,7 @@ public class DualSenseBluetoothNativeIdleRetryTests
         Assert.AreEqual(heavy, report[6]);
     }
 
-    private sealed class Fixture : IDisposable
+    internal sealed class Fixture : IDisposable
     {
         private const BindingFlags Flags = BindingFlags.Instance | BindingFlags.NonPublic;
         private static readonly Type HostType = typeof(DualSenseBluetoothAudioPacer).
@@ -118,9 +118,12 @@ public class DualSenseBluetoothNativeIdleRetryTests
         private readonly DualSenseRealtimeHapticsSharedRing realtime =
             DualSenseRealtimeHapticsSharedRing.CreateOwner("Local\\DS4NativeIdleRetry-" + Guid.NewGuid().ToString("N"), 4);
         private readonly DualSenseBluetoothRealtimeWriter writer;
+        private readonly MemoryStream response = new();
         private readonly object host;
         private readonly Thread pacer;
         private bool stopped;
+        private long nextNativeCommandId;
+        private int nativeGeneration = 1;
         internal readonly SyntheticNativeIo Native = new();
 
         internal Fixture()
@@ -128,7 +131,7 @@ public class DualSenseBluetoothNativeIdleRetryTests
             clockView = clock.CreateViewAccessor();
             writer = new DualSenseBluetoothRealtimeWriter(DualSenseBluetoothAudioPacer.ReportLength, 1, 1, Native);
             host = Activator.CreateInstance(HostType, BindingFlags.Public | Flags, null,
-                new object[] { Stream.Null, Stream.Null, writer, Environment.ProcessId, inputArrival, clockView, realtime }, null);
+                new object[] { Stream.Null, response, writer, Environment.ProcessId, inputArrival, clockView, realtime }, null);
             pacer = (Thread)HostType.GetField("pacerThread", Flags).GetValue(host);
         }
 
@@ -137,8 +140,78 @@ public class DualSenseBluetoothNativeIdleRetryTests
             get
             {
                 object stateLock = HostType.GetField("stateLock", Flags).GetValue(host);
-                lock (stateLock) return (int)HostType.GetField("controllerStateReportsAhead", Flags).GetValue(host);
+                lock (stateLock) return (int)HostType.GetProperty("PendingStateReportsAhead", Flags).GetValue(host);
             }
+        }
+
+        internal int AcknowledgementCount
+        {
+            get
+            {
+                object queue = HostType.GetField("acknowledgements", Flags).GetValue(host);
+                return (int)queue.GetType().GetProperty("Count").GetValue(queue);
+            }
+        }
+
+        internal (int PoolAvailable, int Pending, int Admissions, long ClaimedId) NativeOwnershipSnapshot()
+        {
+            object stateLock = HostType.GetField("stateLock", Flags).GetValue(host);
+            lock (stateLock)
+            {
+                object pool = HostType.GetField("availableNativeCommands", Flags).GetValue(host);
+                object queue = HostType.GetField("nativeCommands", Flags).GetValue(host);
+                object claim = HostType.GetField("claimedNativeCommand", Flags).GetValue(host);
+                var admissions = (DualSenseNativeCommandCredits)HostType.GetField("nativeAdmissions", Flags).GetValue(host);
+                return ((int)pool.GetType().GetProperty("Count").GetValue(pool),
+                    (int)queue.GetType().GetProperty("Count").GetValue(queue), admissions.Count,
+                    claim == null ? 0 : (long)claim.GetType().GetField("Id").GetValue(claim));
+            }
+        }
+
+        internal (long Id, int Generation, DualSenseBluetoothAudioPacer.AcknowledgementDisposition Disposition)[]
+            NativeAcknowledgementsSnapshot()
+        {
+            object queue = HostType.GetField("acknowledgements", Flags).GetValue(host);
+            Type queueType = queue.GetType();
+            lock (queueType.GetField("syncRoot", Flags).GetValue(queue))
+            {
+                Array entries = (Array)queueType.GetField("entries", Flags).GetValue(queue);
+                int head = (int)queueType.GetField("head", Flags).GetValue(queue);
+                int count = (int)queueType.GetField("count", Flags).GetValue(queue);
+                var result = new List<(long, int, DualSenseBluetoothAudioPacer.AcknowledgementDisposition)>();
+                for (int index = 0; index < count; index++)
+                {
+                    object acknowledgement = entries.GetValue((head + index) % entries.Length);
+                    Type type = acknowledgement.GetType();
+                    int generation = (int)type.GetField("NativeGeneration").GetValue(acknowledgement);
+                    if (generation != 0)
+                        result.Add(((long)type.GetField("ReportId").GetValue(acknowledgement), generation,
+                            (DualSenseBluetoothAudioPacer.AcknowledgementDisposition)
+                                type.GetField("Disposition").GetValue(acknowledgement)));
+                }
+                return result.ToArray();
+            }
+        }
+
+        internal (long Id, int Generation, DualSenseBluetoothAudioPacer.AcknowledgementDisposition Disposition)[]
+            DrainNativeAcknowledgements()
+        {
+            Assert.IsFalse(pacer.IsAlive, "Drain witnesses only after joining the sole acknowledgement producer.");
+            object queue = HostType.GetField("acknowledgements", Flags).GetValue(host);
+            MethodInfo dequeue = queue.GetType().GetMethod("TryDequeue");
+            var result = new List<(long, int, DualSenseBluetoothAudioPacer.AcknowledgementDisposition)>();
+            object[] arguments = { null };
+            while ((bool)dequeue.Invoke(queue, arguments))
+            {
+                object acknowledgement = arguments[0];
+                Type type = acknowledgement.GetType();
+                int generation = (int)type.GetField("NativeGeneration").GetValue(acknowledgement);
+                if (generation == 0) continue; // Independently owned finite media receipt.
+                result.Add(((long)type.GetField("ReportId").GetValue(acknowledgement), generation,
+                    (DualSenseBluetoothAudioPacer.AcknowledgementDisposition)
+                        type.GetField("Disposition").GetValue(acknowledgement)));
+            }
+            return result.ToArray();
         }
 
         internal void ReceiveNative(byte light, byte heavy)
@@ -150,8 +223,76 @@ public class DualSenseBluetoothNativeIdleRetryTests
             payload[3] = heavy;
             BinaryPrimitives.WriteInt64LittleEndian(payload.AsSpan(stateLength), long.MaxValue);
             Template().CopyTo(payload, stateLength + sizeof(long));
+            AppendNativeIdentity(payload);
             Receive("ReceiveGameStateAndTemplate", payload);
         }
+
+        internal void ReceiveNativeCommand(byte[] nativeCommand)
+        {
+            const int stateLength = DualSenseBluetoothPhysicalOutputSequence.ControllerStatePayloadLength;
+            Assert.AreEqual(48, nativeCommand.Length);
+            Assert.AreEqual((byte)0x02, nativeCommand[0]);
+            byte[] payload = new byte[DualSenseBluetoothAudioPacer.GameStateAndTemplatePayloadLength];
+            nativeCommand.AsSpan(1, stateLength).CopyTo(payload);
+            BinaryPrimitives.WriteInt64LittleEndian(payload.AsSpan(stateLength), long.MaxValue);
+            byte[] quiescent = Template();
+            nativeCommand.AsSpan(1, stateLength).CopyTo(quiescent.AsSpan(13));
+            DualSenseDevice.ConsumeNativeGameStateValidity(quiescent, 13);
+            quiescent.CopyTo(payload, stateLength + sizeof(long));
+            AppendNativeIdentity(payload);
+            Receive("ReceiveGameStateAndTemplate", payload);
+        }
+
+        private void AppendNativeIdentity(byte[] payload)
+        {
+            int offset = DualSenseBluetoothAudioPacer.NativeCommandIdentityOffset;
+            BinaryPrimitives.WriteInt64LittleEndian(payload.AsSpan(offset),
+                Interlocked.Increment(ref nextNativeCommandId));
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(offset + sizeof(long)),
+                Volatile.Read(ref nativeGeneration));
+        }
+
+        internal void ReceiveLocalState(byte[] nativeShape)
+        {
+            byte[] template = new byte[sizeof(long) + DualSenseBluetoothAudioPacer.ReportLength];
+            BinaryPrimitives.WriteInt64LittleEndian(template, long.MaxValue);
+            Template().CopyTo(template, sizeof(long));
+            Receive("ReceiveTemplate", template);
+            Receive("ReceiveControllerState", nativeShape.AsSpan(1, 47).ToArray());
+        }
+
+        internal void ReceiveTemplateShape(byte[] nativeShape, byte localMarker)
+        {
+            byte[] template = Template();
+            nativeShape.AsSpan(1, 47).CopyTo(template.AsSpan(13));
+            DualSenseDevice.ConsumeNativeGameStateValidity(template, 13);
+            template[13] |= 0xF0;
+            template[14] |= 0x83;
+            template.AsSpan(17, 6).Fill(localMarker);
+            template[50] = localMarker;
+            template.AsSpan(78, 64).Fill(localMarker);
+            byte[] payload = new byte[sizeof(long) + template.Length];
+            BinaryPrimitives.WriteInt64LittleEndian(payload, long.MaxValue);
+            template.CopyTo(payload, sizeof(long));
+            Receive("ReceiveTemplate", payload);
+        }
+
+        internal byte[] TemplateSnapshot(string field)
+        {
+            object stateLock = HostType.GetField("stateLock", Flags).GetValue(host);
+            lock (stateLock) return ((byte[])HostType.GetField(field, Flags).GetValue(host)).ToArray();
+        }
+
+        internal void StartAcknowledgements() =>
+            ((Thread)HostType.GetField("acknowledgementThread", Flags).GetValue(host)).Start();
+
+        internal byte[] ResponseBytes()
+        {
+            Assert.IsFalse(((Thread)HostType.GetField("acknowledgementThread", Flags).GetValue(host)).IsAlive);
+            return response.ToArray();
+        }
+
+        internal void StartIdle() => pacer.Start();
 
         internal void QueueSpeakerReports(int count)
         {
@@ -164,6 +305,7 @@ public class DualSenseBluetoothNativeIdleRetryTests
                 byte[] report = Template();
                 report[142] = 0x93;
                 report[143] = 200;
+                report.AsSpan(144, 200).Fill((byte)(index + 1));
                 report.CopyTo(payload, 20);
                 Receive("ReceiveQueuedReport", payload);
             }
@@ -207,6 +349,7 @@ public class DualSenseBluetoothNativeIdleRetryTests
             BinaryPrimitives.WriteInt32LittleEndian(payload, 2);
             BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4), 2);
             Receive("ReceiveClear", payload);
+            Volatile.Write(ref nativeGeneration, 2);
         }
 
         internal void SetCommittedMicrophoneEnabled() =>
@@ -220,6 +363,8 @@ public class DualSenseBluetoothNativeIdleRetryTests
             if (stopped) return;
             ((IDisposable)host).Dispose();
             Assert.IsFalse(pacer.IsAlive, "Retain dependencies if the bounded helper join fails.");
+            Assert.IsFalse(((Thread)HostType.GetField("acknowledgementThread", Flags).GetValue(host)).IsAlive,
+                "Response bytes are not immutable until the actual acknowledgement loop joins.");
             stopped = true;
         }
 
@@ -233,14 +378,16 @@ public class DualSenseBluetoothNativeIdleRetryTests
             clockView.Dispose();
             clock.Dispose();
             inputArrival.Dispose();
+            response.Dispose();
         }
     }
 
-    private sealed class SyntheticNativeIo : IDualSenseBluetoothRealtimeWriterNativeIo
+    internal sealed class SyntheticNativeIo : IDualSenseBluetoothRealtimeWriterNativeIo
     {
         internal readonly ConcurrentQueue<byte[]> Reports = new();
         internal bool HoldInitialSubmission;
         internal Action DuringCompletionProbe;
+        internal Action DuringSubmit;
         internal int ProbeReturned;
         private IntPtr slotEvent;
         private int probeOnce;
@@ -250,6 +397,7 @@ public class DualSenseBluetoothNativeIdleRetryTests
         {
             byte[] report = new byte[checked((int)length)];
             Marshal.Copy(buffer, report, 0, report.Length);
+            Interlocked.Exchange(ref DuringSubmit, null)?.Invoke();
             Reports.Enqueue(report);
             pending = HoldInitialSubmission;
             HoldInitialSubmission = false;

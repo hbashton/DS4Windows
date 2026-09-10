@@ -730,6 +730,9 @@ namespace DS4Windows.InputDevices
         private long pendingBluetoothNativeGameRevision;
         private long pendingBluetoothNativeGameHapticsGeneration;
         private long pendingBluetoothNativeGameHapticsExpiryQpc;
+        // Capacity pressure belongs to this exact retained transaction/helper,
+        // never to an unavailable or replacement transport owner.
+        private DualSenseBluetoothAudioPacer pendingBluetoothNativeGameCapacityOwner;
         private readonly byte[] bluetoothCombinedNativeStateScratch =
             new byte[BluetoothCombinedNativeStateLength];
         private bool bluetoothCombinedSpeakerReportAvailable;
@@ -1398,7 +1401,7 @@ namespace DS4Windows.InputDevices
                 waitForCompletion: true);
             if (!committed)
             {
-                RequestUnifiedBluetoothOutputTransportRecovery();
+                RequestBluetoothOutputRecoveryUnlessNativeAdmissionBusy();
             }
 
             return committed;
@@ -1618,7 +1621,7 @@ namespace DS4Windows.InputDevices
             }
             if (!published)
             {
-                RequestUnifiedBluetoothOutputTransportRecovery();
+                RequestBluetoothOutputRecoveryUnlessNativeAdmissionBusy();
             }
 
             return published;
@@ -1845,7 +1848,7 @@ namespace DS4Windows.InputDevices
                         }
 
                         retiringPacer = bluetoothAudioPacer;
-                        bluetoothAudioPacer = null;
+                        SetBluetoothAudioPacerUnderLock(null);
                     }
 
                     lock (bluetoothCombinedSpeakerReportLock)
@@ -1923,7 +1926,7 @@ namespace DS4Windows.InputDevices
                         {
                             return false;
                         }
-                        bluetoothAudioPacer = candidate;
+                        SetBluetoothAudioPacerUnderLock(candidate);
                         candidate = null;
                     }
 
@@ -1988,6 +1991,39 @@ namespace DS4Windows.InputDevices
 
                 Volatile.Write(ref bluetoothAudioLifecycleTransitioning, 0);
             }
+        }
+
+        private void RequestBluetoothOutputRecoveryUnlessNativeAdmissionBusy()
+        {
+            lock (bluetoothCombinedTransportWriteLock)
+            {
+                if (pendingBluetoothNativeGameRevision > 0 &&
+                    pendingBluetoothNativeGameCapacityOwner != null &&
+                    TryClaimBluetoothAudioPacer(out DualSenseBluetoothAudioPacer pacer,
+                        out _))
+                {
+                    try
+                    {
+                        if (ReferenceEquals(pacer, pendingBluetoothNativeGameCapacityOwner))
+                        {
+                            // The physical owner services this exact transaction
+                            // on its existing bounded retry cadence.
+                            SchedulePhysicalOutputRetry();
+                            if (Thread.CurrentThread != physicalOutputThread)
+                            {
+                                physicalOutputSignal.Set();
+                            }
+                            return;
+                        }
+                    }
+                    finally
+                    {
+                        ReleaseBluetoothAudioPacerClaim();
+                    }
+                }
+            }
+
+            RequestUnifiedBluetoothOutputTransportRecovery();
         }
 
         private void RequestUnifiedBluetoothOutputTransportRecovery()
@@ -2141,13 +2177,48 @@ namespace DS4Windows.InputDevices
             bluetoothAudioRecoveryWorkerIdle.WaitOne();
         }
 
+        private void SetBluetoothAudioPacerUnderLock(DualSenseBluetoothAudioPacer pacer)
+        {
+            if (!Monitor.IsEntered(bluetoothAudioPacerLock))
+            {
+                throw new InvalidOperationException("Bluetooth pacer ownership requires its monitor.");
+            }
+            if (ReferenceEquals(bluetoothAudioPacer, pacer)) return;
+            if (bluetoothAudioPacer != null)
+            {
+                bluetoothAudioPacer.NativeCommandCapacityAvailable -= OnNativeCommandCapacityAvailable;
+            }
+            bluetoothAudioPacer = pacer;
+            if (pacer != null)
+            {
+                pacer.NativeCommandCapacityAvailable += OnNativeCommandCapacityAvailable;
+            }
+        }
+
+        private void OnNativeCommandCapacityAvailable(DualSenseBluetoothAudioPacer sender)
+        {
+            // The ACK receiver only wakes the existing owner; it never drains
+            // commands, takes the transport/cache monitor, or performs output.
+            // Do not require the pending flag: credit can return between a
+            // failed admission and publication of its fixed transaction.
+            lock (bluetoothAudioPacerLock)
+            {
+                if (sender != null && ReferenceEquals(bluetoothAudioPacer, sender) &&
+                    Volatile.Read(ref bluetoothOutputTransportStopping) == 0 &&
+                    Volatile.Read(ref physicalOutputStopRequested) == 0)
+                {
+                    physicalOutputSignal.Set();
+                }
+            }
+        }
+
         private void StopBluetoothAudioPacerLocked()
         {
             DualSenseBluetoothAudioPacer pacer;
             lock (bluetoothAudioPacerLock)
             {
                 pacer = bluetoothAudioPacer;
-                bluetoothAudioPacer = null;
+                SetBluetoothAudioPacerUnderLock(null);
             }
 
             if (pacer == null)
@@ -2221,7 +2292,7 @@ namespace DS4Windows.InputDevices
             {
                 if (ReferenceEquals(bluetoothAudioPacer, pacer))
                 {
-                    bluetoothAudioPacer = null;
+                    SetBluetoothAudioPacerUnderLock(null);
                     bluetoothAudioPacerLastError = pacer.LastError;
                     detached = true;
                 }
@@ -2548,7 +2619,7 @@ namespace DS4Windows.InputDevices
                 }
                 while (true);
 
-                RequestUnifiedBluetoothOutputTransportRecovery();
+                RequestBluetoothOutputRecoveryUnlessNativeAdmissionBusy();
                 return false;
             }
             finally
@@ -3642,6 +3713,27 @@ namespace DS4Windows.InputDevices
             if (!TryPeekPhysicalOutputCommand(physicalOutputCommandBuffer,
                     out long nativeOutputRevision))
             {
+                if (conType == ConnectionType.BT)
+                {
+                    lock (bluetoothCombinedTransportWriteLock)
+                    {
+                        if (pendingBluetoothNativeGameRevision > 0)
+                        {
+                            if (Volatile.Read(ref bluetoothAudioLifecycleTransitioning) != 0 ||
+                                Volatile.Read(ref bluetoothOutputTransportStopping) != 0)
+                            {
+                                return PhysicalOutputCommandProcessResult.Retry;
+                            }
+
+                            // The final FIFO command can already belong to the
+                            // fixed transaction. It still needs a retry owner
+                            // when no later game/local publication arrives.
+                            return TryPublishPendingBluetoothNativeGameTransition() ?
+                                PhysicalOutputCommandProcessResult.Published :
+                                PhysicalOutputCommandProcessResult.Retry;
+                        }
+                    }
+                }
                 return PhysicalOutputCommandProcessResult.None;
             }
 
@@ -3972,8 +4064,11 @@ namespace DS4Windows.InputDevices
                     // still waits for helper admission. Returning false keeps
                     // B at the existing fixed FIFO head without replaying any
                     // validity-masked field.
-                    if (!TryPublishPendingBluetoothNativeGameTransition() ||
-                        !UpdateCachedBluetoothCombinedState(report, 0))
+                    if (!TryPublishPendingBluetoothNativeGameTransition())
+                    {
+                        return false;
+                    }
+                    if (!UpdateCachedBluetoothCombinedState(report, 0))
                     {
                         RequestUnifiedBluetoothOutputTransportRecovery();
                         return false;
@@ -5811,7 +5906,7 @@ namespace DS4Windows.InputDevices
                         out _);
                 if (!published)
                 {
-                    RequestUnifiedBluetoothOutputTransportRecovery();
+                    RequestBluetoothOutputRecoveryUnlessNativeAdmissionBusy();
                 }
 
                 return published;
@@ -6072,6 +6167,7 @@ namespace DS4Windows.InputDevices
 
             long hapticsExpiryQpc = PersistentBluetoothHapticsExpiryQpc;
             bool published = false;
+            pendingBluetoothNativeGameCapacityOwner = null;
             if (TryClaimBluetoothAudioPacer(out DualSenseBluetoothAudioPacer
                     pacer, out _))
             {
@@ -6079,7 +6175,11 @@ namespace DS4Windows.InputDevices
                 {
                     published = pacer.UpdateGameStateAndTemplate(
                         exactState, quiescentTemplate,
-                        hapticsExpiryQpc);
+                        hapticsExpiryQpc, out bool capacityUnavailable);
+                    if (!published && capacityUnavailable)
+                    {
+                        pendingBluetoothNativeGameCapacityOwner = pacer;
+                    }
                 }
                 finally
                 {
@@ -6107,7 +6207,7 @@ namespace DS4Windows.InputDevices
                 pendingBluetoothNativeGameRevision = nativeOutputRevision;
                 LastBluetoothHapticsWriteStatus =
                     "Could not atomically publish native game state to the unified Bluetooth compositor.";
-                RequestUnifiedBluetoothOutputTransportRecovery();
+                RequestBluetoothOutputRecoveryUnlessNativeAdmissionBusy();
                 return false;
             }
 
@@ -6120,10 +6220,12 @@ namespace DS4Windows.InputDevices
         {
             if (pendingBluetoothNativeGameRevision <= 0)
             {
+                pendingBluetoothNativeGameCapacityOwner = null;
                 return true;
             }
 
             bool published = false;
+            pendingBluetoothNativeGameCapacityOwner = null;
             if (TryClaimBluetoothAudioPacer(out DualSenseBluetoothAudioPacer
                     pacer, out _))
             {
@@ -6132,7 +6234,12 @@ namespace DS4Windows.InputDevices
                     published = pacer.UpdateGameStateAndTemplate(
                         pendingBluetoothNativeGameExactState,
                         pendingBluetoothNativeGameQuiescentTemplate,
-                        pendingBluetoothNativeGameHapticsExpiryQpc);
+                        pendingBluetoothNativeGameHapticsExpiryQpc,
+                        out bool capacityUnavailable);
+                    if (!published && capacityUnavailable)
+                    {
+                        pendingBluetoothNativeGameCapacityOwner = pacer;
+                    }
                 }
                 finally
                 {
@@ -6144,7 +6251,7 @@ namespace DS4Windows.InputDevices
             {
                 LastBluetoothHapticsWriteStatus =
                     "Could not admit the retained native game state to the unified Bluetooth compositor.";
-                RequestUnifiedBluetoothOutputTransportRecovery();
+                RequestBluetoothOutputRecoveryUnlessNativeAdmissionBusy();
                 return false;
             }
 
@@ -6159,6 +6266,7 @@ namespace DS4Windows.InputDevices
 
         private void ClearPendingBluetoothNativeGameTransition()
         {
+            pendingBluetoothNativeGameCapacityOwner = null;
             pendingBluetoothNativeGameRevision = 0;
             pendingBluetoothNativeGameHapticsGeneration = 0;
             pendingBluetoothNativeGameHapticsExpiryQpc = 0;
@@ -6467,7 +6575,7 @@ namespace DS4Windows.InputDevices
                     // Keep dirty state pending so a transient helper queue/fault
                     // cannot turn the latest light/rumble state into a silent
                     // permanent loss.
-                    RequestUnifiedBluetoothOutputTransportRecovery();
+                    RequestBluetoothOutputRecoveryUnlessNativeAdmissionBusy();
                     SchedulePhysicalOutputRetry();
                     return;
                 }
@@ -7399,7 +7507,7 @@ namespace DS4Windows.InputDevices
                         outputState, enabled);
                 if (!published)
                 {
-                    RequestUnifiedBluetoothOutputTransportRecovery();
+                    RequestBluetoothOutputRecoveryUnlessNativeAdmissionBusy();
                 }
                 LastBluetoothMicrophoneWriteStatus = published ?
                     (enabled ?

@@ -21,9 +21,12 @@ namespace DS4Windows.InputDevices
     internal sealed class DualSenseBluetoothAudioPacer : IDisposable
     {
         internal const int ReportLength = 398;
-        internal const int GameStateAndTemplatePayloadLength =
+        internal const int NativeCommandCapacity = 32;
+        internal const int NativeCommandIdentityOffset =
             DualSenseBluetoothPhysicalOutputSequence.
                 ControllerStatePayloadLength + sizeof(long) + ReportLength;
+        internal const int GameStateAndTemplatePayloadLength =
+            NativeCommandIdentityOffset + sizeof(long) + sizeof(int);
         // Keep media on the hardware-validated MeasuredTransport-sized carrier: one
         // complete speaker/haptics generation per 10.667 ms. The 547-byte
         // paired carrier is valid on the combined-report reference's raw L2CAP stack, but Windows
@@ -162,7 +165,7 @@ namespace DS4Windows.InputDevices
         }
 
         private const string HelperArgument = "--dualsense-bt-audio-pacer-helper";
-        private const int ProtocolVersion = 15;
+        private const int ProtocolVersion = 16;
         private const int PipeConnectTimeoutMilliseconds = 5000;
         private const int HelperReadyTimeoutMilliseconds = 5000;
         private const int HelperStopTimeoutMilliseconds = 3000;
@@ -206,6 +209,7 @@ namespace DS4Windows.InputDevices
             Ready = 0x80,
             ReportAcknowledged = 0x81,
             Stopped = 0x82,
+            NativeStateAcknowledged = 0x83,
             Error = 0xFF,
         }
 
@@ -543,6 +547,9 @@ namespace DS4Windows.InputDevices
             new long[OutboundCommandCapacity];
         private readonly Dictionary<long, byte> outstandingReports =
             new Dictionary<long, byte>(HostReservoirCapacity);
+        private readonly DualSenseNativeCommandCredits nativeCommandCredits =
+            new DualSenseNativeCommandCredits(NativeCommandCapacity);
+        private bool nativeAdmissionWaitingForOutboundCapacity;
         private readonly ControlReportCompletionPool controlReportCompletions;
         private readonly AutoResetEvent outboundAvailable = new AutoResetEvent(false);
         private readonly ManualResetEventSlim readyEvent = new ManualResetEventSlim(false);
@@ -693,6 +700,8 @@ namespace DS4Windows.InputDevices
             Interlocked.Read(ref transportFaultReports);
         public bool IsReady => readyEvent.IsSet && !IsFaulted;
         public bool IsFaulted => !string.IsNullOrEmpty(LastError);
+        internal event Action<DualSenseBluetoothAudioPacer> NativeCommandCapacityAvailable;
+
         public bool IsRunning => Volatile.Read(ref stopping) == 0 &&
             Volatile.Read(ref disposed) == 0 && !IsFaulted;
 
@@ -1709,7 +1718,14 @@ namespace DS4Windows.InputDevices
         /// </summary>
         public bool UpdateGameStateAndTemplate(byte[] gameStateReport,
             byte[] quiescentTemplate, long hapticsExpiryQpc)
+            => UpdateGameStateAndTemplate(gameStateReport, quiescentTemplate,
+                hapticsExpiryQpc, out _);
+
+        public bool UpdateGameStateAndTemplate(byte[] gameStateReport,
+            byte[] quiescentTemplate, long hapticsExpiryQpc,
+            out bool capacityUnavailable)
         {
+            capacityUnavailable = false;
             if (gameStateReport == null ||
                 gameStateReport.Length != ReportLength ||
                 quiescentTemplate == null ||
@@ -1724,11 +1740,23 @@ namespace DS4Windows.InputDevices
 
             lock (stateLock)
             {
+                if (!IsRunning) return false;
+                long commandId = unchecked(++nextReportId);
+                if (commandId == 0) commandId = unchecked(++nextReportId);
+                int generation = realtimeHapticsGeneration;
+                if (!nativeCommandCredits.TryReserve(commandId, generation))
+                {
+                    capacityUnavailable = true;
+                    return false;
+                }
                 if (!TryCreateOutboundCommandLocked(
                         MessageKind.UpdateGameStateAndTemplate,
                         GameStateAndTemplatePayloadLength,
-                        out OutboundCommand command))
+                        out OutboundCommand command, commandId))
                 {
+                    nativeCommandCredits.TryRelease(commandId, generation);
+                    nativeAdmissionWaitingForOutboundCapacity = true;
+                    capacityUnavailable = true;
                     return false;
                 }
 
@@ -1748,13 +1776,20 @@ namespace DS4Windows.InputDevices
                 Buffer.BlockCopy(quiescentTemplate, 0,
                     command.Payload.Buffer,
                     stateLength + sizeof(long), ReportLength);
+                BinaryPrimitives.WriteInt64LittleEndian(command.Payload.Buffer.
+                    AsSpan(NativeCommandIdentityOffset), commandId);
+                BinaryPrimitives.WriteInt32LittleEndian(command.Payload.Buffer.
+                    AsSpan(NativeCommandIdentityOffset + sizeof(long)), generation);
                 // Do not replace an older game delta in the parent FIFO. The
-                // helper composes validity-masked fields at the physical
+                // helper preserves exact commands at the physical
                 // boundary; replacing here could erase a rumble stop,
                 // trigger transition, or LED release before it was observed.
                 if (!outboundCommands.TryEnqueue(command))
                 {
                     ReleaseOutboundCommandLocked(command);
+                    nativeCommandCredits.TryRelease(commandId, generation);
+                    nativeAdmissionWaitingForOutboundCapacity = true;
+                    capacityUnavailable = true;
                     return false;
                 }
 
@@ -1764,9 +1799,10 @@ namespace DS4Windows.InputDevices
                 // stale/silent media snapshot that accompanied that state and
                 // suppress an app-selected speaker source. Preserve the media
                 // clock, speaker payload, and current haptics generation while
-                // atomically advancing only the state bytes the game owns.
-                MergeControllerStateIntoTemplate(quiescentTemplate,
-                    latestTemplate);
+                // leaving state presentation to the helper's command FIFO.
+                // The helper owns common-state presentation order. Do not
+                // publish a later command's quiescent state at parent admission.
+                // Independent media/templates retain their own latest lane.
             }
 
             outboundAvailable.Set();
@@ -1788,10 +1824,8 @@ namespace DS4Windows.InputDevices
 
             lock (stateLock)
             {
-                latestControllerStateAvailable = false;
-                latestLocalRumbleAvailable = false;
-                realtimeHapticsGeneration = NextGeneration(
-                    realtimeHapticsGeneration);
+                if (!IsRunning) return false;
+                int nextGeneration = NextGeneration(realtimeHapticsGeneration);
                 if (!TryCreateOutboundCommandLocked(
                         MessageKind.ResetControllerStateTransitions,
                         sizeof(int), out OutboundCommand reset))
@@ -1799,7 +1833,7 @@ namespace DS4Windows.InputDevices
                     return false;
                 }
                 BinaryPrimitives.WriteInt32LittleEndian(reset.Payload.Buffer,
-                    realtimeHapticsGeneration);
+                    nextGeneration);
                 if (!outboundCommands.TryReplaceWhereWithOne(
                     IsControllerStateOrResetCommand, reset,
                     removedOutboundCommands, out int removedCount))
@@ -1809,6 +1843,11 @@ namespace DS4Windows.InputDevices
                 }
 
                 ReleaseRemovedOutboundCommandsLocked(removedCount);
+                // The new generation becomes visible only with its queued
+                // reset. A failed admission must not split the IPC contract.
+                latestControllerStateAvailable = false;
+                latestLocalRumbleAvailable = false;
+                realtimeHapticsGeneration = nextGeneration;
             }
 
             outboundAvailable.Set();
@@ -1924,6 +1963,7 @@ namespace DS4Windows.InputDevices
             {
                 ReleaseAllOutboundCommandsLocked();
                 outstandingReports.Clear();
+                nativeCommandCredits.Clear();
                 controlReportCompletions.CompleteAll(
                     AcknowledgementDisposition.Cleared);
                 if (TryCreateOutboundCommandLocked(MessageKind.Stop, 0,
@@ -1989,11 +2029,13 @@ namespace DS4Windows.InputDevices
                         // pipe now carries only speaker/control/lifecycle work.
                         if (claimed)
                         {
+                            bool frameSent = false;
                             try
                             {
                                 SendFrame(command.Kind,
                                     command.Payload.Buffer,
                                     command.PayloadLength);
+                                frameSent = true;
                                 sentAny = true;
                                 if (command.Kind == MessageKind.Stop)
                                 {
@@ -2006,10 +2048,15 @@ namespace DS4Windows.InputDevices
                                 // frame write returns. Returning it afterward
                                 // lets producers reuse storage without holding
                                 // stateLock or a queue lock across IPC.
+                                bool notifyNativeCapacity;
                                 lock (stateLock)
                                 {
                                     ReleaseOutboundCommandLocked(command);
+                                    notifyNativeCapacity = nativeAdmissionWaitingForOutboundCapacity;
+                                    nativeAdmissionWaitingForOutboundCapacity = false;
                                 }
+                                if (notifyNativeCapacity && frameSent && IsRunning)
+                                    NativeCommandCapacityAvailable?.Invoke(this);
                             }
                         }
 
@@ -2036,42 +2083,16 @@ namespace DS4Windows.InputDevices
         {
             using global::DS4Windows.MultimediaThreadRegistration mmcss =
                 global::DS4Windows.MultimediaThreadRegistration.EnterProAudio();
+            // One receiver owns these buffers. In particular, returning native
+            // command credit must not allocate a header and payload per ACK.
+            byte[] header = new byte[sizeof(byte) + sizeof(int)];
+            byte[] payload = new byte[4096];
             try
             {
                 while (Volatile.Read(ref disposed) == 0)
                 {
-                    ReadFrame(responsePipe, out MessageKind kind,
-                        out byte[] payload);
-                    switch (kind)
-                    {
-                        case MessageKind.Ready:
-                            readyEvent.Set();
-                            break;
-                        case MessageKind.ReportAcknowledged:
-                            ProcessAcknowledgement(payload);
-                            break;
-                        case MessageKind.Stopped:
-                            Volatile.Write(ref cleanStopAcknowledged, 1);
-                            if (Volatile.Read(ref stopping) == 0)
-                            {
-                                SetError("The isolated DualSense audio pacer stopped unexpectedly after releasing transport ownership.");
-                            }
-                            else
-                            {
-                                stoppedEvent.Set();
-                            }
-
-                            return;
-                        case MessageKind.Error:
-                            SetError("DualSense audio pacer helper: " +
-                                Encoding.UTF8.GetString(payload));
-                            readyEvent.Set();
-                            stoppedEvent.Set();
-                            return;
-                        default:
-                            throw new InvalidDataException(
-                                $"Unexpected pacer response 0x{(byte)kind:X2}.");
-                    }
+                    if (!ReceiveResponseFrame(responsePipe, header, payload))
+                        return;
                 }
             }
             catch (EndOfStreamException)
@@ -2105,12 +2126,84 @@ namespace DS4Windows.InputDevices
             }
         }
 
+        // Actual framed receiver entrypoint, also used by isolated tests with
+        // an in-memory stream. The scratch buffer's unused tail is never part
+        // of an ACK, Error string, or lifecycle message.
+        private bool ReceiveResponseFrame(Stream stream, byte[] header,
+            byte[] payload)
+        {
+            int payloadLength = ReadFrameInto(stream, header, payload,
+                out MessageKind kind);
+            switch (kind)
+            {
+                case MessageKind.Ready:
+                    if (payloadLength != 0)
+                        throw new InvalidDataException("Invalid pacer Ready payload length.");
+                    readyEvent.Set();
+                    return true;
+                case MessageKind.ReportAcknowledged:
+                    ProcessAcknowledgementCore(payload, payloadLength);
+                    return true;
+                case MessageKind.NativeStateAcknowledged:
+                    ProcessNativeStateAcknowledgementCore(payload, payloadLength);
+                    return true;
+                case MessageKind.Stopped:
+                    if (payloadLength != 0)
+                        throw new InvalidDataException("Invalid pacer Stopped payload length.");
+                    Volatile.Write(ref cleanStopAcknowledged, 1);
+                    if (Volatile.Read(ref stopping) == 0)
+                        SetError("The isolated DualSense audio pacer stopped unexpectedly after releasing transport ownership.");
+                    else
+                        stoppedEvent.Set();
+                    return false;
+                case MessageKind.Error:
+                    SetError("DualSense audio pacer helper: " +
+                        Encoding.UTF8.GetString(payload, 0, payloadLength));
+                    readyEvent.Set();
+                    stoppedEvent.Set();
+                    return false;
+                default:
+                    throw new InvalidDataException(
+                        $"Unexpected pacer response 0x{(byte)kind:X2}.");
+            }
+        }
+
+        // Preserve the unique byte[] reflection entrypoints used by existing
+        // protocol tests; production uses the exact-length scratch-buffer cores.
+        private void ProcessNativeStateAcknowledgement(byte[] payload)
+            => ProcessNativeStateAcknowledgementCore(payload, payload.Length);
+
+        private void ProcessNativeStateAcknowledgementCore(byte[] payload,
+            int payloadLength)
+        {
+            if (payloadLength != sizeof(long) + sizeof(int) + 1 ||
+                payload == null || payload.Length < payloadLength)
+                throw new InvalidDataException("Invalid native-state acknowledgement length.");
+            long id = BinaryPrimitives.ReadInt64LittleEndian(payload);
+            int generation = BinaryPrimitives.ReadInt32LittleEndian(payload.AsSpan(sizeof(long)));
+            var disposition = (AcknowledgementDisposition)payload[sizeof(long) + sizeof(int)];
+            if (disposition is not (AcknowledgementDisposition.Presented or
+                AcknowledgementDisposition.Cleared or AcknowledgementDisposition.StaleEpoch))
+                throw new InvalidDataException("Native state was not presented or cancelled.");
+            bool released;
+            lock (stateLock) released = nativeCommandCredits.TryRelease(id, generation);
+            // Only signal the owner; never re-enter its mapper or output work
+            // on this pipe reader, and never call it under the pacer lock.
+            if (released && IsRunning)
+                NativeCommandCapacityAvailable?.Invoke(this);
+        }
+
         private void ProcessAcknowledgement(byte[] payload)
+            => ProcessAcknowledgementCore(payload, payload.Length);
+
+        private void ProcessAcknowledgementCore(byte[] payload,
+            int payloadLength)
         {
             const int writerMetricCount = 17;
             int metricOffset = sizeof(long) + sizeof(byte) + sizeof(long);
-            if (payload.Length != metricOffset +
-                writerMetricCount * sizeof(long))
+            if (payloadLength != metricOffset +
+                writerMetricCount * sizeof(long) || payload == null ||
+                payload.Length < payloadLength)
             {
                 throw new InvalidDataException("Invalid pacer acknowledgement length.");
             }
@@ -2312,6 +2405,12 @@ namespace DS4Windows.InputDevices
         {
             OutboundCommand command = removedOutboundCommands[index];
             removedOutboundCommands[index] = default;
+            // Definite pre-send cancellation, unlike returning the sender's
+            // payload after IPC. Sent native credits await exact helper ACKs.
+            if (command.Kind == MessageKind.UpdateGameStateAndTemplate)
+                nativeCommandCredits.TryRelease(command.ReportId,
+                    BinaryPrimitives.ReadInt32LittleEndian(command.Payload.Buffer.
+                        AsSpan(NativeCommandIdentityOffset + sizeof(long))));
             ReleaseOutboundCommandLocked(command);
         }
 
@@ -2354,6 +2453,7 @@ namespace DS4Windows.InputDevices
             {
                 lastError = error ?? "Unknown DualSense audio pacer error.";
             }
+            nativeCommandCredits.Clear();
         }
 
         internal static void BuildQueuePayloadInto(long reportId, int epoch,
@@ -2476,6 +2576,7 @@ namespace DS4Windows.InputDevices
         private static int NextGeneration(int generation)
         {
             int next = unchecked(generation + 1);
+            // Preserve signed serial ordering used by the shared PCM ring.
             return next == 0 ? InitialEpoch : next;
         }
 
@@ -2510,6 +2611,7 @@ namespace DS4Windows.InputDevices
             {
                 ReleaseAllOutboundCommandsLocked();
                 outstandingReports.Clear();
+                nativeCommandCredits.Clear();
                 controlReportCompletions.CompleteAll(
                     AcknowledgementDisposition.Cleared);
             }
@@ -2858,7 +2960,7 @@ namespace DS4Windows.InputDevices
         private sealed class HelperHost : IDisposable
         {
             private const int AcknowledgementCapacity =
-                HostReservoirCapacity * 2;
+                (HostReservoirCapacity + NativeCommandCapacity) * 2;
             private const int PresentationTraceCapacity = 65536;
             private static readonly long ControllerStateIntervalQpc =
                 Math.Max(1, Stopwatch.Frequency / 200);
@@ -2881,19 +2983,29 @@ namespace DS4Windows.InputDevices
                 }
             }
 
+            private sealed class NativeStateCommand
+            {
+                public long Id;
+                public int Generation;
+                public readonly byte[] State = new byte[DualSensePendingGameStateComposer.StateLength];
+                public readonly byte[] QuiescentState = new byte[DualSensePendingGameStateComposer.StateLength];
+            }
+
             private readonly struct QueuedAcknowledgement
             {
                 public readonly long ReportId;
                 public readonly AcknowledgementDisposition Disposition;
                 public readonly long PresentedTimestamp;
+                public readonly int NativeGeneration;
 
                 public QueuedAcknowledgement(long reportId,
                     AcknowledgementDisposition disposition,
-                    long presentedTimestamp)
+                    long presentedTimestamp, int nativeGeneration = 0)
                 {
                     ReportId = reportId;
                     Disposition = disposition;
                     PresentedTimestamp = presentedTimestamp;
+                    NativeGeneration = nativeGeneration;
                 }
             }
 
@@ -2953,6 +3065,16 @@ namespace DS4Windows.InputDevices
             private readonly byte[] pendingControllerState = new byte[
                 DualSenseBluetoothPhysicalOutputSequence.
                     ControllerStatePayloadLength];
+            private readonly DualSenseBluetoothAudioPacerRing<NativeStateCommand> nativeCommands =
+                new(NativeCommandCapacity);
+            private readonly DualSenseBluetoothAudioPacerRing<NativeStateCommand> availableNativeCommands =
+                new(NativeCommandCapacity);
+            private readonly DualSenseNativeCommandCredits nativeAdmissions = new(NativeCommandCapacity);
+            // A claimed slot remains owned through physical I/O even when a
+            // concurrent Clear removes it from the logical FIFO.
+            private NativeStateCommand claimedNativeCommand;
+            private readonly byte[] nativeQuiescentState = new byte[DualSensePendingGameStateComposer.StateLength];
+            private bool HasPendingControllerState => pendingControllerStateAvailable || nativeCommands.Count != 0;
             private readonly byte[] controllerStatePresentation = new byte[
                 DualSenseBluetoothPhysicalOutputSequence.
                     ControllerStatePayloadLength];
@@ -2999,6 +3121,9 @@ namespace DS4Windows.InputDevices
             private bool presentationMicrophoneEnabled;
             private bool pendingControllerStateAvailable;
             private int controllerStateReportsAhead;
+            private int nativeStateReportsAhead;
+            private int PendingStateReportsAhead => nativeCommands.Count != 0
+                ? nativeStateReportsAhead : controllerStateReportsAhead;
             private long lastControllerStateSubmissionQpc;
             private long controllerStateRevision;
             private long microphoneStatusRevision;
@@ -3105,6 +3230,9 @@ namespace DS4Windows.InputDevices
                             "Could not initialize the pacer report pool.");
                     }
                 }
+
+                for (int index = 0; index < NativeCommandCapacity; index++)
+                    availableNativeCommands.TryEnqueue(new NativeStateCommand());
 
                 pacerThread = new Thread(PacerLoop)
                 {
@@ -3363,6 +3491,7 @@ namespace DS4Windows.InputDevices
                         BitConverter.DoubleToInt64Bits(1.0));
                     lifecycleHapticsGeneration = hapticsGeneration;
                     lifecycleResetRevision++;
+                    CancelNativeCommandsLocked();
                     writerClockResetRevision = lifecycleResetRevision;
                     while (reservoir.TryDequeue(out QueuedReport report))
                     {
@@ -3531,6 +3660,8 @@ namespace DS4Windows.InputDevices
                         controllerStateReportsAhead = Math.Max(
                             controllerStateReportsAhead, reportsAhead);
                     }
+                    if (nativeCommands.Count != 0)
+                        nativeStateReportsAhead = Math.Max(nativeStateReportsAhead, reportsAhead);
 
                     microphoneStatusReportsAhead = reportsAhead;
                 }
@@ -3598,7 +3729,6 @@ namespace DS4Windows.InputDevices
                     microphoneStatusReportsAhead = 0;
                     return;
                 }
-
                 if (pendingMicrophoneStatus < 0)
                 {
                     presentationMicrophoneEnabled =
@@ -3672,14 +3802,14 @@ namespace DS4Windows.InputDevices
                                 useV5PresentationCadence &&
                                 IsSpeakerAudioReport(nextReport?.Report);
                             controllerStateReady =
-                                pendingControllerStateAvailable &&
+                                HasPendingControllerState &&
                                 !nativeMediaCanConsumeControllerState &&
-                                controllerStateReportsAhead <= 0 &&
+                                PendingStateReportsAhead <= 0 &&
                                 (lastControllerStateSubmissionQpc == 0 ||
                                     nowQpc -
                                         lastControllerStateSubmissionQpc >=
                                             ControllerStateIntervalQpc);
-                            if (pendingControllerStateAvailable &&
+                            if (HasPendingControllerState &&
                                 !controllerStateReady)
                             {
                                 long remainingQpc =
@@ -3759,6 +3889,7 @@ namespace DS4Windows.InputDevices
                             bool transportFault;
                             bool accepted;
                             bool claimed = false;
+                            bool claimedNative = false;
                             long claimedRevision = 0;
                             long nowQpc = 0;
                             lock (stateLock)
@@ -3767,8 +3898,8 @@ namespace DS4Windows.InputDevices
                                 bool stillReady =
                                     lifecycleResetRevision ==
                                         appliedLifecycleResetRevision &&
-                                    pendingControllerStateAvailable &&
-                                    controllerStateReportsAhead <= 0 &&
+                                    HasPendingControllerState &&
+                                    PendingStateReportsAhead <= 0 &&
                                     (lastControllerStateSubmissionQpc == 0 ||
                                         nowQpc -
                                             lastControllerStateSubmissionQpc >=
@@ -3784,12 +3915,11 @@ namespace DS4Windows.InputDevices
                                         previousTemplate : null;
                                 if (initializationTemplate != null)
                                 {
-                                    Buffer.BlockCopy(pendingControllerState, 0,
-                                        controllerStatePresentation, 0,
-                                        controllerStatePresentation.Length);
+                                    claimedNative = ClaimControllerStateLocked();
                                     Buffer.BlockCopy(initializationTemplate, 0,
                                         controllerStateTemplateSnapshot, 0,
                                         ReportLength);
+                                    FenceNativeTemplateLocked(controllerStateTemplateSnapshot);
                                     claimedRevision = controllerStateRevision;
                                     claimed = true;
                                 }
@@ -3825,7 +3955,7 @@ namespace DS4Windows.InputDevices
                                         // A newer state/reset remains pending;
                                         // completing this older claimed write
                                         // must not clear or overwrite it.
-                                        if (controllerStateRevision ==
+                                        if (!claimedNative && controllerStateRevision ==
                                             claimedRevision)
                                         {
                                             pendingControllerStateAvailable =
@@ -3846,6 +3976,11 @@ namespace DS4Windows.InputDevices
                                 }
                             }
 
+                            if (claimedNative)
+                            {
+                                lock (stateLock) FinishNativeClaimLocked(accepted, nowQpc);
+                            }
+
                             if (transportFault)
                             {
                                 stopRequested.Set();
@@ -3860,7 +3995,7 @@ namespace DS4Windows.InputDevices
                                 {
                                     lock (stateLock)
                                     {
-                                        if (pendingControllerStateAvailable)
+                                        if (HasPendingControllerState)
                                         {
                                             // Yield to an actual queued media
                                             // frame, not an imaginary future
@@ -3872,8 +4007,10 @@ namespace DS4Windows.InputDevices
                                                 IsQueuedSpeakerReport(queuedMedia);
                                             if (mediaQueued)
                                             {
-                                                controllerStateReportsAhead =
-                                                    Math.Max(controllerStateReportsAhead, 1);
+                                                if (nativeCommands.Count != 0)
+                                                    nativeStateReportsAhead = Math.Max(nativeStateReportsAhead, 1);
+                                                else
+                                                    controllerStateReportsAhead = Math.Max(controllerStateReportsAhead, 1);
                                             }
                                         }
                                     }
@@ -4159,6 +4296,7 @@ namespace DS4Windows.InputDevices
                         bool advanceV5Scheduler;
                         bool controlOnly;
                         bool controllerStatePiggybacked = false;
+                        bool nativeStatePiggybacked = false;
                         bool retainedForRetry = false;
                         bool latestTemplateSnapshotAvailable = false;
                         bool previousTemplateSnapshotAvailable = false;
@@ -4261,6 +4399,7 @@ namespace DS4Windows.InputDevices
                                 Buffer.BlockCopy(latestTemplate, 0,
                                     presentationLatestTemplateSnapshot, 0,
                                     ReportLength);
+                                FenceNativeTemplateLocked(presentationLatestTemplateSnapshot);
                                 latestTemplateSnapshotExpiryQpc =
                                     latestTemplateHapticsExpiryQpc;
                             }
@@ -4271,6 +4410,7 @@ namespace DS4Windows.InputDevices
                                 Buffer.BlockCopy(previousTemplate, 0,
                                     presentationPreviousTemplateSnapshot, 0,
                                     ReportLength);
+                                FenceNativeTemplateLocked(presentationPreviousTemplateSnapshot);
                                 previousTemplateSnapshotExpiryQpc =
                                     previousTemplateHapticsExpiryQpc;
                             }
@@ -4286,13 +4426,11 @@ namespace DS4Windows.InputDevices
                                     pairedItem.Epoch == claimedEpoch) &&
                                 useV5PresentationCadence &&
                                 pairedItem == null && !controlOnly &&
-                                pendingControllerStateAvailable &&
-                                controllerStateReportsAhead <= 0;
+                                HasPendingControllerState &&
+                                PendingStateReportsAhead <= 0;
                             if (controllerStatePiggybacked)
                             {
-                                Buffer.BlockCopy(pendingControllerState, 0,
-                                    controllerStatePresentation, 0,
-                                    controllerStatePresentation.Length);
+                                nativeStatePiggybacked = ClaimControllerStateLocked();
                             }
                         }
 
@@ -4502,7 +4640,9 @@ namespace DS4Windows.InputDevices
                                     lifecycleResetRevision ==
                                         claimedLifecycleResetRevision &&
                                     currentEpoch == claimedEpoch;
-                                if (accepted && controllerStatePiggybacked &&
+                                if (nativeStatePiggybacked)
+                                    FinishNativeClaimLocked(accepted, presentedAt);
+                                if (accepted && controllerStatePiggybacked && !nativeStatePiggybacked &&
                                     claimedLifecycleStillCurrent &&
                                     controllerStateRevision ==
                                         claimedControllerStateRevision)
@@ -4589,15 +4729,16 @@ namespace DS4Windows.InputDevices
                                     (pairedItem == null ? 1 : 2));
                             }
                             if (!retainedForRetry &&
-                                claimedLifecycleStillCurrent &&
-                                pendingControllerStateAvailable &&
-                                controllerStateReportsAhead > 0 &&
-                                controllerStateRevision ==
-                                    claimedControllerStateRevision)
+                                disposition == AcknowledgementDisposition.Presented &&
+                                claimedLifecycleStillCurrent && !controlOnly &&
+                                microphoneStatusRevision == claimedMicrophoneStatusRevision)
                             {
-                                controllerStateReportsAhead = Math.Max(0,
-                                    controllerStateReportsAhead -
-                                        (pairedItem == null ? 1 : 2));
+                                int acceptedFrames = pairedItem == null ? 1 : 2;
+                                nativeStateReportsAhead = Math.Max(0,
+                                    nativeStateReportsAhead - acceptedFrames);
+                                if (controllerStateRevision == claimedControllerStateRevision)
+                                    controllerStateReportsAhead = Math.Max(0,
+                                        controllerStateReportsAhead - acceptedFrames);
                             }
 
                             if (!retainedForRetry &&
@@ -4728,48 +4869,53 @@ namespace DS4Windows.InputDevices
                 long hapticsExpiryQpc =
                     BinaryPrimitives.ReadInt64LittleEndian(
                         payload.AsSpan(stateLength, sizeof(long)));
+                long id = BinaryPrimitives.ReadInt64LittleEndian(payload.AsSpan(NativeCommandIdentityOffset));
+                int generation = BinaryPrimitives.ReadInt32LittleEndian(payload.AsSpan(NativeCommandIdentityOffset + sizeof(long)));
+                if (id == 0 || generation == 0)
+                    throw new InvalidDataException("Invalid native command identity.");
                 lock (stateLock)
                 {
-                    ShiftLatestTemplateToPrevious();
-                    if (latestTemplateAvailable)
+                    if (generation != lifecycleHapticsGeneration)
                     {
-                        // The state transition and its validity bits must land
-                        // atomically, but its attached media snapshot is stale
-                        // by construction. Keep the newest locally-owned media
-                        // generation (including selected-app speaker PCM) and
-                        // merge only the common controller state.
-                        Buffer.BlockCopy(payload, templateOffset +
-                            DualSenseBluetoothPhysicalOutputSequence.
-                                ControllerStateSourceOffset,
-                            latestTemplate,
-                            DualSenseBluetoothPhysicalOutputSequence.
-                                ControllerStateSourceOffset,
-                            stateLength);
+                        QueueNativeAcknowledgement(id, generation, AcknowledgementDisposition.StaleEpoch);
+                        return;
                     }
-                    else
+                    // Parent reservation lasts until our terminal ACK. Full
+                    // capacity here is a broken protocol, never permission to
+                    // drop an accepted command or block the shared reader.
+                    if (!nativeAdmissions.TryReserve(id, generation))
+                        throw new InvalidDataException("Native command credit contract violated.");
+                    if (!availableNativeCommands.TryDequeue(out NativeStateCommand command))
+                        throw new InvalidDataException("Native command storage exhausted.");
+                    if (!latestTemplateAvailable)
                     {
                         Buffer.BlockCopy(payload, templateOffset,
                             latestTemplate, 0, ReportLength);
                         latestTemplateHapticsExpiryQpc = hapticsExpiryQpc;
+                        latestTemplateAvailable = true;
                     }
-                    latestTemplateAvailable = true;
-
-                    if (pendingControllerStateAvailable)
+                    if (nativeCommands.Count == 0)
                     {
-                        DualSensePendingGameStateComposer.Merge(
-                            pendingControllerState, payload, 0);
+                        // Native edges do not inherit the local latest-state
+                        // latch's queued-media delay. Only the real microphone
+                        // mode boundary must precede them.
+                        nativeStateReportsAhead = pendingMicrophoneStatus >= 0
+                            ? microphoneStatusReportsAhead : 0;
+                        Buffer.BlockCopy(latestTemplate,
+                            DualSenseBluetoothPhysicalOutputSequence.ControllerStateSourceOffset,
+                            nativeQuiescentState, 0, stateLength);
+                        DualSenseDevice.ConsumeNativeGameStateValidity(nativeQuiescentState, 0);
                     }
-                    else
-                    {
-                        Buffer.BlockCopy(payload, 0,
-                            pendingControllerState, 0, stateLength);
-                    }
-                    pendingControllerStateAvailable = true;
-                    controllerStateRevision++;
-                    // A V5 media generation consumes this state atomically on
-                    // its next due slot. With no media pending, the normal
-                    // controller-state branch emits a serialized 0x31 latch.
-                    controllerStateReportsAhead = 0;
+                    command.Id = id;
+                    command.Generation = generation;
+                    Buffer.BlockCopy(payload, 0, command.State, 0, stateLength);
+                    Buffer.BlockCopy(payload, templateOffset +
+                        DualSenseBluetoothPhysicalOutputSequence.ControllerStateSourceOffset,
+                        command.QuiescentState, 0, stateLength);
+                    DualSenseDevice.ConsumeNativeGameStateValidity(command.QuiescentState, 0);
+                    if (!nativeCommands.TryEnqueue(command))
+                        throw new InvalidDataException("Native command FIFO exhausted.");
+                    RetireSupersededLocalStateLocked(command.State);
                 }
 
                 reservoirChanged.Set();
@@ -4793,9 +4939,125 @@ namespace DS4Windows.InputDevices
                     controllerStateRevision++;
                     lifecycleHapticsGeneration = hapticsGeneration;
                     lifecycleResetRevision++;
+                    CancelNativeCommandsLocked();
                 }
 
                 reservoirChanged.Set();
+            }
+
+            // Called only under stateLock. The presenter owns the claim until
+            // its physical call returns; lifecycle cancellation cannot recycle
+            // that slot or return its admission credit prematurely.
+            private void CancelNativeCommandsLocked()
+            {
+                nativeStateReportsAhead = 0;
+                while (nativeCommands.TryDequeue(out NativeStateCommand command))
+                    if (!ReferenceEquals(command, claimedNativeCommand))
+                        ReleaseNativeCommandLocked(command, AcknowledgementDisposition.Cleared);
+            }
+
+            private void RetireSupersededLocalStateLocked(byte[] newerState)
+            {
+                if (!pendingControllerStateAvailable) return;
+                // Native commands are immutable, while the local lane remains
+                // latest-value. An older local pulse/LED claim must not replay
+                // after a newer native stop/release. Retire only overlapping
+                // fields; unrelated local controls still need presentation.
+                byte flag0 = newerState[0];
+                if ((flag0 & 0x03) != 0) flag0 |= 0x03;
+                byte flag1 = newerState[1];
+                if ((flag1 & 0x08) != 0) flag1 |= 0x14;
+                else if ((flag1 & 0x14) != 0) flag1 |= 0x08;
+                pendingControllerState[0] &= unchecked((byte)~flag0);
+                pendingControllerState[1] &= unchecked((byte)~flag1);
+                pendingControllerState[38] &= unchecked((byte)~(newerState[38] & 0x03));
+                if ((pendingControllerState[0] & 0x03) == 0)
+                    pendingControllerState[38] &= 0xFB;
+                pendingControllerStateAvailable = pendingControllerState[0] != 0 ||
+                    pendingControllerState[1] != 0 || (pendingControllerState[38] & 0x03) != 0;
+                controllerStateRevision++;
+                if (!pendingControllerStateAvailable) controllerStateReportsAhead = 0;
+            }
+
+            private void ReleaseNativeCommandLocked(NativeStateCommand command,
+                AcknowledgementDisposition disposition)
+            {
+                QueueNativeAcknowledgement(command.Id, command.Generation, disposition);
+                nativeAdmissions.TryRelease(command.Id, command.Generation);
+                if (!availableNativeCommands.TryEnqueue(command))
+                    throw new InvalidOperationException("Native command pool overflowed.");
+            }
+
+            private bool ClaimControllerStateLocked()
+            {
+                if (nativeCommands.TryPeek(out NativeStateCommand command))
+                {
+                    if (claimedNativeCommand != null)
+                        throw new InvalidOperationException("A native state claim is already active.");
+                    claimedNativeCommand = command;
+                    Buffer.BlockCopy(command.State, 0, controllerStatePresentation, 0,
+                        controllerStatePresentation.Length);
+                    return true;
+                }
+                Buffer.BlockCopy(pendingControllerState, 0, controllerStatePresentation, 0,
+                    controllerStatePresentation.Length);
+                return false;
+            }
+
+            private void FinishNativeClaimLocked(bool accepted, long submittedAt)
+            {
+                NativeStateCommand command = claimedNativeCommand;
+                if (command == null) throw new InvalidOperationException("No native state claim.");
+                claimedNativeCommand = null;
+                bool current = command.Generation == lifecycleHapticsGeneration &&
+                    nativeCommands.TryPeek(out NativeStateCommand head) && ReferenceEquals(command, head);
+                if (!accepted && current) return; // exact immutable head retries
+                if (current)
+                {
+                    nativeCommands.TryDequeue(out _);
+                    Buffer.BlockCopy(command.QuiescentState, 0, nativeQuiescentState, 0,
+                        nativeQuiescentState.Length);
+                    if (latestTemplateAvailable)
+                        MergeNativeQuiescentStateIntoTemplateLocked(latestTemplate);
+                    if (previousTemplateAvailable)
+                        MergeNativeQuiescentStateIntoTemplateLocked(previousTemplate);
+                    lastControllerStateSubmissionQpc = submittedAt;
+                }
+                ReleaseNativeCommandLocked(command, current ?
+                    AcknowledgementDisposition.Presented : AcknowledgementDisposition.Cleared);
+            }
+
+            private void FenceNativeTemplateLocked(byte[] template)
+            {
+                if (nativeCommands.Count == 0 && claimedNativeCommand == null) return;
+                MergeNativeQuiescentStateIntoTemplateLocked(template);
+            }
+
+            private void MergeNativeQuiescentStateIntoTemplateLocked(byte[] template)
+            {
+                int offset = DualSenseBluetoothPhysicalOutputSequence.ControllerStateSourceOffset;
+                // Keep independently newer local audio controls and all media.
+                // Game-owned fields stay at the last consumed head until the
+                // exact next head is overlaid for one physical presentation.
+                Span<byte> localAudio = stackalloc byte[6];
+                template.AsSpan(offset + 4, 6).CopyTo(localAudio);
+                byte localFlag0 = (byte)(template[offset] & 0xF0);
+                byte localFlag1 = (byte)(template[offset + 1] & 0x83);
+                byte localGain = template[offset + 37];
+                Buffer.BlockCopy(nativeQuiescentState, 0, template, offset, nativeQuiescentState.Length);
+                template[offset] = localFlag0;
+                template[offset + 1] = localFlag1;
+                template[offset + 38] = 0;
+                localAudio.CopyTo(template.AsSpan(offset + 4, 6));
+                template[offset + 37] = localGain;
+            }
+
+            private void QueueNativeAcknowledgement(long id, int generation,
+                AcknowledgementDisposition disposition)
+            {
+                if (!acknowledgements.TryEnqueue(new QueuedAcknowledgement(id, disposition, 0, generation)))
+                    throw new InvalidOperationException("Native acknowledgement reservoir overflowed.");
+                acknowledgementAvailable.Set();
             }
 
             private void ApplyPendingLifecycleResets(
@@ -4875,6 +5137,7 @@ namespace DS4Windows.InputDevices
                 byte[] payload = new byte[
                     sizeof(long) + sizeof(byte) + sizeof(long) +
                     writerMetricCount * sizeof(long)];
+                byte[] nativePayload = new byte[sizeof(long) + sizeof(int) + sizeof(byte)];
                 try
                 {
                     while (!stopRequested.WaitOne(0) || acknowledgements.Count != 0)
@@ -4883,6 +5146,18 @@ namespace DS4Windows.InputDevices
                             out QueuedAcknowledgement acknowledgement))
                         {
                             acknowledgementAvailable.WaitOne(1000);
+                            continue;
+                        }
+
+                        if (acknowledgement.NativeGeneration != 0)
+                        {
+                            BinaryPrimitives.WriteInt64LittleEndian(nativePayload,
+                                acknowledgement.ReportId);
+                            BinaryPrimitives.WriteInt32LittleEndian(nativePayload.AsSpan(sizeof(long)),
+                                acknowledgement.NativeGeneration);
+                            nativePayload[sizeof(long) + sizeof(int)] = (byte)acknowledgement.Disposition;
+                            lock (pipeWriteLock)
+                                WriteFrame(responsePipe, MessageKind.NativeStateAcknowledged, nativePayload);
                             continue;
                         }
 

@@ -1,6 +1,6 @@
 # Audio Haptics routing, Nintendo output, and portable startup
 
-Status: source implemented, independently reviewed, and automated validation passed. Complete private packaging is next; this is not a release or hardware acceptance record.
+Status: source implemented, independently reviewed, automated validation passed, and complete private candidate F packaged and verified. Not launched; this is not a release or hardware acceptance record.
 
 ## Requested work
 
@@ -46,3 +46,14 @@ Status: source implemented, independently reviewed, and automated validation pas
 - Final reviewed x64 Release full suite: **5,293 passed, 0 failed, 11 gated live/external-integration tests skipped**, 5,304 total. Evidence: `isolated_results/audio-routing-nintendo-startup/reviewed-regression/audio-routing-reviewed-regression.trx`. This includes the final capture-format correction and regression test.
 - Forced managed cipher allocation diagnostics measured 232 bytes/write and 312 bytes/read per warmed 24-byte record (1,000 records each). In-process elapsed times were 3.330 ms and 5.464 ms respectively; these are not controller-latency or cross-machine benchmarks. Native warmed zero-allocation and Nintendo composed-writer zero-allocation assertions remain strict and pass.
 - No tactile hardware result or reporter-machine Windows 10 result has been claimed. The current E lab process and user profiles have not been replaced by these source edits.
+
+## Complete private candidate F
+
+- Tested source checkpoint: `2c49288a5343f5e6c31abfd7faa85b82d93f0b90` (clean at composition).
+- Final application directory: `C:\Users\hbash\Desktop\DS4Windows-Haptics-Lab-20260910-F\portable\DS4Windows`.
+- 553 files verified against the final lab manifest, including all 297 dependency assets, 23 application language satellites, the authorized Xbox persona, bundled VIIPER, self-contained .NET, native libraries and notices. BouncyCastle.Cryptography 2.7.0 is present in the dependency manifest; its DLL and notice were explicitly checked after composition.
+- Application SHA-256: `7649E980ABB4AB29301C2B9203A34D1F1A1EB1ACE469EC8AB58621E7A6EC90E1`.
+- Candidate root VIIPER SHA-256: `DC2D47B49F94FA827903FD24F18AE0289EBE682F09D6EF67A09EE7A6A8005EB7` (unchanged broker from E).
+- Final `PRIVATE-LAB-MANIFEST.json` SHA-256: `39FBA5D923498E4AE7E0C20E11416C0C85D7F20C9277FDECD06B8D8B2DD2F23B`.
+- The base ZIP under `x64\Release` is an intermediate with the released broker, **not the final lab or a release handoff artifact**. F has not been launched or installed. Preparing the isolated lab data and ownership preflight remains necessary before launch; preserve E's current profile edits and keys when migrating, never substitute a fresh profile template for them.
+- Runtime read-only check after composition still showed E's DS4Windows PID 37588 and VIIPER PID 7192. No installed files, drivers, routing settings, or user profiles were changed; no public tag, upload, push, or Reddit comment was made.

@@ -109,6 +109,7 @@ def main() -> None:
     setup_actions = (ROOT / "installer/DS4Windows.SetupActions/Program.cs").read_text(encoding="utf-8")
     backend = (ROOT / "extras/install-viiper-backend.ps1").read_text(encoding="utf-8")
     runtime = (ROOT / "DS4Windows/DS4Control/Viiper/ViiperSetupManager.cs").read_text(encoding="utf-8")
+    startup_policy = (ROOT / "DS4Windows/DS4Control/Viiper/ViiperStartupTaskPolicy.cs").read_text(encoding="utf-8")
 
     require(
         bootstrapper,
@@ -165,9 +166,22 @@ def main() -> None:
         "Continue in degraded mode",
         "ResolveRuntimeViiperPath(",
         "FindAlternativeViiperPath(canonicalViiperPath)",
-        "IsSelectableViiperExecutable(selectedPath)",
+        "ViiperStartupTaskPolicy.RefreshOnLaunch(false, canonicalPath,",
+        "IsSelectableViiperExecutable,",
+        "startupPath => EnsureViiperStartupTask(startupPath,",
         "FilesHaveSameSha256(normalized",
         "PersistPreferredViiperPath(selectedPath, canonicalPath)",
+    )
+    # Selection is now behind the production policy seam exercised by the C#
+    # behavior tests. Retain both the real callback wiring above and the safety
+    # guards here; a runtime preference must not retarget the installed task.
+    require(
+        startup_policy,
+        "if (portableSession) return;",
+        "string selectedPath = selectRuntime();",
+        "if (isSelectable(selectedPath)) persistRuntime(selectedPath);",
+        "if (!startupEnabled() || !isSelectable(canonicalPath)) return;",
+        "ensureTask(canonicalPath);",
     )
     require(
         setup_actions,

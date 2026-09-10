@@ -207,6 +207,10 @@
                                         ToolTip="Refresh running audio sessions"
                                         Click="RefreshSources_Click" />
                             </Grid>
+                            <TextBlock x:Name="sourceScopeHelp"
+                                       Text="System audio uses only Windows' default output, not every Sonar output. Choose an app to follow its audio on any output."
+                                       Margin="0,7,0,0" FontSize="11" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource MutedForegroundColor}" />
 
                             <Border Margin="0,12,0,0" Padding="12,10"
                                     Background="{DynamicResource RaisedBackgroundColor}"

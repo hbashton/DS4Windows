@@ -1,11 +1,9 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
 using DS4Windows;
 using NAudio.CoreAudioApi;
-using NAudio.CoreAudioApi.Interfaces;
 
 namespace DS4WinWPF.DS4Forms.ViewModels
 {
@@ -29,18 +27,6 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             ControllerKind = controllerKind;
             UsbipPort = usbipPort;
         }
-    }
-
-    internal sealed class AppAudioSnapshot
-    {
-        public AppAudioSnapshot(string name, int processId)
-        {
-            Name = name ?? string.Empty;
-            ProcessId = processId;
-        }
-
-        public string Name { get; }
-        public int ProcessId { get; }
     }
 
     /// <summary>
@@ -226,73 +212,11 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         private static void CopyAppAudioSessions(MMDeviceEnumerator enumerator,
             List<AppAudioSnapshot> destination)
         {
-            MMDeviceCollection endpoints = enumerator.EnumerateAudioEndPoints(
-                DataFlow.Render, DeviceState.Active);
-            var seen = new HashSet<int>();
-            foreach (MMDevice endpoint in endpoints)
-            {
-                try
-                {
-                    AudioSessionManager manager = endpoint.AudioSessionManager;
-                    try
-                    {
-                        SessionCollection sessions = manager.Sessions;
-                        for (int index = 0; index < sessions.Count; index++)
-                        {
-                            using AudioSessionControl session = sessions[index];
-                            if (session.State ==
-                                AudioSessionState.AudioSessionStateExpired)
-                            {
-                                continue;
-                            }
-
-                            int processId = checked((int)session.GetProcessID);
-                            if (processId <= 0 || !seen.Add(processId))
-                            {
-                                continue;
-                            }
-
-                            string displayName = session.DisplayName;
-                            try
-                            {
-                                using Process process = Process.GetProcessById(
-                                    processId);
-                                if (string.IsNullOrWhiteSpace(displayName))
-                                {
-                                    displayName = process.MainWindowTitle;
-                                }
-                                if (string.IsNullOrWhiteSpace(displayName))
-                                {
-                                    displayName = process.ProcessName;
-                                }
-                            }
-                            catch { }
-
-                            destination.Add(new AppAudioSnapshot(
-                                string.IsNullOrWhiteSpace(displayName)
-                                    ? $"Process {processId}"
-                                    : displayName.Trim(), processId));
-                        }
-                    }
-                    finally
-                    {
-                        manager.Dispose();
-                    }
-                }
-                catch
-                {
-                    // An application can move between render endpoints while
-                    // this snapshot is being built. Keep sessions from the
-                    // remaining active endpoints and let Refresh retry later.
-                }
-                finally
-                {
-                    endpoint?.Dispose();
-                }
-            }
-
-            destination.Sort((left, right) => string.Compare(left.Name,
-                right.Name, StringComparison.CurrentCultureIgnoreCase));
+            // Overview offers process-loopback choices, so keep its existing
+            // one-choice-per-process policy. Haptics retains session identity.
+            destination.AddRange(AppAudioSessionDiscovery.Read(enumerator)
+                .GroupBy(session => session.ProcessId)
+                .Select(group => group.First()));
         }
 
         private static void CopyEndpoints(MMDeviceEnumerator enumerator,

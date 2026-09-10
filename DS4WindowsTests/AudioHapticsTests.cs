@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Xml.Serialization;
 using DS4Windows;
+using DS4Windows.Switch2;
 using DS4WinWPF.DS4Control.DTOXml;
 using DS4WinWPF.DS4Forms.ViewModels;
 
@@ -10,6 +11,27 @@ namespace DS4WindowsTests
     [TestClass]
     public class AudioHapticsTests
     {
+        [TestMethod]
+        public void NintendoAudioHapticsApplicabilityIncludesBothProTransportsAndEveryJoyCon2Shape()
+        {
+            Assert.IsFalse(AudioHapticsService.SupportsDevice(null));
+            foreach (var transport in new[] { Switch2Transport.Usb, Switch2Transport.BluetoothLe })
+            {
+                Assert.IsTrue(Switch2RuntimeInputDevice.TryCreatePro(7100, 7200,
+                    transport, out var pro, out _));
+                Assert.IsTrue(AudioHapticsService.SupportsDevice(pro));
+            }
+            foreach (var side in new[] { Switch2ControllerModel.JoyCon2Left, Switch2ControllerModel.JoyCon2Right })
+            {
+                Assert.IsTrue(Switch2RuntimeInputDevice.TryCreateStandaloneJoyCon(side,
+                    7101, 7201, out var joyCon, out _));
+                Assert.IsTrue(AudioHapticsService.SupportsDevice(joyCon));
+            }
+            Assert.IsTrue(Switch2RuntimeInputDevice.TryCreateJoinedJoyCon(7300,
+                7400, 7101, 7201, 7102, 7202, out var joined, out _));
+            Assert.IsTrue(AudioHapticsService.SupportsDevice(joined));
+        }
+
         [TestMethod]
         public void AutomaticGameAudioLabelUsesSelectedVirtualEndpoint()
         {

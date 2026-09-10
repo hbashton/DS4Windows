@@ -210,8 +210,10 @@ namespace DS4Windows
     }
 
     /// <summary>
-    /// Allocation-free-after-warmup ChaCha20-Poly1305 v2 record stream matching
-    /// VIIPER auth.Conn, with distinct nonce domains and strict sequence checking.
+    /// ChaCha20-Poly1305 v2 record stream matching VIIPER auth.Conn, with
+    /// distinct nonce domains and strict sequence checking. Native-provider
+    /// records are allocation-free after warmup; older Windows uses the same
+    /// authenticated wire protocol through a bounded managed implementation.
     /// </summary>
     internal sealed class ViiperEncryptedStream : Stream
     {
@@ -221,7 +223,7 @@ namespace DS4Windows
         private const int MaximumRecordLength = 2 * 1024 * 1024;
 
         private readonly Stream inner;
-        private readonly ChaCha20Poly1305 cipher;
+        private readonly ViiperRecordCipher cipher;
         private readonly byte[] sessionKey;
         private readonly uint sendPrefix;
         private readonly uint receivePrefix;
@@ -238,7 +240,8 @@ namespace DS4Windows
         private int failed;
 
         internal ViiperEncryptedStream(Stream inner, byte[] sessionKey,
-            ViiperConnectionRole role)
+            ViiperConnectionRole role,
+            ViiperCipherImplementation implementation = ViiperCipherImplementation.Automatic)
         {
             if (role != ViiperConnectionRole.Client && role != ViiperConnectionRole.Server)
                 throw new ArgumentOutOfRangeException(nameof(role));
@@ -253,7 +256,7 @@ namespace DS4Windows
                     "VIIPER session key must contain 32 bytes.",
                     nameof(sessionKey));
             }
-            cipher = new ChaCha20Poly1305(sessionKey);
+            cipher = new ViiperRecordCipher(sessionKey, implementation);
         }
 
         public override bool CanRead => Volatile.Read(ref disposed) == 0 &&

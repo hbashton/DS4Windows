@@ -4879,9 +4879,8 @@ namespace DS4Windows
             }
 
             // Match AudioHapticsService.Start's physical-device applicability.
-            // This is separate from native feedback translated to HD rumble.
             bool audioHapticsRequired = physicalPresent &&
-                device is InputDevices.DualSenseDevice &&
+                AudioHapticsService.SupportsDevice(device) &&
                 Global.store.audioHapticsSettings[index]?.Enabled == true;
             ControllerRuntimeLaneState audioHaptics =
                 ControllerRuntimeLaneState.NotRequired;

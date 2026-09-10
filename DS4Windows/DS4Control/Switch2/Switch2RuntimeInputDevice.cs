@@ -2633,6 +2633,8 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
                 profileFeedbackLane, nowMicroseconds);
             ServicePendingLocalRumbleNoLock(ControllerFeedbackPublicationOrigin.TestPreview,
                 previewFeedbackLane, nowMicroseconds);
+            if (audioHapticsWithdrawalPending && audioHapticsLane != null &&
+                audioHapticsLane.TryWithdraw(nowMicroseconds)) audioHapticsWithdrawalPending = false;
             // Connection/identify cues have independent finite durations;
             // their leases must expire if their cue task fails to stop them.
             if (profileRumbleHeld && !connectionHapticOwnsProfileLane)
@@ -2675,7 +2677,7 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
 
     private bool HasPendingLocalRumble => Volatile.Read(ref pendingProfileRumble.Withdraw) ||
         Volatile.Read(ref pendingProfileRumble.Apply) || Volatile.Read(ref pendingPreviewRumble.Withdraw) ||
-        Volatile.Read(ref pendingPreviewRumble.Apply);
+        Volatile.Read(ref pendingPreviewRumble.Apply) || Volatile.Read(ref audioHapticsWithdrawalPending);
 
     private Switch2RumbleMaintenanceResult ServiceRumbleMaintenance(ulong nowMicroseconds)
     {

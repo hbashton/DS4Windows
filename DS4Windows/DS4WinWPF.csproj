@@ -222,6 +222,10 @@
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
 		</Content>
+		<Content Include="Resources\BouncyCastle.NOTICE.txt">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+		</Content>
 		<Content Include="$(PkgYellowDogMan_RRNoise_NET)\runtimes\win-x64\native\rnnoise.dll" Condition="'$(Platform)' == 'x64'">
 			<Link>rnnoise.dll</Link>
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
@@ -231,6 +235,7 @@
 
 	<ItemGroup>
 		<PackageReference Include="bloomtom.HttpProgress" Version="2.3.2" />
+		<PackageReference Include="BouncyCastle.Cryptography" Version="2.7.0" />
 		<PackageReference Include="Concentus" Version="2.2.2" />
 		<PackageReference Include="DotNetProjects.Extended.Wpf.Toolkit" Version="5.0.106" />
 		<PackageReference Include="H.NotifyIcon.Wpf" Version="2.0.74" />

@@ -161,7 +161,7 @@ internal readonly struct Switch2HdRumblePhysicalSubmission
             DeliveryEpoch == 0 || Fidelity is <
                 Switch2HdRumbleFeedbackFidelity.SdlLogicalNeutral or >
                 Switch2HdRumbleFeedbackFidelity.
-                    NativeSwitch2TestPreview)
+                    LocalAudioHapticsStream)
         {
             return false;
         }
@@ -178,7 +178,7 @@ internal readonly struct Switch2HdRumblePhysicalSubmission
         if ((Command != ControllerFeedbackCommand.Apply &&
                 Command != ControllerFeedbackCommand.Neutral) ||
             Source < ControllerFeedbackSource.XboxOneVirtualDevice ||
-            Source > ControllerFeedbackSource.Switch2VirtualDevice ||
+            Source > ControllerFeedbackSource.LocalAudioHaptics ||
             Sequence == 0 || OwnershipEpoch == 0 ||
             TimeToLiveMicroseconds == 0 ||
             TimeToLiveMicroseconds >
@@ -200,7 +200,8 @@ internal readonly struct Switch2HdRumblePhysicalSubmission
                 Switch2HdRumbleFeedbackFidelity.
                     NativeSwitch2ProfileEffect or
                 Switch2HdRumbleFeedbackFidelity.
-                    NativeSwitch2TestPreview;
+                    NativeSwitch2TestPreview or
+                Switch2HdRumbleFeedbackFidelity.LocalAudioHapticsStream;
         }
 
         return Fidelity ==
@@ -292,7 +293,7 @@ internal enum Switch2HdRumbleRepeatPolicy : byte
 /// only after claiming and admitting the canonical event. The physical writer
 /// is invoked outside the sink gate, with at most one call in flight.
 /// </summary>
-internal sealed class Switch2HdRumbleDeliverySink :
+internal sealed partial class Switch2HdRumbleDeliverySink :
     IControllerFeedbackDeliverySink
 {
     private readonly object gate = new();
@@ -362,7 +363,8 @@ internal sealed class Switch2HdRumbleDeliverySink :
         Switch2HdRumbleFeedbackPolicy policy =
             Switch2HdRumbleFeedbackPolicy.SdlBodyOnlyCompatibility,
         ulong minimumMaintenanceIntervalMicroseconds = 0,
-        Func<ulong> hostWriteStartClock = null)
+        Func<ulong> hostWriteStartClock = null,
+        Func<ulong> feedbackClock = null)
     {
         this.writer = writer ?? throw new ArgumentNullException(nameof(writer));
         if (deviceGeneration == 0)
@@ -390,6 +392,7 @@ internal sealed class Switch2HdRumbleDeliverySink :
             throw new ArgumentOutOfRangeException(nameof(minimumMaintenanceIntervalMicroseconds));
         this.minimumMaintenanceIntervalMicroseconds = minimumMaintenanceIntervalMicroseconds;
         this.hostWriteStartClock = hostWriteStartClock;
+        this.feedbackClock = feedbackClock;
         selectedPolicy = policy;
         selectedImpulseTuning = Switch2HdRumbleImpulseTuning.Default;
         selectedBodyTuning = Switch2HdRumbleBodyTuning.Default;
@@ -640,6 +643,7 @@ internal sealed class Switch2HdRumbleDeliverySink :
             sourcePreservedFidelity = fidelity;
             sourcePreservedRepeatPolicy = repeatPolicy;
             hasSourcePreservedSynthesis = true;
+            RememberNativeSynthesisNoLock(frame, fidelity, left, right);
             return true;
         }
     }
@@ -799,6 +803,10 @@ internal sealed class Switch2HdRumbleDeliverySink :
             ushort releaseRightTrigger;
             ulong releasePresentationRevision;
             ulong deliveryXboxPolicyRevision;
+            ControllerFeedbackFrame audioNativeFrame = default;
+            if (delivery.Frame.Source == ControllerFeedbackSource.LocalAudioHaptics &&
+                TryGetFeedbackTimestamp(out ulong snapshotTime))
+                audioCompositionPump?.TryReadNativeFrame(snapshotTime, out audioNativeFrame);
             lock (gate)
             {
                 if (IsRetired)
@@ -807,6 +815,10 @@ internal sealed class Switch2HdRumbleDeliverySink :
                 }
                 bool exactUnresolvedRetry = hasUnresolvedDelivery &&
                     unresolvedDelivery == delivery;
+                bool suppressConsumedNative = audioCompositionPump != null && !exactUnresolvedRetry &&
+                    delivery.Origin == ControllerFeedbackPublicationOrigin.NativeGame &&
+                    delivery.Disposition == ControllerFeedbackDeliveryDisposition.Frame &&
+                    IsConsumedNativeStreamNoLock(delivery.Frame);
                 deliveryPolicy = exactUnresolvedRetry ? unresolvedPolicy :
                     selectedPolicy;
                 deliveryImpulseTuning = exactUnresolvedRetry ?
@@ -897,6 +909,8 @@ internal sealed class Switch2HdRumbleDeliverySink :
                             lastDeliveredImpulseTuning ||
                         deliveryBodyTuning != lastDeliveredBodyTuning ||
                         deliveryXboxPolicyRevision != lastDeliveredXboxPolicyRevision ||
+                        delivery.Frame.Source == ControllerFeedbackSource.LocalAudioHaptics &&
+                            audioNativeFrame != lastAudioPresentationNativeFrame ||
                         newSourcePreservedSynthesis ||
                         sustainRefresh ||
                         useImpulseReleaseSynthesis &&
@@ -911,6 +925,18 @@ internal sealed class Switch2HdRumbleDeliverySink :
                 {
                     return false;
                 }
+                if (suppressConsumedNative)
+                {
+                    // Audio handover may reveal an already-consumed native
+                    // sample. Admit the real epoch normally, then acknowledge
+                    // it without replaying PCM or inventing a physical receipt.
+                    currentDeliveryEpoch = delivery.DeliveryEpoch;
+                    currentEpochStopped = false;
+                    lastDelivered = delivery;
+                    lastDeliveredNeedsSustain = false;
+                    hasDeliveredSourceSynthesis = false;
+                    return true;
+                }
             }
 
             Switch2HdRumblePhysicalSubmission submission;
@@ -923,7 +949,7 @@ internal sealed class Switch2HdRumbleDeliverySink :
             }
             else
             {
-                if (!ControllerFeedbackClock.TryGetTimestampMicroseconds(
+                if (!TryGetFeedbackTimestamp(
                         out ulong nowMicroseconds))
                 {
                     return RecordFailure(
@@ -932,7 +958,12 @@ internal sealed class Switch2HdRumbleDeliverySink :
                         uncertainOutcome: false, default, default);
                 }
                 Switch2HdRumbleFeedbackSynthesis synthesis;
-                if (useSourcePreservedSynthesis)
+                if (delivery.Frame.Source == ControllerFeedbackSource.LocalAudioHaptics)
+                {
+                    if (!TryComposeAudioPresentation(delivery, audioNativeFrame,
+                            nowMicroseconds, out synthesis)) return false;
+                }
+                else if (useSourcePreservedSynthesis)
                 {
                     ControllerFeedbackFrame frame = delivery.Frame;
                     Switch2HdRumbleGroup tunedLeft =
@@ -1047,7 +1078,8 @@ internal sealed class Switch2HdRumbleDeliverySink :
                     (!useSourcePreservedSynthesis ||
                         preservedRepeatPolicy == Switch2HdRumbleRepeatPolicy.SustainWhileFresh) &&
                     submission.Fidelity is not (Switch2HdRumbleFeedbackFidelity.DualSensePcmDualBand or
-                        Switch2HdRumbleFeedbackFidelity.NativeSwitch2PassThrough) &&
+                        Switch2HdRumbleFeedbackFidelity.NativeSwitch2PassThrough or
+                        Switch2HdRumbleFeedbackFidelity.LocalAudioHapticsStream) &&
                     (submission.Left.First.HasNonzeroAmplitude || submission.Left.Second.HasNonzeroAmplitude ||
                      submission.Left.Third.HasNonzeroAmplitude || submission.Right.First.HasNonzeroAmplitude ||
                      submission.Right.Second.HasNonzeroAmplitude || submission.Right.Third.HasNonzeroAmplitude);
@@ -1071,6 +1103,7 @@ internal sealed class Switch2HdRumbleDeliverySink :
                     deliveredSourceRepeatPolicy = default;
                 }
                 lastDeliveredXboxPolicyRevision = deliveryXboxPolicyRevision;
+                CommitAudioPresentationNoLock(delivery);
                 if (delivery.Disposition ==
                     ControllerFeedbackDeliveryDisposition.Frame)
                 {

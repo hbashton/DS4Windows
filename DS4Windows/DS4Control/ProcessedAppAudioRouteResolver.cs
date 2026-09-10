@@ -1,7 +1,9 @@
 using NAudio.CoreAudioApi;
 using NAudio.CoreAudioApi.Interfaces;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 
 namespace DS4Windows
 {
@@ -26,36 +28,50 @@ namespace DS4Windows
             using var enumerator = new MMDeviceEnumerator();
             MMDeviceCollection endpoints = enumerator.EnumerateAudioEndPoints(
                 DataFlow.Render, DeviceState.Active);
-            MMDevice selected = null;
+            return FindExclusiveEndpoint(endpoints, endpoint =>
+                TryGetExclusiveTargetPeak(endpoint, targetRoot, out float peak)
+                    ? peak : (float?)null);
+        }
+
+        internal static TEndpoint FindExclusiveEndpoint<TEndpoint>(
+            IEnumerable<TEndpoint> endpoints, Func<TEndpoint, float?> readExclusivePeak)
+            where TEndpoint : class, IDisposable
+        {
+            TEndpoint selected = null;
             float selectedPeak = -1.0f;
-            foreach (MMDevice endpoint in endpoints)
+            try
             {
-                try
+                // MMDeviceCollection creates new wrappers on each enumeration.
+                // Dispose this pass's actual rejected wrappers, not a second
+                // enumeration whose objects are unrelated to the selected one.
+                foreach (TEndpoint endpoint in endpoints)
                 {
-                    if (!TryGetExclusiveTargetPeak(endpoint, targetRoot,
-                            out float targetPeak) ||
-                        targetPeak <= selectedPeak)
+                    try
                     {
-                        continue;
+                        float? targetPeak = readExclusivePeak(endpoint);
+                        if (!targetPeak.HasValue || targetPeak.Value <= selectedPeak)
+                            continue;
+
+                        TEndpoint previous = selected;
+                        selected = endpoint;
+                        selectedPeak = targetPeak.Value;
+                        previous?.Dispose();
                     }
-
-                    selected = endpoint;
-                    selectedPeak = targetPeak;
-                }
-                catch
-                {
-                    // The audio graph may rebuild while it is enumerated.
+                    catch
+                    {
+                        // The audio graph may rebuild while it is enumerated.
+                    }
+                    finally
+                    {
+                        if (!ReferenceEquals(endpoint, selected)) endpoint.Dispose();
+                    }
                 }
             }
-
-            foreach (MMDevice endpoint in endpoints)
+            catch
             {
-                if (!ReferenceEquals(endpoint, selected))
-                {
-                    endpoint.Dispose();
-                }
+                selected?.Dispose();
+                throw;
             }
-
             return selected;
         }
 
@@ -80,37 +96,9 @@ namespace DS4Windows
                 return false;
             }
 
-            AudioSessionManager manager = endpoint.AudioSessionManager;
-            try
-            {
-                SessionCollection sessions = manager.Sessions;
-                for (int index = 0; index < sessions.Count; index++)
-                {
-                    using AudioSessionControl session = sessions[index];
-                    if (session.State !=
-                        AudioSessionState.AudioSessionStateActive)
-                    {
-                        continue;
-                    }
-
-                    int sessionProcessId = unchecked((int)
-                        session.GetProcessID);
-                    if (sessionProcessId > 0 &&
-                        ProcessLoopbackWaveCapture.ResolveCaptureRootProcessId(
-                            sessionProcessId) == targetRoot &&
-                        session.AudioMeterInformation.MasterPeakValue >
-                            0.0001f)
-                    {
-                        return true;
-                    }
-                }
-            }
-            finally
-            {
-                manager.Dispose();
-            }
-
-            return false;
+            ReadTargetSessions(endpoint, targetRoot, out _,
+                out float targetPeak, out _);
+            return targetPeak > 0.0001f;
         }
 
         /// <summary>
@@ -155,48 +143,117 @@ namespace DS4Windows
         private static bool TryGetExclusiveTargetPeak(MMDevice endpoint,
             int targetRoot, out float targetPeak)
         {
-            targetPeak = 0.0f;
-            AudioSessionManager manager = endpoint.AudioSessionManager;
-            try
-            {
-                SessionCollection sessions = manager.Sessions;
-                bool targetActive = false;
-                for (int index = 0; index < sessions.Count; index++)
+            ReadTargetSessions(endpoint, targetRoot, out bool targetActive,
+                out targetPeak, out bool unrelatedActive);
+            return targetActive && !unrelatedActive;
+        }
+
+        /// <summary>
+        /// A fresh endpoint/session snapshot for each watchdog poll. Do not
+        /// compare a retained MMDevice's cached session collection with a
+        /// fresh "anywhere" scan: browser session replacement and disposal
+        /// can otherwise make the same route look like a different route.
+        /// </summary>
+        internal static ProcessedAppAudioRouteObservation ObserveRoutes(
+            int processId, string currentEndpointId)
+        {
+            int targetRoot = ProcessLoopbackWaveCapture.ResolveCaptureRootProcessId(processId);
+            if (targetRoot <= 0 || string.IsNullOrWhiteSpace(currentEndpointId))
+                return default;
+
+            using var enumerator = new MMDeviceEnumerator();
+            MMDeviceCollection endpoints = enumerator.EnumerateAudioEndPoints(
+                DataFlow.Render, DeviceState.Active);
+            return ObserveEndpoints(endpoints.Cast<MMDevice>(), currentEndpointId,
+                endpoint => endpoint.ID, endpoint =>
                 {
-                    using AudioSessionControl session = sessions[index];
-                    if (session.State !=
-                        AudioSessionState.AudioSessionStateActive)
-                    {
-                        continue;
-                    }
+                    ReadTargetSessions(endpoint, targetRoot, out bool targetActive,
+                        out float targetPeak, out bool unrelatedActive);
+                    return (targetActive, targetPeak, unrelatedActive);
+                });
+        }
 
-                    int sessionProcessId = unchecked((int)
-                        session.GetProcessID);
-                    if (sessionProcessId <= 0 ||
-                        IsCaptureHostProcess(sessionProcessId))
+        // The production traversal also accepts owned synthetic endpoints so
+        // route identity, query failures and disposal can be tested without
+        // activating Core Audio or accessing the user's running capture.
+        internal static ProcessedAppAudioRouteObservation ObserveEndpoints<TEndpoint>(
+            IEnumerable<TEndpoint> endpoints, string currentEndpointId,
+            Func<TEndpoint, string> getEndpointId,
+            Func<TEndpoint, (bool TargetActive, float TargetPeak, bool UnrelatedActive)> readSessions)
+            where TEndpoint : IDisposable
+        {
+            bool currentKnown = true;
+            bool currentAudible = false;
+            bool currentUnrelated = false;
+            string candidate = string.Empty;
+            float selectedPeak = 0.0001f;
+            foreach (TEndpoint endpoint in endpoints)
+            {
+                string endpointId = null;
+                bool isCurrent = false;
+                try
+                {
+                    endpointId = getEndpointId(endpoint);
+                    isCurrent = string.Equals(endpointId, currentEndpointId,
+                        StringComparison.OrdinalIgnoreCase);
+                    var route = readSessions(endpoint);
+                    if (isCurrent)
                     {
-                        continue;
+                        currentAudible = route.TargetPeak > 0.0001f;
+                        currentUnrelated = route.UnrelatedActive;
                     }
-
-                    int sessionRoot = ProcessLoopbackWaveCapture
-                        .ResolveCaptureRootProcessId(sessionProcessId);
-                    if (sessionRoot == targetRoot)
+                    if (route.TargetActive && !route.UnrelatedActive && route.TargetPeak > selectedPeak)
                     {
-                        targetActive = true;
-                        targetPeak = Math.Max(targetPeak,
-                            session.AudioMeterInformation.MasterPeakValue);
-                    }
-                    else
-                    {
-                        return false;
+                        candidate = endpointId;
+                        selectedPeak = route.TargetPeak;
                     }
                 }
-
-                return targetActive;
+                catch
+                {
+                    if (isCurrent || endpointId == null) currentKnown = false;
+                    // Failed observation is not evidence of relocation.
+                }
+                finally
+                {
+                    endpoint.Dispose();
+                }
             }
-            finally
+            return new ProcessedAppAudioRouteObservation(currentKnown,
+                currentAudible, currentUnrelated, candidate);
+        }
+
+        private static void ReadTargetSessions(MMDevice endpoint, int targetRoot,
+            out bool targetActive, out float targetPeak, out bool unrelatedActive)
+        {
+            targetActive = false;
+            targetPeak = 0.0f;
+            unrelatedActive = false;
+            // MMDevice caches and owns this manager. Disposing the borrowed
+            // property clears its Sessions and poisons every subsequent query.
+            // The endpoint owner disposes it, including on query failure.
+            AudioSessionManager manager = endpoint.AudioSessionManager;
+            SessionCollection sessions = manager.Sessions;
+            for (int index = 0; index < sessions.Count; index++)
             {
-                manager.Dispose();
+                using AudioSessionControl session = sessions[index];
+                if (session.State != AudioSessionState.AudioSessionStateActive)
+                    continue;
+
+                int sessionProcessId = unchecked((int)session.GetProcessID);
+                if (sessionProcessId <= 0 || IsCaptureHostProcess(sessionProcessId))
+                    continue;
+
+                int sessionRoot = ProcessLoopbackWaveCapture.ResolveCaptureRootProcessId(sessionProcessId);
+                if (sessionRoot == targetRoot)
+                {
+                    targetActive = true;
+                    targetPeak = Math.Max(targetPeak,
+                        session.AudioMeterInformation.MasterPeakValue);
+                }
+                else
+                {
+                    unrelatedActive = true;
+                }
             }
         }
 

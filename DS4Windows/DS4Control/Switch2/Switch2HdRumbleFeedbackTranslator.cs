@@ -38,6 +38,7 @@ internal enum Switch2HdRumbleFeedbackFidelity : byte
     DualSenseAdaptiveTriggerApproximation = 6,
     NativeSwitch2ProfileEffect = 7,
     NativeSwitch2TestPreview = 8,
+    LocalAudioHapticsStream = 9,
 }
 
 /// <summary>

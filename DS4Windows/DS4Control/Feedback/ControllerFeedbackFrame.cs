@@ -34,6 +34,8 @@ namespace DS4Windows
         DualSenseEdgeVirtualDevice = 5,
         DualShock4VirtualDevice = 6,
         Switch2VirtualDevice = 7,
+        // Internal presentation source only; never a CFBK wire identity.
+        LocalAudioHaptics = 8,
     }
 
     /// <summary>
@@ -249,7 +251,7 @@ namespace DS4Windows
         {
             if (Version != CurrentVersion ||
                 Source < ControllerFeedbackSource.XboxOneVirtualDevice ||
-                Source > ControllerFeedbackSource.Switch2VirtualDevice ||
+                Source > ControllerFeedbackSource.LocalAudioHaptics ||
                 Command < ControllerFeedbackCommand.Apply ||
                 Command > ControllerFeedbackCommand.Stop ||
                 Actuators != ControllerFeedbackActuators.All ||
@@ -303,7 +305,7 @@ namespace DS4Windows
         internal bool TryWriteTo(Span<byte> destination)
         {
             if (destination.Length < SerializedLength ||
-                !HasValidInvariants())
+                !HasValidInvariants() || Source == ControllerFeedbackSource.LocalAudioHaptics)
             {
                 return false;
             }
@@ -347,6 +349,7 @@ namespace DS4Windows
                     CurrentVersion ||
                 BinaryPrimitives.ReadUInt16LittleEndian(source[6..]) !=
                     SerializedLength ||
+                source[8] > (byte)ControllerFeedbackSource.Switch2VirtualDevice ||
                 source[11] != 0 || source[20] != 0 || source[21] != 0 ||
                 source[22] != 0 || source[23] != 0)
             {

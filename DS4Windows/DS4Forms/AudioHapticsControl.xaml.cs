@@ -1,14 +1,12 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
 using DS4Windows;
-using NAudio.CoreAudioApi;
-using NAudio.CoreAudioApi.Interfaces;
+using DS4WinWPF.DS4Forms.ViewModels;
 
 namespace DS4WinWPF.DS4Forms
 {
@@ -20,7 +18,7 @@ namespace DS4WinWPF.DS4Forms
 
     public partial class AudioHapticsControl : UserControl
     {
-        private sealed class AudioSourceChoice
+        internal sealed class AudioSourceChoice
         {
             public string DisplayName { get; init; }
             public AudioHapticsSourceKind Kind { get; init; }
@@ -111,9 +109,26 @@ namespace DS4WinWPF.DS4Forms
 
         private void PopulateAudioSources(AudioHapticsProfileSettings settings)
         {
+            IReadOnlyList<AppAudioSnapshot> sessions = Array.Empty<AppAudioSnapshot>();
+            try
+            {
+                sessions = AppAudioSessionDiscovery.Read();
+            }
+            catch
+            {
+                // Core Audio can reject discovery while rebuilding the graph.
+                // Retain the stored selection and let the refresh button retry.
+            }
+            sourceCombo.ItemsSource = BuildAudioSourceChoices(settings, sessions);
+        }
+
+        internal static List<AudioSourceChoice> BuildAudioSourceChoices(
+            AudioHapticsProfileSettings settings,
+            IReadOnlyList<AppAudioSnapshot> sessions)
+        {
             List<AudioSourceChoice> choices = new List<AudioSourceChoice>
             {
-                new AudioSourceChoice { DisplayName = "System audio", Kind = AudioHapticsSourceKind.SystemAudio },
+                new AudioSourceChoice { DisplayName = "System audio · default output", Kind = AudioHapticsSourceKind.SystemAudio },
                 new AudioSourceChoice { DisplayName = "Controller audio", Kind = AudioHapticsSourceKind.ControllerAudio },
             };
             if (settings?.AutomaticGameDetection == true)
@@ -125,57 +140,18 @@ namespace DS4WinWPF.DS4Forms
                 });
             }
 
-            try
+            foreach (AppAudioSnapshot session in sessions)
             {
-                using MMDeviceEnumerator enumerator = new MMDeviceEnumerator();
-                using MMDevice endpoint = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
-                AudioSessionManager sessionManager = endpoint.AudioSessionManager;
-                try
+                choices.Add(new AudioSourceChoice
                 {
-                    SessionCollection sessions = sessionManager.Sessions;
-                    for (int i = 0; i < sessions.Count; i++)
-                    {
-                        using AudioSessionControl session = sessions[i];
-                        if (session.State == AudioSessionState.AudioSessionStateExpired) continue;
-                        uint processId = session.GetProcessID;
-                        if (processId == 0) continue;
-                        string executableName = string.Empty;
-                        string processPath = string.Empty;
-                        string displayName = session.DisplayName;
-                        try
-                        {
-                            using Process process = Process.GetProcessById((int)processId);
-                            executableName = process.ProcessName;
-                            processPath = process.MainModule?.FileName ?? string.Empty;
-                            if (string.IsNullOrWhiteSpace(displayName)) displayName = process.MainWindowTitle;
-                            if (string.IsNullOrWhiteSpace(displayName)) displayName = executableName;
-                        }
-                        catch
-                        {
-                            if (string.IsNullOrWhiteSpace(displayName)) displayName = $"Process {processId}";
-                        }
-
-                        choices.Add(new AudioSourceChoice
-                        {
-                            DisplayName = $"{displayName}  ·  App",
-                            Kind = AudioHapticsSourceKind.AppSession,
-                            ProcessId = (int)processId,
-                            ExecutableName = executableName,
-                            ProcessPath = processPath,
-                            SessionIdentifier = session.GetSessionIdentifier ?? string.Empty,
-                            SessionInstanceIdentifier = session.GetSessionInstanceIdentifier ?? string.Empty,
-                        });
-                    }
-                }
-                finally
-                {
-                    sessionManager.Dispose();
-                }
-            }
-            catch
-            {
-                // Core Audio can briefly reject session enumeration while an
-                // endpoint is being replaced. The refresh button retries it.
+                    DisplayName = $"{session.Name}  ·  App",
+                    Kind = AudioHapticsSourceKind.AppSession,
+                    ProcessId = session.ProcessId,
+                    ExecutableName = session.ExecutableName,
+                    ProcessPath = session.ProcessPath,
+                    SessionIdentifier = session.SessionIdentifier,
+                    SessionInstanceIdentifier = session.SessionInstanceIdentifier,
+                });
             }
 
             if (settings?.Source == AudioHapticsSourceKind.AppSession &&
@@ -193,7 +169,7 @@ namespace DS4WinWPF.DS4Forms
                 });
             }
 
-            sourceCombo.ItemsSource = choices
+            return choices
                 .GroupBy(choice => $"{choice.Kind}:{choice.ProcessId}:{choice.SessionInstanceIdentifier}")
                 .Select(group => group.First())
                 .ToList();
@@ -211,7 +187,7 @@ namespace DS4WinWPF.DS4Forms
                 ?? sourceCombo.Items.Cast<AudioSourceChoice>().FirstOrDefault();
         }
 
-        private static bool SourceMatches(AudioSourceChoice choice, AudioHapticsProfileSettings settings)
+        internal static bool SourceMatches(AudioSourceChoice choice, AudioHapticsProfileSettings settings)
         {
             if (choice.Kind != settings.Source) return false;
             if (choice.Kind != AudioHapticsSourceKind.AppSession) return true;
@@ -273,8 +249,15 @@ namespace DS4WinWPF.DS4Forms
                 : FindResource("BridgeSecondaryButtonStyle") as Style;
             modeHelpText.Text = mode == AudioHapticsMode.Mix
                 ? "Mix adds audio-driven detail while preserving game-provided advanced haptics."
-                : "Replace ignores game-provided advanced haptics and uses only the selected audio source.";
+                : IsNintendoAudioHapticsDevice
+                    ? "Replace uses only the selected audio for vibration. Choose Mix to keep game vibrations too."
+                    : "Replace ignores game-provided advanced haptics and uses only the selected audio source.";
         }
+
+        private bool IsNintendoAudioHapticsDevice => deviceIndex >= 0 &&
+            deviceIndex < ControlService.CURRENT_DS4_CONTROLLER_LIMIT &&
+            Program.rootHub?.DS4Controllers[deviceIndex] is
+                DS4Windows.Switch2.Switch2RuntimeInputDevice;
 
         private void UpdateGainPresetVisuals(int gainPercent)
         {
@@ -335,7 +318,7 @@ namespace DS4WinWPF.DS4Forms
             AudioHapticsSourceKind.AppSession => string.IsNullOrWhiteSpace(settings.DisplayName)
                 ? (string.IsNullOrWhiteSpace(settings.ExecutableName) ? "Selected app" : settings.ExecutableName)
                 : settings.DisplayName,
-            _ => "System audio",
+            _ => "System audio · default output",
         };
 
         private Brush FindBrush(string key, Brush fallback) => TryFindResource(key) as Brush ?? fallback;

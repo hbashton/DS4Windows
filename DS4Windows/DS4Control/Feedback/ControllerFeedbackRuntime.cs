@@ -21,7 +21,10 @@ namespace DS4Windows
     /// Identifies one fixed canonical-feedback publisher slot. The numeric
     /// order is also the deterministic winner priority: explicit test output
     /// is highest, then native game output, audio-derived effects, and profile
-    /// effects. Release is a lifecycle transition, never a competing source.
+    /// effects. Nintendo's explicitly enabled local-audio composition selects
+    /// audio above native output so its sole writer can combine the two; the
+    /// ordinary priority remains unchanged elsewhere. Release is a lifecycle
+    /// transition, never a competing source.
     /// </summary>
     internal enum ControllerFeedbackPublicationOrigin : byte
     {
@@ -73,6 +76,8 @@ namespace DS4Windows
         internal bool HasValidInvariants() =>
             Origin >= ControllerFeedbackPublicationOrigin.ProfileEffect &&
             Origin <= ControllerFeedbackPublicationOrigin.TestPreview &&
+            (Frame.Source != ControllerFeedbackSource.LocalAudioHaptics ||
+                Origin == ControllerFeedbackPublicationOrigin.AudioHaptics) &&
             Frame.HasValidInvariants();
 
         public bool Equals(ControllerFeedbackPublication other) =>
@@ -233,6 +238,23 @@ namespace DS4Windows
         private bool hasEvent;
         private ControllerFeedbackDelivery currentEvent;
         private ulong currentEventRevision;
+        private bool audioCompositionEnabled;
+        private ControllerFeedbackFrame audioNativeDependency;
+
+        internal void EnableLocalAudioComposition()
+        {
+            lock (syncRoot) audioCompositionEnabled = true;
+        }
+
+        internal bool TryReadNativeFrame(ulong nowMicroseconds,
+            out ControllerFeedbackFrame frame)
+        {
+            lock (syncRoot)
+            {
+                frame = gameSlot.Publication.Frame;
+                return gameSlot.HasValue && !frame.IsStop && frame.IsFreshAt(nowMicroseconds);
+            }
+        }
 
         internal bool TryPublish(in ControllerFeedbackPublication publication)
         {
@@ -662,17 +684,21 @@ namespace DS4Windows
 
             if (hasWinner && SameOwnership(winner, owner))
             {
+                bool nativeChanged = audioCompositionEnabled &&
+                    winner.Frame.Source == ControllerFeedbackSource.LocalAudioHaptics &&
+                    audioNativeDependency != (gameSlot.HasValue ? gameSlot.Publication.Frame : default);
                 if (winner != owner)
                 {
                     bool effectChanged = !SameEffect(owner.Frame,
                         winner.Frame);
                     owner = winner;
-                    if (effectChanged ||
+                    if (effectChanged || nativeChanged ||
                         !ActiveWriterCompletedCurrentEvent())
                     {
                         SetFrameEvent();
                     }
                 }
+                else if (nativeChanged) SetFrameEvent();
                 return;
             }
 
@@ -733,6 +759,8 @@ namespace DS4Windows
 
         private void SetFrameEvent()
         {
+            if (owner.Frame.Source == ControllerFeedbackSource.LocalAudioHaptics)
+                audioNativeDependency = gameSlot.HasValue ? gameSlot.Publication.Frame : default;
             SetEvent(new ControllerFeedbackDelivery(
                 ControllerFeedbackDeliveryDisposition.Frame,
                 owner.Origin, owner.Frame,
@@ -774,6 +802,18 @@ namespace DS4Windows
             Consider(ref gameSlot, nowMicroseconds,
                 newestDeviceGeneration, newestTransportGeneration,
                 ref winner, ref found);
+            // Explicit Switch2 composition only. Other runtimes retain their
+            // historical priority, including ordinary AudioHaptics publishers.
+            if (audioCompositionEnabled && audioSlot.HasValue &&
+                audioSlot.Publication.Frame.Source == ControllerFeedbackSource.LocalAudioHaptics &&
+                audioSlot.Publication.Frame.Command == ControllerFeedbackCommand.Apply &&
+                audioSlot.Publication.Frame.DeviceGeneration == newestDeviceGeneration &&
+                audioSlot.Publication.Frame.TransportGeneration == newestTransportGeneration &&
+                audioSlot.Publication.Frame.IsFreshAt(nowMicroseconds))
+            {
+                winner = audioSlot.Publication;
+                found = true;
+            }
             Consider(ref previewSlot, nowMicroseconds,
                 newestDeviceGeneration, newestTransportGeneration,
                 ref winner, ref found);

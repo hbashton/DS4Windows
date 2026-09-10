@@ -110,7 +110,20 @@ namespace DS4Windows
                 return false;
             }
 
-            var samples = feedback.AsSpan(sampleOffset, HapticsSampleLength);
+            return TryTranslatePcmToSwitch2Groups(
+                feedback.AsSpan(sampleOffset, HapticsSampleLength), out left, out right);
+        }
+
+        // Audio Haptics already produces this canonical 3 kHz stereo signed-8
+        // window. Share the native PCM analyzer without fabricating a virtual
+        // controller report or reducing either side to ordinary motor rumble.
+        internal static bool TryTranslatePcmToSwitch2Groups(
+            ReadOnlySpan<byte> samples, out Switch2HdRumbleGroup left,
+            out Switch2HdRumbleGroup right)
+        {
+            left = right = default;
+            if (samples.Length != HapticsSampleLength) return false;
+
             Span<Switch2PcmSlice> slices = stackalloc Switch2PcmSlice[3];
             Switch2PcmBandAnalyzer.AnalyzeSlices(samples, 0, slices);
             left = new Switch2HdRumbleGroup(
@@ -134,6 +147,16 @@ namespace DS4Windows
                 Switch2HdRumbleFeedbackTranslator.ScaleCanonicalAmplitude(high),
                 slice.LowControl, Switch2HdRumbleFeedbackTranslator.ScaleCanonicalAmplitude(low));
         }
+
+        // Two voice-coil bands cannot reproduce arbitrary overlapping spectra
+        // exactly. Use the existing bounded mixer: retain the stronger carrier
+        // independently in each band and slice (native wins ties), with soft
+        // amplitude saturation. Call separately for left and right so one
+        // side's sound cannot retune the other side's haptic envelope.
+        internal static Switch2HdRumbleGroup MixSwitch2AudioGroups(
+            in Switch2HdRumbleGroup native, in Switch2HdRumbleGroup derived) =>
+            DualSenseAdaptiveTriggerHdRumbleTranslator.MixPcmWithCompatibility(
+                native, derived);
 
         private static byte ToMotorValue(double normalized)
         {

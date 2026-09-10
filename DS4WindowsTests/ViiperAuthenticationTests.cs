@@ -77,8 +77,9 @@ public sealed class ViiperAuthenticationTests
     }
 
     [TestMethod]
-    public void EncryptedControllerWritesAllocateZeroAfterWarmup()
+    public void NativeEncryptedControllerWritesAllocateZeroAfterWarmup()
     {
+        if (!ChaCha20Poly1305.IsSupported) Assert.Inconclusive("Native provider unavailable; managed allocation has its own bounded regression.");
         byte[] key = RandomNumberGenerator.GetBytes(32);
         using MemoryStream wire = new(capacity: 128 * 1024);
         using ViiperEncryptedStream writer = new(wire,

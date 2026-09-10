@@ -385,6 +385,17 @@ namespace DS4Windows
 
         internal bool RequiresOutputMaintenance => !IsRetired && runtime.RequiresOutputMaintenance(writer);
 
+        internal void EnableLocalAudioComposition() => runtime.EnableLocalAudioComposition();
+
+        internal bool HasLocalAudioOwner => runtime.TryReadCurrent(out var delivery, out _) &&
+            delivery.Disposition == ControllerFeedbackDeliveryDisposition.Frame &&
+            delivery.Frame.Source == ControllerFeedbackSource.LocalAudioHaptics;
+
+        internal bool TryReadNativeFrame(ulong nowMicroseconds,
+            out ControllerFeedbackFrame frame) =>
+            runtime.TryReadNativeFrame(nowMicroseconds, out frame) &&
+            frame.DeviceGeneration == deviceGeneration && frame.TransportGeneration == transportGeneration;
+
         internal static bool TryCreate(ulong deviceGeneration,
             ulong transportGeneration,
             out ControllerFeedbackStateLanePump pump)
@@ -410,7 +421,9 @@ namespace DS4Windows
             if (origin < ControllerFeedbackPublicationOrigin.ProfileEffect ||
                 origin > ControllerFeedbackPublicationOrigin.TestPreview ||
                 source < ControllerFeedbackSource.XboxOneVirtualDevice ||
-                source > ControllerFeedbackSource.Switch2VirtualDevice ||
+                source > ControllerFeedbackSource.LocalAudioHaptics ||
+                source == ControllerFeedbackSource.LocalAudioHaptics &&
+                    origin != ControllerFeedbackPublicationOrigin.AudioHaptics ||
                 ownershipEpoch == 0 || timeToLiveMicroseconds == 0 ||
                 timeToLiveMicroseconds >
                     ControllerFeedbackFrame.MaxTimeToLiveMicroseconds ||

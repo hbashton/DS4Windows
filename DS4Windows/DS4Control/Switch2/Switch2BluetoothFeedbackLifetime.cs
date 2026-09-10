@@ -959,7 +959,7 @@ internal sealed class Switch2VirtualFeedbackSession
 /// begin until it has delivered terminal neutral and retired its sole logical
 /// writer.
 /// </summary>
-internal sealed class Switch2BluetoothFeedbackLifetime :
+internal sealed partial class Switch2BluetoothFeedbackLifetime :
     ISwitch2VirtualFeedbackSessionOwner
 {
     private readonly object gate = new();
@@ -990,7 +990,7 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
         {
             if (!CanServiceRumbleMaintenance) return false;
             return pump.HasPendingOutput ||
-                (pump.RequiresOutputMaintenance && sink.NeedsSustainedRefresh);
+                (pump.RequiresOutputMaintenance && (sink.NeedsSustainedRefresh || pump.HasLocalAudioOwner));
         }
     }
 

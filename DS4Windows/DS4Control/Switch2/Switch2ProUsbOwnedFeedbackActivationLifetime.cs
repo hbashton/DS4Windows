@@ -68,7 +68,7 @@ internal readonly struct Switch2ProUsbOwnedFeedbackActivationCreateResult
 /// This type creates no timer, cadence, callback, worker, registration, or
 /// hardware path.
 /// </summary>
-internal sealed class Switch2ProUsbOwnedFeedbackActivationLifetime :
+internal sealed partial class Switch2ProUsbOwnedFeedbackActivationLifetime :
     ISwitch2ProUsbOwnedFeedbackActivationLifetime,
     ISwitch2VirtualFeedbackSessionOwner
 {
@@ -98,7 +98,7 @@ internal sealed class Switch2ProUsbOwnedFeedbackActivationLifetime :
         {
             if (!CanServiceRumbleMaintenance) return false;
             return pump.HasPendingOutput ||
-                (pump.RequiresOutputMaintenance && sink.NeedsSustainedRefresh);
+                (pump.RequiresOutputMaintenance && (sink.NeedsSustainedRefresh || pump.HasLocalAudioOwner));
         }
     }
 

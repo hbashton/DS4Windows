@@ -508,34 +508,15 @@ namespace DS4Windows
         {
             if (PortableLabContext.IsActive || PortableBrokerContext.IsActive) return;
             string canonicalPath = GetCanonicalViiperExePath();
-            string selectedPath = ResolveRuntimeViiperPath(canonicalPath,
-                Global.PreferredViiperPath,
-                FindAlternativeViiperPath(canonicalPath));
-
-            if (IsSelectableViiperExecutable(selectedPath))
-            {
-                PersistPreferredViiperPath(selectedPath, canonicalPath);
-            }
-
-            if (!DS4WinWPF.StartupMethods.IsRunAtStartupEnabled())
-            {
-                // Observed disabled state may belong to a pending installer
-                // transaction. Passive startup must not erase that state.
-                return;
-            }
-
-            if (!IsSelectableViiperExecutable(selectedPath))
-            {
-                return;
-            }
-
-            if (!EnsureViiperStartupTask(selectedPath,
-                    requestElevation: true))
-            {
-                return;
-            }
-
-            PersistPreferredViiperPath(selectedPath, canonicalPath);
+            ViiperStartupTaskPolicy.RefreshOnLaunch(false, canonicalPath,
+                () => ResolveRuntimeViiperPath(canonicalPath,
+                    Global.PreferredViiperPath,
+                    FindAlternativeViiperPath(canonicalPath)),
+                IsSelectableViiperExecutable,
+                DS4WinWPF.StartupMethods.IsRunAtStartupEnabled,
+                selectedPath => PersistPreferredViiperPath(selectedPath, canonicalPath),
+                startupPath => EnsureViiperStartupTask(startupPath,
+                    requestElevation: true));
         }
 
         public static void RefreshSelectedStartupTaskAfterRunAtStartupChange()
@@ -1629,57 +1610,22 @@ namespace DS4Windows
             try
             {
                 using TaskService service = new TaskService();
-                Microsoft.Win32.TaskScheduler.Task task =
-                    service.GetTask(@"\" + ViiperStartupTaskName);
+                ViiperStartupTaskState task = new ViiperStartupTaskStore(service).Read();
                 if (task == null)
                 {
                     failureMessage = "RunVIIPER is not registered.";
                     return false;
                 }
 
-                using (task)
+                bool valid = ViiperStartupTaskPolicy.IsValid(task, viiperPath,
+                    WindowsIdentity.GetCurrent().User?.Value);
+                if (!valid)
                 {
-                    TaskDefinition definition = task.Definition;
-                    if (!task.Enabled || definition.Actions.Count != 1 ||
-                        definition.Triggers.Count != 1 ||
-                        definition.Principal.RunLevel != TaskRunLevel.Highest ||
-                        definition.Principal.LogonType !=
-                            TaskLogonType.InteractiveToken ||
-                        definition.Settings.Priority !=
-                            ProcessPriorityClass.High ||
-                        definition.Actions[0] is not ExecAction action ||
-                        definition.Triggers[0] is not LogonTrigger trigger)
-                    {
-                        failureMessage = "RunVIIPER does not have the exact " +
-                            "enabled, elevated logon-task shape.";
-                        return false;
-                    }
-
-                    string expectedDirectory = Path.GetDirectoryName(
-                        viiperPath);
-                    string currentSid = WindowsIdentity.GetCurrent().User?.Value;
-                    bool valid = IsExactViiperExecutablePath(action.Path,
-                            viiperPath) &&
-                        string.Equals(action.Arguments?.Trim(),
-                            ViiperServerArguments,
-                            StringComparison.Ordinal) &&
-                        IsExactViiperExecutablePath(
-                            Path.Combine(action.WorkingDirectory ?? string.Empty,
-                                "viiper.exe"), viiperPath) &&
-                        string.Equals(TryResolveAccountSid(
-                                definition.Principal.UserId), currentSid,
-                            StringComparison.OrdinalIgnoreCase) &&
-                        (string.IsNullOrWhiteSpace(trigger.UserId) ||
-                         string.Equals(TryResolveAccountSid(trigger.UserId),
-                            currentSid, StringComparison.OrdinalIgnoreCase));
-                    if (!valid)
-                    {
-                        failureMessage = "RunVIIPER does not target the " +
-                            "selected backend for the current Windows account.";
-                    }
-
-                    return valid;
+                    failureMessage = "RunVIIPER does not have the managed, " +
+                        "enabled, elevated logon-task configuration for the " +
+                        "selected backend and current Windows account.";
                 }
+                return valid;
             }
             catch (Exception ex)
             {
@@ -1822,56 +1768,90 @@ namespace DS4Windows
         private static void DeleteViiperStartupTask()
         {
             using TaskService service = new TaskService();
-            Microsoft.Win32.TaskScheduler.Task task =
-                service.GetTask(@"\" + ViiperStartupTaskName);
-            if (task != null)
-            {
-                task.Dispose();
-                service.RootFolder.DeleteTask(ViiperStartupTaskName);
-            }
+            ViiperStartupTaskPolicy.Remove(WindowsIdentity.GetCurrent().User?.Value,
+                new ViiperStartupTaskStore(service));
         }
 
         private static void RegisterViiperStartupTask(string viiperPath)
         {
-            string fullPath = Path.GetFullPath(viiperPath);
-            string workingDirectory = Path.GetDirectoryName(fullPath);
             string currentUserSid = WindowsIdentity.GetCurrent().User?.Value ??
                 throw new InvalidOperationException(
                     "Windows did not provide the current account SID.");
             using TaskService service = new TaskService();
-            Microsoft.Win32.TaskScheduler.Task existing =
-                service.GetTask(@"\" + ViiperStartupTaskName);
-            if (existing != null)
+            ViiperStartupTaskPolicy.Register(viiperPath, currentUserSid,
+                GetCanonicalViiperExePath(),
+                new ViiperStartupTaskStore(service));
+        }
+
+        private sealed class ViiperStartupTaskStore : IViiperStartupTaskStore
+        {
+            private readonly TaskService service;
+
+            internal ViiperStartupTaskStore(TaskService service) => this.service = service;
+
+            public ViiperStartupTaskState Read()
             {
-                existing.Dispose();
-                service.RootFolder.DeleteTask(ViiperStartupTaskName);
+                using Microsoft.Win32.TaskScheduler.Task task =
+                    service.GetTask(@"\" + ViiperStartupTaskName);
+                if (task == null) return null;
+                TaskDefinition definition = task.Definition;
+                ExecAction action = definition.Actions.Count == 1
+                    ? definition.Actions[0] as ExecAction : null;
+                LogonTrigger trigger = definition.Triggers.Count == 1
+                    ? definition.Triggers[0] as LogonTrigger : null;
+                return new ViiperStartupTaskState
+                {
+                    Description = definition.RegistrationInfo.Description,
+                    Enabled = task.Enabled,
+                    ActionCount = definition.Actions.Count,
+                    TriggerCount = definition.Triggers.Count,
+                    ExecutableAction = action != null,
+                    LogonTrigger = trigger != null,
+                    Highest = definition.Principal.RunLevel == TaskRunLevel.Highest,
+                    InteractiveToken = definition.Principal.LogonType == TaskLogonType.InteractiveToken,
+                    PrincipalSid = TryResolveAccountSid(definition.Principal.UserId),
+                    AllUsersLogon = trigger != null && string.IsNullOrWhiteSpace(trigger.UserId),
+                    LogonUserSid = TryResolveAccountSid(trigger?.UserId),
+                    ExecutablePath = action?.Path,
+                    Arguments = action?.Arguments,
+                    WorkingDirectory = action?.WorkingDirectory,
+                    Priority = definition.Settings.Priority,
+                };
             }
 
-            TaskDefinition definition = service.NewTask();
-            // A generic logon trigger plus an exact-SID interactive principal
-            // avoids Task Scheduler's ambiguous UserId lookup when a local
-            // account and its computer have the same name.
-            definition.Triggers.Add(new LogonTrigger());
-            definition.Actions.Add(new ExecAction(fullPath,
-                ViiperServerArguments,
-                workingDirectory));
-            definition.Principal.UserId = currentUserSid;
-            definition.Principal.LogonType =
-                TaskLogonType.InteractiveToken;
-            definition.Principal.RunLevel = TaskRunLevel.Highest;
-            definition.Settings.StopIfGoingOnBatteries = false;
-            definition.Settings.DisallowStartIfOnBatteries = false;
-            definition.Settings.ExecutionTimeLimit = TimeSpan.Zero;
-            definition.Settings.MultipleInstances =
-                Microsoft.Win32.TaskScheduler.TaskInstancesPolicy.IgnoreNew;
-            definition.Settings.AllowDemandStart = true;
-            // Priority 7 is Task Scheduler's default and maps to below-normal
-            // CPU priority plus low I/O and memory priority.  The virtual USB
-            // audio producer must not be starved by unrelated foreground CPU
-            // work, so give the backend a high (never realtime) task priority.
-            definition.Settings.Priority = ProcessPriorityClass.High;
-            service.RootFolder.RegisterTaskDefinition(
-                ViiperStartupTaskName, definition);
+            public void Delete() => service.RootFolder.DeleteTask(ViiperStartupTaskName);
+
+            public void Write(ViiperStartupTaskState state, bool updateExisting)
+            {
+                TaskDefinition definition = service.NewTask();
+                definition.RegistrationInfo.Description = state.Description;
+                // A generic logon trigger plus an exact-SID interactive principal
+                // avoids Task Scheduler's ambiguous UserId lookup when a local
+                // account and its computer have the same name.
+                definition.Triggers.Add(new LogonTrigger());
+                definition.Actions.Add(new ExecAction(state.ExecutablePath,
+                    state.Arguments, state.WorkingDirectory));
+                definition.Principal.UserId = state.PrincipalSid;
+                definition.Principal.LogonType = TaskLogonType.InteractiveToken;
+                definition.Principal.RunLevel = TaskRunLevel.Highest;
+                definition.Settings.Enabled = state.Enabled;
+                definition.Settings.StopIfGoingOnBatteries = false;
+                definition.Settings.DisallowStartIfOnBatteries = false;
+                definition.Settings.ExecutionTimeLimit = TimeSpan.Zero;
+                definition.Settings.MultipleInstances =
+                    Microsoft.Win32.TaskScheduler.TaskInstancesPolicy.IgnoreNew;
+                definition.Settings.AllowDemandStart = true;
+                // Both installer XML (priority 1) and this writer use High.
+                // Priority 7, Scheduler's default, starves virtual USB audio
+                // under foreground CPU work and must be repaired in place.
+                definition.Settings.Priority = state.Priority;
+                using Microsoft.Win32.TaskScheduler.Task registered =
+                    service.RootFolder.RegisterTaskDefinition(ViiperStartupTaskName,
+                        definition, updateExisting
+                            ? Microsoft.Win32.TaskScheduler.TaskCreation.Update
+                            : Microsoft.Win32.TaskScheduler.TaskCreation.Create,
+                        state.PrincipalSid, null, TaskLogonType.InteractiveToken);
+            }
         }
 
         internal static bool IsExactViiperExecutablePath(string candidatePath,
@@ -2731,25 +2711,22 @@ namespace DS4Windows
         {
             lock (serverStartLock)
             {
-                if (!InspectViiperProcessOwnership(viiperPath,
-                        out bool canonicalProcessRunning, out _))
-                {
-                    return false;
-                }
-
-                if (canonicalProcessRunning)
-                {
-                    return CanPingServer();
-                }
-
-                DateTime now = DateTime.UtcNow;
-                if ((now - lastServerStartAttemptUtc).TotalSeconds < 3)
-                {
-                    return false;
-                }
-
-                lastServerStartAttemptUtc = now;
-                return TryStartServer(viiperPath);
+                return ViiperStartupTaskPolicy.TryStartVerifiedServer(
+                    () =>
+                    {
+                        bool owned = InspectViiperProcessOwnership(viiperPath,
+                            out bool running, out _);
+                        return (owned, running);
+                    },
+                    () => CanPingServer(),
+                    () =>
+                    {
+                        DateTime now = DateTime.UtcNow;
+                        if ((now - lastServerStartAttemptUtc).TotalSeconds < 3)
+                            return false;
+                        lastServerStartAttemptUtc = now;
+                        return TryStartServer(viiperPath);
+                    });
             }
         }
 
@@ -2758,44 +2735,15 @@ namespace DS4Windows
             if (PortableLabContext.IsActive || PortableBrokerContext.IsActive) return false;
             try
             {
-                // When startup is enabled, use its verified elevated task.
-                // With startup explicitly disabled, launch the already hash-
-                // verified selected backend once for this interactive session.
+                // The installed task may target a different backend than the
+                // verified runtime preference. Use it only when it matches;
+                // otherwise start the selected backend for this session after
+                // the same exclusive-process ownership check above.
                 bool taskReady = IsViiperStartupTaskValid(viiperPath,
                     out _);
-                if (!taskReady && DS4WinWPF.StartupMethods.
-                        IsRunAtStartupEnabled())
-                {
-                    return false;
-                }
-
-                ProcessStartInfo startInfo;
-                if (taskReady)
-                {
-                    startInfo = new ProcessStartInfo
-                    {
-                        FileName = Path.Combine(Environment.SystemDirectory,
-                            "schtasks.exe"),
-                        Arguments = $"/Run /TN \"\\{ViiperStartupTaskName}\"",
-                        CreateNoWindow = true,
-                        WindowStyle = ProcessWindowStyle.Hidden,
-                        UseShellExecute = false,
-                    };
-                }
-                else
-                {
-                    startInfo = new ProcessStartInfo
-                    {
-                        FileName = Path.GetFullPath(viiperPath),
-                        Arguments = ViiperServerArguments,
-                        WorkingDirectory = Path.GetDirectoryName(
-                            Path.GetFullPath(viiperPath)),
-                        UseShellExecute = true,
-                        Verb = Global.IsAdministrator() ? string.Empty :
-                            "runas",
-                        WindowStyle = ProcessWindowStyle.Hidden,
-                    };
-                }
+                ProcessStartInfo startInfo = CreateViiperServerStartInfo(
+                    viiperPath, taskReady, Global.IsAdministrator(),
+                    Environment.SystemDirectory);
                 using Process process = Process.Start(startInfo);
                 if (process == null)
                 {
@@ -2818,6 +2766,27 @@ namespace DS4Windows
                 return false;
             }
         }
+
+        internal static ProcessStartInfo CreateViiperServerStartInfo(
+            string viiperPath, bool taskReady, bool administrator,
+            string systemDirectory) => taskReady
+            ? new ProcessStartInfo
+            {
+                FileName = Path.Combine(systemDirectory, "schtasks.exe"),
+                Arguments = $"/Run /TN \"\\{ViiperStartupTaskName}\"",
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden,
+                UseShellExecute = false,
+            }
+            : new ProcessStartInfo
+            {
+                FileName = Path.GetFullPath(viiperPath),
+                Arguments = ViiperServerArguments,
+                WorkingDirectory = Path.GetDirectoryName(Path.GetFullPath(viiperPath)),
+                UseShellExecute = true,
+                Verb = administrator ? string.Empty : "runas",
+                WindowStyle = ProcessWindowStyle.Hidden,
+            };
 
         private static bool CanPingServer(bool authenticated = false)
             => ProbeServer(ApiHost, ApiPort, authenticated);

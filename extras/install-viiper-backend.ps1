@@ -84,6 +84,12 @@ $script:SetupTransactionStarted = $false
 $script:RequiredUsbipVersion = [Version]"0.9.7.7"
 $script:ViiperServerArguments =
     "server --usb.retained-import-authority-id=4923336367393615921"
+# RC4.5 / RC4.5.1-3 shipped this exact VIIPER executable. Their in-app
+# startup writer could retarget RunVIIPER to a portable copy without the
+# ownership marker. Keep this historical recovery pin independent of the
+# current bundle: product metadata alone cannot establish portable ownership.
+$script:LegacyPortableViiperSha256 =
+    "F1ECEF158F02D0BDCD1296C8D5097A281169081D0D59C1A8971592FAC78155EF"
 $script:UsbipInstallerSha256 =
     "51620fa5f9f8be5932bc9d786deee557ce06d5407a99cab490dcfac71f185fea"
 $script:UsbipExecutableSha256 =
@@ -1279,6 +1285,34 @@ function Test-ManagedViiperPath([string]$path) {
     catch { return $false }
 }
 
+function Test-KnownPackagedViiperExecutable([string]$path) {
+    try {
+        if ([string]::IsNullOrWhiteSpace($path) -or
+                $path -notmatch '^[A-Za-z]:[\\/]' -or
+                -not [string]::Equals([IO.Path]::GetFileName($path),
+                    "viiper.exe", [StringComparison]::OrdinalIgnoreCase)) {
+            return $false
+        }
+        $resolved = [IO.Path]::GetFullPath($path)
+        # Inspect the file and every ancestor, including directory junctions.
+        # The task is being replaced with the protected managed target; this
+        # verifier never executes or copies the portable executable.
+        $cursor = $resolved
+        $isExecutable = $true
+        while (-not [string]::IsNullOrWhiteSpace($cursor)) {
+            $item = Get-Item -LiteralPath $cursor -Force -ErrorAction Stop
+            if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+                    [bool]$item.PSIsContainer -eq $isExecutable) {
+                return $false
+            }
+            $isExecutable = $false
+            $cursor = [IO.Path]::GetDirectoryName($cursor)
+        }
+        return Test-FileSha256 $resolved $script:LegacyPortableViiperSha256
+    }
+    catch { return $false }
+}
+
 function Get-ForeignViiperProcesses {
     return @(Get-RunningViiperProcesses | Where-Object {
         -not (Test-ManagedViiperPath ($_.ExecutablePath -as [string]))
@@ -1790,7 +1824,8 @@ function Get-RootScheduledTask([string]$taskName) {
 
 function Test-HighestLogonTaskDefinition($registered,
         [string]$executablePath, [string]$arguments,
-        [string]$workingDirectory, [bool]$requireEnabled = $true) {
+        [string]$workingDirectory, [bool]$requireEnabled = $true,
+        [bool]$requireCurrentPriority = $true) {
     try {
         if (-not $registered -or @($registered.Actions).Count -ne 1 -or
                 @($registered.Triggers).Count -ne 1) {
@@ -1825,6 +1860,9 @@ function Test-HighestLogonTaskDefinition($registered,
         }).Count -gt 0
 
         return (-not $requireEnabled -or $registered.Settings.Enabled) -and
+            (-not $requireCurrentPriority -or
+                [IO.Path]::GetFileName($executablePath) -ine "viiper.exe" -or
+                $registered.Settings.Priority -eq 1) -and
             [string]::Equals(
                 [IO.Path]::GetFullPath([string]$registeredAction.Execute),
                 [IO.Path]::GetFullPath($executablePath),
@@ -1896,14 +1934,15 @@ function Test-LegacyManagedStartupTask($registered, [string]$taskName) {
                 -not (Test-RecognizedProductExecutable $executablePath `
                     $expectedProduct) -or
                 ($isViiper -and -not (Test-ManagedViiperPath `
-                    $executablePath))) {
+                    $executablePath) -and
+                    -not (Test-KnownPackagedViiperExecutable $executablePath))) {
             return $false
         }
 
         # This validates one neutral logon trigger, one exact action, the
         # target SID, Interactive/Highest, and all action fields.
         return Test-HighestLogonTaskDefinition $registered $executablePath `
-            $expectedArguments $expectedWorkingDirectory $false
+            $expectedArguments $expectedWorkingDirectory $false $false
     }
     catch { return $false }
 }
@@ -1952,9 +1991,74 @@ function Test-ManagedStartupTaskOwnership($registered, [string]$taskName,
     catch { return $false }
     # Deliberate one-time migration for pre-marker releases: accept only the
     # tightly recognized previous contract. It may point at an older portable
-    # DS4Windows copy, which preserves documented retargeting; VIIPER must
-    # still point at the canonical managed executable.
+    # DS4Windows copy, which preserves documented retargeting. VIIPER must be
+    # canonical or the exact hash-pinned historical portable package.
     return Test-LegacyManagedStartupTask $registered $taskName
+}
+
+function Write-StartupTaskBackup([string]$taskName, [string]$taskXml) {
+    Assert-ManagedStartupTaskName $taskName
+    if ([string]::IsNullOrWhiteSpace($taskXml)) {
+        throw "Task Scheduler returned an empty backup for '$taskName'."
+    }
+    $backupDirectory = Join-Path $script:InstallerLogRoot "task-backups"
+    $backupDirectory = Assert-SafeManagedDirectory $backupDirectory `
+        "startup-task backup"
+    New-Item -ItemType Directory -Path $backupDirectory -Force | Out-Null
+    $backupDirectory = Assert-SafeManagedDirectory $backupDirectory `
+        "startup-task backup" -RequireExisting
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try {
+        $digest = [BitConverter]::ToString($sha256.ComputeHash(
+            [Text.Encoding]::Unicode.GetBytes($taskXml))).Replace('-', '')
+    }
+    finally { $sha256.Dispose() }
+    $backupPath = Join-Path $backupDirectory "$taskName-$digest.xml"
+    if ([IO.File]::Exists($backupPath)) {
+        $backupItem = Get-Item -LiteralPath $backupPath -Force -ErrorAction Stop
+        if ($backupItem.PSIsContainer -or
+                ($backupItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "The existing startup-task backup is not a regular file: $backupPath"
+        }
+        if (-not [string]::Equals([IO.File]::ReadAllText($backupPath),
+                $taskXml, [StringComparison]::Ordinal)) {
+            throw "The existing startup-task backup is incomplete: $backupPath"
+        }
+        return
+    }
+    $stream = $null
+    $writer = $null
+    $created = $false
+    try {
+        $stream = [IO.FileStream]::new($backupPath, [IO.FileMode]::CreateNew,
+            [IO.FileAccess]::Write, [IO.FileShare]::None)
+        $created = $true
+        $writer = [IO.StreamWriter]::new($stream, [Text.Encoding]::Unicode)
+        $writer.Write($taskXml)
+        $writer.Flush()
+        $stream.Flush($true)
+    }
+    catch {
+        if ($writer) { $writer.Dispose(); $writer = $null }
+        if ($stream) { $stream.Dispose(); $stream = $null }
+        if ($created) { [IO.File]::Delete($backupPath) }
+        throw
+    }
+    finally {
+        if ($writer) { $writer.Dispose() }
+        if ($stream) { $stream.Dispose() }
+    }
+    Write-SetupLog "Preserved previous startup task '$taskName': $backupPath" Green
+}
+
+function Save-ManagedStartupTaskBackup($registered, [string]$taskName) {
+    if (-not $registered -or (Test-ManagedStartupTaskMarker $registered)) {
+        return
+    }
+    # Called only after ownership validation and before the first mutation.
+    # Export the actual definition, including settings not used by ownership.
+    $taskXml = Export-ScheduledTask -InputObject $registered -ErrorAction Stop
+    Write-StartupTaskBackup $taskName $taskXml
 }
 
 function Assert-StartupTaskMutationAllowed([string]$taskName,
@@ -1969,6 +2073,7 @@ function Assert-StartupTaskMutationAllowed([string]$taskName,
             "'$taskName'. Rename or remove that task manually, then rerun " +
             "Install / Repair."
     }
+    Save-ManagedStartupTaskBackup $registered $taskName
     return $registered
 }
 
@@ -2084,6 +2189,11 @@ function New-HighestLogonTaskXml([string]$executablePath,
     [void](Add-ScheduledTaskXmlElement $document $settings "Enabled" "true")
     [void](Add-ScheduledTaskXmlElement $document $settings `
         "ExecutionTimeLimit" "PT0S")
+    if ([IO.Path]::GetFileName($executablePath) -ieq "viiper.exe") {
+        # High priority matches the runtime startup contract; the default 7
+        # forced the old app writer to recreate a correctly installed task.
+        [void](Add-ScheduledTaskXmlElement $document $settings "Priority" "1")
+    }
 
     $actions = Add-ScheduledTaskXmlElement $document $task "Actions"
     [void]$actions.SetAttribute("Context", "Author")
@@ -2304,6 +2414,9 @@ function Set-InfrastructureStartupFailClosed(
             # The durable marker is sufficient ownership for containment even
             # if a failed -Force update left an action that no longer passes
             # the full expected contract.
+            if ([string]::IsNullOrWhiteSpace([string]$registered.Description)) {
+                Save-ManagedStartupTaskBackup $registered $taskName
+            }
             Disable-ScheduledTask -TaskPath "\" -TaskName $taskName `
                 -ErrorAction Stop | Out-Null
             $observed = Get-RootScheduledTask $taskName

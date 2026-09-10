@@ -811,31 +811,72 @@ namespace DS4Windows.Bootstrapper
             Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
             "DS4Windows", "Installer", "setup-actions.log");
 
-        private static string InfrastructureFailureSummary()
+        private string InfrastructureFailureSummary()
         {
-            var tail = ReadLogTail(SetupActionsLogPath, 12000);
-            if (string.IsNullOrWhiteSpace(tail))
-            {
-                tail = ReadLogTail(InstallerActionLogPath, 10000);
-            }
-            if (string.IsNullOrWhiteSpace(tail)) return null;
-            var invocationMarker = "=== DS4Windows setup invocation ";
-            var invocationStart = tail.LastIndexOf(invocationMarker,
+            string correlationId = null;
+            try { correlationId = engine.GetVariableString("SetupCorrelationId"); }
+            catch { }
+            return InfrastructureFailureSummary(
+                ReadLogTail(SetupActionsLogPath, 12000), correlationId);
+        }
+
+        internal static string InfrastructureFailureSummary(string helperTail,
+            string correlationId)
+        {
+            const string generic = "VIIPER/USB-IP setup failed. Open Log includes the detailed child-process diagnostics.";
+            Guid parsedId;
+            if (!Guid.TryParseExact(correlationId, "N", out parsedId) ||
+                string.IsNullOrWhiteSpace(helperTail)) return generic;
+
+            // Completion uses the same invocation prefix as startup. Selecting
+            // the last generic marker discards the failure immediately before
+            // it. A retry also reuses the bundle correlation ID, so select its
+            // latest actual START, never an earlier attempt's diagnostic.
+            const string invocationMarker = "=== DS4Windows setup invocation ";
+            var startMarker = invocationMarker + parsedId.ToString("N") +
+                " started ===";
+            var start = helperTail.LastIndexOf(startMarker,
+                StringComparison.OrdinalIgnoreCase);
+            if (start < 0) return generic;
+            start += startMarker.Length;
+            var end = helperTail.IndexOf(invocationMarker, start,
                 StringComparison.Ordinal);
-            if (invocationStart >= 0)
+            var invocation = end < 0 ? helperTail.Substring(start) :
+                helperTail.Substring(start, end - start);
+
+            const string failureMarker = "Setup could not finish:";
+            var failureIndex = invocation.LastIndexOf(failureMarker,
+                StringComparison.OrdinalIgnoreCase);
+            string failure = null;
+            if (failureIndex >= 0)
             {
-                tail = tail.Substring(invocationStart);
+                var lineEnd = invocation.IndexOfAny(new[] { '\r', '\n' },
+                    failureIndex);
+                failure = lineEnd < 0 ? invocation.Substring(failureIndex) :
+                    invocation.Substring(failureIndex, lineEnd - failureIndex);
             }
-            var marker = "Setup could not finish:";
-            var index = tail.LastIndexOf(marker, StringComparison.OrdinalIgnoreCase);
-            if (index >= 0)
+
+            // Only known diagnostics enter the setup page. Arbitrary exception
+            // messages, executable arguments, and user paths stay in the log.
+            if (failure != null)
             {
-                var end = tail.IndexOfAny(new[] { '\r', '\n' }, index);
-                var summary = end < 0 ? tail.Substring(index) :
-                    tail.Substring(index, end - index);
-                return summary + "\r\nOpen Log includes the complete diagnostic record.";
+                foreach (var taskName in new[] { "RunVIIPER", "RunDS4Windows" })
+                {
+                    if (failure.IndexOf("Refusing to overwrite, disable, or remove foreign root task '" + taskName + "'.",
+                            StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        failure.IndexOf("Startup task '" + taskName + "' became a foreign same-name collision",
+                            StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        string.Equals(failure.TrimEnd(), failureMarker +
+                            " Refusing to suspend an unverified startup task: " + taskName,
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        return "Setup could not verify the existing Windows startup task '" +
+                            taskName + "' as belonging to DS4Windows. The task was preserved.\r\n" +
+                            "Open Log includes the diagnostic details.";
+                    }
+                }
             }
-            return "VIIPER/USB-IP setup failed. Open Log includes the detailed child-process diagnostics.";
+            return generic;
         }
 
         private static string ReadLogTail(string path, int maximumBytes)

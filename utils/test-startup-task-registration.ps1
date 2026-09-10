@@ -47,6 +47,21 @@ if ($script:ViiperServerArguments -ne
         'server --usb.retained-import-authority-id=4923336367393615921') {
     throw 'Backend startup arguments lost the required retained-import authority.'
 }
+$legacyPin = @($ast.FindAll({
+    param($node)
+    $node -is [Management.Automation.Language.AssignmentStatementAst] -and
+        $node.Left -is [Management.Automation.Language.VariableExpressionAst] -and
+        $node.Left.VariablePath.UserPath -eq 'script:LegacyPortableViiperSha256'
+}, $true))
+if ($legacyPin.Count -ne 1 -or
+        $legacyPin[0].Right.Expression -isnot [Management.Automation.Language.StringConstantExpressionAst]) {
+    throw 'Portable task recovery must use one fixed historical package hash.'
+}
+$script:LegacyPortableViiperSha256 = $legacyPin[0].Right.Expression.Value
+if ($script:LegacyPortableViiperSha256 -ne
+        'F1ECEF158F02D0BDCD1296C8D5097A281169081D0D59C1A8971592FAC78155EF') {
+    throw 'The historical RC4.5 portable recovery identity changed.'
+}
 
 foreach ($functionName in @(
         "Assert-ManagedStartupTaskName",
@@ -55,8 +70,10 @@ foreach ($functionName in @(
         "Test-HighestLogonTaskDefinition",
         "Test-HighestLogonTask",
         "Test-ManagedStartupTaskMarker",
+        "Test-KnownPackagedViiperExecutable",
         "Test-LegacyManagedStartupTask",
         "Test-ManagedStartupTaskOwnership",
+        "Save-ManagedStartupTaskBackup",
         "Assert-StartupTaskMutationAllowed",
         "Remove-ManagedStartupTask",
         "Remove-ManagedStartupTaskPair",
@@ -142,6 +159,9 @@ Assert-Equal (Select-TaskXmlNode $taskXml `
     "/t:Task/t:Settings/t:ExecutionTimeLimit").InnerText "PT0S" `
     "The startup task must not have an execution timeout."
 Assert-Equal (Select-TaskXmlNode $taskXml `
+    "/t:Task/t:Settings/t:Priority").InnerText "1" `
+    "VIIPER startup must match the runtime High priority contract."
+Assert-Equal (Select-TaskXmlNode $taskXml `
     "/t:Task/t:Actions/t:Exec/t:Command").InnerText $viiperPath `
     "The escaped executable path did not round-trip."
 Assert-Equal (Select-TaskXmlNode $taskXml `
@@ -189,6 +209,11 @@ $script:SetupLogs = @()
 $script:CapturedRegistrationXml = $null
 $script:RecognizedProductPaths = @()
 $script:ManagedViiperPath = $viiperPath
+$script:FakeExecutableHashes = @{}
+$script:FakeReparsePaths = @()
+$script:TaskBackups = @{}
+$script:BackupFailure = $false
+$script:TaskEvents = @()
 
 function Reset-FakeTaskState {
     $script:FakeTasks = @()
@@ -205,6 +230,11 @@ function Reset-FakeTaskState {
     $script:CapturedRegistrationXml = $null
     $script:RecognizedProductPaths = @()
     $script:ManagedViiperPath = $viiperPath
+    $script:FakeExecutableHashes = @{}
+    $script:FakeReparsePaths = @()
+    $script:TaskBackups = @{}
+    $script:BackupFailure = $false
+    $script:TaskEvents = @()
 }
 
 function New-FakeScheduledTask([string]$taskPath, [string]$taskName,
@@ -225,6 +255,7 @@ function New-FakeScheduledTask([string]$taskPath, [string]$taskName,
     return [pscustomobject]@{
         TaskPath = $taskPath
         TaskName = $taskName
+        OriginalXml = $definitionXml
         Description = $description
         Actions = @([pscustomobject]@{
             Execute = $command
@@ -246,6 +277,9 @@ function New-FakeScheduledTask([string]$taskPath, [string]$taskName,
         }
         Settings = [pscustomobject]@{
             Enabled = $true
+            Priority = if (Select-TaskXmlNode $document "/t:Task/t:Settings/t:Priority") {
+                [int](Select-TaskXmlNode $document "/t:Task/t:Settings/t:Priority").InnerText
+            } else { 7 }
         }
     }
 }
@@ -272,6 +306,7 @@ function Register-ScheduledTask {
         [switch]$Force
     )
     $script:RegisterCalls++
+    $script:TaskEvents += "register:$TaskName"
     $script:RegisterNames += $TaskName
     if ($Force) { $script:RegisterForceNames += $TaskName }
     $script:CapturedRegistrationXml = $Xml
@@ -312,6 +347,7 @@ function Unregister-ScheduledTask {
         [switch]$Confirm
     )
     $script:UnregisterCalls++
+    $script:TaskEvents += "remove:$TaskName"
     $script:FakeTasks = @($script:FakeTasks | Where-Object {
         -not ([string]::Equals([string]$_.TaskPath, $TaskPath,
                     [StringComparison]::Ordinal) -and
@@ -346,6 +382,39 @@ function Test-ManagedViiperPath {
         [StringComparison]::OrdinalIgnoreCase)
 }
 
+function Get-Item {
+    [CmdletBinding()]
+    param([string]$LiteralPath, [switch]$Force)
+    return [pscustomobject]@{
+        PSIsContainer = -not $script:FakeExecutableHashes.ContainsKey($LiteralPath)
+        Attributes = if ($script:FakeReparsePaths -contains $LiteralPath) {
+            [IO.FileAttributes]::ReparsePoint
+        } else { [IO.FileAttributes]::Normal }
+    }
+}
+
+function Test-FileSha256([string]$path, [string]$expectedHash) {
+    Assert-Equal $expectedHash $script:LegacyPortableViiperSha256 `
+        "Portable ownership did not request the historical package pin."
+    return $script:FakeExecutableHashes.ContainsKey($path) -and
+        [string]::Equals($script:FakeExecutableHashes[$path], $expectedHash,
+            [StringComparison]::OrdinalIgnoreCase)
+}
+
+function Export-ScheduledTask {
+    [CmdletBinding()]
+    param($InputObject)
+    $script:TaskEvents += "export:$($InputObject.TaskName)"
+    return $InputObject.OriginalXml.Replace(
+        "DS4Windows managed startup task v1", [string]$InputObject.Description)
+}
+
+function Write-StartupTaskBackup([string]$taskName, [string]$taskXml) {
+    if ($script:BackupFailure) { throw "simulated backup failure" }
+    $script:TaskEvents += "backup:$taskName"
+    $script:TaskBackups["$taskName|$taskXml"] = $taskXml
+}
+
 function Start-Sleep {
     $script:SleepCalls++
 }
@@ -357,6 +426,7 @@ function Disable-ScheduledTask {
         [string]$TaskName
     )
     $script:DisableCalls++
+    $script:TaskEvents += "disable:$TaskName"
     $task = @($script:FakeTasks | Where-Object {
         $_.TaskPath -eq $TaskPath -and $_.TaskName -eq $TaskName
     }) | Select-Object -First 1
@@ -542,6 +612,144 @@ foreach ($legacyArguments in @("server", $script:ViiperServerArguments)) {
         $script:ViiperServerArguments `
         "Migrated VIIPER task did not use the current authority contract."
 }
+
+# Recover the exact shipped portable writer bug, preserving its original XML
+# before replacing it with the protected executable and ownership marker.
+Reset-FakeTaskState
+$packagedPortablePath = "C:\Known RC4.5 Portable\viiper.exe"
+$packagedPortableDirectory = Split-Path -Parent $packagedPortablePath
+$script:RecognizedProductPaths = @($packagedPortablePath)
+$script:FakeExecutableHashes[$packagedPortablePath] = $script:LegacyPortableViiperSha256
+$packagedPortableTask = New-FakeScheduledTask "\" "RunVIIPER" `
+    (New-HighestLogonTaskXml $packagedPortablePath `
+        $script:ViiperServerArguments $packagedPortableDirectory)
+$packagedPortableTask.Description = ""
+$script:FakeTasks = @($packagedPortableTask)
+if (-not (Register-HighestLogonTask "RunVIIPER" $viiperPath `
+        $script:ViiperServerArguments $workingDirectory)) {
+    throw "Pinned packaged portable VIIPER task did not recover automatically."
+}
+Assert-Equal $script:FakeTasks[0].Actions[0].Execute $viiperPath `
+    "Recovered portable VIIPER startup did not use the managed executable."
+Assert-Equal $script:FakeTasks[0].Description `
+    "DS4Windows managed startup task v1" `
+    "Recovered portable VIIPER startup lost its ownership marker."
+Assert-Equal $script:TaskBackups.Count 1 `
+    "Portable migration did not preserve exactly one original definition."
+if ($script:TaskEvents.IndexOf("backup:RunVIIPER") -ge
+        $script:TaskEvents.IndexOf("register:RunVIIPER")) {
+    throw "Portable migration changed startup before preserving the definition."
+}
+Assert-Equal $script:FakeTasks[0].Settings.Priority 1 `
+    "Portable recovery did not produce the runtime High priority."
+
+$portableNearMisses = @(
+    @{ Name = "wrong hash"; Mutate = {
+        param($task)
+        $script:FakeExecutableHashes[$packagedPortablePath] = ('0' * 64)
+    } },
+    @{ Name = "file reparse point"; Mutate = {
+        param($task) $script:FakeReparsePaths = @($packagedPortablePath)
+    } },
+    @{ Name = "ancestor reparse point"; Mutate = {
+        param($task) $script:FakeReparsePaths = @($packagedPortableDirectory)
+    } },
+    @{ Name = "wrong arguments"; Mutate = {
+        param($task) $task.Actions[0].Arguments += " --other"
+    } },
+    @{ Name = "wrong SID"; Mutate = {
+        param($task) $task.Principal.UserId = "S-1-5-18"
+    } },
+    @{ Name = "foreign description"; Mutate = {
+        param($task) $task.Description = "Another product"
+    } },
+    @{ Name = "wrong working directory"; Mutate = {
+        param($task) $task.Actions[0].WorkingDirectory = "C:\Other"
+    } },
+    @{ Name = "extra action"; Mutate = {
+        param($task) $task.Actions += $task.Actions[0]
+    } },
+    @{ Name = "wrong trigger"; Mutate = {
+        param($task) $task.Triggers[0].CimClass.CimClassName = "MSFT_TaskTimeTrigger"
+    } },
+    @{ Name = "noninteractive principal"; Mutate = {
+        param($task) $task.Principal.LogonType = "Password"
+    } },
+    @{ Name = "nonhighest principal"; Mutate = {
+        param($task) $task.Principal.RunLevel = "Limited"
+    } }
+)
+foreach ($nearMiss in $portableNearMisses) {
+    Reset-FakeTaskState
+    $script:RecognizedProductPaths = @($packagedPortablePath)
+    $script:FakeExecutableHashes[$packagedPortablePath] = $script:LegacyPortableViiperSha256
+    $candidate = New-FakeScheduledTask "\" "RunVIIPER" `
+        (New-HighestLogonTaskXml $packagedPortablePath `
+            $script:ViiperServerArguments $packagedPortableDirectory)
+    $candidate.Description = ""
+    & $nearMiss.Mutate $candidate
+    $script:FakeTasks = @($candidate)
+    $rejected = $false
+    try {
+        [void](Register-HighestLogonTask "RunVIIPER" $viiperPath `
+            $script:ViiperServerArguments $workingDirectory)
+    }
+    catch { $rejected = $_.Exception.Message -match "foreign root task" }
+    if (-not $rejected) { throw "Portable near-miss accepted: $($nearMiss.Name)." }
+    Set-InfrastructureStartupFailClosed $viiperPath $ds4Path
+    Assert-Equal $script:RegisterCalls 0 "Portable near-miss reached registration."
+    Assert-Equal $script:DisableCalls 0 "Portable near-miss was disabled."
+    Assert-Equal $script:UnregisterCalls 0 "Portable near-miss was removed."
+    Assert-Equal $script:TaskBackups.Count 0 "Foreign task was archived as owned."
+}
+
+# Backup failure prevents all mutations, including failure-containment disable.
+foreach ($operation in @("register", "remove", "disable")) {
+    Reset-FakeTaskState
+    $script:RecognizedProductPaths = @($packagedPortablePath)
+    $script:FakeExecutableHashes[$packagedPortablePath] = $script:LegacyPortableViiperSha256
+    $candidate = New-FakeScheduledTask "\" "RunVIIPER" `
+        (New-HighestLogonTaskXml $packagedPortablePath "server" $packagedPortableDirectory)
+    $candidate.Description = ""
+    $candidate.Settings.Priority = 7
+    $script:FakeTasks = @($candidate)
+    $script:BackupFailure = $true
+    try {
+        switch ($operation) {
+            "register" {
+                [void](Register-HighestLogonTask "RunVIIPER" $viiperPath `
+                    $script:ViiperServerArguments $workingDirectory)
+            }
+            "remove" {
+                [void](Remove-ManagedStartupTask "RunVIIPER" $viiperPath `
+                    $script:ViiperServerArguments $workingDirectory)
+            }
+            "disable" { Set-InfrastructureStartupFailClosed $viiperPath $ds4Path }
+        }
+    }
+    catch {
+        if ($_.Exception.Message -notmatch "simulated backup failure") { throw }
+    }
+    Assert-Equal $script:RegisterCalls 0 "Backup failure allowed replacement."
+    Assert-Equal $script:DisableCalls 0 "Backup failure allowed disable."
+    Assert-Equal $script:UnregisterCalls 0 "Backup failure allowed removal."
+    Assert-Equal $script:FakeTasks.Count 1 "Backup failure lost the previous task."
+}
+
+# A default-priority marked task is owned but not current. Repair upgrades it
+# once; the next repair reuses it without another registration or backup.
+Reset-FakeTaskState
+$oldPriorityTask = New-FakeScheduledTask "\" "RunVIIPER" `
+    (New-HighestLogonTaskXml $viiperPath $script:ViiperServerArguments $workingDirectory)
+$oldPriorityTask.Settings.Priority = 7
+$script:FakeTasks = @($oldPriorityTask)
+foreach ($attempt in @(1, 2)) {
+    if (-not (Register-ViiperRunTask $viiperPath "RunVIIPER")) {
+        throw "High-priority startup repair did not converge."
+    }
+}
+Assert-Equal $script:RegisterCalls 1 "High-priority repair recreated an exact task."
+Assert-Equal $script:TaskBackups.Count 0 "Marked-task repair needed legacy archival."
 
 # Recognition is an exact finite compatibility set, not a "server" prefix.
 foreach ($unexpectedArguments in @(

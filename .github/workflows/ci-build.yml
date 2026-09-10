@@ -44,6 +44,18 @@ jobs:
         shell: powershell
         run: .\utils\test-renamed-executable-setup.ps1
 
+      - name: Test startup task recovery and ownership
+        shell: powershell
+        run: .\utils\test-startup-task-registration.ps1 -BackendScript .\extras\install-viiper-backend.ps1
+
+      - name: Test durable startup task backups
+        shell: powershell
+        run: .\utils\test-startup-task-backup.ps1 -BackendScript .\extras\install-viiper-backend.ps1
+
+      - name: Test current setup failure diagnostics
+        shell: powershell
+        run: .\utils\test-infrastructure-failure-summary.ps1
+
       - name: Test read-only legacy joystick diagnostics
         shell: pwsh
         run: .\utils\test-legacy-joystick-exposure.ps1

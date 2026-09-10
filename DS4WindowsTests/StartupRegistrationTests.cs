@@ -234,11 +234,13 @@ public class StartupRegistrationTests
             "public static void RefreshSelectedStartupTaskAfterRunAtStartupChange()");
         Assert.IsFalse(body.Contains("RemoveViiperStartupTask", StringComparison.Ordinal));
         Assert.IsFalse(body.Contains("DeleteViiperStartupTask", StringComparison.Ordinal));
-        StringAssert.Matches(body, new Regex(
-            @"if\s*\(!DS4WinWPF\.StartupMethods\.IsRunAtStartupEnabled\(\)\)\s*\{\s*return;\s*\}"));
-        Assert.IsTrue(body.IndexOf("IsRunAtStartupEnabled()", StringComparison.Ordinal) <
-            body.IndexOf("EnsureViiperStartupTask(", StringComparison.Ordinal),
-            "Passive repair must stop before changing a task when startup is not enabled.");
+        StringAssert.Contains(body, "ViiperStartupTaskPolicy.RefreshOnLaunch(");
+        DS4Windows.ViiperStartupTaskPolicy.RefreshOnLaunch(false,
+            @"C:\Program Files\DS4Windows\VIIPER\viiper.exe",
+            () => @"C:\Program Files\DS4Windows\VIIPER\viiper.exe",
+            _ => true, () => false, _ => { },
+            _ => throw new AssertFailedException(
+                "Passive repair must stop before changing a task when startup is not enabled."));
     }
 
     [TestMethod]

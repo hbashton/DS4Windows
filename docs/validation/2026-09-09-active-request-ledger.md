@@ -183,6 +183,26 @@ are recorded in the [published recovery evidence](2026-09-09-read-failure-recove
 The initiating 995 and Joy-Con rumble stutter are still unconfirmed; publication
 does not turn those open questions into hardware-fix claims.
 
+## RC4.5.5 setup and startup correction
+
+- The user's failed RC4.5.3 setup was a stale unmarked `RunVIIPER` task conflict,
+  not a demonstrated USB/IP driver failure. The exact old task/settings were
+  backed up and repaired, and the approved Retry completed successfully.
+- Permanent fixes separate portable runtime preference from installed startup,
+  preserve task ownership, align priority, update owned tasks in place, and
+  recover narrowly verified legacy registrations only after durable backups.
+  Unrelated tasks and unsafe backup paths remain protected.
+- Versioned Release/x64 suite: **4,952 passed, zero failed, 11 opt-in skips**,
+  including allocation assertions. Startup recovery, real backup-file and
+  22 current-attempt diagnostic cases passed; the bootstrapper build is clean.
+  These three script gates are now required in CI.
+- Prepared tag `VIIPERRC4.5.5`, Windows version `5.0.5.5`, title **Reliable Setup
+  & Startup**. Exact-source CI, release artifacts and updater acceptance remain
+  publication gates. VIIPER and updater 2.0.6 are unchanged.
+- See [root cause, safety boundaries and evidence](2026-09-09-installer-startup-recovery.md).
+  The initial 995 cause and Joy-Con rumble stutter remain open; this installer
+  correction does not change input or haptic transport.
+
 ## Current execution boundaries
 
 - Preserve the earlier source and live-preview changes, now checkpointed in the

@@ -167,6 +167,8 @@ def main() -> None:
         "ResolveRuntimeViiperPath(",
         "FindAlternativeViiperPath(canonicalViiperPath)",
         "ViiperStartupTaskPolicy.RefreshOnLaunch(false, canonicalPath,",
+        "ViiperStartupTaskPolicy.SelectRuntimePath(startupEnabled,",
+        "FindAlternativeViiperPath(canonicalViiperPath), startupEnabled)",
         "IsSelectableViiperExecutable,",
         "startupPath => EnsureViiperStartupTask(startupPath,",
         "FilesHaveSameSha256(normalized",
@@ -178,9 +180,11 @@ def main() -> None:
     require(
         startup_policy,
         "if (portableSession) return;",
-        "string selectedPath = selectRuntime();",
+        "startupEnabled && isSelectable(canonicalPath)",
+        "? Path.GetFullPath(canonicalPath) : selectAlternative();",
+        "string selectedPath = SelectRuntimePath(enabled, canonicalPath,",
         "if (isSelectable(selectedPath)) persistRuntime(selectedPath);",
-        "if (!startupEnabled() || !isSelectable(canonicalPath)) return;",
+        "if (!enabled || !isSelectable(canonicalPath)) return;",
         "ensureTask(canonicalPath);",
     )
     require(

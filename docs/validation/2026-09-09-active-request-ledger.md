@@ -192,7 +192,11 @@ does not turn those open questions into hardware-fix claims.
   preserve task ownership, align priority, update owned tasks in place, and
   recover narrowly verified legacy registrations only after durable backups.
   Unrelated tasks and unsafe backup paths remain protected.
-- Versioned Release/x64 suite: **4,952 passed, zero failed, 11 opt-in skips**,
+- Final upgrade review also reproduced and corrected a logon repair loop: with
+  installed startup enabled, runtime selection now matches the verified canonical
+  startup broker and normalizes the stale portable cache. Four failures reproduced
+  the mismatch before 123 focused cases passed with the fix.
+- Versioned Release/x64 suite: **4,958 passed, zero failed, 11 opt-in skips**,
   including allocation assertions. Startup recovery, real backup-file and
   22 current-attempt diagnostic cases passed; the bootstrapper build is clean.
   These three script gates are now required in CI.

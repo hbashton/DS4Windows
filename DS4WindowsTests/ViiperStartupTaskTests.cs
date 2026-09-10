@@ -127,7 +127,7 @@ public class ViiperStartupTaskTests
     }
 
     [TestMethod]
-    public void InstalledLaunchKeepsPortableRuntimePreferenceOutOfInstalledStartup()
+    public void InstalledStartupAlignsRuntimeAndTaskAndClearsStalePortableCache()
     {
         string taskPath = null;
         string runtimePreference = null;
@@ -136,8 +136,51 @@ public class ViiperStartupTaskTests
             path => runtimePreference = path,
             path => { taskPath = path; return true; });
         Assert.AreEqual(Canonical, taskPath);
-        Assert.AreEqual(Portable, runtimePreference,
-            "The in-session backend preference remains independent of installed startup.");
+        Assert.AreEqual(Canonical, runtimePreference);
+        Assert.AreEqual(string.Empty, ViiperStartupTaskPolicy.NormalizePreferredRuntimePath(
+            runtimePreference, Canonical),
+            "Selecting the installed backend must clear the automatically persisted portable cache.");
+    }
+
+    [DataTestMethod]
+    [DataRow(true, true, Canonical)]
+    [DataRow(true, false, Portable)]
+    [DataRow(false, true, Portable)]
+    [DataRow(false, false, Portable)]
+    public void RuntimeSelectionUsesInstalledStartupOnlyWithAVerifiedCanonicalBackend(
+        bool startupEnabled, bool canonicalVerified, string expected)
+    {
+        string selected = ViiperStartupTaskPolicy.SelectRuntimePath(startupEnabled,
+            Canonical, () => Portable, path => path == Portable || canonicalVerified);
+        Assert.AreEqual(expected, selected);
+        Assert.AreEqual(expected == Canonical ? string.Empty : Portable,
+            ViiperStartupTaskPolicy.NormalizePreferredRuntimePath(selected, Canonical));
+    }
+
+    [DataTestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void InstalledStartupWithStalePortableCacheUsesOneCanonicalBroker(bool alreadyRunning)
+    {
+        string selected = ViiperStartupTaskPolicy.SelectRuntimePath(true,
+            Canonical, () => Portable, _ => true);
+        int launches = 0;
+        int probes = 0;
+        bool ready = ViiperStartupTaskPolicy.TryStartVerifiedServer(
+            () => (!alreadyRunning || ViiperSetupManager.IsExactViiperExecutablePath(
+                Canonical, selected), alreadyRunning),
+            () => { probes++; return true; },
+            () =>
+            {
+                launches++;
+                Assert.IsTrue(ViiperStartupTaskPolicy.IsValid(ManagedTask(), selected, Sid),
+                    "First launch must select the same canonical backend as its installed task.");
+                return true;
+            });
+        Assert.IsTrue(ready,
+            "The canonical broker started at logon must not be classified as a foreign portable copy.");
+        Assert.AreEqual(alreadyRunning ? 0 : 1, launches);
+        Assert.AreEqual(alreadyRunning ? 1 : 0, probes);
     }
 
     [TestMethod]
@@ -173,7 +216,9 @@ public class ViiperStartupTaskTests
     public void EnabledInstalledTaskForAnotherBackendUsesVerifiedSessionLaunch()
     {
         var installedTask = ManagedTask();
-        bool taskReady = ViiperStartupTaskPolicy.IsValid(installedTask, Portable, Sid);
+        string selected = ViiperStartupTaskPolicy.SelectRuntimePath(true,
+            Canonical, () => Portable, path => path == Portable);
+        bool taskReady = ViiperStartupTaskPolicy.IsValid(installedTask, selected, Sid);
         Assert.IsFalse(taskReady);
         ProcessStartInfo startInfo = null;
         Assert.IsTrue(ViiperStartupTaskPolicy.TryStartVerifiedServer(
@@ -181,7 +226,7 @@ public class ViiperStartupTaskTests
             () =>
             {
                 startInfo = ViiperSetupManager.CreateViiperServerStartInfo(
-                    Portable, taskReady, false, @"C:\Windows\System32");
+                    selected, taskReady, false, @"C:\Windows\System32");
                 return true;
             }));
         Assert.AreEqual(Portable, startInfo.FileName);

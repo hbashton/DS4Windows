@@ -243,11 +243,15 @@ namespace DS4Windows
             // bundled VIIPER executable anywhere; the preferred/running/task
             // candidate still has to pass the same SHA-256 package check as
             // the protected Program Files copy before it can be selected.
+            // With installed startup enabled, a verified Program Files backend
+            // takes precedence so runtime ownership agrees with its logon task.
             PortableLabContext lab = PortableLabContext.Current;
             PortableBrokerContext portable = PortableBrokerContext.Current;
+            bool startupEnabled = lab == null && portable == null &&
+                DS4WinWPF.StartupMethods.IsRunAtStartupEnabled();
             string viiperPath = lab?.ViiperPath ?? portable?.ViiperPath ?? ResolveRuntimeViiperPath(
                 canonicalViiperPath, Global.PreferredViiperPath,
-                FindAlternativeViiperPath(canonicalViiperPath));
+                FindAlternativeViiperPath(canonicalViiperPath), startupEnabled);
             string bundledViiperPath = GetBundledViiperPath();
             string setupScriptPath = GetSetupScriptPath();
             string usbipPath = GetCanonicalUsbipPath();
@@ -292,10 +296,8 @@ namespace DS4Windows
                 ? lab.IsVerifiedBackend(viiperPath)
                 : portable != null ? portable.IsVerifiedBackend(viiperPath)
                 : IsBundledViiperAuthentic() && FilesHaveSameSha256(viiperPath, bundledViiperPath);
-            bool startupEnabled = DS4WinWPF.StartupMethods.
-                IsRunAtStartupEnabled();
             bool viiperStartupTaskReady = portable != null || !startupEnabled ||
-                IsViiperStartupTaskValid(viiperPath, out _);
+                IsViiperStartupTaskValid(canonicalViiperPath, out _);
             bool canonicalViiperRunning;
             string viiperProcessConflictMessage;
             bool viiperProcessOwnershipReady = portable != null
@@ -1415,10 +1417,13 @@ namespace DS4Windows
 
         internal static string ResolveRuntimeViiperPath(
             string canonicalPath, string preferredPath,
-            string alternativePath = null)
+            string alternativePath = null, bool startupEnabled = false)
         {
-            return ResolveRuntimeViiperPath(canonicalPath, preferredPath,
-                alternativePath, IsSelectableViiperExecutable);
+            return ViiperStartupTaskPolicy.SelectRuntimePath(startupEnabled,
+                canonicalPath,
+                () => ResolveRuntimeViiperPath(canonicalPath, preferredPath,
+                    alternativePath, IsSelectableViiperExecutable),
+                IsSelectableViiperExecutable);
         }
 
         internal static string ResolveRuntimeViiperPath(
@@ -1458,10 +1463,8 @@ namespace DS4Windows
         private static void PersistPreferredViiperPath(string selectedPath,
             string canonicalPath)
         {
-            string persistedPath = IsExactViiperExecutablePath(selectedPath,
-                    canonicalPath)
-                ? string.Empty
-                : Path.GetFullPath(selectedPath);
+            string persistedPath = ViiperStartupTaskPolicy.NormalizePreferredRuntimePath(
+                selectedPath, canonicalPath);
             if (string.Equals(Global.PreferredViiperPath ?? string.Empty,
                     persistedPath, StringComparison.OrdinalIgnoreCase))
             {

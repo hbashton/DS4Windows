@@ -25,9 +25,13 @@ recurrence path. That repair was not testing the new RC4.5.5 installer.
 
 ## Permanent correction and safety boundaries
 
-- Installed startup maintenance now uses the canonical installed backend. A
-  verified portable runtime preference remains usable for its interactive session;
-  portable sessions do not maintain installed startup tasks.
+- With installed startup enabled and a verified canonical package present,
+  runtime selection and startup maintenance both use the installed backend. This
+  clears the old automatically cached portable preference and prevents the logon
+  broker from being mistaken for a conflicting copy. When startup is disabled or
+  the canonical package is unavailable, verified alternative selection remains
+  supported. Explicit portable sessions keep their own backend and do not maintain
+  installed startup tasks.
 - The runtime task writer preserves the managed marker and uses in-place Update
   for an existing owned task, or Create-only when absent. It checks exact current
   account, action, arguments and trigger shape before mutation. All unmarked tasks,
@@ -63,6 +67,14 @@ Production fixes now cover marker preservation, priority alignment, in-place
 updates, failed-write preservation, foreign/unmarked tasks, portable preference
 separation and exclusive broker launch behavior.
 
+Final upgrade review reproduced a further logon conflict before tagging: merely
+separating task maintenance from a retained portable preference could classify
+the installed logon broker as foreign. Four new failing assertions demonstrated
+runtime/task disagreement, canonical selection, initial launch and already-running
+broker reuse. A shared production selector now aligns the enabled installed
+startup/runtime paths before either broker is launched, while preserving verified
+fallbacks and explicit portable contexts.
+
 The installer fixture first reproduced rejection of the known packaged portable
 task. Expanded checks cover hash/path identity, reparse points, account and action
 shape, backup-before-mutation, backup-failure preservation, rollback and containment.
@@ -71,9 +83,11 @@ backup leaf, then passed after explicit leaf validation.
 
 Final local Release/x64 results:
 
-- **4,952 passed, zero failed, 11 existing opt-in skips** (4,963 total), unfiltered
+- **4,958 passed, zero failed, 11 existing opt-in skips** (4,969 total), unfiltered
   and including allocation assertions. TRX:
-  `isolated_results/rc455-release-verification/rc455-versioned-full.trx`.
+  `isolated_results/rc455-release-verification/rc455-final-logon-full.trx`.
+- The final selector correction passed **123 focused tests**, including all 28
+  dedicated startup task cases, after four failures reproduced the logon mismatch.
 - Startup task registration/ownership/recovery simulations passed.
 - Actual backup-file Unicode, idempotence, corruption, reparse and directory
   collision tests passed in a disposable isolated directory.

@@ -6,13 +6,14 @@ This hotfix repairs a setup/startup conflict that could stop an upgrade with **V
 
 - Setup can recover the verified older VIIPER startup registration left behind by the affected build, including a recognized portable-broker target. It saves the original task before changing it.
 - DS4Windows no longer redirects the installed startup task to a portable runtime preference or removes the task's ownership marker.
+- With installed startup enabled, runtime selection follows the verified installed broker too, so an old portable preference cannot put the next sign-in into a repair loop.
 - The app and installer now agree on the broker's startup priority, preventing repeated unnecessary task replacement.
 - Owned tasks are updated in place instead of being deleted before replacement. Unrelated startup tasks are preserved.
 - When setup cannot safely recover a task, the error identifies the task conflict instead of hiding it behind a generic dependency failure. Retry diagnostics refer to the current attempt.
 
 Includes the earlier 4.5.3/4.5.4 Stop and read-failure recovery fixes. This hotfix does not change controller input, rumble or USB/IP transport behavior.
 
-Validation: **4,952 automated tests passed**, zero failures, with 11 existing opt-in skips. Startup ownership/recovery, durable backup and setup-error regression checks also passed. Allocation assertions remain enabled.
+Validation: **4,958 automated tests passed**, zero failures, with 11 existing opt-in skips. Startup ownership/recovery, durable backup and setup-error regression checks also passed. Allocation assertions remain enabled.
 
 ## Updating
 

@@ -124,18 +124,31 @@ internal static class ViiperStartupTaskPolicy
                 "Run setup to recover a verified older DS4Windows registration.");
     }
 
+    internal static string SelectRuntimePath(bool startupEnabled,
+        string canonicalPath, Func<string> selectAlternative,
+        Func<string, bool> isSelectable) =>
+        startupEnabled && isSelectable(canonicalPath)
+            ? Path.GetFullPath(canonicalPath) : selectAlternative();
+
+    internal static string NormalizePreferredRuntimePath(string selectedPath,
+        string canonicalPath) =>
+        ViiperSetupManager.IsExactViiperExecutablePath(selectedPath, canonicalPath)
+            ? string.Empty : Path.GetFullPath(selectedPath);
+
     internal static void RefreshOnLaunch(bool portableSession,
         string canonicalPath, Func<string> selectRuntime,
         Func<string, bool> isSelectable, Func<bool> startupEnabled,
         Action<string> persistRuntime, Func<string, bool> ensureTask)
     {
         if (portableSession) return;
-        string selectedPath = selectRuntime();
+        bool enabled = startupEnabled();
+        string selectedPath = SelectRuntimePath(enabled, canonicalPath,
+            selectRuntime, isSelectable);
         if (isSelectable(selectedPath)) persistRuntime(selectedPath);
-        // A runtime preference can point at a verified portable package. The
-        // installed logon task belongs to the installed backend and must never
-        // follow that preference, including on an elevated ordinary launch.
-        if (!startupEnabled() || !isSelectable(canonicalPath)) return;
+        // Use the same verified installed backend for the runtime and its logon
+        // task. Otherwise a stale portable cache can misidentify the canonical
+        // broker started at the next Windows logon as a foreign process.
+        if (!enabled || !isSelectable(canonicalPath)) return;
         ensureTask(canonicalPath);
     }
 

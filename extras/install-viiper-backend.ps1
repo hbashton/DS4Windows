@@ -84,7 +84,7 @@ $script:SetupTransactionStarted = $false
 $script:RequiredUsbipVersion = [Version]"0.9.7.7"
 $script:ViiperServerArguments =
     "server --usb.retained-import-authority-id=4923336367393615921"
-# RC4.5 / RC4.5.1-3 shipped this exact VIIPER executable. Their in-app
+# RC4.5 / RC4.5.1-4 shipped this exact VIIPER executable. Their in-app
 # startup writer could retarget RunVIIPER to a portable copy without the
 # ownership marker. Keep this historical recovery pin independent of the
 # current bundle: product metadata alone cannot establish portable ownership.

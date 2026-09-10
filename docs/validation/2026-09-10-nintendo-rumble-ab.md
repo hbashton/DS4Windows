@@ -1,0 +1,93 @@
+# Nintendo rumble: controlled comparison, September 10
+
+This is a private validation record, not release notes or a smoothness claim.
+The requested work window ends at 13:43 UTC on September 10, 2026.
+
+## Established starting point
+
+- The September 9 installed RC4.5.4 Bluetooth left Joy-Con Heavy trace had one
+  unchanged three-active-subframe waveform, no counter discontinuities and no
+  intervals over 20 ms. The user still reported crackling. See the
+  [preceding evidence](2026-09-09-haptics-burst-and-joycon-followup.md).
+- Complete private candidate A uses DS4Windows checkpoint `db78c9d` and the
+  independently built VIIPER candidate corresponding to checkpoint `9999f25`.
+  All 551 composed payload files, the runtime/dependency closure and Xbox
+  identity were verified. It is not an incomplete publish-directory handoff.
+- A changes standalone Joy-Con 2 Bluetooth held servicing to 10 ms, retaining
+  the waveform bytes. Pro/joined Bluetooth remains 15 ms; USB remains 12 ms.
+  Actual scheduling and input-tail measurements are still required.
+- A connected a right Joy-Con at 90% battery at 07:05 local. It was closed at
+  07:07; the installed build subsequently connected a Pro. Therefore the
+  user's tentative "slightly better" feedback cannot yet be attributed to a
+  controlled before/after comparison. The earlier left Joy-Con's 10% battery
+  and the different physical half are additional comparison confounders.
+- With explicit user approval, A was resumed at 12:24 UTC using its existing
+  isolated data and verified immutable payloads. Authenticated backend
+  readiness and Bluetooth discovery succeeded. At the time this section was
+  written, no controller had woken in the resumed session.
+
+## One-variable packet experiment
+
+The pinned implementations do not establish one universally correct held
+layout:
+
+| Source | Ordinary held group |
+| --- | --- |
+| DS4Windows | Three identical active subframes |
+| [Switch2Connect](https://github.com/TommyWabg/Switch2Connect/blob/61ac6642ce12fe7217e38a860b14863b18ca7e28/src/virtual_controller.py), lines 2323–2327 and 2391–2393 | Held fallback repeats all three |
+| [Hifi SDL BLE](https://github.com/hifihedgehog/SDL/blob/d98c5804a9d20b0d96e993741797878c86b8f1e1/src/joystick/windows/SDL_ble_switch2joystick.c), `BLE_WriteRumble` | One active, two neutral-amplitude tails |
+| [SDL USB](https://github.com/libsdl-org/SDL/blob/c71abd08605b8bb7078372307a93274725c99fe0/src/joystick/hidapi/SDL_hidapi_switch2.c), `UpdateRumble` | One active, remaining bytes zero |
+
+The B experiment is disabled by default and requires both portable-lab mode
+and the exact cold setting
+`DS4WINDOWS_SWITCH2_HELD_SUBFRAME_EXPERIMENT=neutral-tails`. Only standalone
+Joy-Con 2 Bluetooth lifetimes can opt in. Only ordinary Test Heavy/Test Light
+preview output is transformed. The first subframe, every control/frequency
+field, strength setting, counter, cadence, ownership and freshness metadata
+remain unchanged; only the second and third subframe amplitudes become zero.
+The first write and held refreshes use the same transform.
+
+Pro, joined Joy-Cons, USB, normal launches, game feedback, profile effects,
+source-preserved rich previews, finite one-shots, PCM, native packets and
+impulse/release presentations are excluded. There is no shared-codec change,
+amplitude boost, inferred firmware slot duration, or claim of equivalent
+actuator energy. This experiment may feel weaker or worse; it is not a fix
+until compared on the same physical controller under matching conditions.
+
+Failing-first fixtures reproduced five expected trailing-amplitude failures
+with three unchanged controls passing. After implementation, 33 new cases and
+188 combined targeted cases passed without skips. They include actual sink to
+BLE encoder bytes, cold factory configuration, finite/repeat distinctions,
+uncertain exact retries, Stop/no resurrection, default identity and strict
+zero allocation with an allocation-positive control. The subsequent unfiltered
+full run passed **5,040**, failed **0**, and skipped **11** explicitly gated
+hardware/cross-runtime rows. Allocation checks remained enabled. Evidence is
+`isolated_results/held-subframe-experiment/full/held-subframe-full-reviewed.trx`.
+No subjective or physical hardware acceptance is inferred from that result.
+
+## Measurement and acceptance rules
+
+1. Identify the actual executable, transport, physical half, pair state,
+   profile and battery before every comparison. Do not mix installed and lab
+   results or compare a depleted half with a charged different controller.
+2. Record accepted physical-report publication counters before/after idle and
+   rumble windows. Compare deltas only within matching runtime, physical and
+   clock generations. Cumulative maximum gaps cannot be subtracted.
+3. Observe bounded host HCI windows with start and Stop inside the capture.
+   Check waveform identity, active subframes, counter progression, write gaps,
+   explicit neutral output, and absence of later active output. Host evidence
+   is not radio-delivery or physical motor completion evidence.
+4. Change cadence and packet shape in separate comparisons. Keep strength and
+   carriers fixed. Ask for tactile confirmation rather than infer it from
+   green software tests or a lower average interval.
+5. Reject a candidate that worsens input tails, loses finite effects, changes
+   unrelated feedback, or fails to stop. No new public release is authorized
+   by this private experiment.
+
+The private observer now has separate strict parsers for a Joy-Con-shaped
+36-byte event402 and a Pro-shaped 52-byte event402. The latter records the two
+protocol groups separately. Synthetic malformed/layout/counter/neutral tests
+pass and independent review found no concrete capture blocker. Both modes
+retain the 25-second owned-session deadline, bounded rows, no raw ETL/payload,
+no controller writes and explicit host-only limitations. Missing/unknown
+events are inconclusive, not evidence that rumble was absent.

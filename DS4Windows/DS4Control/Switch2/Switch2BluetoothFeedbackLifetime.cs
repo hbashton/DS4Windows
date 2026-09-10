@@ -1102,7 +1102,9 @@ internal sealed class Switch2BluetoothFeedbackLifetime :
                 deviceGeneration, transportGeneration, policy,
                 minimumMaintenanceIntervalMicroseconds: (ulong)Switch2RumbleMaintenanceWorker.
                     BluetoothIntervalFor(model, joinedPair: false) * 1000,
-                hostWriteStartClock: hostWriteStartClock);
+                hostWriteStartClock: hostWriteStartClock,
+                labNeutralPreviewTails: Switch2HeldSubframeExperiment.ReadColdConfiguration(
+                    model, Switch2Transport.BluetoothLe, joinedPair: false));
             owner = new Switch2BluetoothFeedbackLifetime(model,
                 deviceGeneration, transportGeneration, pump, sink,
                 lease as ISwitch2BluetoothPlayerLedTransportLease,

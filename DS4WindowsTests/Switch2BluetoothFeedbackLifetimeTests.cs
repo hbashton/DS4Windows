@@ -1339,8 +1339,8 @@ public class Switch2BluetoothFeedbackLifetimeTests
         AssertHdRumble(lease.LastPayload, expectAmplitude: true,
             out Switch2HdRumbleGroup profileLeft,
             out Switch2HdRumbleGroup profileRight);
-        AssertSustained(profileLeft);
-        AssertSustained(profileRight);
+        AssertHeldFirstActive(profileLeft);
+        AssertHeldFirstActive(profileRight);
 
         runtime.SetRumblePreview(lightMotorActive: true,
             lightMotorStrength: 200, heavyMotorActive: true,
@@ -1352,8 +1352,8 @@ public class Switch2BluetoothFeedbackLifetimeTests
             out Switch2HdRumbleGroup previewRight);
         Assert.AreNotEqual(profileLeft, previewLeft);
         Assert.AreNotEqual(profileRight, previewRight);
-        AssertSustained(previewLeft);
-        AssertSustained(previewRight);
+        AssertHeldFirstActive(previewLeft);
+        AssertHeldFirstActive(previewRight);
 
         runtime.ClearRumblePreview();
         Assert.AreEqual(5, lease.WriteCount,
@@ -1652,10 +1652,13 @@ public class Switch2BluetoothFeedbackLifetimeTests
         Assert.AreEqual(expectAmplitude, HasAmplitude(right));
     }
 
-    private static void AssertSustained(in Switch2HdRumbleGroup group)
+    private static void AssertHeldFirstActive(in Switch2HdRumbleGroup group)
     {
-        Assert.AreEqual(group.First, group.Second);
-        Assert.AreEqual(group.First, group.Third);
+        Assert.IsTrue(group.First.HasNonzeroAmplitude);
+        var neutralTail = new Switch2HdRumbleSubframe(
+            group.First.Oscillator0ControlCode, 0, group.First.Oscillator1ControlCode, 0);
+        Assert.AreEqual(neutralTail, group.Second);
+        Assert.AreEqual(neutralTail, group.Third);
     }
 
     private static byte[] Wire(ulong sequence, ulong ownershipEpoch,

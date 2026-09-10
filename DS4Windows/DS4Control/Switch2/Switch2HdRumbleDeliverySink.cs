@@ -299,7 +299,6 @@ internal sealed class Switch2HdRumbleDeliverySink :
     private readonly ISwitch2HdRumblePhysicalWriter writer;
     private readonly ulong deviceGeneration;
     private readonly ulong transportGeneration;
-    private readonly bool labNeutralPreviewTails;
 
     private ControllerFeedbackDelivery lastDelivered;
     private bool lastDeliveredNeedsSustain;
@@ -363,8 +362,7 @@ internal sealed class Switch2HdRumbleDeliverySink :
         Switch2HdRumbleFeedbackPolicy policy =
             Switch2HdRumbleFeedbackPolicy.SdlBodyOnlyCompatibility,
         ulong minimumMaintenanceIntervalMicroseconds = 0,
-        Func<ulong> hostWriteStartClock = null,
-        bool labNeutralPreviewTails = false)
+        Func<ulong> hostWriteStartClock = null)
     {
         this.writer = writer ?? throw new ArgumentNullException(nameof(writer));
         if (deviceGeneration == 0)
@@ -388,7 +386,6 @@ internal sealed class Switch2HdRumbleDeliverySink :
 
         this.deviceGeneration = deviceGeneration;
         this.transportGeneration = transportGeneration;
-        this.labNeutralPreviewTails = labNeutralPreviewTails;
         if (minimumMaintenanceIntervalMicroseconds is not (0 or 10000 or 12000 or 15000))
             throw new ArgumentOutOfRangeException(nameof(minimumMaintenanceIntervalMicroseconds));
         this.minimumMaintenanceIntervalMicroseconds = minimumMaintenanceIntervalMicroseconds;
@@ -979,9 +976,9 @@ internal sealed class Switch2HdRumbleDeliverySink :
                             InvalidSubmission,
                         uncertainOutcome: false, default, default);
                 }
-                if (Switch2HeldSubframeExperiment.AppliesTo(labNeutralPreviewTails,
-                        delivery, useSourcePreservedSynthesis, useImpulseReleaseSynthesis, synthesis))
-                    synthesis = Switch2HeldSubframeExperiment.NeutralizeTails(synthesis);
+                if (Switch2HeldRumblePresentation.AppliesTo(delivery,
+                        useSourcePreservedSynthesis, useImpulseReleaseSynthesis, synthesis))
+                    synthesis = Switch2HeldRumblePresentation.FirstActiveFrame(synthesis);
                 if (!synthesis.IsFreshAt(nowMicroseconds) ||
                     !Switch2HdRumblePhysicalSubmission.TryCreateFrame(
                         synthesis, delivery.DeliveryEpoch, out submission))

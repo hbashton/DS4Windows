@@ -1,7 +1,8 @@
 # Nintendo rumble: controlled comparison, September 10
 
 This is a private validation record, not release notes or a smoothness claim.
-The requested work window ends at 13:43 UTC on September 10, 2026.
+The user extended unattended work to one hour at approximately 12:56 UTC;
+the current work window ends at 13:56 UTC on September 10, 2026.
 
 ## Established starting point
 
@@ -91,3 +92,88 @@ pass and independent review found no concrete capture blocker. Both modes
 retain the 25-second owned-session deadline, bounded rows, no raw ETL/payload,
 no controller writes and explicit host-only limitations. Missing/unknown
 events are inconclusive, not evidence that rumble was absent.
+
+## Resumed A: measured host output, before the first-active-frame change
+
+The resumed mapper is PID 416, broker PID 13920, from the complete A folder.
+It connected a standalone Bluetooth right Joy-Con 2 at 12:33 UTC and a
+Bluetooth Pro at 12:34 UTC, both reporting 90% battery and using the isolated
+`ds` profile with virtual DualSense output. No physical left Joy-Con was
+connected in these captures.
+
+| Pro test / 25-second host capture | Packets | Median gap | p95 | p99 | Maximum | Gaps >20 ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Heavy, `pro-heavy-A-0735` | 1,475 | 15.6478 ms | 16.271 ms | 16.6993 ms | 25.8153 ms | 1 |
+| Light, `pro-light-A-manual` | 1,468 | 15.6517 ms | 16.2975 ms | 16.6665 ms | 20.3437 ms | 1 |
+
+Both protocol groups retained the same waveform throughout each capture:
+three active subframes, maximum amplitude code 453, no counter discontinuity,
+no observed neutral packet, and no ETW event loss. These are host-stack
+observations, not actuator timing or proof of a firmware timeout. The user's
+small perceived skips remain unexplained by these measurements alone.
+
+During the roughly 40.7-second Heavy input comparison, clock/runtime/physical
+generations remained unchanged. Pro accepted 2,729 reports with 17 publication
+gaps above 20 ms; right Joy-Con accepted 2,691 with 25 above 20 ms. Neither had
+a gap above 50 ms in that delta window, and neither recorded a busy publication
+drop. Earlier cumulative maximum values are not this window's maximum.
+
+The automatic Light-click capture (`pro-light-A-0741`) had no matching output;
+the user's subsequent manual click produced the measured Light capture above.
+The unattended Joy-Con-shaped observation (`joycon-A-unattended-1305`) also had
+no matching packets. These are inconclusive for the corresponding motor, not
+evidence of output loss. The intended Stop was not captured in either primary
+Pro window. A later unattended UI Stop attempt did not change the displayed
+Stop Light state or establish a neutral output, so physical Stop acceptance
+is explicitly **not verified** here.
+
+## Requested first-active-frame implementation
+
+After asking to focus on cadence while away, the user explicitly requested
+the SDL active-frame change as well. Shape and timing remain separate changes.
+The earlier B build at `7011175` was fully composed and prepared but never
+launched; its gated preview experiment is not a hardware-tested result.
+
+The production candidate applies first-active plus zero-amplitude tails only
+at the Switch 2 delivery sink, for ordinary canonical body-compatible Apply
+frames. All four arbitration origins are eligible. It retains the current
+first subframe, control fields, gain, lifetime/sequence metadata and cadence.
+Source-preserved/native/PCM/one-shot/adaptive designs, impulse and release
+presentations, raw nonzero trigger lanes, Stop and Neutral are excluded. The
+shared compatibility-group builder is deliberately unchanged because it also
+provides body samples for richer DualSense mixing.
+
+This is a BLE-shaped adaptation, not byte-identical SDL USB: the USB donor
+zeros the entire trailing words, whereas the BLE donor retains neutral
+carrier fields. Our actual sink coverage is Pro USB and standalone/joined
+Joy-Con 2/Pro BLE; this change does not create a Joy-Con USB transport.
+
+Other donor mechanics were reviewed, not blindly copied: SDL USB services
+rumble from its input-read loop with a 12 ms gate and a 24 ms joined-child
+workaround; the BLE donor uses a 10 ms update pump. DS4Windows keeps its
+independent output-only maintenance worker, immediate Stop/new-frame
+admission, and exact uncertain-payload retry/counter ownership. No donor
+comment establishes the playback duration of an individual subframe.
+
+The failing-first run caught 18 expected old-layout failures with 30 unchanged
+controls passing. After enabling the sink policy, all 48 focused cases passed.
+The first full run caught two older integration helpers that explicitly
+required three identical active frames. Their body-only assertions now check
+one active frame plus exact zero-amplitude, carrier-preserving tails; rich
+frame assertions were not weakened. The reviewed full run passed **5,055**,
+failed **0**, and skipped the same **11** gated hardware/cross-runtime cases.
+Strict zero-allocation and allocation-positive controls remained enabled.
+Evidence: `isolated_results/held-rumble-production/full-reviewed/first-active-full-reviewed.trx`.
+
+The 18 new composed scheduling rows exercise the real worker and sink with a
+controlled physical-writer clock at 10/12/15 ms. They cover service duration,
+early/late callbacks, competing publishers, bounded contention retries, exact
+uncertain retries and Stop sealing rearm. They establish no new timing defect
+and are not measurements of Windows radio or actuator scheduling.
+
+At 13:07:35 UTC the old A mapper/broker processes were terminated after the
+observed UI Stop Light and close inputs did not take effect. Exact retained
+PID/start-time/path/hash checks scoped termination to that private session.
+No installed files changed. This ended the old host output stream; it is not
+a clean Stop test or physical neutral acknowledgement. No new build has been
+launched, and no user wake/manual test is requested while the user is away.

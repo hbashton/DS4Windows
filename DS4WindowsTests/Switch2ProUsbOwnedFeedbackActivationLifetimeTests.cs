@@ -1060,13 +1060,13 @@ public sealed class Switch2ProUsbOwnedFeedbackActivationLifetimeTests
         {
             runtime.setRumble(rightLightFastMotor: 64, leftHeavySlowMotor: 128);
             WaitForTransitions(1);
-            DecodeSustained(Transitions()[0], out var profileLeft, out var profileRight);
+            DecodeHeldFirstActive(Transitions()[0], out var profileLeft, out var profileRight);
 
             runtime.SetRumblePreview(lightMotorActive: true, lightMotorStrength: 200,
                 heavyMotorActive: true, heavyMotorStrength: 100);
             WaitForTransitions(3);
             var transitions = Transitions();
-            DecodeSustained(transitions[2], out var previewLeft, out var previewRight);
+            DecodeHeldFirstActive(transitions[2], out var previewLeft, out var previewRight);
             Assert.AreNotEqual(profileLeft, previewLeft);
             Assert.AreNotEqual(profileRight, previewRight);
             AssertNeutral(transitions[1]);
@@ -1074,7 +1074,7 @@ public sealed class Switch2ProUsbOwnedFeedbackActivationLifetimeTests
             runtime.ClearRumblePreview();
             WaitForTransitions(5);
             transitions = Transitions();
-            DecodeSustained(transitions[4], out var restoredLeft, out var restoredRight);
+            DecodeHeldFirstActive(transitions[4], out var restoredLeft, out var restoredRight);
             Assert.AreEqual(profileLeft, restoredLeft);
             Assert.AreEqual(profileRight, restoredRight);
             AssertNeutral(transitions[3]);
@@ -1806,17 +1806,21 @@ public sealed class Switch2ProUsbOwnedFeedbackActivationLifetimeTests
         Assert.AreEqual(right.First, right.Third);
     }
 
-    private static void DecodeSustained(byte[] report,
+    private static void DecodeHeldFirstActive(byte[] report,
         out Switch2HdRumbleGroup left, out Switch2HdRumbleGroup right)
     {
         Assert.IsTrue(Switch2UsbHdRumbleCodec.TryDecodeProController(report,
             out _, out left, out right, out _));
         Assert.IsTrue(left.First.HasNonzeroAmplitude);
         Assert.IsTrue(right.First.HasNonzeroAmplitude);
-        Assert.AreEqual(left.First, left.Second);
-        Assert.AreEqual(left.First, left.Third);
-        Assert.AreEqual(right.First, right.Second);
-        Assert.AreEqual(right.First, right.Third);
+        var neutralLeft = new Switch2HdRumbleSubframe(
+            left.First.Oscillator0ControlCode, 0, left.First.Oscillator1ControlCode, 0);
+        var neutralRight = new Switch2HdRumbleSubframe(
+            right.First.Oscillator0ControlCode, 0, right.First.Oscillator1ControlCode, 0);
+        Assert.AreEqual(neutralLeft, left.Second);
+        Assert.AreEqual(neutralLeft, left.Third);
+        Assert.AreEqual(neutralRight, right.Second);
+        Assert.AreEqual(neutralRight, right.Third);
     }
 
     private static void DecodeSidedAmplitude(byte[] report,

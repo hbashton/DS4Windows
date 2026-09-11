@@ -1,8 +1,18 @@
 [CmdletBinding()]
-param([string]$ExistingMsi)
+param(
+    [ValidateNotNullOrEmpty()][string]$ExistingMsi,
+    [ValidatePattern('^\d+\.\d+\.\d+\.\d+$')][string]$ExpectedVersion
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# Fail without prompting before any filesystem/COM work. The expected version
+# must come from the caller's build contract, never from the MSI being checked.
+if ($PSBoundParameters.ContainsKey('ExistingMsi') -ne
+    $PSBoundParameters.ContainsKey('ExpectedVersion')) {
+    throw 'ExistingMsi and ExpectedVersion must be supplied together.'
+}
 
 # Parse, then load only read-only metadata/path functions. Never execute the
 # hosted fixture's body, download/layout a bundle, or invoke Windows Installer.
@@ -19,6 +29,14 @@ foreach ($name in @('Assert-LocalPath', 'Get-PreviousMsiPayload', 'Get-MsiProper
     Invoke-Expression $function.Extent.Text
 }
 $upgradeCode = '{65E808E3-D35A-4825-AE11-8D9415F16446}'
+if ($PSBoundParameters.ContainsKey('ExistingMsi')) {
+    $resolvedMsi = (Resolve-Path -LiteralPath $ExistingMsi).Path
+    $result = @(Inspect-Msi $resolvedMsi $ExpectedVersion)
+    if ($result.Count -ne 1 -or $result[0] -isnot [hashtable]) { throw 'Actual MSI identity has pipeline contamination.' }
+    Write-Output "PASS existing MSI readonly inspection for expected version $ExpectedVersion (no installation)"
+    return
+}
+
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('ds4w-msi-metadata-' + [Guid]::NewGuid().ToString('N'))
 [void](New-Item -ItemType Directory -Path $testRoot)
 $createdFiles = [Collections.Generic.List[string]]::new()
@@ -130,12 +148,41 @@ try {
         $caseCount++
         Write-Output "PASS attached MSI payload $shape"
     }
-    if ($ExistingMsi) {
-        $resolvedMsi = (Resolve-Path -LiteralPath $ExistingMsi).Path
-        $result = @(Inspect-Msi $resolvedMsi '5.0.5.7')
-        if ($result.Count -ne 1 -or $result[0] -isnot [hashtable]) { throw 'Actual MSI identity has pipeline contamination.' }
-        Write-Output 'PASS existing MSI readonly inspection (no installation)'
+    # Exercise the same script entry point used by CI against a newer,
+    # disposable metadata-only database. Historical fixtures above stay fixed.
+    $newerMsi = Join-Path $testRoot 'newer-caller-version.msi'
+    $createdFiles.Add($newerMsi)
+    New-MetadataFixture $newerMsi @{
+        ProductName = 'DS4Windows'; ProductVersion = '5.0.5.8'
+        ProductCode = '{AFCE9079-ED1B-485E-ABFD-AFA60858A752}'; UpgradeCode = $upgradeCode
+    }
+    $callerResult = @(& $PSCommandPath -ExistingMsi $newerMsi -ExpectedVersion '5.0.5.8')
+    if ($callerResult.Count -ne 1 -or $callerResult[0] -notlike 'PASS existing MSI readonly inspection for expected version 5.0.5.8*') {
+        throw 'The actual metadata caller did not accept the explicitly expected newer version.'
+    }
+    $caseCount++
+    Write-Output 'PASS existing MSI caller accepts explicit newer expected version'
+    foreach ($callerFailure in @('wrong-expected', 'missing-expected')) {
+        $failure = $null
+        try {
+            if ($callerFailure -eq 'wrong-expected') {
+                [void](& $PSCommandPath -ExistingMsi $newerMsi -ExpectedVersion '5.0.5.7')
+            }
+            else {
+                [void](& $PSCommandPath -ExistingMsi $newerMsi)
+            }
+        }
+        catch { $failure = $_.Exception.Message }
+        if ($callerFailure -eq 'wrong-expected') {
+            if ($failure -notlike '*5.0.5.8*' -or $failure -notlike '*ProductVersion*') {
+                throw "Wrong expected version was not rejected with actual MSI metadata: $failure"
+            }
+        }
+        elseif ($failure -notlike '*ExistingMsi and ExpectedVersion must be supplied together*') {
+            throw "Missing expected version was not rejected before inspection: $failure"
+        }
         $caseCount++
+        Write-Output "PASS existing MSI caller rejects $callerFailure"
     }
     Write-Output "$caseCount MSI metadata regression cases passed without installation, application launch or driver mutation."
 }

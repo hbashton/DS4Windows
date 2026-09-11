@@ -167,7 +167,7 @@ jobs:
         shell: pwsh
         run: |
           $msi = (Resolve-Path ".\installer\DS4Windows.Package\bin\x64\Release\DS4Windows_${{ env.PRODUCT_VERSION }}_x64.msi").Path
-          .\utils\test-msi-upgrade-metadata.ps1 -ExistingMsi $msi
+          .\utils\test-msi-upgrade-metadata.ps1 -ExistingMsi $msi -ExpectedVersion "${{ env.PRODUCT_VERSION }}"
           .\utils\test-previous-msi-upgrade.ps1 -NewMsi $msi
 
       - name: Preserve installer lifecycle evidence

@@ -29,3 +29,17 @@ This record is preparation, not evidence that a release is published. Final
 source, run IDs, asset hashes, updater results, and publication status will be
 appended after those steps succeed. No live installer or driver test is required
 on the user's machine; install/repair/uninstall/upgrade tests run on hosted CI.
+
+## First CI attempt
+
+Source `747e4b4664bde932561703693c6453ad21c9e9d7`, CI run `34657242268`,
+passed all **5,413 tests** with 11 gated skips, packaging, offline layout, and
+MSI install/repair/uninstall. The next gate stopped before attempting the
+previous-release upgrade: the optional real-MSI path of the metadata checker
+still passed the historical fixture version `5.0.5.7` to `Inspect-Msi`, while
+the actual new package correctly reported `5.0.5.8`.
+
+The release remains untagged/unpublished at this point. The checker must accept
+an explicitly supplied expected build version (not infer it from the MSI under
+test), retain mismatched-version rejection, and pass again on hosted CI. No
+installer or haptics production-code change follows from this checker failure.

@@ -51,3 +51,11 @@ Status: reviewed source frozen; local gates passed; hosted DS4Windows CI/publica
 - VIIPER `v0.1.4-rc4.5.6` published as an unsigned prerelease on 2026-09-11 at 00:02:23 UTC: release ID `386698830`, 11 assets including the exact source ZIP. Windows Actions artifact `10178464223`, release asset `556070364`.
 - Broker archive SHA-256 `7A08CAE2E5A8829BC0C7CE7CCCF6EDD72AAB3DAE1FA31DC431FEA0A942BED779`; executable `89808A41610997A6DAD0807579B816C18B34C039E03E96FDC8FD2BD68434FFBB`; source ZIP `2F73D30A60ECC134215844EB81DA4FD58BD8F2B85FD6C92CCFF46DC0CF5984C8`. Independent review checked all ZIP files, notices, actual PE/embedded Go provenance and exact source ZIP commit comment without running the broker.
 - DS4Windows hosted CI, exact-tag release assets and post-publication receipt remain pending. Public notes explicitly retain the subjective haptics/game acceptance and unsupported Bluetooth Switch 2 headset-audio boundaries.
+
+### Pre-publication CI correction
+
+Main CI `34545049986` at `73fc07e` passed the complete Windows test job and built both MSI and bundle, then failed the installer source validator: the old Program.cs mutex-literal assertion remained after moving the mutex into `SetupMutationOwnership.cs`. No DS4Windows tag or public assets were created from this failed run.
+
+The validator now checks the exact mutex/acquisition/busy/abandonment/release rules in the production helper and the delegation/cleanup gates in Program.cs through one tested function. No runtime safety check was removed. Six additional real-source regressions cover this layout and reject wrong mutex identity, missing delegation, gate bypass, missing release and forbidden RunOnce registration; all **28** packaging cases pass. The application binaries are unchanged from the full green local/hosted regression suites.
+
+A fresh local self-contained publish, portable composition, MSI and bundle build, full installer validator, USB-IP downgrade/reboot simulation, startup-task simulations and installer state simulation then passed. Evidence is under `isolated_results/rc456-stabilization/publish-console.log` and `installer-console.log`; local composition is under `isolated_results/rc456-composition`. These files were not installed, launched, or substituted for the required tagged CI public artifacts. The hosted rerun remains required before tagging.

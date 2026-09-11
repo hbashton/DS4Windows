@@ -251,6 +251,49 @@ def validate_release_workflow(release_workflow: str) -> None:
             )
 
 
+def validate_setup_actions(setup_actions: str, setup_mutation_ownership: str) -> None:
+    # The named mutex lives in the production ownership helper. Program.cs
+    # must invoke that helper, not duplicate its implementation or its name.
+    for contract in [r'@"Global\DS4Windows-VIIPER-Setup"', 'setupMutex.WaitOne(0)',
+                     'catch (AbandonedMutexException)', 'return 1618;',
+                     'return action();', 'setupMutex.ReleaseMutex();']:
+        if contract not in setup_mutation_ownership:
+            raise SystemExit("Setup mutation ownership contract missing: " + contract)
+    for contract in [
+        'SetupResumeShortcut',
+        'KillProcessTree(process)',
+        'IsInfrastructureCommitted()',
+        'ValidateSuppliedInteractiveUser',
+        'RegistryView.Registry64',
+        'return SetupMutationOwnership.Run(action, WriteFallbackLog);',
+        'return RunWithSetupMutex(() => PostUninstallCleanupLocked(installRoot));',
+        'ValidateManagedInstallRoot(installRoot)',
+        'FileAttributes.ReparsePoint',
+        'EnsureDirectoryPathHasNoReparsePoints(resumeRoot)',
+        'ProtectResumeDirectory(resumeRoot, targetUser.Sid)',
+        'HashesEqual(bundleSource, stagedBundle)',
+        '=== DS4Windows setup invocation ',
+        'IsRecognizedProductProcess(process, processName',
+        'FileVersionInfo.GetVersionInfo(executablePath)',
+        'EnsureDirectoryPathHasNoReparsePoints(InstallerLogRoot)',
+        'return RunWithSetupMutex(PreflightLocked);',
+        'completed with exit code',
+        'AppendLogWithRetry',
+        'SystemTool("WindowsPowerShell", "v1.0",',
+        'arguments.Append(" -CorrelationId ")',
+        'ConfigureCommonShortcuts(ds4Path, desktopShortcut)',
+        'ReadArgument(args, "--correlation-id")',
+        'NormalizeCorrelationId(',
+        'Environment.SpecialFolder.CommonPrograms',
+        'Environment.SpecialFolder.CommonDesktopDirectory',
+        'RemoveCommonShortcuts()',
+    ]:
+        if contract not in setup_actions:
+            raise SystemExit("Setup action safety contract missing: " + contract)
+    if 'SetValue("DS4WindowsSetupResume"' in setup_actions:
+        raise SystemExit("Setup must not create a custom HKLM RunOnce entry.")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--publish-root", type=Path, required=True)
@@ -568,45 +611,7 @@ def main() -> int:
 
     setup_actions = (installer_root / "DS4Windows.SetupActions" / "Program.cs").read_text(encoding="utf-8")
     setup_mutation_ownership = (installer_root / "DS4Windows.SetupActions" / "SetupMutationOwnership.cs").read_text(encoding="utf-8")
-    for contract in ['Global\\DS4Windows-VIIPER-Setup', 'setupMutex.WaitOne(0)',
-                     'catch (AbandonedMutexException)', 'return 1618;',
-                     'return action();', 'setupMutex.ReleaseMutex();']:
-        if contract not in setup_mutation_ownership:
-            raise SystemExit("Setup mutation ownership contract missing: " + contract)
-    for contract in [
-        r'@"Global\DS4Windows-VIIPER-Setup"',
-        'SetupResumeShortcut',
-        'KillProcessTree(process)',
-        'IsInfrastructureCommitted()',
-        'ValidateSuppliedInteractiveUser',
-        'RegistryView.Registry64',
-        'return SetupMutationOwnership.Run(action, WriteFallbackLog);',
-        'return RunWithSetupMutex(() => PostUninstallCleanupLocked(installRoot));',
-        'ValidateManagedInstallRoot(installRoot)',
-        'FileAttributes.ReparsePoint',
-        'EnsureDirectoryPathHasNoReparsePoints(resumeRoot)',
-        'ProtectResumeDirectory(resumeRoot, targetUser.Sid)',
-        'HashesEqual(bundleSource, stagedBundle)',
-        '=== DS4Windows setup invocation ',
-        'IsRecognizedProductProcess(process, processName',
-        'FileVersionInfo.GetVersionInfo(executablePath)',
-        'EnsureDirectoryPathHasNoReparsePoints(InstallerLogRoot)',
-        'return RunWithSetupMutex(PreflightLocked);',
-        'completed with exit code',
-        'AppendLogWithRetry',
-        'SystemTool("WindowsPowerShell", "v1.0",',
-        'arguments.Append(" -CorrelationId ")',
-        'ConfigureCommonShortcuts(ds4Path, desktopShortcut)',
-        'ReadArgument(args, "--correlation-id")',
-        'NormalizeCorrelationId(',
-        'Environment.SpecialFolder.CommonPrograms',
-        'Environment.SpecialFolder.CommonDesktopDirectory',
-        'RemoveCommonShortcuts()',
-    ]:
-        if contract not in setup_actions:
-            raise SystemExit("Setup action safety contract missing: " + contract)
-    if 'SetValue("DS4WindowsSetupResume"' in setup_actions:
-        raise SystemExit("Setup must not create a custom HKLM RunOnce entry.")
+    validate_setup_actions(setup_actions, setup_mutation_ownership)
 
     backend_script = (
         args.bundle_source.parent.parent.parent

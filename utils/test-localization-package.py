@@ -292,6 +292,57 @@ class LocalizationPackageTests(unittest.TestCase):
                 VALIDATOR.validate_localization_package(package)
 
 
+class SetupActionValidationTests(unittest.TestCase):
+    @staticmethod
+    def sources():
+        root = REPOSITORY / "installer" / "DS4Windows.SetupActions"
+        return ((root / "Program.cs").read_text(encoding="utf-8"),
+                (root / "SetupMutationOwnership.cs").read_text(encoding="utf-8"))
+
+    def test_actual_setup_actions_and_extracted_ownership_helper_pass(self):
+        program, helper = self.sources()
+        self.assertNotIn(r'@"Global\DS4Windows-VIIPER-Setup"', program)
+        VALIDATOR.validate_setup_actions(program, helper)
+
+    def test_installer_uses_the_validated_setup_action_entrypoint(self):
+        source = (REPOSITORY / "utils/validate-installer.py").read_text(encoding="utf-8")
+        main = source[source.index("def main() -> int:"):]
+        self.assertIn("    validate_setup_actions(setup_actions, setup_mutation_ownership)", main)
+
+    def test_wrong_mutex_name_is_rejected_in_actual_helper(self):
+        program, helper = self.sources()
+        original = r'@"Global\DS4Windows-VIIPER-Setup"'
+        self.assertIn(original, helper)
+        with self.assertRaisesRegex(SystemExit, "Setup mutation ownership contract missing"):
+            VALIDATOR.validate_setup_actions(program, helper.replace(original, r'@"Local\Different-Setup"'))
+
+    def test_program_cannot_bypass_the_shared_ownership_gate(self):
+        program, helper = self.sources()
+        for original in (
+            'return SetupMutationOwnership.Run(action, WriteFallbackLog);',
+            'return RunWithSetupMutex(() => PostUninstallCleanupLocked(installRoot));',
+            'return RunWithSetupMutex(PreflightLocked);',
+        ):
+            with self.subTest(contract=original):
+                self.assertIn(original, program)
+                with self.assertRaisesRegex(SystemExit, "Setup action safety contract missing"):
+                    VALIDATOR.validate_setup_actions(program.replace(original, 'return 0;'), helper)
+
+    def test_helper_cannot_drop_busy_acquisition_abandonment_or_release_contracts(self):
+        program, helper = self.sources()
+        for original in ('setupMutex.WaitOne(0)', 'catch (AbandonedMutexException)',
+                         'return 1618;', 'return action();', 'setupMutex.ReleaseMutex();'):
+            with self.subTest(contract=original):
+                self.assertIn(original, helper)
+                with self.assertRaisesRegex(SystemExit, "Setup mutation ownership contract missing"):
+                    VALIDATOR.validate_setup_actions(program, helper.replace(original, 'removed'))
+
+    def test_custom_hklm_runonce_remains_forbidden(self):
+        program, helper = self.sources()
+        with self.assertRaisesRegex(SystemExit, "custom HKLM RunOnce"):
+            VALIDATOR.validate_setup_actions(program + '\nSetValue("DS4WindowsSetupResume", "unsafe")', helper)
+
+
 class ReleaseWorkflowValidationTests(unittest.TestCase):
     @staticmethod
     def workflow():

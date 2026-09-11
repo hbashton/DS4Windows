@@ -216,24 +216,24 @@ public sealed class Switch2AudioHapticsOutputTests
         using var f = new RuntimeFixture(model);
         Assert.IsTrue(f.Runtime.TryCreateAudioHapticsOutput(out var old));
         Assert.IsFalse(old.IsReady);
-        Assert.IsFalse(old.TryWrite(f.Samples, AudioHapticsMode.Mix, Stopwatch.GetTimestamp()));
+        Assert.IsFalse(old.TryWrite(f.Samples, AudioHapticsMode.Mix, f.CaptureTimestamp));
         f.Activate();
         Assert.IsTrue(old.IsReady);
-        Assert.IsTrue(old.TryWrite(f.Samples, AudioHapticsMode.Mix, Stopwatch.GetTimestamp()));
+        Assert.IsTrue(old.TryWrite(f.Samples, AudioHapticsMode.Mix, f.CaptureTimestamp));
         Assert.IsTrue(f.Lease.Calls > 0);
         Assert.IsTrue(f.Runtime.TryCreateAudioHapticsOutput(out var current));
         old.Dispose();
-        Assert.IsFalse(old.TryWrite(f.Samples, AudioHapticsMode.Mix, Stopwatch.GetTimestamp()));
+        Assert.IsFalse(old.TryWrite(f.Samples, AudioHapticsMode.Mix, f.CaptureTimestamp));
         Assert.IsTrue(current.IsReady);
-        Assert.IsTrue(current.TryWrite(f.Samples, AudioHapticsMode.Mix, Stopwatch.GetTimestamp()));
-        Assert.IsTrue(current.TryWrite(new byte[64], AudioHapticsMode.Mix, Stopwatch.GetTimestamp()));
+        Assert.IsTrue(current.TryWrite(f.Samples, AudioHapticsMode.Mix, f.CaptureTimestamp));
+        Assert.IsTrue(current.TryWrite(new byte[64], AudioHapticsMode.Mix, f.CaptureTimestamp));
         Global.EnableOutputDataToDS4[0] = false;
         Assert.IsFalse(current.IsReady);
-        Assert.IsFalse(current.TryWrite(f.Samples, AudioHapticsMode.Mix, Stopwatch.GetTimestamp()));
+        Assert.IsFalse(current.TryWrite(f.Samples, AudioHapticsMode.Mix, f.CaptureTimestamp));
         Global.EnableOutputDataToDS4[0] = true;
         f.Runtime.TryPublishTerminalNeutral();
         Assert.IsFalse(current.IsReady);
-        Assert.IsFalse(current.TryWrite(f.Samples, AudioHapticsMode.Mix, Stopwatch.GetTimestamp()));
+        Assert.IsFalse(current.TryWrite(f.Samples, AudioHapticsMode.Mix, f.CaptureTimestamp));
         current.Dispose();
     }
 
@@ -247,7 +247,7 @@ public sealed class Switch2AudioHapticsOutputTests
         Task<bool> writer;
         lock (publicationGate)
         {
-            writer = Task.Run(() => output.TryWrite(f.Samples, AudioHapticsMode.Mix, Stopwatch.GetTimestamp()));
+            writer = Task.Run(() => output.TryWrite(f.Samples, AudioHapticsMode.Mix, f.CaptureTimestamp));
             Assert.IsTrue(writer.Wait(TimeSpan.FromSeconds(2)), "Writer must not block on a publication held by profile processing.");
             Assert.IsFalse(writer.Result);
             output.Dispose();
@@ -262,9 +262,19 @@ public sealed class Switch2AudioHapticsOutputTests
         internal readonly Switch2RuntimeInputDevice Runtime;
         internal readonly Switch2BluetoothFeedbackLifetime Feedback;
         internal readonly Lease Lease;
+        private readonly bool useManualAudioClock;
+        // A whole-second initial capture is exact for every QPC frequency.
+        // Advance logical microseconds directly, avoiding fractional-tick
+        // rounding across the 23,999 / 24,000 microsecond boundary assertion.
+        internal ulong NowMicroseconds = (ulong)(Stopwatch.GetTimestamp() / Stopwatch.Frequency) * 1_000_000;
+        internal long CaptureTimestamp => useManualAudioClock ? checked((long)
+            ((UInt128)NowMicroseconds * (ulong)Stopwatch.Frequency / 1_000_000)) : Stopwatch.GetTimestamp();
+        internal void AdvanceMicroseconds(ulong microseconds) => NowMicroseconds = checked(NowMicroseconds + microseconds);
         internal readonly byte[] Samples = Enumerable.Range(0, 64).Select(i => unchecked((byte)(sbyte)(i % 4 < 2 ? 80 : -80))).ToArray();
-        internal RuntimeFixture(Switch2ControllerModel model = Switch2ControllerModel.ProController2)
+        internal RuntimeFixture(Switch2ControllerModel model = Switch2ControllerModel.ProController2,
+            bool useManualAudioClock = true)
         {
+            this.useManualAudioClock = useManualAudioClock;
             Global.EnableOutputDataToDS4[0] = true;
             Lease = new Lease(model);
             Assert.IsTrue(Switch2BluetoothFeedbackLifetime.TryCreate(Lease, model, 7, 11, out Feedback));
@@ -272,6 +282,18 @@ public sealed class Switch2AudioHapticsOutputTests
                 Switch2RuntimeInputDevice.TryCreatePro(7, 11, Switch2Transport.BluetoothLe, out Runtime, out _) :
                 Switch2RuntimeInputDevice.TryCreateStandaloneJoyCon(model, 7, 11, out Runtime, out _);
             Assert.IsTrue(created);
+            if (useManualAudioClock)
+            {
+                Func<ulong> clock = () => NowMicroseconds;
+                typeof(Switch2RuntimeInputDevice).GetField("audioHapticsClock",
+                    BindingFlags.NonPublic | BindingFlags.Instance).SetValue(Runtime, clock);
+                var sink = (Switch2HdRumbleDeliverySink)Field(Feedback, "sink");
+                typeof(Switch2HdRumbleDeliverySink).GetField("feedbackClock",
+                    BindingFlags.NonPublic | BindingFlags.Instance).SetValue(sink, clock);
+                var writer = (Switch2BluetoothHdRumblePhysicalWriter)Field(sink, "writer");
+                typeof(Switch2BluetoothHdRumblePhysicalWriter).GetField("submissionClock",
+                    BindingFlags.NonPublic | BindingFlags.Instance).SetValue(writer, clock);
+            }
             Assert.IsTrue(Runtime.TryAttachBluetoothFeedbackLifetime(model, 7, 11, Feedback));
             Runtime.DeviceSlotNumber = 0;
         }

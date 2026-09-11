@@ -149,16 +149,61 @@ public class Switch2BluetoothHdRumblePhysicalWriterTests
         Assert.AreEqual(0, lease.Calls);
     }
 
+    [DataTestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void DefaultPhysicalClockRejectsExpiredAndFutureSamplesBeforeTransport(bool future)
+    {
+        RecordingLease lease = new(Switch2ControllerModel.ProController2);
+        Switch2BluetoothHdRumblePhysicalWriter writer = new(lease,
+            Switch2ControllerModel.ProController2, DeviceGeneration, TransportGeneration);
+        Assert.IsTrue(ControllerFeedbackClock.TryGetTimestampMicroseconds(out ulong now));
+        Assert.IsTrue(now > ControllerFeedbackFrame.MaxTimeToLiveMicroseconds);
+        ulong captured = future ? now + 10_000_000 : now - ControllerFeedbackFrame.MaxTimeToLiveMicroseconds - 1;
+        var result = writer.TryWrite(CreateSubmission(1, 17, capturedAt: captured));
+        Assert.AreEqual(Switch2HdRumblePhysicalWriteFailure.InvalidSubmission, result.Failure);
+        Assert.AreEqual(0, lease.Calls);
+    }
+
+    [TestMethod]
+    public void ControlledPhysicalClockRetainsExactFreshnessBoundsAndFailsClosed()
+    {
+        const ulong captured = 1_000_000;
+        ulong now = captured;
+        bool clockFails = false;
+        RecordingLease lease = new(Switch2ControllerModel.ProController2);
+        Switch2BluetoothHdRumblePhysicalWriter writer = new(lease,
+            Switch2ControllerModel.ProController2, DeviceGeneration, TransportGeneration,
+            submissionClock: () => clockFails ? throw new InvalidOperationException("clock unavailable") : now);
+        var submission = CreateSubmission(1, 17, capturedAt: captured);
+        Assert.IsTrue(writer.TryWrite(submission).Succeeded);
+        now += ControllerFeedbackFrame.MaxTimeToLiveMicroseconds;
+        Assert.IsTrue(writer.TryWrite(submission).Succeeded,
+            "The physical writer's existing inclusive TTL boundary must remain unchanged.");
+        now++;
+        Assert.AreEqual(Switch2HdRumblePhysicalWriteFailure.InvalidSubmission, writer.TryWrite(submission).Failure);
+        now = captured - 1;
+        Assert.AreEqual(Switch2HdRumblePhysicalWriteFailure.InvalidSubmission, writer.TryWrite(submission).Failure);
+        clockFails = true;
+        Assert.AreEqual(Switch2HdRumblePhysicalWriteFailure.InvalidSubmission, writer.TryWrite(submission).Failure);
+        Assert.AreEqual(2, lease.Calls);
+        Assert.IsTrue(writer.TryWrite(Switch2HdRumblePhysicalSubmission.CreateStop(
+            DeviceGeneration, TransportGeneration, 32)).Succeeded,
+            "A failed sample clock must not prevent an explicit terminal neutral.");
+    }
+
     private static Switch2HdRumblePhysicalSubmission CreateSubmission(
         ulong sequence, int seed,
         ulong deviceGeneration = DeviceGeneration,
-        ulong transportGeneration = TransportGeneration)
+        ulong transportGeneration = TransportGeneration,
+        ulong? capturedAt = null)
     {
         if (!ControllerFeedbackClock.TryGetTimestampMicroseconds(
                 out ulong timestampMicroseconds))
         {
             throw new InvalidOperationException();
         }
+        if (capturedAt.HasValue) timestampMicroseconds = capturedAt.Value;
 
         ushort a = (ushort)((seed * 3 + 1) & 0x03FF);
         ushort b = (ushort)((seed * 5 + 2) & 0x03FF);

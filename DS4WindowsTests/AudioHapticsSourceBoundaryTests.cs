@@ -25,7 +25,7 @@ public sealed class AudioHapticsSourceBoundaryTests
     {
         using var nintendo = new NintendoFixture();
         nintendo.Activate();
-        using var f = new Fixture(device: nintendo.Runtime);
+        using var f = new Fixture(device: nintendo.Runtime, captureTimestamp: () => nintendo.CaptureTimestamp);
         f.Invoke("EnsureNintendoOutput");
         var oldOutput = f.Get<Switch2AudioHapticsOutput>("nintendoOutput");
         Assert.IsTrue(oldOutput.IsReady);
@@ -63,7 +63,7 @@ public sealed class AudioHapticsSourceBoundaryTests
     {
         using var nintendo = new NintendoFixture();
         nintendo.Activate();
-        using var f = new Fixture(device: nintendo.Runtime);
+        using var f = new Fixture(device: nintendo.Runtime, captureTimestamp: () => nintendo.CaptureTimestamp);
         f.Invoke("EnsureNintendoOutput");
         nintendo.Samples.CopyTo(f.Get<byte[]>("writerFrame"), 0);
         long sameServiceGeneration = f.Get<long>("captureGeneration");
@@ -100,7 +100,7 @@ public sealed class AudioHapticsSourceBoundaryTests
     public void NintendoReadinessTracksCreatedActiveAndDisabledOutputWithoutStartingCapture()
     {
         using var nintendo = new NintendoFixture();
-        using var f = new Fixture(device: nintendo.Runtime);
+        using var f = new Fixture(device: nintendo.Runtime, captureTimestamp: () => nintendo.CaptureTimestamp);
         typeof(ProcessLoopbackWaveCapture).GetField("currentProcessId",
             BindingFlags.Instance | BindingFlags.NonPublic).SetValue(f.Capture, Environment.ProcessId);
         f.Invoke("EnsureNintendoOutput");
@@ -133,6 +133,52 @@ public sealed class AudioHapticsSourceBoundaryTests
         f.Invoke("RetireStoppedCapture");
         Assert.IsNull(f.Get<object>("stoppedCaptureSource"));
         Assert.IsNull(f.Get<object>("processCapture"));
+    }
+
+    [TestMethod]
+    public void NintendoBoundaryFixtureIgnoresSetupWallTimeButRejectsActualTwentyFourMillisecondAge()
+    {
+        using var nintendo = new NintendoFixture();
+        nintendo.Activate();
+        using var f = new Fixture(device: nintendo.Runtime, captureTimestamp: () => nintendo.CaptureTimestamp);
+        f.Invoke("EnsureNintendoOutput");
+        nintendo.Samples.CopyTo(f.Get<byte[]>("writerFrame"), 0);
+        long generation = f.Get<long>("captureGeneration");
+        long captured = nintendo.CaptureTimestamp;
+        ulong capturedMicros = nintendo.NowMicroseconds;
+        var setup = Stopwatch.StartNew();
+        Thread.Sleep(50); // Deterministic simulated cold JIT/reflection/setup pause.
+        Assert.IsTrue(setup.ElapsedMilliseconds >= 24);
+        Assert.AreEqual(capturedMicros, nintendo.NowMicroseconds);
+        Assert.IsTrue(f.PublishAt(generation, 1, captured),
+            "Setup wall time cannot age a frame in a controlled-clock ownership test.");
+        Assert.IsTrue(nintendo.Lease.Calls > 0);
+        nintendo.AdvanceMicroseconds(23_999);
+        Assert.IsTrue(f.PublishAt(generation, 1, captured));
+        nintendo.AdvanceMicroseconds(1);
+        int calls = nintendo.Lease.Calls;
+        Assert.IsFalse(f.PublishAt(generation, 1, captured),
+            "The production >=24 ms rejection is unchanged; only logical time advances it.");
+        Assert.AreEqual(calls, nintendo.Lease.Calls);
+        Assert.IsFalse(f.PublishAt(generation, 1, nintendo.CaptureTimestamp + Stopwatch.Frequency),
+            "A controlled clock must not make future-dated samples admissible.");
+    }
+
+    [TestMethod]
+    public void DefaultProductionAudioClockRejectsSamplesAgedByActualWallTime()
+    {
+        using var nintendo = new NintendoFixture(useManualAudioClock: false);
+        nintendo.Activate();
+        using var f = new Fixture(device: nintendo.Runtime);
+        f.Invoke("EnsureNintendoOutput");
+        Assert.IsTrue(f.Get<Switch2AudioHapticsOutput>("nintendoOutput").IsReady);
+        nintendo.Samples.CopyTo(f.Get<byte[]>("writerFrame"), 0);
+        long captured = Stopwatch.GetTimestamp();
+        Thread.Sleep(50);
+        int calls = nintendo.Lease.Calls;
+        Assert.IsFalse(f.PublishAt(f.Get<long>("captureGeneration"), 1, captured));
+        Assert.AreEqual(calls, nintendo.Lease.Calls,
+            "A real-clock expired sample must never reach the physical lease.");
     }
 
     [TestMethod]
@@ -344,12 +390,16 @@ public sealed class AudioHapticsSourceBoundaryTests
         internal readonly AudioHapticsService.SlotRuntime Runtime;
         internal readonly ProcessLoopbackWaveCapture Capture;
         internal readonly AudioHapticsProfileSettings Settings;
+        private readonly Func<long> captureTimestamp;
+        private readonly Func<long, bool, int, long, long, bool> publishNintendo;
         private readonly WaveFormat format = WaveFormat.CreateIeeeFloatWaveFormat(48000, 2);
         private readonly byte[] pcm = CreatePcm();
         internal byte[] Pcm => pcm;
 
-        internal Fixture(bool automatic = false, DS4Device device = null)
+        internal Fixture(bool automatic = false, DS4Device device = null,
+            Func<long> captureTimestamp = null)
         {
+            this.captureTimestamp = captureTimestamp ?? Stopwatch.GetTimestamp;
             Settings = new AudioHapticsProfileSettings
             {
                 Enabled = true, Source = AudioHapticsSourceKind.AppSession,
@@ -361,6 +411,8 @@ public sealed class AudioHapticsSourceBoundaryTests
             typeof(ProcessLoopbackWaveCapture).GetField("currentSessionGeneration", Flags).SetValue(Capture, 1L);
             Runtime = new AudioHapticsService.SlotRuntime(0, device, Settings,
                 OutContType.ViiperDualSense, "", -1);
+            publishNintendo = RuntimeType.GetMethod("TryPublishNintendoFrame", Flags)
+                .CreateDelegate<Func<long, bool, int, long, long, bool>>(Runtime);
             Set("processCapture", Capture);
             Bind(Capture);
         }
@@ -372,8 +424,10 @@ public sealed class AudioHapticsSourceBoundaryTests
                 Capture.CurrentSessionGeneration) : new WaveInEventArgs(pcm, pcm.Length));
         internal void SourceChanged(object source, int pid) => Invoke("ProcessCapture_SourceChanged", source,
             new ProcessAudioSourceChangedEventArgs(pid, "synthetic source", "test"));
-        internal bool Publish(long generation, long leaseGeneration) => (bool)Invoke("TryPublishNintendoFrame",
-            generation, true, 80, Stopwatch.GetTimestamp(), leaseGeneration);
+        internal bool Publish(long generation, long leaseGeneration) =>
+            PublishAt(generation, leaseGeneration, captureTimestamp());
+        internal bool PublishAt(long generation, long leaseGeneration, long captured) =>
+            publishNintendo(generation, true, 80, captured, leaseGeneration);
         internal T Get<T>(string field) => (T)RuntimeType.GetField(field, Flags).GetValue(Runtime);
         internal void Set(string field, object value) => RuntimeType.GetField(field, Flags).SetValue(Runtime, value);
         internal object Invoke(string method, params object[] args) => RuntimeType.GetMethod(method, Flags).Invoke(Runtime, args);

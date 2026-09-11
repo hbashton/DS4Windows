@@ -183,6 +183,7 @@ internal sealed class Switch2BluetoothHdRumblePhysicalWriter :
     private readonly Switch2ControllerModel model;
     private readonly ulong deviceGeneration;
     private readonly ulong transportGeneration;
+    private readonly Func<ulong> submissionClock;
     private readonly byte[] pendingPayload = new byte[
         Switch2BluetoothHdRumbleCodec.ProControllerPayloadLength];
 
@@ -195,7 +196,8 @@ internal sealed class Switch2BluetoothHdRumblePhysicalWriter :
     internal Switch2BluetoothHdRumblePhysicalWriter(
         ISwitch2BluetoothHdRumbleTransportLease lease,
         Switch2ControllerModel model, ulong deviceGeneration,
-        ulong transportGeneration, byte initialCounter = 0)
+        ulong transportGeneration, byte initialCounter = 0,
+        Func<ulong> submissionClock = null)
     {
         this.lease = lease ?? throw new ArgumentNullException(nameof(lease));
         if (PayloadLengthFor(model) == 0)
@@ -228,6 +230,7 @@ internal sealed class Switch2BluetoothHdRumblePhysicalWriter :
         this.model = model;
         this.deviceGeneration = deviceGeneration;
         this.transportGeneration = transportGeneration;
+        this.submissionClock = submissionClock;
         nextCounter = initialCounter;
     }
 
@@ -254,7 +257,7 @@ internal sealed class Switch2BluetoothHdRumblePhysicalWriter :
                 Switch2HdRumblePhysicalWriteFailure.StaleLifetime);
         }
         if (!submission.IsStop &&
-            (!ControllerFeedbackClock.TryGetTimestampMicroseconds(
+            (!TryGetSubmissionTimestamp(
                     out ulong nowMicroseconds) ||
                 !IsFreshAt(submission, nowMicroseconds)))
         {
@@ -378,6 +381,16 @@ internal sealed class Switch2BluetoothHdRumblePhysicalWriter :
                 JoyCon2RightCharacteristicUuid,
             _ => Guid.Empty,
         };
+
+    private bool TryGetSubmissionTimestamp(out ulong timestamp)
+    {
+        // Default production admission remains host-wide QPC. The internal
+        // seam keeps deterministic tests on one clock through final framing.
+        if (submissionClock == null)
+            return ControllerFeedbackClock.TryGetTimestampMicroseconds(out timestamp);
+        try { timestamp = submissionClock(); return true; }
+        catch { timestamp = 0; return false; }
+    }
 
     private static bool IsFreshAt(
         in Switch2HdRumblePhysicalSubmission submission,

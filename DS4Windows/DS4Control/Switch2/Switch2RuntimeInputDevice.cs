@@ -220,10 +220,12 @@ public sealed partial class Switch2RuntimeInputDevice : DS4Device
         Switch2Transport transport, ulong runtimeGeneration,
         Switch2JoyConRuntimeBindingMode joyConBindingMode, ulong pairEpoch,
         ulong leftDeviceGeneration, ulong leftTransportGeneration,
-        ulong rightDeviceGeneration, ulong rightTransportGeneration)
+        ulong rightDeviceGeneration, ulong rightTransportGeneration,
+        Func<ulong> audioHapticsClock = null)
         : base(displayName, inputDeviceType, connectionType)
     {
         this.transport = transport;
+        this.audioHapticsClock = audioHapticsClock;
         renewLocalRumbleLeases = RenewLocalRumbleLeases;
         // Only the opt-in portable probing session suppresses automatic idle
         // closure. No profile setting is changed; manual Stop/disconnect works.

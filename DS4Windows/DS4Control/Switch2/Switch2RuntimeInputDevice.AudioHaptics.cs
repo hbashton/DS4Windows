@@ -22,6 +22,18 @@ internal sealed class Switch2AudioHapticsOutput : IDisposable
 
 public sealed partial class Switch2RuntimeInputDevice
 {
+    private readonly Func<ulong> audioHapticsClock;
+
+    private bool TryGetAudioHapticsTimestamp(out ulong timestamp)
+    {
+        // Production instances retain the host-wide QPC clock. A private
+        // construction seam lets boundary tests advance time independently
+        // of reflection/JIT/scheduler delays without relaxing the live TTL.
+        if (audioHapticsClock == null)
+            return ControllerFeedbackClock.TryGetTimestampMicroseconds(out timestamp);
+        try { timestamp = audioHapticsClock(); return true; }
+        catch { timestamp = 0; return false; }
+    }
     private Switch2AudioHapticsOutput audioHapticsOutput;
     private ISwitch2AudioHapticsLifetime audioHapticsLifetime;
     private ControllerFeedbackStateLanePump.Lane audioHapticsLane;
@@ -73,7 +85,7 @@ public sealed partial class Switch2RuntimeInputDevice
         if (samples.Length != 64 || mode is not (AudioHapticsMode.Mix or AudioHapticsMode.Replace) ||
             capturedTimestamp < 0 || !ControllerFeedbackClock.TryConvertQpcTicks(
                 (ulong)capturedTimestamp, (ulong)Stopwatch.Frequency, out ulong captured) ||
-            !ControllerFeedbackClock.TryGetTimestampMicroseconds(out ulong now) ||
+            !TryGetAudioHapticsTimestamp(out ulong now) ||
             captured > now || now - captured >= Switch2AudioHapticsLifetime.MaximumSampleAgeMicroseconds) return false;
         lock (localFeedbackGate)
         {
@@ -87,7 +99,7 @@ public sealed partial class Switch2RuntimeInputDevice
             if (audioHapticsWithdrawalPending && !WithdrawAudioHapticsNoLock()) return false;
             if (!DualSenseHapticsTranslator.TryTranslatePcmToSwitch2Groups(samples, out var left, out var right)) return false;
             if (!HasAudioAmplitude(left) && !HasAudioAmplitude(right)) return WithdrawAudioHapticsNoLock();
-            if (!ControllerFeedbackClock.TryGetTimestampMicroseconds(out now) ||
+            if (!TryGetAudioHapticsTimestamp(out now) ||
                 captured > now || now - captured >= Switch2AudioHapticsLifetime.MaximumSampleAgeMicroseconds) return false;
             return audioHapticsLifetime.TryPublishAudio(audioHapticsLane, left, right, mode, captured, now);
         }
@@ -134,7 +146,7 @@ public sealed partial class Switch2RuntimeInputDevice
     private bool WithdrawAudioHapticsNoLock()
     {
         if (audioHapticsLane == null) return true;
-        if (!ControllerFeedbackClock.TryGetTimestampMicroseconds(out ulong now)) return false;
+        if (!TryGetAudioHapticsTimestamp(out ulong now)) return false;
         bool withdrawn = audioHapticsLifetime.TryWithdrawAudio(audioHapticsLane, now);
         audioHapticsWithdrawalPending = !withdrawn;
         if (!withdrawn) rumbleMaintenanceWorker?.Wake();

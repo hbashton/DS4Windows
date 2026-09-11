@@ -493,6 +493,11 @@ namespace DS4Windows.InputDevices
         private DS4HapticState previousHapticState = new DS4HapticState();
         private long preparedLocalRumbleGeneration;
         private long submittedLocalRumbleGeneration;
+        private long preparedLocalLeftTriggerGeneration;
+        private long preparedLocalRightTriggerGeneration;
+        private long submittedLocalLeftTriggerGeneration;
+        private long submittedLocalRightTriggerGeneration;
+        private readonly byte[] localTriggerStateReport = new byte[398];
         private byte[] outputBTCrc32Head = new byte[] { 0xA2 };
         //private byte outputPendCount = 0;
         private new GyroMouseSensDualSense gyroMouseSensSettings;
@@ -2359,7 +2364,8 @@ namespace DS4Windows.InputDevices
         }
 
         private bool TryQueueBluetoothAudioPacerReport(byte[] report,
-            long hapticsExpiryQpc, out bool pacerOwnsTransport)
+            long hapticsExpiryQpc, out bool pacerOwnsTransport,
+            DualSenseBluetoothAudioPacer pendingNativeCapacityOwner = null)
         {
             if (!TryClaimBluetoothAudioPacer(
                     out DualSenseBluetoothAudioPacer pacer,
@@ -2370,6 +2376,12 @@ namespace DS4Windows.InputDevices
 
             try
             {
+                if (pendingNativeCapacityOwner != null)
+                {
+                    return ReferenceEquals(pacer, pendingNativeCapacityOwner) &&
+                        pacer.TryQueueSpeakerReportBeforePendingNativeState(report,
+                            hapticsExpiryQpc);
+                }
                 return pacer.TryQueueReport(report,
                     hapticsExpiryQpc);
             }
@@ -3837,6 +3849,16 @@ namespace DS4Windows.InputDevices
                 pendingProfileMuteReleaseStrobes |=
                     GetProfileMuteReleaseStrobes(
                         activePhysicalOutputState, snapshot);
+                DualSensePhysicalOutputSnapshot previousTriggers =
+                    activePhysicalOutputState.ForLocalTriggerReport();
+                DualSensePhysicalOutputSnapshot nextTriggers =
+                    snapshot.ForLocalTriggerReport();
+                if (!SameLocalTriggerEffect(previousTriggers.LeftTrigger,
+                        nextTriggers.LeftTrigger))
+                    preparedLocalLeftTriggerGeneration++;
+                if (!SameLocalTriggerEffect(previousTriggers.RightTrigger,
+                        nextTriggers.RightTrigger))
+                    preparedLocalRightTriggerGeneration++;
                 activePhysicalOutputState = snapshot;
 
                 // These are compositor copies. Only this physical owner
@@ -6570,6 +6592,9 @@ namespace DS4Windows.InputDevices
                     published = WriteReport();
                 }
 
+                if (published && conType == ConnectionType.BT)
+                    published = TryPublishPreparedLocalTriggerState();
+
                 if (!published)
                 {
                     // Keep dirty state pending so a transient helper queue/fault
@@ -6840,7 +6865,7 @@ namespace DS4Windows.InputDevices
                     outputState.PreviewHeavyRumbleStrength : (byte)0;
         }
 
-        private static void MergeControllerStateIntoV5AudioSnapshot(
+        internal static void MergeControllerStateIntoV5AudioSnapshot(
             byte[] source, int sourceOffset, byte[] destination,
             int destinationOffset)
         {
@@ -7320,9 +7345,12 @@ namespace DS4Windows.InputDevices
                 return false;
             }
 
+            DualSenseBluetoothAudioPacer pendingNativeCapacityOwner = null;
             if (!TryPublishPendingBluetoothNativeGameTransition())
             {
-                return false;
+                pendingNativeCapacityOwner = pendingBluetoothNativeGameCapacityOwner;
+                if (pendingNativeCapacityOwner == null)
+                    return false;
             }
 
             byte[] combined = bluetoothCombinedSpeakerWorkingReport;
@@ -7384,7 +7412,8 @@ namespace DS4Windows.InputDevices
 
             long hapticsExpiryQpc = PersistentBluetoothHapticsExpiryQpc;
             bool written = TryQueueBluetoothAudioPacerReport(combined,
-                hapticsExpiryQpc, out bool pacerOwnsTransport);
+                hapticsExpiryQpc, out bool pacerOwnsTransport,
+                pendingNativeCapacityOwner);
             if (!pacerOwnsTransport)
             {
                 RequestUnifiedBluetoothOutputTransportRecovery();
@@ -7574,6 +7603,51 @@ namespace DS4Windows.InputDevices
                 ApplyBluetoothMicrophoneVolume(report,
                     outputState.MicrophoneVolume);
             }
+        }
+
+        private static bool SameLocalTriggerEffect(in TriggerEffectData left,
+            in TriggerEffectData right) =>
+            left.triggerMotorMode == right.triggerMotorMode &&
+            left.triggerStartResistance == right.triggerStartResistance &&
+            left.triggerEffectForce == right.triggerEffectForce &&
+            left.triggerRangeForce == right.triggerRangeForce &&
+            left.triggerNearReleaseStrength == right.triggerNearReleaseStrength &&
+            left.triggerNearMiddleStrength == right.triggerNearMiddleStrength &&
+            left.triggerPressedStrength == right.triggerPressedStrength &&
+            left.triggerActuationFrequency == right.triggerActuationFrequency;
+
+        private bool TryPublishPreparedLocalTriggerState()
+        {
+            byte validity = 0;
+            if (preparedLocalRightTriggerGeneration != submittedLocalRightTriggerGeneration)
+                validity |= 0x04;
+            if (preparedLocalLeftTriggerGeneration != submittedLocalLeftTriggerGeneration)
+                validity |= 0x08;
+            if (validity == 0) return true;
+            if (!TryClaimBluetoothAudioPacer(out DualSenseBluetoothAudioPacer pacer,
+                    out _)) return false;
+            try
+            {
+                // A local trigger edit is an explicit state command. Media
+                // templates consume trigger validity, and the native cache
+                // deliberately preserves the game's state on unrelated edits.
+                // Send only the changed sides through the helper's local lane.
+                // Its native FIFO orders this command and handles later game
+                // ownership; no cached rumble, LED, or opposite trigger is replayed.
+                Array.Clear(localTriggerStateReport);
+                localTriggerStateReport[BluetoothCombinedStateOffset] = validity;
+                if ((validity & 0x04) != 0)
+                    Buffer.BlockCopy(outputReport, 12, localTriggerStateReport,
+                        BluetoothCombinedStateOffset + 10, 11);
+                if ((validity & 0x08) != 0)
+                    Buffer.BlockCopy(outputReport, 23, localTriggerStateReport,
+                        BluetoothCombinedStateOffset + 21, 11);
+                if (!pacer.UpdateControllerState(localTriggerStateReport)) return false;
+                submittedLocalLeftTriggerGeneration = preparedLocalLeftTriggerGeneration;
+                submittedLocalRightTriggerGeneration = preparedLocalRightTriggerGeneration;
+                return true;
+            }
+            finally { ReleaseBluetoothAudioPacerClaim(); }
         }
 
         internal static void ApplyProfileMuteButtonStateToNativeReport(

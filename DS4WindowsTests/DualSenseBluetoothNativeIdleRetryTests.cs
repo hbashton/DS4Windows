@@ -115,8 +115,7 @@ public class DualSenseBluetoothNativeIdleRetryTests
         private readonly MemoryMappedFile clock = MemoryMappedFile.CreateNew(null, 4096);
         private readonly MemoryMappedViewAccessor clockView;
         private readonly EventWaitHandle inputArrival = new AutoResetEvent(false);
-        private readonly DualSenseRealtimeHapticsSharedRing realtime =
-            DualSenseRealtimeHapticsSharedRing.CreateOwner("Local\\DS4NativeIdleRetry-" + Guid.NewGuid().ToString("N"), 4);
+        private readonly DualSenseRealtimeHapticsSharedRing realtime;
         private readonly DualSenseBluetoothRealtimeWriter writer;
         private readonly MemoryStream response = new();
         private readonly object host;
@@ -126,8 +125,10 @@ public class DualSenseBluetoothNativeIdleRetryTests
         private int nativeGeneration = 1;
         internal readonly SyntheticNativeIo Native = new();
 
-        internal Fixture()
+        internal Fixture(int realtimeCapacity = 4)
         {
+            realtime = DualSenseRealtimeHapticsSharedRing.CreateOwner(
+                "Local\\DS4NativeIdleRetry-" + Guid.NewGuid().ToString("N"), realtimeCapacity);
             clockView = clock.CreateViewAccessor();
             writer = new DualSenseBluetoothRealtimeWriter(DualSenseBluetoothAudioPacer.ReportLength, 1, 1, Native);
             host = Activator.CreateInstance(HostType, BindingFlags.Public | Flags, null,

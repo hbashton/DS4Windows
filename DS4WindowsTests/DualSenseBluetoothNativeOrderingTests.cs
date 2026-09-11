@@ -81,14 +81,18 @@ public class DualSenseBluetoothNativeOrderingTests
         fixture.ReceiveNativeCommand(commands[0]);
         fixture.ReceiveNativeCommand(commands[1]);
         fixture.StartIdle();
-        WaitAndStop(fixture, 8);
+        _ = SpinWait.SpinUntil(() => fixture.Native.Reports.Count(report => report[0] == 0x36) >= 8 &&
+            fixture.NativeOwnershipSnapshot().Admissions == 0, 2000);
+        fixture.Stop();
         byte[][] reports = fixture.Native.Reports.ToArray();
-        Assert.AreEqual(8, reports.Length,
+        byte[][] mediaReports = reports.Where(report => report[0] == 0x36).ToArray();
+        Assert.AreEqual(8, mediaReports.Length,
             "Native ordering must not manufacture or discard a source media interval.");
-        Assert.IsTrue(reports.All(report => report[0] == 0x36),
-            "Already queued V5 media must carry the commands through its real piggyback branch.");
-        for (int index = 0; index < reports.Length; index++)
-            Assert.IsTrue(reports[index].AsSpan(144, 200).ToArray().All(value => value == index + 1),
+        Assert.AreEqual((byte)0x36, reports[0][0],
+            "The due startup media frame must carry the first native command.");
+        Assert.IsTrue(reports.All(report => report[0] is 0x31 or 0x36));
+        for (int index = 0; index < mediaReports.Length; index++)
+            Assert.IsTrue(mediaReports[index].AsSpan(144, 200).ToArray().All(value => value == index + 1),
                 "Native command piggyback must preserve every original speaker interval and its order.");
         byte[][] nativeReports = reports.Where(report => HasCommand(report, kind)).ToArray();
         AssertCommands(nativeReports, commands, kind);

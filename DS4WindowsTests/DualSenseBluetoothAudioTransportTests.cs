@@ -2543,6 +2543,127 @@ namespace DS4WindowsTests
             SetFieldValue(BluetoothAudioPacerField, device, null);
         }
 
+        [DataTestMethod]
+        [DataRow(false)]
+        [DataRow(true)]
+        public void ExplicitLocalTriggerAfterNativeOutputReachesPacerWithoutReplayingOtherGameFields(bool speakerClock)
+        {
+            DualSenseDevice device = CreateBluetoothDevice();
+            SetFieldValue(OutputReportField, device, new byte[78]);
+            using var pacer = new QueueOnlyPacerFixture();
+            SetFieldValue(BluetoothAudioPacerField, device, pacer.Owner);
+            try
+            {
+                device.EnableSpeakerOutput = speakerClock;
+                if (speakerClock)
+                {
+                    SetFieldValue(SpeakerClockActiveClaimField, device, 1L);
+                    SetFieldValue(SpeakerClockLeaseExpiryField, device, long.MaxValue);
+                }
+                byte[] native = BuildCombinedControlReport(0, 0, false);
+                native[13] = 0x0C;
+                native[23] = 0x05;
+                native[34] = 0x05;
+                Assert.IsTrue(device.WriteBluetoothCombinedHapticsAudioOutputReport(
+                    native, 0, native.Length, hasNativeGameState: true));
+
+                TriggerLabEffectEncoder.ApplyToDevice(device, TriggerId.LeftTrigger,
+                    new TriggerLabEffectSettings { Mode = TriggerLabMode.Weapon,
+                        StartPercent = 20, WallPercent = 60, ForcePercent = 85 }, true);
+                PrepareAndFlushPhysicalOutputMethod.Invoke(device, new object[] { 0L });
+                var commands = GetQueuedCommands(pacer.Owner).Where(command =>
+                    command.Kind == DualSenseBluetoothAudioPacer.MessageKind.UpdateControllerState &&
+                    (command.Payload.Buffer[0] & 0x0C) != 0).ToArray();
+                Assert.AreEqual(1, commands.Length, "The live mailbox effect never reached the helper's state lane.");
+                byte[] state = commands[0].Payload.Buffer;
+                Assert.AreEqual((byte)0x08, state[0], "Only the explicitly changed left trigger belongs to this local command.");
+                Assert.AreEqual((byte)0, state[1], "Local trigger must not replay game LEDs or motor gain.");
+                Assert.AreEqual((byte)0x25, state[21]);
+                Assert.AreEqual((byte)0x44, state[22]);
+                Assert.AreEqual((byte)6, state[24]);
+
+                device.SpeakerVolume = 97;
+                PrepareAndFlushPhysicalOutputMethod.Invoke(device, new object[] { 0L });
+                Assert.AreEqual(1, GetQueuedCommands(pacer.Owner).Count(command =>
+                    command.Kind == DualSenseBluetoothAudioPacer.MessageKind.UpdateControllerState &&
+                    (command.Payload.Buffer[0] & 0x0C) != 0),
+                    "An unrelated audio edit replayed a local trigger over later game state.");
+
+                TriggerLabEffectEncoder.ApplyToDevice(device, TriggerId.LeftTrigger,
+                    new TriggerLabEffectSettings(), false);
+                PrepareAndFlushPhysicalOutputMethod.Invoke(device, new object[] { 0L });
+                var release = GetQueuedCommands(pacer.Owner).Last(command =>
+                    command.Kind == DualSenseBluetoothAudioPacer.MessageKind.UpdateControllerState &&
+                    (command.Payload.Buffer[0] & 0x08) != 0);
+                Assert.AreEqual((byte)0x05, release.Payload.Buffer[21],
+                    "Stopping the local effect did not publish its explicit trigger release.");
+            }
+            finally { SetFieldValue(BluetoothAudioPacerField, device, null); }
+        }
+
+        [TestMethod]
+        public void DefaultLocalTriggersCannotDisarmNativeEffectsOnAnUnrelatedProfileEdit()
+        {
+            DualSenseDevice device = CreateBluetoothDevice();
+            SetFieldValue(OutputReportField, device, new byte[78]);
+            using var pacer = new QueueOnlyPacerFixture();
+            SetFieldValue(BluetoothAudioPacerField, device, pacer.Owner);
+            try
+            {
+                byte[] native = BuildCombinedControlReport(0, 0, false);
+                native[13] = 0x0C;
+                native[23] = native[34] = 0x25;
+                Assert.IsTrue(device.WriteBluetoothCombinedHapticsAudioOutputReport(
+                    native, 0, native.Length, hasNativeGameState: true));
+                device.SpeakerVolume = 97;
+                PrepareAndFlushPhysicalOutputMethod.Invoke(device, new object[] { 0L });
+                Assert.IsFalse(GetQueuedCommands(pacer.Owner).Any(command =>
+                    command.Kind == DualSenseBluetoothAudioPacer.MessageKind.UpdateControllerState &&
+                    (command.Payload.Buffer[0] & 0x0C) != 0),
+                    "The unchanged default profile trigger state must not replace an active game effect.");
+            }
+            finally { SetFieldValue(BluetoothAudioPacerField, device, null); }
+        }
+
+        [TestMethod]
+        public void LocalTriggerAdmissionFailureRetainsTheExactChangedSideForRetry()
+        {
+            DualSenseDevice device = CreateBluetoothDevice();
+            SetFieldValue(OutputReportField, device, new byte[78]);
+            using var pacer = new QueueOnlyPacerFixture();
+            SetFieldValue(BluetoothAudioPacerField, device, pacer.Owner);
+            try
+            {
+                TriggerLabEffectEncoder.ApplyToDevice(device, TriggerId.RightTrigger,
+                    new TriggerLabEffectSettings { Mode = TriggerLabMode.Weapon,
+                        StartPercent = 20, WallPercent = 60, ForcePercent = 85 }, true);
+                typeof(DualSenseDevice).GetMethod("PrepareOutReport",
+                    BindingFlags.Instance | BindingFlags.NonPublic).Invoke(device, null);
+                byte[] filler = new byte[398];
+                for (int index = 0; index < 80; index++)
+                {
+                    filler[13] = (byte)(index + 1);
+                    Assert.IsTrue(pacer.Owner.UpdateControllerState(filler));
+                }
+                MethodInfo publish = typeof(DualSenseDevice).GetMethod(
+                    "TryPublishPreparedLocalTriggerState", BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.IsFalse((bool)publish.Invoke(device, null));
+                var ring = (DualSenseBluetoothAudioPacerRing<DualSenseBluetoothAudioPacer.OutboundCommand>)
+                    PacerOutboundCommandsField.GetValue(pacer.Owner);
+                Assert.IsTrue(ring.TryDequeue(out var removed));
+                typeof(DualSenseBluetoothAudioPacer).GetMethod("ReleaseOutboundCommandLocked",
+                    BindingFlags.Instance | BindingFlags.NonPublic).Invoke(pacer.Owner, new object[] { removed });
+                Assert.IsTrue((bool)publish.Invoke(device, null));
+                var command = GetQueuedCommands(pacer.Owner).Last();
+                Assert.AreEqual((byte)0x04, command.Payload.Buffer[0]);
+                Assert.AreEqual((byte)0x25, command.Payload.Buffer[10]);
+                Assert.IsTrue((bool)publish.Invoke(device, null));
+                Assert.AreEqual(80, GetQueuedCommands(pacer.Owner).Length,
+                    "A successfully admitted local effect must not be enqueued again on retry.");
+            }
+            finally { SetFieldValue(BluetoothAudioPacerField, device, null); }
+        }
+
         [TestMethod]
         public void VirtualPadDetachReturnsStateOwnershipToActiveProfile()
         {

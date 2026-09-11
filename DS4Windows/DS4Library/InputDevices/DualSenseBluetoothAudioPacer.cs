@@ -549,6 +549,9 @@ namespace DS4Windows.InputDevices
             new Dictionary<long, byte>(HostReservoirCapacity);
         private readonly DualSenseNativeCommandCredits nativeCommandCredits =
             new DualSenseNativeCommandCredits(NativeCommandCapacity);
+        private readonly byte[] latestAdmittedNativeState = new byte[
+            DualSenseBluetoothPhysicalOutputSequence.ControllerStatePayloadLength];
+        private int latestAdmittedNativeStateGeneration;
         private bool nativeAdmissionWaitingForOutboundCapacity;
         private readonly ControlReportCompletionPool controlReportCompletions;
         private readonly AutoResetEvent outboundAvailable = new AutoResetEvent(false);
@@ -1044,6 +1047,34 @@ namespace DS4Windows.InputDevices
         {
             return TryQueueReportCore(report, hapticsExpiryQpc,
                 requiresCompletion: false, out reportId, out _);
+        }
+
+        internal bool TryQueueSpeakerReportBeforePendingNativeState(byte[] report,
+            long hapticsExpiryQpc)
+        {
+            if (report == null || report.Length != ReportLength ||
+                !IsSpeakerAudioReport(report))
+                return false;
+
+            lock (stateLock)
+            {
+                // A retained command has not entered the helper FIFO yet.
+                // Media may fill its own prime gate, but cannot expose that
+                // future command through its accompanying state snapshot.
+                // Reset/Clear invalidates the snapshot through the generation
+                // check even when old native credits still await their ACKs.
+                if (!IsRunning || latestAdmittedNativeStateGeneration == 0 ||
+                    latestAdmittedNativeStateGeneration != realtimeHapticsGeneration)
+                    return false;
+
+                DualSenseDevice.MergeControllerStateIntoV5AudioSnapshot(
+                    latestAdmittedNativeState, 0, report,
+                    DualSenseBluetoothPhysicalOutputSequence.ControllerStateSourceOffset);
+                BinaryPrimitives.WriteUInt32LittleEndian(report.AsSpan(ReportLength - sizeof(uint)),
+                    DualSenseBluetoothAudioReportPatcher.ComputeSonyCrc(report, ReportLength - sizeof(uint)));
+                return TryQueueReportCore(report, hapticsExpiryQpc,
+                    requiresCompletion: false, out _, out _);
+            }
         }
 
         /// <summary>
@@ -1792,6 +1823,12 @@ namespace DS4Windows.InputDevices
                     capacityUnavailable = true;
                     return false;
                 }
+
+                Buffer.BlockCopy(quiescentTemplate,
+                    DualSenseBluetoothPhysicalOutputSequence.ControllerStateSourceOffset,
+                    latestAdmittedNativeState, 0, latestAdmittedNativeState.Length);
+                DualSenseDevice.ConsumeNativeGameStateValidity(latestAdmittedNativeState, 0);
+                latestAdmittedNativeStateGeneration = generation;
 
                 // Native game output owns the common controller state, not
                 // the speaker media generation. Replacing the whole template
@@ -3689,6 +3726,8 @@ namespace DS4Windows.InputDevices
                     if (!pendingControllerStateAvailable)
                     {
                         controllerStateReportsAhead =
+                            useV5PresentationCadence &&
+                                !CanQueuedSpeakerConsumeControllerStateLocked() ? 0 :
                             CompletePairedReportBoundary(
                                 reservoir.CountLeading(
                                     IsQueuedSpeakerReport));
@@ -3758,6 +3797,60 @@ namespace DS4Windows.InputDevices
                         IsQueuedSpeakerReport));
             }
 
+            // Called under stateLock. A partial prime cannot carry a pending
+            // state yet. Waiting for it can also prevent the parent from
+            // admitting the remaining media while native credits are full.
+            private bool CanQueuedSpeakerConsumeControllerStateLocked()
+            {
+                return useV5PresentationCadence &&
+                    reservoir.TryPeek(out QueuedReport nextReport) &&
+                    IsQueuedSpeakerReport(nextReport) &&
+                    CanPresentFromTransportGate(primeRequired,
+                        reservoir.CountLeading(IsQueuedSpeakerReport),
+                        nextReport.Report,
+                        GetPrimeReportCount(useMeasuredTransportAudioTransport));
+            }
+
+            // Called only by the presenter under stateLock. Local latest-value
+            // updates retain their media piggyback policy. Immutable native
+            // commands may use the existing 200 Hz control lane between media
+            // deadlines; otherwise even 100 Hz game output outgrows the 93.75 Hz
+            // media clock. A due/startup media frame always gets first service.
+            private bool MustPiggybackControllerStateLocked(
+                DualSenseV5NativePresentationScheduler mediaScheduler,
+                int startupReportsRemaining, long nowQpc)
+            {
+                if (!CanQueuedSpeakerConsumeControllerStateLocked()) return false;
+                return nativeCommands.Count == 0 || primeRequired ||
+                    startupReportsRemaining > 0 || !mediaScheduler.IsStarted ||
+                    mediaScheduler.NextDeadlineQpc <= nowQpc;
+            }
+
+            private bool TryDequeueReportForPresentationLocked(out QueuedReport report)
+            {
+                report = null;
+                // A native mic transition may have arrived after the wait's
+                // readiness snapshot. Its required 0x32 must still precede
+                // the next media frame; the two FE frames owed on disable
+                // remain eligible until that physical-media debt reaches zero.
+                if (useV5PresentationCadence && pendingMicrophoneStatus >= 0 &&
+                    microphoneStatusReportsAhead <= 0) return false;
+                return reservoir.TryDequeue(out report);
+            }
+
+            private long SelectV5PresentationWakeDeadlineLocked(long nowQpc, long mediaDeadline)
+            {
+                // An overdue media slot wins even if a control deadline is
+                // older. Selecting that older deadline would repeatedly return
+                // to the loop whose due-media priority then rejects the control,
+                // leaving both queues live but permanently unable to progress.
+                if (mediaDeadline <= nowQpc || nativeCommands.Count == 0 || PendingStateReportsAhead > 0)
+                    return mediaDeadline;
+                long controlDeadline = lastControllerStateSubmissionQpc == 0 ? nowQpc :
+                    lastControllerStateSubmissionQpc + ControllerStateIntervalQpc;
+                return Math.Min(mediaDeadline, controlDeadline);
+            }
+
             private void PacerLoop()
             {
                 timeBeginPeriod(1);
@@ -3765,6 +3858,11 @@ namespace DS4Windows.InputDevices
                     global::DS4Windows.MultimediaThreadRegistration.
                         EnterProAudio(critical: true);
                 IntPtr timer = CreateHighResolutionTimer();
+                using var timerWait = timer != IntPtr.Zero ?
+                    new BorrowedTimerWaitHandle(timer) : null;
+                WaitHandle[] mediaWaits = timerWait != null ?
+                    new WaitHandle[] { timerWait, stopRequested, reservoirChanged } :
+                    new WaitHandle[] { stopRequested, reservoirChanged };
                 // Compact/paired fallbacks retain the rational clock. The V5
                 // source opts into the native transport's separately observed 10/20 ms
                 // host lattice below; other native sources keep their existing
@@ -3799,10 +3897,11 @@ namespace DS4Windows.InputDevices
                                 microphoneStatusReportsAhead <= 0;
                             reservoir.TryPeek(out QueuedReport nextReport);
                             bool nativeMediaCanConsumeControllerState =
-                                useV5PresentationCadence &&
-                                IsSpeakerAudioReport(nextReport?.Report);
+                                MustPiggybackControllerStateLocked(
+                                    nativeTransportScheduler,
+                                    nativeTransportStartupBurstReportsRemaining, nowQpc);
                             controllerStateReady =
-                                HasPendingControllerState &&
+                                !microphoneStatusReady && HasPendingControllerState &&
                                 !nativeMediaCanConsumeControllerState &&
                                 PendingStateReportsAhead <= 0 &&
                                 (lastControllerStateSubmissionQpc == 0 ||
@@ -3898,7 +3997,11 @@ namespace DS4Windows.InputDevices
                                 bool stillReady =
                                     lifecycleResetRevision ==
                                         appliedLifecycleResetRevision &&
+                                    !(pendingMicrophoneStatus >= 0 && microphoneStatusReportsAhead <= 0) &&
                                     HasPendingControllerState &&
+                                    !MustPiggybackControllerStateLocked(
+                                        nativeTransportScheduler,
+                                        nativeTransportStartupBurstReportsRemaining, nowQpc) &&
                                     PendingStateReportsAhead <= 0 &&
                                     (lastControllerStateSubmissionQpc == 0 ||
                                         nowQpc -
@@ -3997,15 +4100,11 @@ namespace DS4Windows.InputDevices
                                     {
                                         if (HasPendingControllerState)
                                         {
-                                            // Yield to an actual queued media
-                                            // frame, not an imaginary future
-                                            // one. An idle native command must
-                                            // retry once physical credit returns
-                                            // without requiring new source data.
-                                            bool mediaQueued = reservoir.TryPeek(
-                                                out QueuedReport queuedMedia) &&
-                                                IsQueuedSpeakerReport(queuedMedia);
-                                            if (mediaQueued)
+                                            // Yield only when queued media can
+                                            // present. A partial prime cannot
+                                            // return the fairness credit, so a
+                                            // Busy control must retry on its own.
+                                            if (CanQueuedSpeakerConsumeControllerStateLocked())
                                             {
                                                 if (nativeCommands.Count != 0)
                                                     nativeStateReportsAhead = Math.Max(nativeStateReportsAhead, 1);
@@ -4149,9 +4248,22 @@ namespace DS4Windows.InputDevices
                                     nativeTransportScheduler.Start(nowQpc);
                                     nativeTransportScheduler.AdvanceAfterSend(nowQpc);
                                 }
-                                WaitUntil(timer,
-                                    nativeTransportScheduler.NextDeadlineQpc,
-                                    stopRequested);
+                                long mediaDeadline = nativeTransportScheduler.NextDeadlineQpc;
+                                long wakeDeadline = mediaDeadline;
+                                lock (stateLock)
+                                {
+                                    // Wake for an earlier ordered control slot,
+                                    // without moving or consuming the media clock.
+                                    // New commands/clear/mic transitions also wake
+                                    // this wait so they can be revalidated above.
+                                    wakeDeadline = SelectV5PresentationWakeDeadlineLocked(
+                                        Stopwatch.GetTimestamp(), mediaDeadline);
+                                }
+                                if (!WaitUntil(timer, wakeDeadline, stopRequested, mediaWaits) ||
+                                    wakeDeadline < mediaDeadline)
+                                {
+                                    continue;
+                                }
                             }
                             else
                             {
@@ -4361,7 +4473,7 @@ namespace DS4Windows.InputDevices
                                     continue;
                                 }
                             }
-                            else if (!reservoir.TryDequeue(out item))
+                            else if (!TryDequeueReportForPresentationLocked(out item))
                             {
                                 if (ShouldReprimeAfterEmptyReservoir(
                                         useNativeAudioTransport))
@@ -4427,7 +4539,10 @@ namespace DS4Windows.InputDevices
                                 useV5PresentationCadence &&
                                 pairedItem == null && !controlOnly &&
                                 HasPendingControllerState &&
-                                PendingStateReportsAhead <= 0;
+                                PendingStateReportsAhead <= 0 &&
+                                (nativeCommands.Count == 0 ||
+                                    lastControllerStateSubmissionQpc == 0 ||
+                                    presentedAt - lastControllerStateSubmissionQpc >= ControllerStateIntervalQpc);
                             if (controllerStatePiggybacked)
                             {
                                 nativeStatePiggybacked = ClaimControllerStateLocked();
@@ -5252,15 +5367,26 @@ namespace DS4Windows.InputDevices
                 }
             }
 
-            private static void WaitUntil(IntPtr timer, long targetQpc,
-                WaitHandle stopEvent)
+            private sealed class BorrowedTimerWaitHandle : WaitHandle
+            {
+                internal BorrowedTimerWaitHandle(IntPtr handle)
+                {
+                    SafeWaitHandle = new Microsoft.Win32.SafeHandles.SafeWaitHandle(handle, ownsHandle: false);
+                }
+            }
+
+            private static bool WaitUntil(IntPtr timer, long targetQpc,
+                WaitHandle stopEvent, WaitHandle[] interruptibleWaits = null)
             {
                 while (true)
                 {
                     long remaining = targetQpc - Stopwatch.GetTimestamp();
-                    if (remaining <= 0 || stopEvent.WaitOne(0))
+                    if (remaining <= 0) return true;
+                    if (stopEvent.WaitOne(0)) return false;
+                    if (interruptibleWaits != null &&
+                        interruptibleWaits[interruptibleWaits.Length - 1].WaitOne(0))
                     {
-                        return;
+                        return false;
                     }
 
                     double remainingMilliseconds = remaining * 1000.0 /
@@ -5281,13 +5407,22 @@ namespace DS4Windows.InputDevices
                             ref relativeHundredNanoseconds, 0, IntPtr.Zero,
                             IntPtr.Zero, false))
                         {
-                            WaitForSingleObject(timer, 20);
+                            if (interruptibleWaits == null)
+                                WaitForSingleObject(timer, 20);
+                            else
+                            {
+                                int signaled = WaitHandle.WaitAny(interruptibleWaits, 20);
+                                if (signaled != 0 && signaled != WaitHandle.WaitTimeout) return false;
+                            }
                             continue;
                         }
                     }
 
-                    Thread.Sleep(Math.Max(1,
-                        (int)Math.Floor(remainingMilliseconds - 0.5)));
+                    int waitMilliseconds = Math.Max(1,
+                        (int)Math.Floor(remainingMilliseconds - 0.5));
+                    if (interruptibleWaits == null) Thread.Sleep(waitMilliseconds);
+                    else if (WaitHandle.WaitAny(interruptibleWaits, waitMilliseconds) != WaitHandle.WaitTimeout)
+                        return false;
                 }
             }
 

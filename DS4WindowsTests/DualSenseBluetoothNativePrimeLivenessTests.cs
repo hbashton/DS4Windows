@@ -103,7 +103,10 @@ public class DualSenseBluetoothNativePrimeLivenessTests
         }
         byte[][] nativeReports = reports.Where(report => report[0] is 0x31 or 0x36 &&
             (report[report[0] == 0x31 ? 3 : 13] & 3) == 3).ToArray();
+        nativeReports = DualSenseBluetoothNativeOrderingTests.RumbleTransitions(nativeReports);
         Assert.AreEqual(32, nativeReports.Length);
+        Assert.AreEqual(32, helper.DrainNativeAcknowledgements().Length,
+            "Continuous mode on media must not manufacture native command completions.");
         for (int index = 0; index < nativeReports.Length; index++)
         {
             int stateOffset = nativeReports[index][0] == 0x31 ? 3 : 13;

@@ -295,7 +295,7 @@ public class DualSenseBluetoothNativeIdleRetryTests
 
         internal void StartIdle() => pacer.Start();
 
-        internal void QueueSpeakerReports(int count)
+        internal void QueueSpeakerReports(int count, byte audioGain = 0)
         {
             for (int index = 0; index < count; index++)
             {
@@ -304,6 +304,7 @@ public class DualSenseBluetoothNativeIdleRetryTests
                 BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(8), 1);
                 BinaryPrimitives.WriteInt64LittleEndian(payload.AsSpan(12), long.MaxValue);
                 byte[] report = Template();
+                report[50] = audioGain;
                 report[142] = 0x93;
                 report[143] = 200;
                 report.AsSpan(144, 200).Fill((byte)(index + 1));

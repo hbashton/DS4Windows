@@ -864,6 +864,8 @@ namespace DS4Windows.InputDevices
         private int physicalLifecycleShutdownRequested;
         private int physicalLifecycleRemovalRequested;
         private int physicalLifecycleIdleDisconnectRequested;
+        // Bit 0 admits a deferred radio disconnect; bit 1 retains removal.
+        private int physicalLifecycleCommandDisconnectRequested;
         private int physicalInputFailureKind;
         private int physicalInputFailureWinError;
         private long physicalInputFailureTimestamp;
@@ -890,6 +892,7 @@ namespace DS4Windows.InputDevices
         // this null; the physical output worker remains the sole caller.
         internal Action PhysicalOutputWriteTestHook;
         internal Action PhysicalOutputFinalizeTestHook;
+        internal Func<bool, bool> PhysicalBluetoothDisconnectTestHook;
         internal Func<byte[], bool> PhysicalRawOutputWriteTestHook;
         internal Func<long, bool> BluetoothOutputRecoveryIterationTestHook;
         internal Action<long> BluetoothOutputRecoveryBeforeWaitTestHook;
@@ -3152,6 +3155,8 @@ namespace DS4Windows.InputDevices
                 Volatile.Write(ref physicalLifecycleRemovalRequested, 0);
                 Volatile.Write(ref physicalLifecycleIdleDisconnectRequested,
                     0);
+                Volatile.Write(ref physicalLifecycleCommandDisconnectRequested,
+                    0);
                 Volatile.Write(ref physicalInputFailureKind,
                     (int)PhysicalInputFailureKind.None);
                 Volatile.Write(ref physicalInputFailureWinError, 0);
@@ -3358,14 +3363,35 @@ namespace DS4Windows.InputDevices
         private void CompletePhysicalLifecycleNotifications()
         {
             ReportPhysicalInputFailure();
+            int commandDisconnect = Interlocked.Exchange(
+                ref physicalLifecycleCommandDisconnectRequested, 0);
             if (Interlocked.Exchange(
                     ref physicalLifecycleIdleDisconnectRequested, 0) != 0)
             {
                 AppLogger.LogToGui(Mac.ToString() +
                     " disconnecting due to idle disconnect", false);
-                base.DisconnectBT(callRemoval: true);
+                DisconnectBluetoothAfterOutputStop(callRemoval: true);
                 Interlocked.Exchange(
                     ref physicalLifecycleRemovalRequested, 0);
+            }
+            else if (commandDisconnect != 0)
+            {
+                bool removalPending = Interlocked.Exchange(
+                    ref physicalLifecycleRemovalRequested, 0) != 0;
+                try
+                {
+                    DisconnectBluetoothAfterOutputStop(
+                        callRemoval: (commandDisconnect & 2) != 0 || removalPending);
+                }
+                catch (Exception exception)
+                {
+                    // This request previously ran inside the command queue's
+                    // exception boundary. Moving it to the lifecycle owner
+                    // must not turn radio/removal failures into an unhandled
+                    // background-thread exception or strand external Stop.
+                    AppLogger.LogToGui($"{Mac} deferred disconnect failed: " +
+                        exception.Message, true);
+                }
             }
             else if (Interlocked.Exchange(
                          ref physicalLifecycleRemovalRequested, 0) != 0)
@@ -3395,7 +3421,8 @@ namespace DS4Windows.InputDevices
             bluetoothAudioRecoveryWake.Set();
 
             if (waitForCompletion &&
-                !ReferenceEquals(Thread.CurrentThread, physicalLifecycleThread))
+                !ReferenceEquals(Thread.CurrentThread, physicalLifecycleThread) &&
+                !IsPhysicalLifecycleJoinedWorker(Thread.CurrentThread))
             {
                 if (!internalStartRetirement &&
                     Environment.CurrentManagedThreadId != Volatile.Read(
@@ -3419,6 +3446,16 @@ namespace DS4Windows.InputDevices
                 // still a definitive ownership boundary.
                 bluetoothAudioRecoveryWorkerIdle.WaitOne();
             }
+        }
+
+        private bool IsPhysicalLifecycleJoinedWorker(Thread thread)
+        {
+            // A participant cannot wait for the owner that must join it.
+            // External Stop callers still retain the definitive barrier.
+            return ReferenceEquals(thread, physicalOutputThread) ||
+                ReferenceEquals(thread, bluetoothObservationThread) ||
+                ReferenceEquals(thread, bluetoothMicrophoneDispatchThread) ||
+                ReferenceEquals(thread, deviceCommandThread);
         }
 
         private void RequestPhysicalRemoval()
@@ -4158,9 +4195,9 @@ namespace DS4Windows.InputDevices
 
             // The raw native delta above is emitted exactly once. Keep a
             // quiescent template for later local audio/mute/LED generations,
-            // but consume every game-authored command strobe first so a
-            // profile update cannot retrigger rumble, adaptive triggers, LED
-            // release, or an unknown validity-masked field.
+            // but consume one-shot command strobes first so a profile update
+            // cannot retrigger adaptive effects or LED release. Continuous
+            // motor mode/strength remain intact until the next native packet.
             Buffer.BlockCopy(report, 0, latestUsbNativeGameOutputReport, 0,
                 USB_OUTPUT_CHANGE_LENGTH);
             ConsumeNativeGameStateValidity(
@@ -4580,6 +4617,34 @@ namespace DS4Windows.InputDevices
 
         public override bool DisconnectBT(bool callRemoval = false)
         {
+            if (IsPhysicalLifecycleJoinedWorker(Thread.CurrentThread))
+            {
+                if (Mac == null && PhysicalBluetoothDisconnectTestHook == null)
+                {
+                    return false;
+                }
+                // UI/profile commands run on a worker the lifecycle must
+                // join. Admit their request without waiting on that join;
+                // the lifecycle performs radio I/O only after all writers
+                // retire and the final neutral output has been presented.
+                Interlocked.Or(ref physicalLifecycleCommandDisconnectRequested,
+                    callRemoval ? 3 : 1);
+                RequestPhysicalLifecycleShutdown(waitForCompletion: false);
+                return true;
+            }
+            return DisconnectBluetoothAfterOutputStop(callRemoval);
+        }
+
+        private bool DisconnectBluetoothAfterOutputStop(bool callRemoval)
+        {
+            Func<bool, bool> testHook = PhysicalBluetoothDisconnectTestHook;
+            if (testHook != null)
+            {
+                // Keep the real base method's output-retirement boundary in
+                // hardware-free lifecycle tests; replace only radio I/O.
+                StopOutputUpdate();
+                return testHook(callRemoval);
+            }
             return base.DisconnectBT(callRemoval);
         }
 
@@ -6304,13 +6369,15 @@ namespace DS4Windows.InputDevices
                 throw new ArgumentOutOfRangeException(nameof(stateOffset));
             }
 
-            // Bits outside these masks are game-authored update strobes. The
-            // exact transition is already queued in the compositor; retaining
-            // them in its steady media template would retrigger adaptive
-            // effects, rumble, or LED release on every 10.667 ms carrier.
-            report[stateOffset] &= 0xF0;
+            // Consume one-shot trigger/LED updates, not the continuous motor
+            // mode. SDL uses 03 for compatible rumble or 02 + flag38/04 for
+            // improved rumble; clearing these on the next media carrier
+            // switches the controller back to audio haptics immediately.
+            // A subsequent native packet with no mode bits is authoritative
+            // too (SDL's explicit stop / return to audio haptics).
+            report[stateOffset] &= 0xF3;
             report[stateOffset + 1] &= 0x83;
-            report[stateOffset + 38] = 0;
+            report[stateOffset + 38] &= 0x04;
         }
 
         private static byte[] BuildBluetoothCombinedControlReport(byte sequence,
@@ -6917,12 +6984,12 @@ namespace DS4Windows.InputDevices
             }
 
             // Native USB output reports are validity-masked deltas, but only
-            // the visible LED state is persistent here. Rumble and adaptive
-            // trigger validity bits are commands: retaining them across an
-            // unrelated report replays an old effect and can make the
-            // physical controls feel stuck. Preserve the last game-authored
-            // lightbar/player LEDs while every other field remains the exact
-            // current game report.
+            // the visible LED state is accumulated across native packets.
+            // Motor mode (including zero = audio haptics) and adaptive trigger
+            // strobes must remain exactly as authored in the current packet.
+            // The physical helper retains continuous mode only after that
+            // exact native head is accepted; it never infers a native mode
+            // from an older packet's omitted validity bits.
             byte previousFlag1 = scratch[1];
             byte previousPlayerLeds = scratch[43];
             byte previousRed = scratch[44];
@@ -7781,8 +7848,8 @@ namespace DS4Windows.InputDevices
             // the raw report's controller-command nibble and LED validity for
             // its one exact emission, but replace the audio validity/value
             // domain with the current coherent profile snapshot. A consumed
-            // USB template has no controller-command validity left, so later
-            // local writes can only republish these explicitly owned fields.
+            // USB template retains continuous motor mode but no trigger/LED
+            // command strobes; local audio writes must not cancel that mode.
             byte audioFlags0 = (byte)(
                 DualSenseOutputFlag0HeadphoneVolumeEnable |
                 DualSenseOutputFlag0MicrophoneVolumeEnable |

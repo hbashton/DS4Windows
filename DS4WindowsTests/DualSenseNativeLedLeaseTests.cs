@@ -1099,9 +1099,9 @@ namespace DS4WindowsTests
                 PrepareUsbNativeGameReportWithLocalOverridesInto(
                     quiescentTemplate, localMuteUpdate, snapshot);
 
-            Assert.AreEqual((byte)0,
+            Assert.AreEqual((byte)3,
                 (byte)(localMuteUpdate[1] & 0x0F),
-                "A later local update replayed rumble/trigger validity.");
+                "A later local update must preserve continuous rumble mode without replaying trigger strobes.");
             Assert.AreEqual((byte)0,
                 (byte)(localMuteUpdate[2] & 0x7C),
                 "A later local update replayed LED release or another " +
@@ -1112,7 +1112,7 @@ namespace DS4WindowsTests
             Assert.AreEqual(native[4], localMuteUpdate[4]);
             CollectionAssert.AreEqual(native[11..38],
                 localMuteUpdate[11..38],
-                "Payload may remain cached, but no actuator validity bit " +
+                "Payload may remain cached, but no adaptive-trigger strobe " +
                 "may make it a second command.");
             Assert.AreEqual((byte)0x01, localMuteUpdate[9]);
             Assert.AreEqual((byte)0x10, localMuteUpdate[10]);
@@ -1168,10 +1168,20 @@ namespace DS4WindowsTests
                 }
             }
             Assert.AreEqual((byte)0,
-                (byte)(afterRelease[1] & 0x0F));
+                (byte)(afterRelease[1] & 0x0C),
+                "An LED-only release must not re-arm consumed adaptive-trigger strobes.");
+            Assert.AreEqual((byte)(beforeRelease[1] & 0x03),
+                (byte)(afterRelease[1] & 0x03),
+                "An LED-only release must preserve the native motor mode.");
             Assert.AreEqual((byte)0x14,
                 (byte)(afterRelease[2] & 0x7C));
-            Assert.AreEqual((byte)0x02, afterRelease[39]);
+            Assert.AreEqual((byte)0x02, (byte)(afterRelease[39] & 0x03),
+                "Only the LED brightness control is newly asserted in flag2.");
+            Assert.AreEqual((byte)0x04, (byte)(beforeRelease[39] & 0x04),
+                "This fixture must retain improved-rumble mode before LED release.");
+            Assert.AreEqual((byte)(beforeRelease[39] & 0xFC),
+                (byte)(afterRelease[39] & 0xFC),
+                "LED restore must not clear improved-rumble mode or change any other nonvisual flag2 bit.");
             Assert.AreEqual((byte)0x04, afterRelease[44]);
             Assert.AreEqual((byte)255, afterRelease[45]);
             Assert.AreEqual((byte)37, afterRelease[46]);

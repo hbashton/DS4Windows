@@ -95,6 +95,7 @@ public class DualSenseBluetoothNativeOrderingTests
             Assert.IsTrue(mediaReports[index].AsSpan(144, 200).ToArray().All(value => value == index + 1),
                 "Native command piggyback must preserve every original speaker interval and its order.");
         byte[][] nativeReports = reports.Where(report => HasCommand(report, kind)).ToArray();
+        if (kind == "pulse-stop") nativeReports = RumbleTransitions(nativeReports);
         AssertCommands(nativeReports, commands, kind);
         AssertPresentedReceipts(fixture, commands.Length);
     }
@@ -226,7 +227,7 @@ public class DualSenseBluetoothNativeOrderingTests
         fixture.QueueSpeakerReports(8);
         fixture.StartIdle();
         WaitAndStop(fixture, 8);
-        AssertCommands(fixture.Native.Reports.Where(report => HasCommand(report, "pulse-stop")).ToArray(),
+        AssertCommands(RumbleTransitions(fixture.Native.Reports.Where(report => HasCommand(report, "pulse-stop"))),
             new[] { stop, newer }, "pulse-stop");
         AssertPresentedReceipts(fixture, 1);
     }
@@ -242,7 +243,7 @@ public class DualSenseBluetoothNativeOrderingTests
         fixture.StartIdle();
         WaitAndStop(fixture, 8);
         byte[][] reports = fixture.Native.Reports.ToArray();
-        AssertCommands(reports.Where(report => HasCommand(report, "pulse-stop")).ToArray(),
+        AssertCommands(RumbleTransitions(reports.Where(report => HasCommand(report, "pulse-stop"))),
             new[] { stop }, "pulse-stop");
         AssertCommands(reports.Where(report => HasCommand(report, "led-claim-release")).ToArray(),
             new[] { led }, "led-claim-release");
@@ -402,7 +403,7 @@ public class DualSenseBluetoothNativeOrderingTests
     {
         byte[] expected = command.AsSpan(1, 47).ToArray();
         DualSenseDevice.ConsumeNativeGameStateValidity(expected, 0);
-        expected[0] = (byte)(previous[13] & 0xF0);
+        expected[0] = (byte)((previous[13] & 0xF0) | (command[1] & 0x03));
         expected[1] = (byte)(previous[14] & 0x83);
         previous.AsSpan(17, 6).CopyTo(expected.AsSpan(4));
         expected[37] = previous[50];
@@ -436,6 +437,29 @@ public class DualSenseBluetoothNativeOrderingTests
             (report[state + 1] & 0x0C) != 0 :
             kind.StartsWith("trigger-", StringComparison.Ordinal) ? (report[state] & 4) != 0 :
             (report[state] & 3) == 3;
+    }
+
+    // Rumble is a continuous mode on carrier frames, not a validity strobe.
+    // These specific pulse/stop tests compare every mode/value transition;
+    // immutable native command identities are separately checked by ACKs.
+    // The duplicate-native-rumble tests still assert each exact idle write.
+    internal static byte[][] RumbleTransitions(IEnumerable<byte[]> reports)
+    {
+        var transitions = new List<byte[]>();
+        foreach (byte[] report in reports)
+        {
+            if (transitions.Count != 0)
+            {
+                byte[] previous = transitions[^1];
+                int currentOffset = StateOffset(report), previousOffset = StateOffset(previous);
+                if ((report[currentOffset] & 3) == (previous[previousOffset] & 3) &&
+                    (report[currentOffset + 38] & 4) == (previous[previousOffset + 38] & 4) &&
+                    report[currentOffset + 2] == previous[previousOffset + 2] &&
+                    report[currentOffset + 3] == previous[previousOffset + 3]) continue;
+            }
+            transitions.Add(report);
+        }
+        return transitions.ToArray();
     }
 
     private static void AssertCommands(byte[][] reports, byte[][] commands, string kind)

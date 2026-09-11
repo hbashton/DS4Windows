@@ -3111,6 +3111,14 @@ namespace DS4Windows.InputDevices
             // concurrent Clear removes it from the logical FIFO.
             private NativeStateCommand claimedNativeCommand;
             private readonly byte[] nativeQuiescentState = new byte[DualSensePendingGameStateComposer.StateLength];
+            // Continuous motor mode belongs to the last physical acceptance,
+            // never to a producer template (which may contain a future native
+            // command or an older native state than a local rumble update).
+            private bool acceptedRumbleModeAvailable;
+            private byte acceptedRumbleMode;
+            private byte acceptedImprovedRumbleMode;
+            private byte acceptedLightRumble;
+            private byte acceptedHeavyRumble;
             private bool HasPendingControllerState => pendingControllerStateAvailable || nativeCommands.Count != 0;
             private readonly byte[] controllerStatePresentation = new byte[
                 DualSenseBluetoothPhysicalOutputSequence.
@@ -3529,6 +3537,7 @@ namespace DS4Windows.InputDevices
                     lifecycleHapticsGeneration = hapticsGeneration;
                     lifecycleResetRevision++;
                     CancelNativeCommandsLocked();
+                    ResetAcceptedRumbleModeLocked();
                     writerClockResetRevision = lifecycleResetRevision;
                     while (reservoir.TryDequeue(out QueuedReport report))
                     {
@@ -4055,6 +4064,8 @@ namespace DS4Windows.InputDevices
                                         reservoir.Count);
                                     lock (stateLock)
                                     {
+                                        if (!claimedNative && lifecycleResetRevision == appliedLifecycleResetRevision)
+                                            CommitAcceptedRumbleModeLocked(controllerStatePresentation);
                                         // A newer state/reset remains pending;
                                         // completing this older claimed write
                                         // must not clear or overwrite it.
@@ -4758,6 +4769,9 @@ namespace DS4Windows.InputDevices
                                 if (nativeStatePiggybacked)
                                     FinishNativeClaimLocked(accepted, presentedAt);
                                 if (accepted && controllerStatePiggybacked && !nativeStatePiggybacked &&
+                                    claimedLifecycleStillCurrent)
+                                    CommitAcceptedRumbleModeLocked(controllerStatePresentation);
+                                if (accepted && controllerStatePiggybacked && !nativeStatePiggybacked &&
                                     claimedLifecycleStillCurrent &&
                                     controllerStateRevision ==
                                         claimedControllerStateRevision)
@@ -5002,6 +5016,9 @@ namespace DS4Windows.InputDevices
                         throw new InvalidDataException("Native command credit contract violated.");
                     if (!availableNativeCommands.TryDequeue(out NativeStateCommand command))
                         throw new InvalidDataException("Native command storage exhausted.");
+                    // Even before the first native head presents, carriers
+                    // must not expose its mode from the incoming template.
+                    acceptedRumbleModeAvailable = true;
                     if (!latestTemplateAvailable)
                     {
                         Buffer.BlockCopy(payload, templateOffset,
@@ -5055,6 +5072,7 @@ namespace DS4Windows.InputDevices
                     lifecycleHapticsGeneration = hapticsGeneration;
                     lifecycleResetRevision++;
                     CancelNativeCommandsLocked();
+                    ResetAcceptedRumbleModeLocked();
                 }
 
                 reservoirChanged.Set();
@@ -5078,8 +5096,9 @@ namespace DS4Windows.InputDevices
                 // latest-value. An older local pulse/LED claim must not replay
                 // after a newer native stop/release. Retire only overlapping
                 // fields; unrelated local controls still need presentation.
-                byte flag0 = newerState[0];
-                if ((flag0 & 0x03) != 0) flag0 |= 0x03;
+                // Native mode bits are authoritative even when zero: SDL's
+                // stop returns to audio haptics without a positive strobe.
+                byte flag0 = (byte)(newerState[0] | 0x03);
                 byte flag1 = newerState[1];
                 if ((flag1 & 0x08) != 0) flag1 |= 0x14;
                 else if ((flag1 & 0x14) != 0) flag1 |= 0x08;
@@ -5116,6 +5135,9 @@ namespace DS4Windows.InputDevices
                 }
                 Buffer.BlockCopy(pendingControllerState, 0, controllerStatePresentation, 0,
                     controllerStatePresentation.Length);
+                if ((controllerStatePresentation[0] & 0x03) == 0 &&
+                    (controllerStatePresentation[38] & 0x04) == 0)
+                    ApplyAcceptedRumbleModeLocked(controllerStatePresentation, 0);
                 return false;
             }
 
@@ -5130,6 +5152,7 @@ namespace DS4Windows.InputDevices
                 if (current)
                 {
                     nativeCommands.TryDequeue(out _);
+                    CommitAcceptedRumbleModeLocked(command.State);
                     Buffer.BlockCopy(command.QuiescentState, 0, nativeQuiescentState, 0,
                         nativeQuiescentState.Length);
                     if (latestTemplateAvailable)
@@ -5144,8 +5167,42 @@ namespace DS4Windows.InputDevices
 
             private void FenceNativeTemplateLocked(byte[] template)
             {
-                if (nativeCommands.Count == 0 && claimedNativeCommand == null) return;
-                MergeNativeQuiescentStateIntoTemplateLocked(template);
+                if (nativeCommands.Count != 0 || claimedNativeCommand != null)
+                    MergeNativeQuiescentStateIntoTemplateLocked(template);
+                ApplyAcceptedRumbleModeLocked(template,
+                    DualSenseBluetoothPhysicalOutputSequence.ControllerStateSourceOffset);
+            }
+
+            private void CommitAcceptedRumbleModeLocked(byte[] state)
+            {
+                acceptedRumbleModeAvailable = true;
+                acceptedRumbleMode = (byte)(state[0] & 0x03);
+                acceptedImprovedRumbleMode = (byte)(state[38] & 0x04);
+                acceptedLightRumble = state[2];
+                acceptedHeavyRumble = state[3];
+                if (latestTemplateAvailable) ApplyAcceptedRumbleModeLocked(latestTemplate, 13);
+                if (previousTemplateAvailable) ApplyAcceptedRumbleModeLocked(previousTemplate, 13);
+            }
+
+            private void ApplyAcceptedRumbleModeLocked(byte[] state, int offset)
+            {
+                if (!acceptedRumbleModeAvailable) return;
+                state[offset] = (byte)((state[offset] & ~0x03) | acceptedRumbleMode);
+                state[offset + 38] = (byte)((state[offset + 38] & ~0x04) | acceptedImprovedRumbleMode);
+                state[offset + 2] = acceptedLightRumble;
+                state[offset + 3] = acceptedHeavyRumble;
+            }
+
+            private void ResetAcceptedRumbleModeLocked()
+            {
+                // Keep the fence active so a stale pre-reset media template
+                // cannot restart motors before a new explicit command.
+                acceptedRumbleModeAvailable = true;
+                acceptedRumbleMode = acceptedImprovedRumbleMode = 0;
+                acceptedLightRumble = acceptedHeavyRumble = 0;
+                if (latestTemplateAvailable) ApplyAcceptedRumbleModeLocked(latestTemplate, 13);
+                if (previousTemplateAvailable) ApplyAcceptedRumbleModeLocked(previousTemplate, 13);
+                ApplyAcceptedRumbleModeLocked(nativeQuiescentState, 0);
             }
 
             private void MergeNativeQuiescentStateIntoTemplateLocked(byte[] template)
@@ -5160,9 +5217,9 @@ namespace DS4Windows.InputDevices
                 byte localFlag1 = (byte)(template[offset + 1] & 0x83);
                 byte localGain = template[offset + 37];
                 Buffer.BlockCopy(nativeQuiescentState, 0, template, offset, nativeQuiescentState.Length);
-                template[offset] = localFlag0;
+                template[offset] = (byte)(localFlag0 | (nativeQuiescentState[0] & 0x03));
                 template[offset + 1] = localFlag1;
-                template[offset + 38] = 0;
+                template[offset + 38] &= 0x04;
                 localAudio.CopyTo(template.AsSpan(offset + 4, 6));
                 template[offset + 37] = localGain;
             }

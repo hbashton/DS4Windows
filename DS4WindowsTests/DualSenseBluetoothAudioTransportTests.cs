@@ -912,7 +912,7 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void NativeGameStateIsConsumedOnceBySteadyMediaTemplate()
+        public void NativeGameOneShotStateIsConsumedButContinuousRumbleModeSurvivesSteadyMediaTemplate()
         {
             byte[] report = CreateSpeakerReport(0x22, 0x33, 0, 1);
             const int stateOffset = 13;
@@ -925,9 +925,9 @@ namespace DS4WindowsTests
             DualSenseDevice.ConsumeNativeGameStateValidity(report,
                 stateOffset);
 
-            Assert.AreEqual((byte)0xF0, report[stateOffset]);
+            Assert.AreEqual((byte)0xF3, report[stateOffset]);
             Assert.AreEqual((byte)0x83, report[stateOffset + 1]);
-            Assert.AreEqual((byte)0x00, report[stateOffset + 38]);
+            Assert.AreEqual((byte)0x04, report[stateOffset + 38]);
             Assert.AreEqual((byte)0x26, report[stateOffset + 10],
                 "Consuming update strobes changed the latched trigger payload.");
             Assert.AreEqual((byte)0x08, report[stateOffset + 44],
@@ -1666,8 +1666,14 @@ namespace DS4WindowsTests
 
             byte[] cached = GetFieldValue<byte[]>(CachedCombinedReportField,
                 device);
-            AssertV5AudioContract(cached, expectedFlag0: 0xF0,
+            AssertV5AudioContract(cached, expectedFlag0: 0xF2,
                 expectedFlag1: 0x83);
+            Assert.AreEqual((byte)0x02, (byte)(cached[13] & 0x03),
+                "The cache must retain the game's continuous vibration mode, independently of local audio flags.");
+            Assert.AreEqual((byte)0, (byte)(cached[13] & 0x0C),
+                "Retaining motor mode must not re-arm trigger command strobes.");
+            Assert.AreEqual((byte)0x04, cached[51],
+                "Retain improved-rumble mode while consuming flag2's one-shot controls.");
             byte[] pendingExact = GetFieldValue<byte[]>(
                 PendingNativeGameExactStateField, device);
             Assert.AreEqual((byte)0xF2, pendingExact[13]);
@@ -2005,12 +2011,27 @@ namespace DS4WindowsTests
 
             byte[] cached = GetFieldValue<byte[]>(CachedCombinedReportField,
                 device);
-            AssertV5AudioContract(cached, expectedFlag0: 0xF0,
+            AssertV5AudioContract(cached, expectedFlag0: 0xF2,
                 expectedFlag1: 0x83);
             byte[] pendingExact = GetFieldValue<byte[]>(
                 PendingNativeGameExactStateField, device);
             Assert.AreEqual((byte)0xF2, pendingExact[13]);
             Assert.AreEqual((byte)0xF7, pendingExact[14]);
+
+            // The exact command/cache retains game mode even for zero motors.
+            // Only subsequent steady carriers apply the proven zero-pair guard,
+            // so they cannot repeatedly switch the speaker away from PCM.
+            byte[] steadyCarrier = (byte[])cached.Clone();
+            DualSenseBluetoothAudioReportPatcher.PatchForPresentation(
+                steadyCarrier, cached, long.MaxValue, 0);
+            AssertV5AudioContract(steadyCarrier, expectedFlag0: 0xF0,
+                expectedFlag1: 0x83);
+            Assert.AreEqual((byte)0, steadyCarrier[15]);
+            Assert.AreEqual((byte)0, steadyCarrier[16]);
+            Assert.AreEqual(cached[51], steadyCarrier[51],
+                "The zero-pair guard must not change independent flag2 fields.");
+            Assert.AreEqual((byte)0xF2, cached[13],
+                "Physical presentation cannot mutate the retained native cache.");
         }
 
         [TestMethod]

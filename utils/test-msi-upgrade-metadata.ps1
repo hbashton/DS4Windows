@@ -63,7 +63,7 @@ function New-MetadataFixture([string]$Path, [hashtable]$Properties, [switch]$Cus
 try {
     foreach ($mutation in @('none', 'ProductName', 'ProductVersion', 'ProductCode', 'UpgradeCode', 'CustomAction')) {
         $properties = @{
-            ProductName = 'DS4Windows'; ProductVersion = '5.0.5.6'
+            ProductName = 'DS4Windows'; ProductVersion = '5.0.5.7'
             ProductCode = '{8C3839ED-2834-4927-90DE-D058EB1E0495}'; UpgradeCode = $upgradeCode
         }
         if ($mutation -notin @('none', 'CustomAction')) { $properties[$mutation] = 'unexpected-fixture-value' }
@@ -71,7 +71,7 @@ try {
         $createdFiles.Add($path)
         New-MetadataFixture $path $properties -CustomAction:($mutation -eq 'CustomAction')
         if ($mutation -eq 'none') {
-            $result = @(Inspect-Msi $path '5.0.5.6')
+            $result = @(Inspect-Msi $path '5.0.5.7')
             if ($result.Count -ne 1 -or $result[0] -isnot [hashtable]) {
                 throw 'Inspect-Msi must return one identity object without COM pipeline nulls.'
             }
@@ -83,7 +83,7 @@ try {
         }
         else {
             $failure = $null
-            try { [void](Inspect-Msi $path '5.0.5.6') }
+            try { [void](Inspect-Msi $path '5.0.5.7') }
             catch { $failure = $_.Exception.Message }
             if (-not $failure) { throw "Unsafe MSI metadata was accepted: $mutation" }
             if ($mutation -eq 'CustomAction') {
@@ -102,26 +102,26 @@ try {
         [void](New-Item -ItemType Directory -Path $attached -Force)
         $createdDirectories.Add($payloadRoot)
         $createdDirectories.Add($attached)
-        $expected = Join-Path $attached 'DS4Windows_5.0.5.6_x64.msi'
+        $expected = Join-Path $attached 'DS4Windows_5.0.5.7_x64.msi'
         $copies = switch ($shape) {
             'exact' { @($expected) }
             'missing' { @() }
             'wrong-name' { @(Join-Path $attached 'DS4Windows_other_x64.msi') }
-            'wrong-location' { @(Join-Path $payloadRoot 'DS4Windows_5.0.5.6_x64.msi') }
-            'duplicate' { @($expected, (Join-Path $payloadRoot 'DS4Windows_5.0.5.6_x64.msi')) }
+            'wrong-location' { @(Join-Path $payloadRoot 'DS4Windows_5.0.5.7_x64.msi') }
+            'duplicate' { @($expected, (Join-Path $payloadRoot 'DS4Windows_5.0.5.7_x64.msi')) }
         }
         foreach ($copy in $copies) {
             Copy-Item -LiteralPath (Join-Path $testRoot 'none.msi') -Destination $copy
             $createdFiles.Add($copy)
         }
         if ($shape -eq 'exact') {
-            $selected = @(Get-PreviousMsiPayload $payloadRoot '5.0.5.6')
+            $selected = @(Get-PreviousMsiPayload $payloadRoot '5.0.5.7')
             if ($selected.Count -ne 1 -or $selected[0] -cne $expected) { throw 'Expected one exact attached MSI path.' }
-            [void](Inspect-Msi $selected[0] '5.0.5.6')
+            [void](Inspect-Msi $selected[0] '5.0.5.7')
         }
         else {
             $failure = $null
-            try { [void](Get-PreviousMsiPayload $payloadRoot '5.0.5.6') }
+            try { [void](Get-PreviousMsiPayload $payloadRoot '5.0.5.7') }
             catch { $failure = $_.Exception.Message }
             if ($failure -notlike '*one expected MSI*Observed MSI paths*') {
                 throw "Payload selection did not safely reject $shape with diagnostics: $failure"
@@ -132,7 +132,7 @@ try {
     }
     if ($ExistingMsi) {
         $resolvedMsi = (Resolve-Path -LiteralPath $ExistingMsi).Path
-        $result = @(Inspect-Msi $resolvedMsi '5.0.5.6')
+        $result = @(Inspect-Msi $resolvedMsi '5.0.5.7')
         if ($result.Count -ne 1 -or $result[0] -isnot [hashtable]) { throw 'Actual MSI identity has pipeline contamination.' }
         Write-Output 'PASS existing MSI readonly inspection (no installation)'
         $caseCount++

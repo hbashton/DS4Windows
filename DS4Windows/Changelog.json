@@ -1,9 +1,31 @@
 {
-  "latest_version": "5.0.5.6",
+  "latest_version": "5.0.5.7",
   "latest_version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 5},
-  "updated_at": "2026-09-10T23:45:00+0000",
+  "updated_at": "2026-09-11T21:48:29+0000",
   "changelog": {
     "versions": [
+    {
+      "version_str": "5.0.5.7",
+      "version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 5},
+      "base_header": "Release Candidate 4.5.7 Hotfix - Sorry, broke Vibration/Triggers",
+      "release_date": "2026-09-11T21:48:29+0000",
+      "locales": [
+        {
+          "code": "en",
+          "header": "Release Candidate 4.5.7 Hotfix - Sorry, broke Vibration/Triggers",
+          "log_text": [
+            "* **Bluetooth feedback hotfix** - native game commands can progress between audio packets without losing their order, fixing the command backlog introduced in 4.5.6",
+            "* **Audio and trigger startup** - partially filled audio buffers no longer block the commands and media needed to finish starting feedback",
+            "* **Trigger Lab delivery** - live trigger changes reach Bluetooth output during speaker passthrough; unrelated profile edits do not clear game trigger effects",
+            "* **Per-trigger priority** - enabled Trigger Lab effects override only their corresponding trigger; other triggers retain native game feedback",
+            "* **Targeted update** - PCM encoding, audio cadence, input buffering and Nintendo rumble tuning are unchanged; complete packages reuse VIIPER 0.1.4-rc4.5.6 and support DS4Updater 2.0.6"
+          ],
+          "editor": "hbashton",
+          "editors_note": ["Unsigned release candidate. Automated native-command and PCM tests pass; haptics were tested on a physical Bluetooth DualSense, while adaptive triggers still need confirmation in a trigger-supporting game."],
+          "updated_at": "2026-09-11T21:48:29+0000"
+        }
+      ]
+    },
     {
       "version_str": "5.0.5.6",
       "version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 5},

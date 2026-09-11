@@ -2,25 +2,25 @@
 
 `build-installer.ps1` composes the standard x64 distribution as a WiX 5 Burn
 bundle with a custom WPF interface. It contains the managed DS4Windows MSI,
-VIIPER 0.1.3-rc4.5, USB-IP 0.9.7.7, and optional HidHide/FakerInput packages.
+VIIPER 0.1.4-rc4.5.6, USB-IP 0.9.7.7, and optional HidHide/FakerInput packages.
 The VIIPER payload is accompanied by its generated dependency-license notice
 and a validated provenance record containing the exact source commit and
 SHA-256 used by this release.
 
 The installer intentionally has no portable mode or destination selector. The
 portable ZIP remains a separate CI artifact. The standard installer places
-VIIPER under protected `%ProgramFiles%\DS4Windows\VIIPER`. A portable
-DS4Windows package may instead use VIIPER from any location, but only when the
-executable is an exact SHA-256 match for the VIIPER build bundled with that
-DS4Windows release; its selected startup task is retargeted to that verified
-path. Program Files remains the recommended, tamper-resistant location.
+VIIPER under protected `%ProgramFiles%\DS4Windows\VIIPER`. The marked portable
+ZIP instead starts its bundled, hash-verified broker when needed and does not
+create or retarget installed startup tasks. A verified matching running copy
+can be reused; a conflicting copy is reported without being terminated.
+Installed startup tasks continue to target the verified installed broker.
 
 ```powershell
 .\installer\build-installer.ps1 `
   -PublishRoot .\bin\x64\Release\output `
-  -ProductVersion 5.0.5.5 `
-  -BundleVersion 5.0.5.5 `
-  -DisplayVersion VIIPERRC4.5.5 `
+  -ProductVersion 5.0.5.6 `
+  -BundleVersion 5.0.5.6 `
+  -DisplayVersion VIIPERRC4.5.6 `
   -SkipApplicationPublish
 ```
 

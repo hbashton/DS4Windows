@@ -21,6 +21,7 @@
   <ItemGroup>
     <ProjectReference Include="..\DS4Windows\DS4WinWPF.csproj" />
     <Compile Include="..\installer\DS4Windows.Bootstrapper\UninstallHelperPackagePlan.cs" Link="UninstallHelperPackagePlan.cs" />
+    <Compile Include="..\installer\DS4Windows.SetupActions\SetupMutationOwnership.cs" Link="SetupMutationOwnership.cs" />
     <Compile Include="..\utils\Switch2BluetoothAudioProbe\ProbeProtocol.cs" Link="ProbeProtocol.cs" />
     <Compile Include="..\utils\Switch2BluetoothLabClient\PlanFramer.cs" Link="PlanFramer.cs" />
     <Compile Include="..\utils\Switch2BluetoothLabClient\DualMonoPlanFactory.cs" Link="DualMonoPlanFactory.cs" />

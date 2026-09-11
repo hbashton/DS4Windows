@@ -219,8 +219,8 @@ jobs:
         $records = Join-Path $env:RUNNER_TEMP 'ds4windows-release-records'
         New-Item -ItemType Directory -Path $records | Out-Null
         $publish = (Resolve-Path '.\bin\x64\Release\DS4Windows').Path
-        $provenance = Get-Content -LiteralPath (Join-Path $publish 'extras\VIIPER-0.1.3-rc4.5-PROVENANCE.txt') -Raw
-        $buildNotes = Get-Content -LiteralPath (Join-Path $publish 'extras\VIIPER-0.1.3-rc4.5-BUILD-NOTES.txt') -Raw
+        $provenance = Get-Content -LiteralPath (Join-Path $publish 'extras\VIIPER-0.1.4-rc4.5.6-PROVENANCE.txt') -Raw
+        $buildNotes = Get-Content -LiteralPath (Join-Path $publish 'extras\VIIPER-0.1.4-rc4.5.6-BUILD-NOTES.txt') -Raw
         function Read-RecordField([string]$text, [string]$name, [string]$pattern) {
           $match = [regex]::Match($text, '(?m)^' + [regex]::Escape($name) + ': (' + $pattern + ')\r?$')
           if (-not $match.Success) { throw "Missing or invalid provenance field: $name" }
@@ -264,8 +264,8 @@ jobs:
         if ((Get-FileHash -LiteralPath $brokerSource -Algorithm SHA256).Hash -cne $brokerSourceHash) {
           throw 'VIIPER source archive differs from the recorded corresponding-source archive.'
         }
-        $noticeNames = @('VIIPER-0.1.3-rc4.5-LICENSES.txt', 'VIIPER-0.1.3-rc4.5-PROVENANCE.txt',
-          'VIIPER-0.1.3-rc4.5-BUILD-NOTES.txt', 'VIIPER-SYSTRAY-LICENSE.txt', 'VIIPER-SYSTRAY-NOTICE.md', 'LICENSE.txt')
+        $noticeNames = @('VIIPER-0.1.4-rc4.5.6-LICENSES.txt', 'VIIPER-0.1.4-rc4.5.6-PROVENANCE.txt',
+          'VIIPER-0.1.4-rc4.5.6-BUILD-NOTES.txt', 'VIIPER-SYSTRAY-LICENSE.txt', 'VIIPER-SYSTRAY-NOTICE.md', 'LICENSE.txt')
         foreach ($name in $noticeNames) { Copy-Item -LiteralPath (Join-Path $publish "extras\$name") -Destination $records }
         $signing = if ($env:UNSIGNED_RC_RELEASE -ceq 'true') { 'Unsigned named release candidate' } else { 'Required Authenticode signing verified' }
         @("DS4Windows release: $env:RELEASE_TAG", "DS4Windows source commit: $sourceCommit",
@@ -390,8 +390,8 @@ jobs:
         }
         foreach ($required in @('DS4Windows_VIIPER_x64.zip', "DS4Windows_$($receipt.binaryVersion)_Setup_x64.exe",
           "DS4Windows-$($env:RELEASE_TAG)-SOURCE.zip", $receipt.brokerSourceName, 'SHA256SUMS.txt', 'SOURCE-REVISIONS.txt',
-          'VIIPER-0.1.3-rc4.5-LICENSES.txt', 'VIIPER-0.1.3-rc4.5-PROVENANCE.txt',
-          'VIIPER-0.1.3-rc4.5-BUILD-NOTES.txt', 'VIIPER-SYSTRAY-LICENSE.txt', 'VIIPER-SYSTRAY-NOTICE.md', 'LICENSE.txt')) {
+          'VIIPER-0.1.4-rc4.5.6-LICENSES.txt', 'VIIPER-0.1.4-rc4.5.6-PROVENANCE.txt',
+          'VIIPER-0.1.4-rc4.5.6-BUILD-NOTES.txt', 'VIIPER-SYSTRAY-LICENSE.txt', 'VIIPER-SYSTRAY-NOTICE.md', 'LICENSE.txt')) {
           if (-not $seen.Contains($required)) { throw "Incomplete RC receipt: $required" }
         }
         Write-Host 'Published unsigned RC matches its successful draft build; no assets rebuilt or overwritten.'

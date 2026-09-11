@@ -22,10 +22,10 @@
 		     a SustainedLowLatency lease in the process. -->
 		<ServerGarbageCollection>false</ServerGarbageCollection>
 		<ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
-		<AssemblyVersion>5.0.5.5</AssemblyVersion>
-		<FileVersion>5.0.5.5</FileVersion>
-		<Version>5.0.5.5-rc4.5.5</Version>
-		<InformationalVersion>VIIPERRC4.5.5</InformationalVersion>
+		<AssemblyVersion>5.0.5.6</AssemblyVersion>
+		<FileVersion>5.0.5.6</FileVersion>
+		<Version>5.0.5.6-rc4.5.6</Version>
+		<InformationalVersion>VIIPERRC4.5.6</InformationalVersion>
 		<IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
 		<Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
 		<Platform Condition=" '$(Platform)' == '' ">x64</Platform>
@@ -91,7 +91,7 @@
 		AfterTargets="Publish"
 		BeforeTargets="GenerateManagedFileManifest">
 		<PropertyGroup>
-			<_BundledViiperName>VIIPER-0.1.3-rc4.5-x64.exe</_BundledViiperName>
+			<_BundledViiperName>VIIPER-0.1.4-rc4.5.6-x64.exe</_BundledViiperName>
 			<_BundledViiperPath>$(PublishDir)extras\$(_BundledViiperName)</_BundledViiperPath>
 			<_BundledViiperHashPath>$(_BundledViiperPath).sha256</_BundledViiperHashPath>
 		</PropertyGroup>
@@ -136,8 +136,8 @@
 		<EmbeddedResource Include="..\extras\install-viiper-backend.ps1">
 			<LogicalName>DS4Windows.install-viiper-backend.ps1</LogicalName>
 		</EmbeddedResource>
-		<Content Include="..\extras\VIIPER-0.1.3-rc4.5-x64.exe">
-			<Link>extras\VIIPER-0.1.3-rc4.5-x64.exe</Link>
+		<Content Include="..\extras\VIIPER-0.1.4-rc4.5.6-x64.exe">
+			<Link>extras\VIIPER-0.1.4-rc4.5.6-x64.exe</Link>
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
 		</Content>
@@ -153,18 +153,18 @@
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
 		</Content>
-		<Content Include="..\extras\VIIPER-0.1.3-rc4.5-LICENSES.txt">
-			<Link>extras\VIIPER-0.1.3-rc4.5-LICENSES.txt</Link>
+		<Content Include="..\extras\VIIPER-0.1.4-rc4.5.6-LICENSES.txt">
+			<Link>extras\VIIPER-0.1.4-rc4.5.6-LICENSES.txt</Link>
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
 		</Content>
-		<Content Include="..\extras\VIIPER-0.1.3-rc4.5-PROVENANCE.txt">
-			<Link>extras\VIIPER-0.1.3-rc4.5-PROVENANCE.txt</Link>
+		<Content Include="..\extras\VIIPER-0.1.4-rc4.5.6-PROVENANCE.txt">
+			<Link>extras\VIIPER-0.1.4-rc4.5.6-PROVENANCE.txt</Link>
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
 		</Content>
-		<Content Include="..\extras\VIIPER-0.1.3-rc4.5-BUILD-NOTES.txt">
-			<Link>extras\VIIPER-0.1.3-rc4.5-BUILD-NOTES.txt</Link>
+		<Content Include="..\extras\VIIPER-0.1.4-rc4.5.6-BUILD-NOTES.txt">
+			<Link>extras\VIIPER-0.1.4-rc4.5.6-BUILD-NOTES.txt</Link>
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
 		</Content>

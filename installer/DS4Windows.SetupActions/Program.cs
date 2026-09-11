@@ -19,9 +19,9 @@ namespace DS4Windows.SetupActions
     {
         private const string RegistryKeyPath = @"SOFTWARE\DS4Windows";
         private const string InfrastructureVersion =
-            "VIIPER-0.1.3-rc4.5+USBIP-0.9.7.7";
+            "VIIPER-0.1.4-rc4.5.6+USBIP-0.9.7.7";
         private const string CurrentBundledViiperName =
-            "VIIPER-0.1.3-rc4.5-x64.exe";
+            "VIIPER-0.1.4-rc4.5.6-x64.exe";
         private static string CorrelationId =
             Guid.NewGuid().ToString("N");
         private static readonly string InstallerLogRoot = Path.Combine(
@@ -95,9 +95,6 @@ namespace DS4Windows.SetupActions
                 throw new FileNotFoundException("The managed DS4Windows installation is incomplete.", scriptPath);
             }
 
-            RemoveObsoleteBundledViiperPayloads(installRoot,
-                preserveCurrent: true);
-
             var targetUser = ResolveInteractiveUser(args);
             var desktopShortcut = !string.Equals(
                 ReadArgument(args, "--desktop-shortcut"), "0",
@@ -111,6 +108,10 @@ namespace DS4Windows.SetupActions
             string extrasRoot, string scriptPath, string bundleSource,
             InteractiveUser targetUser, bool desktopShortcut)
         {
+            // Cleanup is mutation too: a concurrent repair may still need an
+            // older payload, so do not touch it before owning the setup mutex.
+            RemoveObsoleteBundledViiperPayloads(Path.GetDirectoryName(ds4Path),
+                preserveCurrent: true);
             ResetInfrastructureLog(targetUser);
             WriteFallbackLog("Infrastructure setup starting for interactive user " +
                 targetUser.Name + " (" + targetUser.Sid + ").");
@@ -405,6 +406,11 @@ namespace DS4Windows.SetupActions
 
         private static int PostUninstallCleanup(string installRoot)
         {
+            return RunWithSetupMutex(() => PostUninstallCleanupLocked(installRoot));
+        }
+
+        private static int PostUninstallCleanupLocked(string installRoot)
+        {
             if (!Directory.Exists(installRoot))
             {
                 return 0;
@@ -477,37 +483,7 @@ namespace DS4Windows.SetupActions
 
         private static int RunWithSetupMutex(Func<int> action)
         {
-            using (var setupMutex = new Mutex(false,
-                       @"Global\DS4Windows-VIIPER-Setup"))
-            {
-                var mutexOwned = false;
-                try
-                {
-                    try
-                    {
-                        mutexOwned = setupMutex.WaitOne(0);
-                    }
-                    catch (AbandonedMutexException)
-                    {
-                        mutexOwned = true;
-                    }
-                    if (!mutexOwned)
-                    {
-                        WriteFallbackLog(
-                            "Another DS4Windows VIIPER setup owns the global " +
-                            "setup mutex; returning Windows Installer busy (1618).");
-                        return 1618;
-                    }
-                    return action();
-                }
-                finally
-                {
-                    if (mutexOwned)
-                    {
-                        try { setupMutex.ReleaseMutex(); } catch { }
-                    }
-                }
-            }
+            return SetupMutationOwnership.Run(action, WriteFallbackLog);
         }
 
         private static InteractiveUser ResolveInteractiveUser(string[] args)

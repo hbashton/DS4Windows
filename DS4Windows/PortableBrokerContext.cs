@@ -43,6 +43,32 @@ internal sealed class PortableBrokerContext : IDisposable
     internal string DataPath { get; }
     internal string ConfigPath { get; }
 
+    internal static string DescribeReadinessFailure(string probeFailure)
+    {
+        // ProbeServer returns only a fixed phase plus an exception type, never
+        // exception messages, credentials or peer bytes. Keep that contract
+        // explicit at the dialog boundary instead of dropping the useful cause.
+        string detail = "No successful authenticated reply was received.";
+        if (probeFailure != null && probeFailure.Length <= 128)
+        {
+            int separator = probeFailure.IndexOf(": ", StringComparison.Ordinal);
+            if (separator > 0)
+            {
+                string phase = probeFailure[..separator];
+                string reason = probeFailure[(separator + 2)..];
+                bool knownPhase = phase is "Connect" or "CompleteConnect" or
+                    "Authenticate" or "OpenStream" or "WritePing" or "ReadPing";
+                bool safeReason = reason is "timeout" or "no valid VIIPER response" ||
+                    (reason.EndsWith("Exception", StringComparison.Ordinal) &&
+                     reason.All(character => character is >= 'A' and <= 'Z' or >= 'a' and <= 'z' or >= '0' and <= '9'));
+                if (knownPhase && safeReason) detail = probeFailure;
+            }
+        }
+        return "Portable VIIPER did not become ready.\n\nReadiness check: " + detail +
+            "\n\nInclude this check in your bug report. Use a complete extracted portable package and USB/IP 0.9.7.7. " +
+            "Close any conflicting VIIPER before reopening DS4Windows. Your key and profiles were not replaced.";
+    }
+
     internal static void Initialize(string executableDirectory)
     {
         if (current != null)

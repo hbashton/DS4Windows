@@ -1,0 +1,72 @@
+VIIPER bundled artifact provenance
+
+Version: v0.1.4-rc4.5.6
+Status: Unsigned release candidate, built by the tagged GitHub Actions workflow; not a stable release.
+Source: https://github.com/hbashton/VIIPER
+Source commit: 02d93e403ffde7ad24c1b373c01c6eb04ce02f2e
+Source archive: VIIPER-0.1.4-rc4.5.6-SOURCE.zip
+Source archive SHA-256: 2F73D30A60ECC134215844EB81DA4FD58BD8F2B85FD6C92CCFF46DC0CF5984C8
+Source archive layout: git archive --format=zip --prefix=VIIPER/ of the exact source commit; ZIP commit comment verified.
+Release: https://github.com/hbashton/VIIPER/releases/tag/v0.1.4-rc4.5.6
+Tagged build: https://github.com/hbashton/VIIPER/actions/runs/34544136045
+GitHub artifact: VIIPER-windows-amd64-Release (10178464223)
+Release archive: viiper-windows-amd64.zip
+Release archive SHA-256: 7A08CAE2E5A8829BC0C7CE7CCCF6EDD72AAB3DAE1FA31DC431FEA0A942BED779
+Toolchain: Go 1.27.0 windows/amd64
+Resource tool: github.com/josephspurrier/goversioninfo/cmd/goversioninfo v1.7.0
+Build: GOOS=windows GOARCH=amd64 CGO_ENABLED=0 BUILD_TYPE=Release
+Build flags: -tags release -trimpath; default Go VCS stamping verified clean.
+Link flags: -s -w -X main.Version=v0.1.4-rc4.5.6 -X main.Commit=02d93e4 -X main.Date=2026-09-10T23:56:34Z -X github.com/Alia5/VIIPER/internal/codegen/common.Version=v0.1.4-rc4.5.6
+Embedded commit: 02d93e4
+Embedded build date: 2026-09-10T23:56:34Z
+Embedded VCS revision: 02d93e403ffde7ad24c1b373c01c6eb04ce02f2e
+Embedded VCS time: 2026-09-10T23:46:58Z
+Embedded VCS modified: false
+PE file version: 0.1.4.0
+PE product version: 0.1.4-rc4.5.6
+Binary: VIIPER-0.1.4-rc4.5.6-x64.exe
+Binary size: 13287424 bytes
+Binary SHA-256: 89808A41610997A6DAD0807579B816C18B34C039E03E96FDC8FD2BD68434FFBB
+Authenticode status at packaging: NotSigned
+License notice: VIIPER-0.1.4-rc4.5.6-LICENSES.txt
+License notice SHA-256: 81B2857295C5C8A5A02BFD64E326659746D0B507A8641EE5CC11A5534204819A
+Full GPL-3.0 license: LICENSE.txt
+Full GPL-3.0 license SHA-256: F24EE094842DC3347A7A06B71373573CE18F6DCB935C81E95623723EE22E6CA6
+Local Windows tray modification notice: VIIPER-SYSTRAY-NOTICE.md
+Local Windows tray modification notice SHA-256: 6126849BBF404E8172729DAF992DDF7BE43C84F30721883F51C0FA52CC4CD192
+Local Windows tray full Apache-2.0 license: VIIPER-SYSTRAY-LICENSE.txt
+Local Windows tray full Apache-2.0 license SHA-256: 05C55BD8834035C143C17AA218BFF08E22B7A66C5603CBA8F070DCAAFC974B8F
+
+Artifact identity:
+
+The Windows executable and all four notices are copied byte-for-byte from the
+tagged CI archive, not rebuilt locally. BUILD-INFO.json in that archive binds
+its exact hashes, PE versions, source commit, build date, and Go module/settings
+to run 34544136045. The source archive is a separate exact-commit git archive.
+Both the portable root alias and the managed extras payload use this binary.
+
+Validation and scope:
+
+Main run 34543672440 and tagged run 34544136045 passed the complete Linux and
+Windows test gates, all four generated client builds, all executable targets
+and both native-library builds. The Windows/amd64 job checked fresh licenses,
+clean VCS, Release metadata, PE versions and a help-only smoke test.
+
+This release adds bounded native DualSense command ordering/admission and
+retirement of owned listeners after partial server initialization failure.
+It preserves the existing USB/IP backend and authentication; it does not add
+console authentication or a separate native presentation stack.
+
+CFBK v1 uses the shared Windows QPC clock. Windows suites exercise real Stop/ACK
+scenarios; Linux explicitly rejects the unavailable clock instead of pretending
+a different epoch is equivalent. The canonical feedback/retirement path is
+Windows-specific.
+
+The kong-yaml dependency remains pinned to a56dc1466c79ffc467aac6e158b878b2d7903bd2
+with its MIT COPYING grant. Notices include that grant and the complete copied
+systray Apache-2.0 license. The dependency notice changed with the module version;
+its actual CI bytes and hash are intentionally preserved.
+
+No installed app, broker, driver, scheduled task, or controller session was
+changed to inspect this artifact. Automated and package validation do not replace
+combined-build physical controller/game acceptance.

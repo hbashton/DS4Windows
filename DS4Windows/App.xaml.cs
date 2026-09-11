@@ -513,6 +513,7 @@ namespace DS4WinWPF
                 portable.Start();
                 Stopwatch startup = Stopwatch.StartNew();
                 const int startupBudgetMilliseconds = 8000;
+                string lastProbeFailure = null;
                 while (startup.ElapsedMilliseconds < startupBudgetMilliseconds)
                 {
                     if (!portable.InspectOwnedProcess(out bool running, out string failure) || !running)
@@ -523,16 +524,21 @@ namespace DS4WinWPF
                     if (DS4Windows.ViiperSetupManager.ProbeServer(
                             DS4Windows.ViiperSetupManager.ApiHost,
                             DS4Windows.ViiperSetupManager.ApiPort, authenticated: true,
-                            out _, totalTimeoutMilliseconds: Math.Max(1, Math.Min(1000, remaining))) &&
+                            out lastProbeFailure, totalTimeoutMilliseconds: Math.Max(1, Math.Min(1000, remaining))) &&
                         portable.InspectOwnedProcess(out running, out _) && running)
                         return true;
                     Thread.Sleep(50);
                 }
                 throw new DS4Windows.PortableBrokerStartupException(
-                    "Portable VIIPER did not become ready. Close any conflicting VIIPER, check USB/IP 0.9.7.7, then restart DS4Windows. If Windows denied driver access, try Run as administrator.");
+                    DS4Windows.PortableBrokerContext.DescribeReadinessFailure(lastProbeFailure));
             }
             catch (DS4Windows.PortableBrokerStartupException exception)
             {
+                // No controller lifetime has started yet. Retire only our own
+                // child before showing a modal dialog; otherwise its ports stay
+                // occupied until the user dismisses the error. Borrowed brokers
+                // are never stopped by this context, including this failure path.
+                portable.Dispose();
                 CancelPortableStartup(exception.Message);
                 return false;
             }

@@ -1,9 +1,34 @@
 {
-  "latest_version": "5.0.5.0",
+  "latest_version": "5.0.5.6",
   "latest_version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 5},
-  "updated_at": "2026-09-09T01:58:01+0000",
+  "updated_at": "2026-09-10T23:45:00+0000",
   "changelog": {
     "versions": [
+    {
+      "version_str": "5.0.5.6",
+      "version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 5},
+      "base_header": "Release Candidate 4.5.6 - Steadier Feedback & Safer Startup",
+      "release_date": "2026-09-10T23:45:00+0000",
+      "locales": [
+        {
+          "code": "en",
+          "header": "Release Candidate 4.5.6 - Steadier Feedback & Safer Startup",
+          "log_text": [
+            "* **Windows 10 portable startup** - compatible encrypted VIIPER communication no longer requires the native Windows 11 encryption provider; authentication remains enabled",
+            "* **Useful startup errors** - portable readiness failures identify the failed stage, and an unsuccessful startup releases its own broker before displaying the error",
+            "* **Safer setup and recovery** - installer cleanup respects the same setup lock as repair, and VIIPER releases its own listeners if initialization fails partway through",
+            "* **More reliable audio capture** - failed initialization can retry cleanly, source switches discard stale audio, and a capture/writer failure does not leave a dead runtime or retained audio rumble",
+            "* **Audio Haptics for Switch 2** - Switch 2 Pro and Joy-Con 2 can turn app or system audio into stereo HD rumble using Mix or Replace; System audio captures the Windows default output",
+            "* **Find apps across Sonar outputs** - both app pickers discover audio on all active outputs, with more stable route recovery instead of repeatedly restarting capture",
+            "* **Steadier feedback delivery** - Switch 2 sustained-rumble framing follows the referenced first-active-frame approach; native DualSense commands preserve ordering and retry state across busy writers",
+            "* **Complete matching packages** - the installer and portable ZIP include VIIPER 0.1.4-rc4.5.6, the Windows 10 encryption dependency, Xbox emulation identity, runtime and notices; existing DS4Updater 2.0.6 supports this release"
+          ],
+          "editor": "hbashton",
+          "editors_note": ["Unsigned release candidate. Automated regression and package validation do not establish every controller/game combination or guarantee zero failures. Bluetooth Switch 2 headset audio remains unsupported."],
+          "updated_at": "2026-09-10T23:45:00+0000"
+        }
+      ]
+    },
     {
       "version_str": "5.0.5.0",
       "version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 5},

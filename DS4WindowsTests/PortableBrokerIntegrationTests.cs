@@ -70,6 +70,45 @@ public class PortableBrokerIntegrationTests
     }
 
     [TestMethod]
+    public void FailedReadinessRetainsSafeCauseAndRetiresOwnedChildBeforeShowingTheDialog()
+    {
+        string start = Section(Read("App.xaml.cs"),
+            "private bool StartPortableBroker()", "private static void ShowStartupDialog(");
+        StringAssert.Contains(start, "out lastProbeFailure, totalTimeoutMilliseconds:");
+        StringAssert.Contains(start, "DescribeReadinessFailure(lastProbeFailure)");
+        Before(start, "portable.Dispose();", "CancelPortableStartup(exception.Message);");
+    }
+
+    [DataTestMethod]
+    [DataRow("Connect: SocketException")]
+    [DataRow("Connect: timeout")]
+    [DataRow("Authenticate: PlatformNotSupportedException")]
+    [DataRow("Authenticate: UnauthorizedAccessException")]
+    [DataRow("ReadPing: AuthenticationTagMismatchException")]
+    [DataRow("ReadPing: no valid VIIPER response")]
+    public void ReadinessMessageRetainsOnlyTheProbePhaseAndType(string failure)
+    {
+        string message = PortableBrokerContext.DescribeReadinessFailure(failure);
+        StringAssert.Contains(message, "Readiness check: " + failure);
+        StringAssert.Contains(message, "Your key and profiles were not replaced.");
+    }
+
+    [DataTestMethod]
+    [DataRow(null)]
+    [DataRow("")]
+    [DataRow("Authenticate: token-secret-C:\\user\\viiper.key.txt")]
+    [DataRow("Authenticate: IOException\r\npeer data")]
+    [DataRow("Unknown: AuthenticationException")]
+    [DataRow("ReadPing: <VIIPER peer bytes>")]
+    public void ReadinessMessageDoesNotEchoUnexpectedDiagnosticContent(string failure)
+    {
+        string message = PortableBrokerContext.DescribeReadinessFailure(failure);
+        StringAssert.Contains(message, "No successful authenticated reply was received.");
+        if (!string.IsNullOrEmpty(failure))
+            Assert.IsFalse(message.Contains(failure, StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public void RuntimeStatusKeepsSessionPathAndAuthenticationWithoutTaskOrServerFallback()
     {
         string status = Section(Read("DS4Control", "Viiper", "ViiperSetupManager.cs"),

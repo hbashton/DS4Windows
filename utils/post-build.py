@@ -62,15 +62,17 @@ if len({entry.as_posix().casefold() for entry in relative_entries}) != len(relat
 # of producing an archive that later needs a network recovery path.
 required_offline_files = (
     "DS4Windows.exe",
+    "BouncyCastle.Cryptography.dll",
+    "Resources/BouncyCastle.NOTICE.txt",
     "xbox-one-authorized-persona.json",
     "extras/XBOX-ONE-PERSONA-NOTICE.md",
     "coreclr.dll",
     "hostfxr.dll",
     "extras/install-viiper-backend.ps1",
-    "extras/VIIPER-0.1.3-rc4.5-x64.exe",
-    "extras/VIIPER-0.1.3-rc4.5-LICENSES.txt",
-    "extras/VIIPER-0.1.3-rc4.5-PROVENANCE.txt",
-    "extras/VIIPER-0.1.3-rc4.5-BUILD-NOTES.txt",
+    "extras/VIIPER-0.1.4-rc4.5.6-x64.exe",
+    "extras/VIIPER-0.1.4-rc4.5.6-LICENSES.txt",
+    "extras/VIIPER-0.1.4-rc4.5.6-PROVENANCE.txt",
+    "extras/VIIPER-0.1.4-rc4.5.6-BUILD-NOTES.txt",
     "extras/LICENSE.txt",
     "extras/VIIPER-SYSTRAY-NOTICE.md",
     "extras/VIIPER-SYSTRAY-LICENSE.txt",
@@ -93,7 +95,7 @@ if missing_offline_files:
 # Bind setup to the exact VIIPER executable copied by this publish. This
 # sidecar is regenerated for every artifact, so no hand-maintained hash can
 # drift when the bundled executable changes.
-viiper_name = "VIIPER-0.1.3-rc4.5-x64.exe"
+viiper_name = "VIIPER-0.1.4-rc4.5.6-x64.exe"
 viiper_path = target_dir / "extras" / viiper_name
 viiper_hasher = hashlib.sha256()
 with viiper_path.open("rb") as viiper_stream:

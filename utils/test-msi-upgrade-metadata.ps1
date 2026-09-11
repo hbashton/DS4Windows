@@ -4,14 +4,14 @@ param([string]$ExistingMsi)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# Parse, then load only two read-only metadata functions. Never execute the
+# Parse, then load only read-only metadata/path functions. Never execute the
 # hosted fixture's body, download/layout a bundle, or invoke Windows Installer.
 $tokens = $null
 $parseErrors = $null
 $source = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot 'test-previous-msi-upgrade.ps1')).Path
 $ast = [Management.Automation.Language.Parser]::ParseFile($source, [ref]$tokens, [ref]$parseErrors)
 if ($parseErrors.Count) { throw 'The hosted upgrade fixture has parser errors.' }
-foreach ($name in @('Get-MsiProperty', 'Inspect-Msi')) {
+foreach ($name in @('Assert-LocalPath', 'Get-PreviousMsiPayload', 'Get-MsiProperty', 'Inspect-Msi')) {
     $function = $ast.Find({ param($node)
         $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
     }, $true)
@@ -22,6 +22,7 @@ $upgradeCode = '{65E808E3-D35A-4825-AE11-8D9415F16446}'
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('ds4w-msi-metadata-' + [Guid]::NewGuid().ToString('N'))
 [void](New-Item -ItemType Directory -Path $testRoot)
 $createdFiles = [Collections.Generic.List[string]]::new()
+$createdDirectories = [Collections.Generic.List[string]]::new()
 $caseCount = 0
 
 function New-MetadataFixture([string]$Path, [hashtable]$Properties, [switch]$CustomAction) {
@@ -95,6 +96,40 @@ try {
         $caseCount++
         Write-Output "PASS MSI metadata $mutation"
     }
+    foreach ($shape in @('exact', 'missing', 'wrong-name', 'wrong-location', 'duplicate')) {
+        $payloadRoot = Join-Path $testRoot ('payloads-' + $shape)
+        $attached = Join-Path $payloadRoot 'WixAttachedContainer'
+        [void](New-Item -ItemType Directory -Path $attached -Force)
+        $createdDirectories.Add($payloadRoot)
+        $createdDirectories.Add($attached)
+        $expected = Join-Path $attached 'DS4Windows_5.0.5.6_x64.msi'
+        $copies = switch ($shape) {
+            'exact' { @($expected) }
+            'missing' { @() }
+            'wrong-name' { @(Join-Path $attached 'DS4Windows_other_x64.msi') }
+            'wrong-location' { @(Join-Path $payloadRoot 'DS4Windows_5.0.5.6_x64.msi') }
+            'duplicate' { @($expected, (Join-Path $payloadRoot 'DS4Windows_5.0.5.6_x64.msi')) }
+        }
+        foreach ($copy in $copies) {
+            Copy-Item -LiteralPath (Join-Path $testRoot 'none.msi') -Destination $copy
+            $createdFiles.Add($copy)
+        }
+        if ($shape -eq 'exact') {
+            $selected = @(Get-PreviousMsiPayload $payloadRoot '5.0.5.6')
+            if ($selected.Count -ne 1 -or $selected[0] -cne $expected) { throw 'Expected one exact attached MSI path.' }
+            [void](Inspect-Msi $selected[0] '5.0.5.6')
+        }
+        else {
+            $failure = $null
+            try { [void](Get-PreviousMsiPayload $payloadRoot '5.0.5.6') }
+            catch { $failure = $_.Exception.Message }
+            if ($failure -notlike '*one expected MSI*Observed MSI paths*') {
+                throw "Payload selection did not safely reject $shape with diagnostics: $failure"
+            }
+        }
+        $caseCount++
+        Write-Output "PASS attached MSI payload $shape"
+    }
     if ($ExistingMsi) {
         $resolvedMsi = (Resolve-Path -LiteralPath $ExistingMsi).Path
         $result = @(Inspect-Msi $resolvedMsi '5.0.5.6')
@@ -113,8 +148,12 @@ finally {
         throw 'Unexpected fixture cleanup root.'
     }
     foreach ($path in $createdFiles) {
-        if ([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($path)) -ne $resolvedRoot) { throw 'Unexpected metadata cleanup target.' }
+        if (-not [IO.Path]::GetFullPath($path).StartsWith($resolvedRoot + [IO.Path]::DirectorySeparatorChar,
+            [StringComparison]::OrdinalIgnoreCase)) { throw 'Unexpected metadata cleanup target.' }
         Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+    }
+    for ($index = $createdDirectories.Count - 1; $index -ge 0; $index--) {
+        [IO.Directory]::Delete($createdDirectories[$index], $false)
     }
     [IO.Directory]::Delete($resolvedRoot, $false)
 }

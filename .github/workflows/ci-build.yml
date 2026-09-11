@@ -179,6 +179,7 @@ jobs:
             ${{ runner.temp }}/ds4windows-msi-lifecycle/
             ${{ runner.temp }}/ds4windows-previous-msi-upgrade-*/VERIFICATION.json
             ${{ runner.temp }}/ds4windows-previous-msi-upgrade-*/*.log
+            ${{ runner.temp }}/ds4windows-previous-msi-upgrade-*/previous-extracted/extraction.json
           if-no-files-found: warn
 
       - name: Upload portable ZIP

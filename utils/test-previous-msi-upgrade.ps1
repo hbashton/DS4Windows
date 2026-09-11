@@ -120,6 +120,55 @@ function Invoke-Msi([string]$Arguments, [string]$Phase) {
     $log = Join-Path $runRoot ($Phase + '.log')
     Invoke-BoundedProcess $msiexec "$Arguments /qn /norestart /L*v `"$log`"" $Phase
 }
+function Get-PreviousMsiPayload([string]$PayloadRoot, [string]$ExpectedVersion) {
+    $PayloadRoot = Assert-LocalPath $PayloadRoot
+    if ($ExpectedVersion -notmatch '^\d+\.\d+\.\d+\.\d+$') { throw 'Invalid expected MSI version.' }
+    $name = "DS4Windows_${ExpectedVersion}_x64.msi"
+    $expected = Join-Path $PayloadRoot ('WixAttachedContainer\' + $name)
+    $matchingPayloads = @(Get-ChildItem -LiteralPath $PayloadRoot -Filter $name -File -Recurse)
+    if ($matchingPayloads.Count -ne 1 -or $matchingPayloads[0].FullName -ine $expected) {
+        $observed = @(Get-ChildItem -LiteralPath $PayloadRoot -Filter '*.msi' -File -Recurse |
+            Select-Object -First 20 -ExpandProperty FullName) | ConvertTo-Json -Compress
+        throw "Attached container did not produce the one expected MSI '$expected'. Observed MSI paths: $observed"
+    }
+    return Assert-LocalPath $expected
+}
+function Expand-PreviousBundlePayloads([string]$RepositoryRoot, [string]$BundlePath,
+    [string]$ExtractionRoot, [string]$ExpectedVersion) {
+    # Burn /layout keeps attached payloads inside the copied bundle. WiX can
+    # passively extract that container without executing the old bundle/BA.
+    # Reuse the release composer's SDK resolver; never select arbitrary PATH tools.
+    $tokens = $null
+    $errors = $null
+    $buildScript = Join-Path $RepositoryRoot 'installer\build-installer.ps1'
+    $buildAst = [Management.Automation.Language.Parser]::ParseFile($buildScript, [ref]$tokens, [ref]$errors)
+    if ($errors.Count) { throw 'The installer composer has parser errors.' }
+    $resolver = $buildAst.Find({ param($node)
+        $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Resolve-WixExecutable'
+    }, $true)
+    if (-not $resolver) { throw 'The verified WiX SDK resolver was not found.' }
+    Invoke-Expression $resolver.Extent.Text
+    $wix = Resolve-WixExecutable (Join-Path $RepositoryRoot 'installer\DS4Windows.Bundle\DS4Windows.Bundle.wixproj')
+    $ExtractionRoot = Assert-LocalPath $ExtractionRoot
+    if (Test-Path -LiteralPath $ExtractionRoot) { throw 'Passive extraction requires a fresh directory.' }
+    $payloads = Join-Path $ExtractionRoot 'payloads'
+    $bootstrapper = Join-Path $ExtractionRoot 'bootstrapper'
+    $intermediate = Join-Path $ExtractionRoot 'intermediate'
+    foreach ($directory in @($payloads, $bootstrapper, $intermediate)) {
+        [void](New-Item -ItemType Directory -Path $directory -Force)
+    }
+    $diagnostic = Join-Path $ExtractionRoot 'extraction.json'
+    [ordered]@{ Tool = $wix; Bundle = $BundlePath; BundleSha256 = (Get-FileHash -LiteralPath $BundlePath -Algorithm SHA256).Hash
+        PayloadRoot = $payloads; Intermediate = $intermediate; Status = 'Starting' } |
+        ConvertTo-Json | Set-Content -LiteralPath $diagnostic -Encoding utf8
+    Invoke-BoundedProcess $wix "burn extract `"$BundlePath`" -o `"$payloads`" -outba `"$bootstrapper`" -intermediateFolder `"$intermediate`"" 'Passive previous bundle extraction'
+    $msi = Get-PreviousMsiPayload $payloads $ExpectedVersion
+    [ordered]@{ Tool = $wix; Bundle = $BundlePath; BundleSha256 = (Get-FileHash -LiteralPath $BundlePath -Algorithm SHA256).Hash
+        Msi = $msi; MsiSha256 = (Get-FileHash -LiteralPath $msi -Algorithm SHA256).Hash
+        MsiLength = (Get-Item -LiteralPath $msi).Length; Status = 'Extracted' } |
+        ConvertTo-Json | Set-Content -LiteralPath $diagnostic -Encoding utf8
+    return $msi
+}
 function Get-MsiProperty($Database, [string]$Name) {
     # Windows Installer COM void methods emit pipeline nulls in PowerShell.
     # Discard Execute/Close explicitly so callers receive exactly one string.
@@ -210,9 +259,16 @@ try {
     if (@([Ds4HostedMsiInventory]::Related($upgradeCode)).Count -ne 0) {
         throw 'Layout unexpectedly changed MSI registration; refusing further work.'
     }
-    $oldPackages = @(Get-ChildItem -LiteralPath $layout -Filter 'DS4Windows_5.0.5.5_x64.msi' -File -Recurse)
-    if ($oldPackages.Count -ne 1) { throw 'Layout did not produce exactly one expected previous MSI.' }
-    $oldMsi = Assert-LocalPath $oldPackages[0].FullName
+    $layoutBundle = Join-Path $layout 'DS4Windows_VIIPERRC4.5.5_Setup_x64.exe'
+    if (-not (Test-Path -LiteralPath $layoutBundle -PathType Leaf) -or
+        (Get-FileHash -LiteralPath $layoutBundle -Algorithm SHA256).Hash -cne $oldInstallerSha256) {
+        throw 'Layout did not preserve the exact pinned previous bundle.'
+    }
+    $oldMsi = Expand-PreviousBundlePayloads $workspaceRoot $oldInstaller (Join-Path $runRoot 'previous-extracted') $oldVersion
+    if ((Get-FileHash -LiteralPath $oldMsi -Algorithm SHA256).Hash -cne
+        'EA28DE830488C8B7783607C38AE97A4B1CAFFB60DA68BE4F1CBD7105F25A4370') {
+        throw 'Extracted previous MSI bytes do not match the immutable bundle payload.'
+    }
     $oldIdentity = Inspect-Msi $oldMsi $oldVersion
     if ($oldIdentity.ProductCode -ieq $newIdentity.ProductCode) { throw 'The upgrade MSI must have a new ProductCode.' }
 
@@ -243,6 +299,7 @@ try {
     Assert-NoRuntimeProcesses
     [ordered]@{
         PreviousTag = 'VIIPERRC4.5.5'; PreviousInstallerSha256 = $oldInstallerSha256
+        PreviousMsiSha256 = (Get-FileHash -LiteralPath $oldMsi -Algorithm SHA256).Hash
         PreviousProductCode = $oldIdentity.ProductCode; NewProductCode = $newIdentity.ProductCode
         PreviousFileVersion = $oldVersion; NewFileVersion = $newVersion
         NewMsiSha256 = (Get-FileHash -LiteralPath $NewMsi -Algorithm SHA256).Hash

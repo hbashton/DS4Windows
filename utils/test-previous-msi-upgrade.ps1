@@ -121,21 +121,25 @@ function Invoke-Msi([string]$Arguments, [string]$Phase) {
     Invoke-BoundedProcess $msiexec "$Arguments /qn /norestart /L*v `"$log`"" $Phase
 }
 function Get-MsiProperty($Database, [string]$Name) {
+    # Windows Installer COM void methods emit pipeline nulls in PowerShell.
+    # Discard Execute/Close explicitly so callers receive exactly one string.
     $view = $null
     $record = $null
     try {
         $view = $Database.OpenView("SELECT ``Value`` FROM ``Property`` WHERE ``Property``='$Name'")
-        $view.Execute()
+        [void]$view.Execute()
         $record = $view.Fetch()
         if ($null -eq $record) { throw "MSI property is absent: $Name" }
         return [string]$record.StringData(1)
     }
     finally {
         if ($record) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($record) }
-        if ($view) { $view.Close(); [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($view) }
+        if ($view) { [void]$view.Close(); [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($view) }
     }
 }
 function Inspect-Msi([string]$Path, [string]$ExpectedVersion) {
+    # Keep COM method results off the success pipeline: this function returns
+    # one identity hashtable, never a null/identity/null array.
     $installer = $null
     $database = $null
     $view = $null
@@ -151,18 +155,23 @@ function Inspect-Msi([string]$Path, [string]$ExpectedVersion) {
             $properties.ProductVersion -cne $ExpectedVersion -or
             $properties.UpgradeCode -ine $upgradeCode -or
             $properties.ProductCode -notmatch '^\{[0-9A-Fa-f-]{36}\}$') {
-            throw "Unexpected application MSI identity in $Path"
+            $observed = [ordered]@{
+                Path = $Path; ExpectedVersion = $ExpectedVersion
+                ProductName = $properties.ProductName; ProductVersion = $properties.ProductVersion
+                ProductCode = $properties.ProductCode; UpgradeCode = $properties.UpgradeCode
+            } | ConvertTo-Json -Compress
+            throw "Unexpected application MSI identity: $observed"
         }
         # A payload-only MSI must not execute infrastructure or launch the app.
         $view = $database.OpenView('SELECT `Name` FROM `_Tables` WHERE `Name`=''CustomAction''')
-        $view.Execute()
+        [void]$view.Execute()
         $record = $view.Fetch()
         if ($record) { throw 'The MSI contains custom actions; driver/app side effects are not authorized by this fixture.' }
         return $properties
     }
     finally {
         if ($record) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($record) }
-        if ($view) { $view.Close(); [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($view) }
+        if ($view) { [void]$view.Close(); [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($view) }
         if ($database) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($database) }
         if ($installer) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($installer) }
     }

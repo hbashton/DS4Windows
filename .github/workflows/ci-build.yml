@@ -54,6 +54,10 @@ jobs:
         shell: pwsh
         run: .\utils\test-legacy-joystick-exposure.ps1
 
+      - name: Test MSI identity inspection without installation
+        shell: pwsh
+        run: .\utils\test-msi-upgrade-metadata.ps1
+
   build:
     runs-on: windows-2022
     needs: test
@@ -163,6 +167,7 @@ jobs:
         shell: pwsh
         run: |
           $msi = (Resolve-Path ".\installer\DS4Windows.Package\bin\x64\Release\DS4Windows_${{ env.PRODUCT_VERSION }}_x64.msi").Path
+          .\utils\test-msi-upgrade-metadata.ps1 -ExistingMsi $msi
           .\utils\test-previous-msi-upgrade.ps1 -NewMsi $msi
 
       - name: Preserve installer lifecycle evidence

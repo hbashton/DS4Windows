@@ -39,7 +39,7 @@ VIIPER integration on this page refer to the hbashton repositories.
 
 ### Standard installer — recommended
 
-Most users should download `DS4Windows_5.0.4.0_Setup_x64.exe` from the
+Most users should download `DS4Windows_5.0.5.8_Setup_x64.exe` from the
 [newest release candidate](https://github.com/hbashton/DS4Windows/releases). The
 single offline installer:
 
@@ -64,10 +64,12 @@ selector.
 
 DS4Windows 5 release candidates include virtual DualSense output, advanced
 haptics, controller audio, microphone capture, and the redesigned interface.
-Release Candidate 4.4, **Input Fidelity, Audio Efficiency, and Mute Controls**,
-adds ordered raw DualSense trigger fidelity, read-ahead input, bounded
-DualShock 4 audio, per-target mute controls, and safer lightbar, HidHide, and
-installer lifecycle handling.
+Release Candidate 4.5.8, **Bluetooth Haptics & Disconnect Recovery**, fixes
+continuous native DualSense rumble being cancelled by subsequent Bluetooth
+audio packets and a queued-disconnect shutdown deadlock. It retains the later
+command-ordering, Trigger Lab, Nintendo, audio, input, and installer improvements.
+See the [RC4.5.8 release notes](docs/release-notes-rc4.5.8.md) for verification
+and remaining physical-game testing limits.
 They appear as pre-releases on the
 [DS4Windows Releases page](https://github.com/hbashton/DS4Windows/releases).
 Choose the newest release-candidate build when you want to test these features.

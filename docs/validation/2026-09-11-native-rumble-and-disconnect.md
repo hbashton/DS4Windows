@@ -73,7 +73,10 @@ installed MSI. Its MSI product state was unknown; only the newer installed
 product was registered. Three exact stale registry keys were exported and
 removed. The old cached installer was moved to a recoverable Desktop backup;
 the old uninstaller was not invoked against shared current-version resources.
-Current MSI registration was independently checked unchanged.
+Current MSI registration was independently checked unchanged. The user later
+deliberately reinstalled 5.0.3.0 as the known-working comparison build. That
+fresh installed reference was not removed or uninstalled by the orphan cleanup
+or the private-candidate handoff.
 
 ## Validation status
 
@@ -90,8 +93,59 @@ Current MSI registration was independently checked unchanged.
   actual physical zero-motor guard. No case was removed or skipped.
 - Final rebuilt, unfiltered Release x64 run: **5,413 passed, zero failed,
   11 gated skips**, 5,424 total. This includes **2,646 passing tests** in
-  Switch 2/Joy-Con/Nintendo test classes. Allocation checks remained enabled.
+  Switch 2/Joy-Con/Nintendo test classes. Allocation checks remained enabled
+  and passed.
   Result: `isolated_results/rc457-native-rumble-final-green/full-native-rumble-disconnect-green.trx`.
-- Private-candidate identity and physical acceptance are pending.
+- Functional source is committed as
+  `14b8920b060ea9e81b64747116da543a54c93c08`.
+- The complete private portable candidate was verified and launched, as
+  recorded below. It is not a new published release.
 - Physical acceptance in Hades II and Expedition 33 remains required. No claim
   of zero end-to-end latency or complete game coverage follows from unit tests.
+
+## Verified private portable handoff
+
+Candidate root:
+`C:\Users\hbash\Desktop\DS4Windows-Haptics-Disconnect-Fix-20260911`.
+The archive and extracted payload both passed strict verification with all
+**553 files**, including the pinned broker and required runtime/dependencies.
+
+- `PRIVATE-CANDIDATE-MANIFEST.json` SHA-256:
+  `D47D96AC468E7341BA0F3873CACFEC44E630F177CAF3E099EE2A721C2491FFFA`.
+- Verified archive:
+  `resume\x64\Release\DS4Windows_HAPTICS-DISCONNECT-FIX-20260911_x64.zip`.
+  SHA-256:
+  `BE258AD8C3372DAC7B217C2606FB11FB7F2EFDD464FB4451E00EA8AEAD72D9BD`.
+- The first package failed the unchanged strict runtime-config check because
+  local SDK 8 emitted different runtime metadata. The exact released runtime
+  config was restored only in fresh staging, and the unchanged verifier then
+  passed. The original failed archive and runtime config remain preserved in
+  `isolated_results/rc457-rumble-private/original-runtimeconfig-evidence`.
+  No verification rule was weakened and no installed runtime was changed.
+
+At 18:07:18 local time on 2026-09-11, the private mapper started as PID 16132
+with portable broker PID 3164. Bluetooth helper PID 28488 belonged to mapper
+16132. The log found physical DualSense `10:18:49:BB:74:C7` at 18:07:25 and
+recorded virtual DualSense association, active feedback, and speaker PCM
+startup at 18:07:27. These are connection/startup observations, not proof that
+a game supplied PCM or that the physical haptics feel correct.
+
+The installed comparison build and original user profile were left intact.
+The `dsm` profile's verified SHA-256 remained
+`FA2F06C5C7345DA583D5710327FCDA42B78A9F3951D4392D6656A4FF856BE8AA`.
+Normal RC4.3 shutdown removed the physical controller's HidHide entry; the
+strict handoff guard detected that change and halted. Handoff resumed only
+after explicit restoration of that exact entry. The private lab mode cannot
+change HidHide device entries. Only the private application's allowlist entry
+was added; global cloaking settings were not changed. The guarded halt,
+restoration, profile copy, and final launch evidence are retained under the
+candidate's `handoff-evidence` directory.
+
+A subsequent non-suspending startup sample is retained under
+`isolated_results/native-haptics-evening-private-startup`. Mapper 16132 and
+helper 28488 both reported `problems=[]` and `suspended=false`. The mapper had
+zero transport fault reports and zero rejected reports, with 17 control
+deliveries and zero speaker deliveries. Helper rumble mode, improved mode,
+and both motors were zero in this idle sample. No transport fault was observed
+there; this is **not physical haptics acceptance**. Hades II and Expedition 33
+feel/trigger confirmation remains pending.

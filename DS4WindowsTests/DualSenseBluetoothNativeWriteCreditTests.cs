@@ -1,4 +1,5 @@
 using DS4Windows.InputDevices;
+using DS4WindowsTests;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
 using System.Collections.Generic;
@@ -12,6 +13,7 @@ namespace DS4Windows.Tests
     public class DualSenseBluetoothNativeWriteCreditTests
     {
         private const int PhysicalLength = 398;
+        public TestContext TestContext { get; set; }
 
         [DataTestMethod]
         [DataRow(0x31, 78)]
@@ -293,21 +295,156 @@ namespace DS4Windows.Tests
             var io = new ControlledNativeIo { Asynchronous = false, RecordHistory = false };
             using var writer = Create(io);
             byte[] command = Report(0x31, 78);
+            string traceMode = Environment.GetEnvironmentVariable("DS4W_NATIVE_CREDIT_ALLOCATION_TRACE");
+            if (!string.IsNullOrEmpty(traceMode))
+            {
+                TraceAllocationWindows(io, writer, command, traceMode);
+                return;
+            }
             bool successful = true;
             for (int index = 0; index < 256; index++)
             {
                 successful &= writer.CanSubmitNativeCommand(out bool fault) && !fault;
                 successful &= writer.TryWrite(command, true, out fault) && !fault;
             }
-            long before = GC.GetAllocatedBytesForCurrentThread();
-            for (int index = 0; index < 10_000; index++)
+            Assert.IsTrue(successful);
+            Assert.AreEqual(32, io.RequestCount);
+            long allocated;
+            // Same-workload object callbacks corroborate background-GC
+            // allocation-context repair without a managed object. Isolate
+            // only the warmed counter pair; entry/exit failures still fail.
+            using (StrictAllocationMeasurementScope.Begin())
+            {
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                for (int index = 0; index < 10_000; index++)
+                {
+                    successful &= writer.CanSubmitNativeCommand(out bool fault) && !fault;
+                    successful &= writer.TryWrite(command, true, out fault) && !fault;
+                }
+                allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            }
+            Assert.IsTrue(successful);
+            Assert.AreEqual(0L, allocated);
+        }
+
+        [TestMethod]
+        public void NativeCreditRealReportCloneFailsTheExactZeroGate()
+        {
+            var io = new ControlledNativeIo { Asynchronous = false, RecordHistory = false };
+            using var writer = Create(io);
+            byte[] command = Report(0x31, 78);
+            bool successful = true;
+            for (int index = 0; index < 256; index++)
             {
                 successful &= writer.CanSubmitNativeCommand(out bool fault) && !fault;
                 successful &= writer.TryWrite(command, true, out fault) && !fault;
             }
-            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            bool capture = NativeAllocationMeasurement.IsEnabled;
+            if (capture) { NativeAllocationMeasurement.Begin(); NativeAllocationMeasurement.End(0); }
+            io.CloneReport = true;
+            long allocated;
+            uint nativeObjects = 0;
+            using (StrictAllocationMeasurementScope.Begin())
+            {
+                if (capture) NativeAllocationMeasurement.Begin();
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                successful &= writer.CanSubmitNativeCommand(out bool fault) && !fault;
+                successful &= writer.TryWrite(command, true, out fault) && !fault;
+                allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+                if (capture) nativeObjects = NativeAllocationMeasurement.End(allocated);
+            }
             Assert.IsTrue(successful);
-            Assert.AreEqual(0L, allocated);
+            Assert.AreEqual(PhysicalLength, io.LastClone.Length);
+            CollectionAssert.AreEqual(command, io.LastClone.AsSpan(0, command.Length).ToArray());
+            Assert.IsTrue(allocated >= PhysicalLength);
+            Assert.ThrowsException<AssertFailedException>(() => Assert.AreEqual(0L, allocated));
+            if (capture) Assert.IsTrue(nativeObjects >= 1);
+            TestContext?.WriteLine($"Native credit positive control: bytes={allocated} nativeCapture={capture} nativeObjects={nativeObjects}");
+        }
+
+        private void TraceAllocationWindows(ControlledNativeIo io,
+            DualSenseBluetoothRealtimeWriter writer, byte[] command, string mode)
+        {
+            if (mode is not ("boundary" or "phases"))
+                throw new ArgumentException("Unknown native credit allocation trace mode.");
+            bool pressure = Environment.GetEnvironmentVariable("DS4W_NATIVE_CREDIT_ALLOCATION_PRESSURE") == "1";
+            bool isolate = Environment.GetEnvironmentVariable("DS4W_NATIVE_CREDIT_ALLOCATION_ISOLATE") == "1";
+            bool capture = NativeAllocationMeasurement.IsEnabled;
+            if (capture) { NativeAllocationMeasurement.Begin(); NativeAllocationMeasurement.End(0); }
+            object[][] graph = null;
+            if (pressure)
+            {
+                graph = new object[250_000][];
+                for (int index = 0; index < graph.Length; index++)
+                    graph[index] = new object[] { new object(), index == 0 ? graph : graph[index - 1] };
+            }
+            for (int batch = 0; batch < (pressure ? 256 : 1); batch++)
+            {
+                // Pressure is outside the original 256/10,000-call workload.
+                // Preserve the first failed strict-zero window; never retry it.
+                long[] first = pressure ? new long[24_576] : null;
+                long[] second = pressure ? new long[24_576] : null;
+                byte[] padding = pressure ? new byte[512] : null;
+                Window(batch);
+                GC.KeepAlive(first); GC.KeepAlive(second); GC.KeepAlive(padding);
+            }
+            GC.KeepAlive(graph);
+
+            void Window(int batch)
+            {
+                var records = new (int Iteration, int Phase, long Delta)[256];
+                var phaseBytes = new long[3];
+                int recordCount = 0, omitted = 0;
+                bool successful = true;
+                for (int index = 0; index < 256; index++)
+                {
+                    successful &= writer.CanSubmitNativeCommand(out bool fault) && !fault;
+                    successful &= writer.TryWrite(command, true, out fault) && !fault;
+                }
+                int threadBefore = Environment.CurrentManagedThreadId;
+                int g0 = GC.CollectionCount(0), g1 = GC.CollectionCount(1), g2 = GC.CollectionCount(2);
+                long before, after, last = 0;
+                uint objects = 0;
+                using (isolate ? StrictAllocationMeasurementScope.Begin() : null)
+                {
+                    if (capture) NativeAllocationMeasurement.Begin();
+                    before = GC.GetAllocatedBytesForCurrentThread();
+                    last = before;
+                    for (int index = 0; index < 10_000; index++)
+                    {
+                        if (mode == "phases") Probe(index, 0);
+                        successful &= writer.CanSubmitNativeCommand(out bool fault) && !fault;
+                        if (mode == "phases") Probe(index, 1);
+                        successful &= writer.TryWrite(command, true, out fault) && !fault;
+                        if (mode == "phases") Probe(index, 2);
+                    }
+                    after = GC.GetAllocatedBytesForCurrentThread();
+                    if (capture) objects = NativeAllocationMeasurement.End(after - before);
+                }
+                int threadAfter = Environment.CurrentManagedThreadId;
+                string details = $"Native credit allocation trace mode={mode} batch={batch} warm=256 measured=10000 " +
+                    $"before={before} after={after} bytes={after-before} nativeCapture={capture} nativeObjects={objects} isolated={isolate} " +
+                    $"thread={threadBefore}->{threadAfter} gc={g0},{g1},{g2}->{GC.CollectionCount(0)},{GC.CollectionCount(1)},{GC.CollectionCount(2)} " +
+                    $"requests={io.RequestCount} omitted={omitted} phaseBytes={phaseBytes[0]},{phaseBytes[1]},{phaseBytes[2]}";
+                TestContext?.WriteLine(details);
+                for (int index = 0; index < recordCount; index++)
+                    TestContext?.WriteLine($"iteration={records[index].Iteration} phase={records[index].Phase} bytes={records[index].Delta}");
+                Assert.IsTrue(successful, details);
+                Assert.AreEqual(32, io.RequestCount, details);
+                Assert.AreEqual(threadBefore, threadAfter, details);
+                Assert.AreEqual(0L, after - before, details);
+
+                void Probe(int iteration, int phase)
+                {
+                    long current = GC.GetAllocatedBytesForCurrentThread();
+                    long delta = current - last;
+                    last = current;
+                    phaseBytes[phase] += delta;
+                    if (delta == 0) return;
+                    if (recordCount < records.Length) records[recordCount++] = (iteration, phase, delta);
+                    else omitted++;
+                }
+            }
         }
 
         private static DualSenseBluetoothRealtimeWriter Create(
@@ -337,6 +474,9 @@ namespace DS4Windows.Tests
             internal readonly List<Request> History = new();
             internal bool Asynchronous = true;
             internal bool RecordHistory = true;
+            internal bool CloneReport;
+            internal byte[] LastClone;
+            internal int RequestCount => requests.Count;
             internal bool RejectNext;
             internal uint SynchronousLength = PhysicalLength;
             internal int Submitted;
@@ -372,6 +512,15 @@ namespace DS4Windows.Tests
                 request.Successful = true;
                 request.CompletionLength = pending ? bytesToWrite : SynchronousLength;
                 Marshal.Copy(buffer, request.Bytes, 0, checked((int)bytesToWrite));
+                if (CloneReport)
+                {
+                    // Explicit test-owned allocation/copy keeps the native
+                    // profiler's JIT allocation callback visible as well as
+                    // exercising real report retention in this writer seam.
+                    byte[] copy = new byte[request.Bytes.Length];
+                    Buffer.BlockCopy(request.Bytes, 0, copy, 0, copy.Length);
+                    LastClone = copy;
+                }
                 if (RecordHistory)
                     History.Add(request);
                 return true;

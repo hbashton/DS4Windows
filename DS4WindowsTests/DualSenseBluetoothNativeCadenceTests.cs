@@ -106,18 +106,24 @@ public class DualSenseBluetoothNativeCadenceTests
     }
 
     [DataTestMethod]
-    [DataRow(9, 6)]
-    [DataRow(10, 10)]
-    [DataRow(12, 10)]
-    public void ActualWakeSelectionCannotLivelockWhenBothMediaAndControlAreOverdue(int nowMilliseconds, int expectedMilliseconds)
+    [DataRow(200, 9, 6, true)]
+    [DataRow(200, 10, 10, true)]
+    [DataRow(200, 12, 10, true)]
+    [DataRow(500, 9, 3, true)]
+    [DataRow(500, 10, 10, true)]
+    [DataRow(500, 12, 10, true)]
+    [DataRow(500, 9, 10, false)]
+    public void ActualWakeSelectionCannotLivelockWhenBothMediaAndControlAreOverdue(
+        int nativeRateHz, int nowMilliseconds, int expectedMilliseconds, bool creditAvailable)
     {
-        using var fixture = new Fixture();
+        using var fixture = new Fixture(nativeCommandRateHz: nativeRateHz);
         fixture.QueueSpeakerReports(8);
         fixture.ReceiveNativeCommand(Trigger(1));
         object host = GetHost(fixture);
         Type hostType = host.GetType();
         long millisecond = Stopwatch.Frequency / 1000;
         hostType.GetField("lastControllerStateSubmissionQpc", Private).SetValue(host, millisecond);
+        hostType.GetField("nativeCommandCreditAvailable", Private).SetValue(host, creditAvailable);
         long selected = (long)hostType.GetMethod("SelectV5PresentationWakeDeadlineLocked", Private)
             .Invoke(host, new object[] { nowMilliseconds * millisecond, 10 * millisecond });
         Assert.AreEqual(expectedMilliseconds * millisecond, selected,

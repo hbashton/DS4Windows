@@ -125,14 +125,17 @@ public class DualSenseBluetoothNativeIdleRetryTests
         private int nativeGeneration = 1;
         internal readonly SyntheticNativeIo Native = new();
 
-        internal Fixture(int realtimeCapacity = 4)
+        internal Fixture(int realtimeCapacity = 4, int nativeCommandRateHz = 500,
+            int writeSlotCount = 1, int nativeCommandInFlightLimit = 0)
         {
             realtime = DualSenseRealtimeHapticsSharedRing.CreateOwner(
                 "Local\\DS4NativeIdleRetry-" + Guid.NewGuid().ToString("N"), realtimeCapacity);
             clockView = clock.CreateViewAccessor();
-            writer = new DualSenseBluetoothRealtimeWriter(DualSenseBluetoothAudioPacer.ReportLength, 1, 1, Native);
+            writer = new DualSenseBluetoothRealtimeWriter(DualSenseBluetoothAudioPacer.ReportLength,
+                writeSlotCount, writeSlotCount, Native, nativeCommandInFlightLimit);
             host = Activator.CreateInstance(HostType, BindingFlags.Public | Flags, null,
-                new object[] { Stream.Null, response, writer, Environment.ProcessId, inputArrival, clockView, realtime }, null);
+                new object[] { Stream.Null, response, writer, Environment.ProcessId, inputArrival,
+                    clockView, realtime, nativeCommandRateHz }, null);
             pacer = (Thread)HostType.GetField("pacerThread", Flags).GetValue(host);
         }
 

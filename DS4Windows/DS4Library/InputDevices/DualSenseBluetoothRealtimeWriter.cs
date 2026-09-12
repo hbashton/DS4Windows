@@ -65,6 +65,7 @@ namespace DS4Windows.InputDevices
             public readonly IntPtr EventHandle;
             public readonly IntPtr Overlapped;
             public bool Pending;
+            public bool NativeCommand;
             public long SubmittedTimestamp;
 
             public WriteSlot(int reportLength)
@@ -143,8 +144,10 @@ namespace DS4Windows.InputDevices
         private readonly int maximumLogicalReportLength;
         private readonly int physicalWriteLength;
         private readonly int audioInFlightLimit;
+        private readonly int nativeCommandInFlightLimit;
         private int nextSlot;
         private bool operationInFlight;
+        private bool nativeCommandTransportFault;
         private long lifecycleGeneration = 1;
         private bool disposed;
         private bool nativeResourcesReleased;
@@ -204,6 +207,7 @@ namespace DS4Windows.InputDevices
         public long LastCompletionBytes =>
             Interlocked.Read(ref lastCompletionBytes);
         public int PhysicalWriteLength => physicalWriteLength;
+        public int NativeCommandInFlightLimit => nativeCommandInFlightLimit;
         public bool NativeResourcesReleased =>
             disposalCompletion.Task.IsCompletedSuccessfully;
 
@@ -213,11 +217,14 @@ namespace DS4Windows.InputDevices
         }
 
         private DualSenseBluetoothRealtimeWriter(IntPtr deviceHandle,
-            int reportLength, int slotCount, int audioInFlightLimit)
+            int reportLength, int slotCount, int audioInFlightLimit,
+            int nativeCommandInFlightLimit)
         {
             nativeIo = NativeIo.Instance;
             this.deviceHandle = deviceHandle;
             ownsDeviceHandle = true;
+            this.nativeCommandInFlightLimit = ResolveNativeCommandInFlightLimit(
+                nativeCommandInFlightLimit, slotCount);
             maximumLogicalReportLength = reportLength;
             physicalWriteLength = ResolvePhysicalWriteLength(deviceHandle,
                 reportLength);
@@ -243,7 +250,8 @@ namespace DS4Windows.InputDevices
         }
 
         private DualSenseBluetoothRealtimeWriter(SafeFileHandle deviceHandle,
-            int reportLength, int slotCount, int audioInFlightLimit)
+            int reportLength, int slotCount, int audioInFlightLimit,
+            int nativeCommandInFlightLimit)
         {
             nativeIo = NativeIo.Instance;
             if (deviceHandle == null || deviceHandle.IsInvalid || deviceHandle.IsClosed)
@@ -257,6 +265,8 @@ namespace DS4Windows.InputDevices
             try
             {
                 sharedDeviceHandle = deviceHandle;
+                this.nativeCommandInFlightLimit = ResolveNativeCommandInFlightLimit(
+                    nativeCommandInFlightLimit, slotCount);
                 sharedHandleReferenceAdded = addedReference;
                 this.deviceHandle = deviceHandle.DangerousGetHandle();
                 maximumLogicalReportLength = reportLength;
@@ -294,7 +304,8 @@ namespace DS4Windows.InputDevices
         /// </summary>
         internal DualSenseBluetoothRealtimeWriter(int reportLength,
             int slotCount, int audioInFlightLimit,
-            IDualSenseBluetoothRealtimeWriterNativeIo nativeIo)
+            IDualSenseBluetoothRealtimeWriterNativeIo nativeIo,
+            int nativeCommandInFlightLimit = 0)
         {
             if (reportLength <= 0)
             {
@@ -304,6 +315,8 @@ namespace DS4Windows.InputDevices
             this.nativeIo = nativeIo ??
                 throw new ArgumentNullException(nameof(nativeIo));
             deviceHandle = new IntPtr(1);
+            this.nativeCommandInFlightLimit = ResolveNativeCommandInFlightLimit(
+                nativeCommandInFlightLimit, Math.Max(1, slotCount));
             maximumLogicalReportLength = reportLength;
             physicalWriteLength = reportLength;
             this.audioInFlightLimit = Math.Max(1, audioInFlightLimit);
@@ -337,6 +350,20 @@ namespace DS4Windows.InputDevices
             return handles;
         }
 
+        // Zero preserves the existing full ring. A tighter native budget is
+        // opt-in: HidBth can batch IRP completions well after transmission, so
+        // a one-credit default would impose an unverified throughput limit.
+        private static int ResolveNativeCommandInFlightLimit(int requested,
+            int slotCount)
+        {
+            if (requested == 0)
+                return slotCount;
+            if (requested < 1 || requested > slotCount)
+                throw new ArgumentOutOfRangeException(
+                    "nativeCommandInFlightLimit");
+            return requested;
+        }
+
         public static bool TryCreate(string devicePath, int reportLength,
             out DualSenseBluetoothRealtimeWriter writer, out int error)
         {
@@ -346,7 +373,8 @@ namespace DS4Windows.InputDevices
 
         public static bool TryCreate(string devicePath, int reportLength,
             out DualSenseBluetoothRealtimeWriter writer, out int error,
-            int slotCount, int audioInFlightLimit)
+            int slotCount, int audioInFlightLimit,
+            int nativeCommandInFlightLimit = 0)
         {
             writer = null;
             error = 0;
@@ -368,7 +396,7 @@ namespace DS4Windows.InputDevices
             {
                 writer = new DualSenseBluetoothRealtimeWriter(handle,
                     reportLength, Math.Max(1, slotCount),
-                    Math.Max(1, audioInFlightLimit));
+                    Math.Max(1, audioInFlightLimit), nativeCommandInFlightLimit);
                 return true;
             }
             catch
@@ -394,7 +422,8 @@ namespace DS4Windows.InputDevices
 
         public static bool TryCreate(SafeFileHandle deviceHandle, int reportLength,
             out DualSenseBluetoothRealtimeWriter writer, out int error,
-            int slotCount, int audioInFlightLimit)
+            int slotCount, int audioInFlightLimit,
+            int nativeCommandInFlightLimit = 0)
         {
             writer = null;
             error = 0;
@@ -408,7 +437,7 @@ namespace DS4Windows.InputDevices
             {
                 writer = new DualSenseBluetoothRealtimeWriter(deviceHandle, reportLength,
                     Math.Max(1, slotCount),
-                    Math.Max(1, audioInFlightLimit));
+                    Math.Max(1, audioInFlightLimit), nativeCommandInFlightLimit);
                 return true;
             }
             catch
@@ -496,10 +525,78 @@ namespace DS4Windows.InputDevices
         }
 
         /// <summary>
+        /// Nonblocking credit for a new game-command-bearing report. This is
+        /// an exact Windows I/O completion boundary, not a controller actuator
+        /// acknowledgement. Media keeps its independent bounded slot ring.
+        /// </summary>
+        public bool CanSubmitNativeCommand(out bool transportFault)
+        {
+            if (!TryBeginOperation(out long generation, out transportFault))
+                return false;
+            try
+            {
+                bool nativePending;
+                lock (syncRoot)
+                    nativePending = CountPendingNativeCommandsLocked() != 0;
+                // With no native I/O outstanding the credit is already known.
+                // Do not poll unrelated media completions here: the ordinary
+                // writer owns that observation at its existing admission point.
+                if (!nativePending)
+                    return IsOperationCurrent(generation, out transportFault);
+                if (!ObserveCompletedWrites())
+                {
+                    transportFault = true;
+                    return false;
+                }
+                lock (syncRoot)
+                {
+                    if (IsNativeCommandCreditExhaustedLocked())
+                        return false;
+                }
+                return IsOperationCurrent(generation, out transportFault);
+            }
+            finally
+            {
+                EndOperation();
+            }
+        }
+
+        private bool IsNativeCommandCreditExhaustedLocked()
+            => CountPendingNativeCommandsLocked() >= nativeCommandInFlightLimit;
+
+        private int CountPendingNativeCommandsLocked()
+        {
+            int pending = 0;
+            foreach (WriteSlot slot in slots)
+            {
+                if (slot.Pending && slot.NativeCommand)
+                    pending++;
+            }
+            return pending;
+        }
+
+        private void PoisonNativeCommandTransport()
+        {
+            lock (syncRoot)
+                nativeCommandTransportFault = true;
+        }
+
+        /// <summary>
         /// Returns true when the report was accepted. A false result with no
         /// transport fault means the bounded writer is currently saturated.
         /// </summary>
-        public bool TryWrite(byte[] report, out bool transportFault)
+        public bool TryWrite(byte[] report, out bool transportFault) =>
+            TryWrite(report, nativeCommand: false, out transportFault);
+
+        /// <summary>
+        /// Opt-in native credit applies to either a standalone state report or
+        /// a media report carrying a new native command. The flag describes
+        /// ownership, not report ID; ordinary media is never serialized behind
+        /// this credit. Admission and credit consumption share the single
+        /// writer operation lease, so a readiness probe cannot bypass the cap.
+        /// </summary>
+        public bool TryWrite(byte[] report, bool nativeCommand,
+            out bool transportFault)
         {
             transportFault = false;
             if (report == null || report.Length == 0 ||
@@ -521,6 +618,14 @@ namespace DS4Windows.InputDevices
                 {
                     transportFault = true;
                     return false;
+                }
+                if (nativeCommand)
+                {
+                    lock (syncRoot)
+                    {
+                        if (IsNativeCommandCreditExhaustedLocked())
+                            return false;
+                    }
                 }
                 long now = Stopwatch.GetTimestamp();
                 int slotIndex;
@@ -576,6 +681,8 @@ namespace DS4Windows.InputDevices
                 if (!submitted)
                 {
                     SetEvent(slot.EventHandle);
+                    if (nativeCommand)
+                        PoisonNativeCommandTransport();
                     transportFault = true;
                     return false;
                 }
@@ -585,6 +692,7 @@ namespace DS4Windows.InputDevices
                     lock (syncRoot)
                     {
                         slot.Pending = true;
+                        slot.NativeCommand = nativeCommand;
                         slot.SubmittedTimestamp = now;
                     }
                 }
@@ -593,6 +701,8 @@ namespace DS4Windows.InputDevices
                     if (!ValidateSynchronousCompletion(slot))
                     {
                         SetEvent(slot.EventHandle);
+                        if (nativeCommand)
+                            PoisonNativeCommandTransport();
                         transportFault = true;
                         return false;
                     }
@@ -601,6 +711,7 @@ namespace DS4Windows.InputDevices
                     lock (syncRoot)
                     {
                         slot.Pending = false;
+                        slot.NativeCommand = false;
                         slot.SubmittedTimestamp = 0;
                     }
                     Interlocked.Increment(ref completedWrites);
@@ -625,7 +736,7 @@ namespace DS4Windows.InputDevices
             lock (syncRoot)
             {
                 generation = lifecycleGeneration;
-                if (disposed || nativeResourcesReleased)
+                if (disposed || nativeResourcesReleased || nativeCommandTransportFault)
                 {
                     transportFault = true;
                     return false;
@@ -653,6 +764,7 @@ namespace DS4Windows.InputDevices
             lock (syncRoot)
             {
                 bool current = !disposed && !nativeResourcesReleased &&
+                    !nativeCommandTransportFault &&
                     lifecycleGeneration == generation;
                 transportFault = !current;
                 return current;
@@ -1041,9 +1153,14 @@ namespace DS4Windows.InputDevices
         private bool CompletePendingSlot(WriteSlot slot,
             long completedTimestamp)
         {
+            bool nativeCommand;
+            lock (syncRoot)
+                nativeCommand = slot.NativeCommand;
             if (!TryGetCompletion(slot.Overlapped,
                 out uint bytesTransferred))
             {
+                if (nativeCommand)
+                    PoisonNativeCommandTransport();
                 return false;
             }
 
@@ -1052,10 +1169,13 @@ namespace DS4Windows.InputDevices
             {
                 submittedTimestamp = slot.SubmittedTimestamp;
                 slot.Pending = false;
+                slot.NativeCommand = false;
                 slot.SubmittedTimestamp = 0;
             }
             if (!ValidateCompletionLength(bytesTransferred))
             {
+                if (nativeCommand)
+                    PoisonNativeCommandTransport();
                 return false;
             }
 
@@ -1255,6 +1375,7 @@ namespace DS4Windows.InputDevices
                 lock (syncRoot)
                 {
                     slot.Pending = false;
+                    slot.NativeCommand = false;
                     slot.SubmittedTimestamp = 0;
                 }
             }

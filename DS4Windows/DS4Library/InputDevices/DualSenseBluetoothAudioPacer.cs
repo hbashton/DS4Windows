@@ -3001,6 +3001,10 @@ namespace DS4Windows.InputDevices
             private const int PresentationTraceCapacity = 65536;
             private static readonly long ControllerStateIntervalQpc =
                 Math.Max(1, Stopwatch.Frequency / 200);
+            private readonly long nativeCommandIntervalQpc;
+            private bool nativeCommandCreditAvailable = true;
+            private long PendingControllerStateIntervalQpc => nativeCommands.Count != 0
+                ? nativeCommandIntervalQpc : ControllerStateIntervalQpc;
 
             private sealed class QueuedReport
             {
@@ -3201,7 +3205,21 @@ namespace DS4Windows.InputDevices
                 int parentProcessId, EventWaitHandle inputArrivalSignal,
                 MemoryMappedViewAccessor inputClockView,
                 DualSenseRealtimeHapticsSharedRing realtimeHaptics)
+                : this(commandPipe, responsePipe, writer, parentProcessId,
+                    inputArrivalSignal, inputClockView, realtimeHaptics, 500)
             {
+            }
+
+            public HelperHost(Stream commandPipe, Stream responsePipe,
+                DualSenseBluetoothRealtimeWriter writer,
+                int parentProcessId, EventWaitHandle inputArrivalSignal,
+                MemoryMappedViewAccessor inputClockView,
+                DualSenseRealtimeHapticsSharedRing realtimeHaptics,
+                int nativeCommandRateHz)
+            {
+                if (nativeCommandRateHz is < 200 or > 1000)
+                    throw new ArgumentOutOfRangeException(nameof(nativeCommandRateHz));
+                nativeCommandIntervalQpc = Math.Max(1, Stopwatch.Frequency / nativeCommandRateHz);
                 this.commandPipe = commandPipe;
                 this.responsePipe = responsePipe;
                 this.writer = writer;
@@ -3822,7 +3840,7 @@ namespace DS4Windows.InputDevices
 
             // Called only by the presenter under stateLock. Local latest-value
             // updates retain their media piggyback policy. Immutable native
-            // commands may use the existing 200 Hz control lane between media
+            // commands use their own faster bounded control lane between media
             // deadlines; otherwise even 100 Hz game output outgrows the 93.75 Hz
             // media clock. A due/startup media frame always gets first service.
             private bool MustPiggybackControllerStateLocked(
@@ -3853,10 +3871,11 @@ namespace DS4Windows.InputDevices
                 // older. Selecting that older deadline would repeatedly return
                 // to the loop whose due-media priority then rejects the control,
                 // leaving both queues live but permanently unable to progress.
-                if (mediaDeadline <= nowQpc || nativeCommands.Count == 0 || PendingStateReportsAhead > 0)
+                if (mediaDeadline <= nowQpc || nativeCommands.Count == 0 ||
+                    !nativeCommandCreditAvailable || PendingStateReportsAhead > 0)
                     return mediaDeadline;
                 long controlDeadline = lastControllerStateSubmissionQpc == 0 ? nowQpc :
-                    lastControllerStateSubmissionQpc + ControllerStateIntervalQpc;
+                    lastControllerStateSubmissionQpc + nativeCommandIntervalQpc;
                 return Math.Min(mediaDeadline, controlDeadline);
             }
 
@@ -3891,6 +3910,17 @@ namespace DS4Windows.InputDevices
                         ApplyPendingLifecycleResets(
                             ref appliedLifecycleResetRevision,
                             ref appliedWriterClockResetRevision);
+                        // Completion polling is physical I/O and must remain
+                        // outside stateLock. The write rechecks credit
+                        // atomically; a busy native lane never blocks media.
+                        bool nativeCreditAvailable = writer.CanSubmitNativeCommand(out bool nativeCreditFault);
+                        if (nativeCreditFault)
+                        {
+                            stopRequested.Set();
+                            reservoirChanged.Set();
+                            acknowledgementAvailable.Set();
+                            break;
+                        }
                         bool canPresent;
                         bool controlPrimeBypass;
                         bool microphoneStatusReady;
@@ -3898,8 +3928,10 @@ namespace DS4Windows.InputDevices
                         bool sourceDrivenNativePresentation;
                         bool nativeTransportStartupBurstPresentation;
                         int idleWaitMilliseconds = 1000;
+                        long idleControlDeadlineQpc = 0;
                         lock (stateLock)
                         {
+                            nativeCommandCreditAvailable = nativeCreditAvailable;
                             long nowQpc = Stopwatch.GetTimestamp();
                             microphoneStatusReady =
                                 pendingMicrophoneStatus >= 0 &&
@@ -3913,20 +3945,25 @@ namespace DS4Windows.InputDevices
                                 !microphoneStatusReady && HasPendingControllerState &&
                                 !nativeMediaCanConsumeControllerState &&
                                 PendingStateReportsAhead <= 0 &&
+                                (nativeCommands.Count == 0 || nativeCommandCreditAvailable) &&
                                 (lastControllerStateSubmissionQpc == 0 ||
                                     nowQpc -
                                         lastControllerStateSubmissionQpc >=
-                                            ControllerStateIntervalQpc);
+                                            PendingControllerStateIntervalQpc);
                             if (HasPendingControllerState &&
                                 !controllerStateReady)
                             {
                                 long remainingQpc =
-                                    ControllerStateIntervalQpc -
+                                    PendingControllerStateIntervalQpc -
                                     (nowQpc -
                                         lastControllerStateSubmissionQpc);
                                 idleWaitMilliseconds = Math.Clamp(
                                     (int)Math.Ceiling(remainingQpc * 1000.0 /
                                         Stopwatch.Frequency), 1, 1000);
+                                if (nativeCommands.Count != 0 && nativeCommandCreditAvailable &&
+                                    !nativeMediaCanConsumeControllerState && PendingStateReportsAhead <= 0 &&
+                                    remainingQpc > 0)
+                                    idleControlDeadlineQpc = nowQpc + remainingQpc;
                             }
                             int speakerReportCount = nextReport != null &&
                                 IsSpeakerAudioReport(nextReport.Report) ?
@@ -3979,7 +4016,10 @@ namespace DS4Windows.InputDevices
 
                         if (!canPresent)
                         {
-                            reservoirChanged.WaitOne(idleWaitMilliseconds);
+                            if (idleControlDeadlineQpc != 0)
+                                WaitForNativeDeadline(timer, idleControlDeadlineQpc, mediaWaits);
+                            else
+                                reservoirChanged.WaitOne(idleWaitMilliseconds);
                             if (!IsExpectedParentAlive(parentProcessId))
                             {
                                 stopRequested.Set();
@@ -4012,10 +4052,11 @@ namespace DS4Windows.InputDevices
                                         nativeTransportScheduler,
                                         nativeTransportStartupBurstReportsRemaining, nowQpc) &&
                                     PendingStateReportsAhead <= 0 &&
+                                    (nativeCommands.Count == 0 || nativeCommandCreditAvailable) &&
                                     (lastControllerStateSubmissionQpc == 0 ||
                                         nowQpc -
                                             lastControllerStateSubmissionQpc >=
-                                                ControllerStateIntervalQpc);
+                                                PendingControllerStateIntervalQpc);
                                 if (!stillReady)
                                 {
                                     continue;
@@ -4053,7 +4094,7 @@ namespace DS4Windows.InputDevices
                                     controllerStateTemplateSnapshot,
                                     controllerStateReport);
                                 accepted = physicalWriteBoundary.TryWrite(writer,
-                                    controllerStateReport,
+                                    controllerStateReport, claimedNative,
                                     out transportFault);
                                 if (accepted)
                                 {
@@ -4270,8 +4311,12 @@ namespace DS4Windows.InputDevices
                                     wakeDeadline = SelectV5PresentationWakeDeadlineLocked(
                                         Stopwatch.GetTimestamp(), mediaDeadline);
                                 }
-                                if (!WaitUntil(timer, wakeDeadline, stopRequested, mediaWaits) ||
-                                    wakeDeadline < mediaDeadline)
+                                if (wakeDeadline < mediaDeadline)
+                                {
+                                    WaitForNativeDeadline(timer, wakeDeadline, mediaWaits);
+                                    continue;
+                                }
+                                if (!WaitUntil(timer, mediaDeadline, stopRequested, mediaWaits))
                                 {
                                     continue;
                                 }
@@ -4552,8 +4597,9 @@ namespace DS4Windows.InputDevices
                                 HasPendingControllerState &&
                                 PendingStateReportsAhead <= 0 &&
                                 (nativeCommands.Count == 0 ||
-                                    lastControllerStateSubmissionQpc == 0 ||
-                                    presentedAt - lastControllerStateSubmissionQpc >= ControllerStateIntervalQpc);
+                                    (nativeCommandCreditAvailable &&
+                                     (lastControllerStateSubmissionQpc == 0 ||
+                                      presentedAt - lastControllerStateSubmissionQpc >= nativeCommandIntervalQpc)));
                             if (controllerStatePiggybacked)
                             {
                                 nativeStatePiggybacked = ClaimControllerStateLocked();
@@ -4687,7 +4733,7 @@ namespace DS4Windows.InputDevices
                                 // every outstanding 0x36 and then waiting
                                 // for 0x32 completion breaks that FIFO.
                                 accepted = physicalWriteBoundary.TryWrite(
-                                    writer, physicalReport,
+                                    writer, physicalReport, nativeStatePiggybacked,
                                     out transportFault);
                                 if (accepted)
                                 {
@@ -5483,6 +5529,30 @@ namespace DS4Windows.InputDevices
                 }
             }
 
+            // Native state does not need the media clock's spin window. Arm
+            // the existing high-resolution timer to the actual deadline so a
+            // 2 ms interval does not inherit an extra rounded WaitOne tick.
+            // New work and stop still interrupt this wait; readiness is always
+            // recomputed before the sole presenter makes a physical call.
+            private static void WaitForNativeDeadline(IntPtr timer, long targetQpc,
+                WaitHandle[] interruptibleWaits)
+            {
+                long remaining = targetQpc - Stopwatch.GetTimestamp();
+                if (remaining <= 0) return;
+                if (timer != IntPtr.Zero)
+                {
+                    long due = -Math.Max(1, (long)Math.Ceiling(
+                        remaining * 10000000.0 / Stopwatch.Frequency));
+                    if (SetWaitableTimer(timer, ref due, 0, IntPtr.Zero, IntPtr.Zero, false))
+                    {
+                        WaitHandle.WaitAny(interruptibleWaits, 20);
+                        return;
+                    }
+                }
+                WaitHandle.WaitAny(interruptibleWaits, Math.Clamp(
+                    (int)Math.Ceiling(remaining * 1000.0 / Stopwatch.Frequency), 1, 20));
+            }
+
             private void InputClockLoop()
             {
                 using global::DS4Windows.MultimediaThreadRegistration mmcss =
@@ -5883,6 +5953,15 @@ namespace DS4Windows.InputDevices
             }
 
             return writer.TryWrite(report, out transportFault);
+        }
+
+        public bool TryWrite(DualSenseBluetoothRealtimeWriter writer,
+            byte[] report, bool nativeCommand, out bool transportFault)
+        {
+            if (Monitor.IsEntered(stateLock))
+                throw new InvalidOperationException(
+                    "Physical DualSense I/O cannot run while the pacer state lock is held.");
+            return writer.TryWrite(report, nativeCommand, out transportFault);
         }
     }
 

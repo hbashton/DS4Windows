@@ -52,8 +52,12 @@ public sealed class ViiperNativeCommandDispatchTests
         Assert.IsTrue(fixture.Output.TryCaptureNativeCommandContext(envelope,
             envelope.Length, 0, out var context));
         for (int index = 0; index < ViiperOutDevice.FeedbackOrderedControlQueueCapacity; index++)
+        {
+            envelope = Envelope(Led((byte)(31 + index)));
             Assert.IsTrue(fixture.Output.EnqueueNativeCommandUntilCancelled(null, 0,
                 envelope, envelope.Length, 0, context));
+        }
+        envelope = Envelope(Led(35));
         bool? accepted = null;
         Exception failure = null;
         using var started = new ManualResetEventSlim();

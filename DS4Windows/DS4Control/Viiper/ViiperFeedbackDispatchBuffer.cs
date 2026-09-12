@@ -24,6 +24,8 @@ namespace DS4Windows
     /// retain order only inside explicit live-latency budgets. Native HID
     /// commands instead retain their accepted head until physical admission;
     /// their validity-masked deltas cannot be coalesced or aged like PCM.
+    /// Consecutive identical, known state-setting commands may share an
+    /// unclaimed pending tail, without changing its bytes, receipt or age.
     /// Legacy cumulative controller state retains its newest-state policy.
     /// </summary>
     internal sealed class ViiperFeedbackDispatchBuffer
@@ -71,10 +73,12 @@ namespace DS4Windows
         private long orderedControlDequeued;
         private long orderedControlDropped;
         private long orderedControlExpired;
+        private long orderedControlRepeated;
         private long orderedControlHighWater;
         private long orderedControlMaximumQueueAgeTicks;
         private long controlAdmissionRevision;
         private long pendingBoundaryRevision;
+        private long repeatableNativeTailRevision;
 
         internal ViiperFeedbackDispatchBuffer(int speakerCapacity,
             int speakerSlotLength, int controlSlotLength,
@@ -191,6 +195,8 @@ namespace DS4Windows
             Interlocked.Read(ref orderedControlDropped);
         internal long OrderedControlExpired =>
             Interlocked.Read(ref orderedControlExpired);
+        internal long OrderedControlRepeated =>
+            Interlocked.Read(ref orderedControlRepeated);
         internal long OrderedControlHighWater =>
             Interlocked.Read(ref orderedControlHighWater);
         internal long ControlAdmissionRevision
@@ -235,6 +241,7 @@ namespace DS4Windows
 
             lock (syncRoot)
             {
+                repeatableNativeTailRevision = 0;
                 if (speakerCount == speakerSlots.Length)
                 {
                     // Live audio must remain bounded in time. Retaining a full
@@ -341,6 +348,7 @@ namespace DS4Windows
 
             lock (syncRoot)
             {
+                repeatableNativeTailRevision = 0;
                 controlAdmissionRevision++;
                 if (controlPending)
                 {
@@ -379,6 +387,15 @@ namespace DS4Windows
                 if (expectedBoundaryRevision.HasValue &&
                     expectedBoundaryRevision.Value != pendingBoundaryRevision)
                     return false;
+                bool repeatable = nativeCommand && nativeContext.Target != null &&
+                    nativeContext.PendingBoundaryRevision == pendingBoundaryRevision &&
+                    DualSenseNativeFeedbackRepeatPolicy.IsRepeatable(source.AsSpan(0, length));
+                if (repeatable && IsPendingNativeTailRepeat(source, length,
+                    generation, deviceIndex, nativeContext))
+                {
+                    Interlocked.Increment(ref orderedControlRepeated);
+                    return true;
+                }
                 if (orderedControlCount == orderedControlSlots.Length)
                 {
                     // A raw HID command is a validity-masked delta, not PCM.
@@ -414,6 +431,7 @@ namespace DS4Windows
                 orderedControlNativeCommands[orderedControlWriteIndex] = nativeCommand;
                 orderedControlAdmissionRevisions[orderedControlWriteIndex] = controlAdmissionRevision;
                 orderedControlNativeContexts[orderedControlWriteIndex] = nativeContext;
+                repeatableNativeTailRevision = repeatable ? controlAdmissionRevision : 0;
                 orderedControlWriteIndex = (orderedControlWriteIndex + 1) %
                     orderedControlSlots.Length;
                 orderedControlCount++;
@@ -476,6 +494,35 @@ namespace DS4Windows
             }
         }
 
+        // Called under syncRoot. Compare the pending tail, never historical
+        // last-sent state: A -> B -> A must retain B and the final A/release.
+        // Once a consumer peeks this tail it may already be physically owned,
+        // so later identical commands must be admitted again as keepalives.
+        private bool IsPendingNativeTailRepeat(byte[] source, int length,
+            long generation, int deviceIndex, in ViiperNativeCommandContext context)
+        {
+            if (orderedControlCount == 0 || repeatableNativeTailRevision == 0 ||
+                repeatableNativeTailRevision != controlAdmissionRevision) return false;
+            int tail = (orderedControlWriteIndex + orderedControlSlots.Length - 1) %
+                orderedControlSlots.Length;
+            ViiperNativeCommandContext previous = orderedControlNativeContexts[tail];
+            return orderedControlNativeCommands[tail] &&
+                orderedControlAdmissionRevisions[tail] == repeatableNativeTailRevision &&
+                orderedControlLengths[tail] == length &&
+                orderedControlGenerations[tail] == generation &&
+                orderedControlDeviceIndexes[tail] == deviceIndex &&
+                ReferenceEquals(previous.Target, context.Target) &&
+                previous.BindingRevision == context.BindingRevision &&
+                previous.ProfileRevision == context.ProfileRevision &&
+                previous.PendingBoundaryRevision == context.PendingBoundaryRevision &&
+                source.AsSpan(0, length).SequenceEqual(orderedControlSlots[tail].AsSpan(0, length));
+        }
+
+        internal void InvalidateNativeRepeat()
+        {
+            lock (syncRoot) repeatableNativeTailRevision = 0;
+        }
+
         internal bool TryPeekNativeCommand(byte[] destination, out int length,
             out long generation, out int deviceIndex, out long admissionRevision,
             out ViiperNativeCommandContext context)
@@ -501,6 +548,8 @@ namespace DS4Windows
                 deviceIndex = orderedControlDeviceIndexes[orderedControlReadIndex];
                 admissionRevision = orderedControlAdmissionRevisions[orderedControlReadIndex];
                 context = orderedControlNativeContexts[orderedControlReadIndex];
+                if (repeatableNativeTailRevision == admissionRevision)
+                    repeatableNativeTailRevision = 0;
                 RecordMaximum(ref orderedControlMaximumQueueAgeTicks,
                     Stopwatch.GetTimestamp() - orderedControlEnqueueTimestamps[orderedControlReadIndex]);
                 return true;
@@ -620,6 +669,7 @@ namespace DS4Windows
         {
             lock (syncRoot)
             {
+                repeatableNativeTailRevision = 0;
                 controlAdmissionRevision++;
                 pendingBoundaryRevision++;
                 Array.Clear(speakerLengths, 0, speakerLengths.Length);
@@ -670,6 +720,7 @@ namespace DS4Windows
             Interlocked.Exchange(ref orderedControlDequeued, 0);
             Interlocked.Exchange(ref orderedControlDropped, 0);
             Interlocked.Exchange(ref orderedControlExpired, 0);
+            Interlocked.Exchange(ref orderedControlRepeated, 0);
             Interlocked.Exchange(ref orderedControlHighWater, 0);
             Interlocked.Exchange(ref orderedControlMaximumQueueAgeTicks, 0);
         }

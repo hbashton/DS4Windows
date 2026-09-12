@@ -531,6 +531,8 @@ namespace DS4Windows
         private long feedbackControlDelivered;
         private long feedbackControlStale;
         private long feedbackControlCallbackFailures;
+        private long feedbackNativeAdmissionWaits;
+        private long feedbackNativeAdmissionMaximumWaitTicks;
         private long switch2FeedbackValidated;
         private long switch2FeedbackRejected;
         private long switch2RumbleFramesPreserved;
@@ -1219,6 +1221,8 @@ namespace DS4Windows
             Interlocked.Exchange(ref feedbackControlDelivered, 0);
             Interlocked.Exchange(ref feedbackControlStale, 0);
             Interlocked.Exchange(ref feedbackControlCallbackFailures, 0);
+            Interlocked.Exchange(ref feedbackNativeAdmissionWaits, 0);
+            Interlocked.Exchange(ref feedbackNativeAdmissionMaximumWaitTicks, 0);
             Interlocked.Exchange(ref switch2FeedbackValidated, 0);
             Interlocked.Exchange(ref switch2FeedbackRejected, 0);
             Interlocked.Exchange(ref switch2RumbleFramesPreserved, 0);
@@ -5915,6 +5919,9 @@ namespace DS4Windows
                 $"controlCoalesced={feedbackDispatchBuffer.ControlCoalesced} " +
                 $"controlDropped={feedbackDispatchBuffer.ControlDropped} " +
                 $"hapticsQueued={feedbackDispatchBuffer.OrderedControlEnqueued} " +
+                $"nativeRepeatsSuppressed={feedbackDispatchBuffer.OrderedControlRepeated} " +
+                $"nativeAdmissionWaits={Interlocked.Read(ref feedbackNativeAdmissionWaits)} " +
+                $"nativeAdmissionWaitMaxMs={StopwatchTicksToMilliseconds(Interlocked.Read(ref feedbackNativeAdmissionMaximumWaitTicks)):F2} " +
                 $"hapticsDequeued={feedbackDispatchBuffer.OrderedControlDequeued} " +
                 $"hapticsDropped={feedbackDispatchBuffer.OrderedControlDropped} " +
                 $"hapticsExpired={feedbackDispatchBuffer.OrderedControlExpired} " +
@@ -6106,6 +6113,11 @@ namespace DS4Windows
                         int payloadLength = stream.ReadFrame(
                             activeStreamFrameVersion, out byte frameType,
                             framedPayload);
+                        // A microphone/media boundary is not another copy of
+                        // a native state command, even if that command is
+                        // still waiting in the independent control lane.
+                        if (frameType != ViiperStreamFrameOutputState)
+                            feedbackDispatchBuffer.InvalidateNativeRepeat();
                         long frameNumber = Interlocked.Increment(
                             ref feedbackFramesRead);
                         if (Interlocked.CompareExchange(
@@ -6268,20 +6280,27 @@ namespace DS4Windows
                                 targetDeviceIndex, nativeContext))
                                 feedbackControlSignal.Set();
                         }
-                        else if (TryBeginFeedbackReaderCallback(stream,
-                                readStreamGeneration))
+                        else
                         {
-                            try
+                            // Legacy fixed-length streams deliver media and
+                            // compatibility state directly, outside both queue
+                            // admission methods. They still break a repeat run.
+                            feedbackDispatchBuffer.InvalidateNativeRepeat();
+                            if (TryBeginFeedbackReaderCallback(stream,
+                                    readStreamGeneration))
                             {
-                                ApplyFeedback(buffer, feedbackLength,
-                                    freshNativeOutput: true,
-                                    nativeOutputScratch: nativeOutputScratch,
-                                    nativeOutputStreamGeneration:
-                                        readStreamGeneration);
-                            }
-                            finally
-                            {
-                                EndFeedbackCallback();
+                                try
+                                {
+                                    ApplyFeedback(buffer, feedbackLength,
+                                        freshNativeOutput: true,
+                                        nativeOutputScratch: nativeOutputScratch,
+                                        nativeOutputStreamGeneration:
+                                            readStreamGeneration);
+                                }
+                                finally
+                                {
+                                    EndFeedbackCallback();
+                                }
                             }
                         }
                     }
@@ -6454,25 +6473,41 @@ namespace DS4Windows
         {
             if (length > feedbackDispatchBuffer.ControlSlotLength) return false;
             long boundary = feedbackDispatchBuffer.PendingBoundaryRevision;
-            while (true)
+            long waitStarted = 0;
+            try
             {
-                lock (feedbackCallbackAdmissionLock)
+                while (true)
                 {
-                    if (!connected || feedbackDispatchStopRequested ||
-                        sourceGeneration != Interlocked.Read(ref streamGeneration) ||
-                        !ReferenceEquals(stream, Volatile.Read(ref deviceStream)) ||
-                        !IsNativeCommandTargetCurrent(deviceIndex, context) ||
-                        boundary != feedbackDispatchBuffer.PendingBoundaryRevision) return false;
-                    if (feedbackDispatchBuffer.TryEnqueueOrderedControl(payload,
-                        length, sourceGeneration, deviceIndex, nativeCommand: true,
-                        expectedBoundaryRevision: boundary, nativeContext: context)) return true;
+                    lock (feedbackCallbackAdmissionLock)
+                    {
+                        if (!connected || feedbackDispatchStopRequested ||
+                            sourceGeneration != Interlocked.Read(ref streamGeneration) ||
+                            !ReferenceEquals(stream, Volatile.Read(ref deviceStream)) ||
+                            !IsNativeCommandTargetCurrent(deviceIndex, context) ||
+                            boundary != feedbackDispatchBuffer.PendingBoundaryRevision) return false;
+                        if (feedbackDispatchBuffer.TryEnqueueOrderedControl(payload,
+                            length, sourceGeneration, deviceIndex, nativeCommand: true,
+                            expectedBoundaryRevision: boundary, nativeContext: context)) return true;
+                    }
+                    // Only this dedicated feedback reader waits, outside callback
+                    // admission. TCP input writes and physical input are independent.
+                    // Known repeats share an unclaimed tail; genuine command
+                    // overload can still back up TCP. Queue age alone excludes
+                    // this pre-admission wait (and the upstream TCP residence).
+                    if (waitStarted == 0)
+                    {
+                        waitStarted = Stopwatch.GetTimestamp();
+                        Interlocked.Increment(ref feedbackNativeAdmissionWaits);
+                    }
+                    feedbackControlSignal.Set();
+                    feedbackDispatchBuffer.WaitForOrderedControlSpace(boundary, 10);
                 }
-                // Only this dedicated feedback reader waits, outside callback
-                // admission. TCP input writes and physical input are independent.
-                // Later media on this same feedback stream can be delayed under
-                // native-command saturation; V5 supplies no per-command credits.
-                feedbackControlSignal.Set();
-                feedbackDispatchBuffer.WaitForOrderedControlSpace(boundary, 10);
+            }
+            finally
+            {
+                if (waitStarted != 0)
+                    RecordMaximum(ref feedbackNativeAdmissionMaximumWaitTicks,
+                        Stopwatch.GetTimestamp() - waitStarted);
             }
         }
 

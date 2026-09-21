@@ -1,0 +1,489 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    Microsoft ResX Schema
+
+    Version 2.0
+
+    The primary goals of this format is to allow a simple XML format
+    that is mostly human readable. The generation and parsing of the
+    various data types are done through the TypeConverter classes
+    associated with the data types.
+
+    Example:
+
+    ... ado.net/XML headers & schema ...
+    <resheader name="resmimetype">text/microsoft-resx</resheader>
+    <resheader name="version">2.0</resheader>
+    <resheader name="reader">System.Resources.ResXResourceReader, System.Windows.Forms, ...</resheader>
+    <resheader name="writer">System.Resources.ResXResourceWriter, System.Windows.Forms, ...</resheader>
+    <data name="Name1"><value>this is my long string</value><comment>this is a comment</comment></data>
+    <data name="Color1" type="System.Drawing.Color, System.Drawing">Blue</data>
+    <data name="Bitmap1" mimetype="application/x-microsoft.net.object.binary.base64">
+        <value>[base64 mime encoded serialized .NET Framework object]</value>
+    </data>
+    <data name="Icon1" type="System.Drawing.Icon, System.Drawing" mimetype="application/x-microsoft.net.object.bytearray.base64">
+        <value>[base64 mime encoded string representing a byte array form of the .NET Framework object]</value>
+        <comment>This is a comment</comment>
+    </data>
+
+    There are any number of "resheader" rows that contain simple
+    name/value pairs.
+
+    Each data row contains a name, and value. The row also contains a
+    type or mimetype. Type corresponds to a .NET class that support
+    text/value conversion through the TypeConverter architecture.
+    Classes that don't support this are serialized and stored with the
+    mimetype set.
+
+    The mimetype is used for serialized objects, and tells the
+    ResXResourceReader how to depersist the object. This is currently not
+    extensible. For a given mimetype the value must be set accordingly:
+
+    Note - application/x-microsoft.net.object.binary.base64 is the format
+    that the ResXResourceWriter will generate, however the reader can
+    read any of the formats listed below.
+
+    mimetype: application/x-microsoft.net.object.binary.base64
+    value   : The object must be serialized with
+            : System.Runtime.Serialization.Formatters.Binary.BinaryFormatter
+            : and then encoded with base64 encoding.
+
+    mimetype: application/x-microsoft.net.object.soap.base64
+    value   : The object must be serialized with
+            : System.Runtime.Serialization.Formatters.Soap.SoapFormatter
+            : and then encoded with base64 encoding.
+
+    mimetype: application/x-microsoft.net.object.bytearray.base64
+    value   : The object must be serialized into a byte array
+            : using a System.ComponentModel.TypeConverter
+            : and then encoded with base64 encoding.
+    -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="Accel" xml:space="preserve">
+    <value>شتاب‌سنج</value>
+  </data>
+  <data name="Action" xml:space="preserve">
+    <value>عملیات</value>
+  </data>
+  <data name="AddDirectory" xml:space="preserve">
+    <value>افزودن پوشه</value>
+  </data>
+  <data name="AddPrograms" xml:space="preserve">
+    <value>افزودن برنامه‌ها</value>
+  </data>
+  <data name="AddStartMenuPrograms" xml:space="preserve">
+    <value>افزودن از منوی استارت</value>
+  </data>
+  <data name="AddSteamGames" xml:space="preserve">
+    <value>افزودن بازی‌های استیم</value>
+  </data>
+  <data name="All" xml:space="preserve">
+    <value>همه</value>
+  </data>
+  <data name="AutoProfiles" xml:space="preserve">
+    <value>پروفایل‌های خودکار</value>
+  </data>
+  <data name="Battery" xml:space="preserve">
+    <value>باتری</value>
+  </data>
+  <data name="Browse" xml:space="preserve">
+    <value>مرور</value>
+  </data>
+  <data name="BrowseOtherPrograms" xml:space="preserve">
+    <value>مرور سایر برنامه‌ها</value>
+  </data>
+  <data name="Cancel" xml:space="preserve">
+    <value>انصراف</value>
+  </data>
+  <data name="CheckUpdateNow" xml:space="preserve">
+    <value>بررسی به‌روزرسانی</value>
+  </data>
+  <data name="CheckUpdateStartup" xml:space="preserve">
+    <value>بررسی به‌روزرسانی هنگام اجرای DS4Windows</value>
+  </data>
+  <data name="Clear" xml:space="preserve">
+    <value>پاک کردن</value>
+  </data>
+  <data name="CloseMinimizes" xml:space="preserve">
+    <value>کوچک کردن برنامه هنگام بستن</value>
+  </data>
+  <data name="Color" xml:space="preserve">
+    <value>رنگ</value>
+  </data>
+  <data name="Controller1Text" xml:space="preserve">
+    <value>کنترلر ۱</value>
+  </data>
+  <data name="Controller2Text" xml:space="preserve">
+    <value>کنترلر ۲</value>
+  </data>
+  <data name="Controller3Text" xml:space="preserve">
+    <value>کنترلر ۳</value>
+  </data>
+  <data name="Controller4Text" xml:space="preserve">
+    <value>کنترلر ۴</value>
+  </data>
+  <data name="Controllers" xml:space="preserve">
+    <value>کنترلرها</value>
+  </data>
+  <data name="ControlPanel" xml:space="preserve">
+    <value>کنترل پنل</value>
+  </data>
+  <data name="Delete" xml:space="preserve">
+    <value>حذف</value>
+  </data>
+  <data name="DriverSetup" xml:space="preserve">
+    <value>نصب درایور کنترلر</value>
+  </data>
+  <data name="Duplicate" xml:space="preserve">
+    <value>تکثیر</value>
+  </data>
+  <data name="Edit" xml:space="preserve">
+    <value>ویرایش</value>
+  </data>
+  <data name="EditAction" xml:space="preserve">
+    <value>ویرایش عملیات</value>
+  </data>
+  <data name="Export" xml:space="preserve">
+    <value>صادر کردن</value>
+  </data>
+  <data name="Full" xml:space="preserve">
+    <value>کامل</value>
+  </data>
+  <data name="Gyro" xml:space="preserve">
+    <value>ژیروسکوپ</value>
+  </data>
+  <data name="HideUnchecked" xml:space="preserve">
+    <value>پنهان کردن موارد انتخاب‌نشده</value>
+  </data>
+  <data name="Import" xml:space="preserve">
+    <value>وارد کردن</value>
+  </data>
+  <data name="LeftStick" xml:space="preserve">
+    <value>استیک چپ</value>
+  </data>
+  <data name="Log" xml:space="preserve">
+    <value>گزارش</value>
+  </data>
+  <data name="Name" xml:space="preserve">
+    <value>نام</value>
+  </data>
+  <data name="New" xml:space="preserve">
+    <value>جدید</value>
+  </data>
+  <data name="NewAction" xml:space="preserve">
+    <value>عملیات جدید</value>
+  </data>
+  <data name="NewProfile" xml:space="preserve">
+    <value>پروفایل جدید</value>
+  </data>
+  <data name="None" xml:space="preserve">
+    <value>هیچ‌کدام</value>
+  </data>
+  <data name="Path" xml:space="preserve">
+    <value>مسیر</value>
+  </data>
+  <data name="Profile" xml:space="preserve">
+    <value>پروفایل</value>
+  </data>
+  <data name="ProfileFolder" xml:space="preserve">
+    <value>پوشه‌ی پروفایل‌ها</value>
+  </data>
+  <data name="QuickCharge" xml:space="preserve">
+    <value>شارژ سریع</value>
+  </data>
+  <data name="RecordText" xml:space="preserve">
+    <value>ضبط</value>
+  </data>
+  <data name="Remove" xml:space="preserve">
+    <value>حذف</value>
+  </data>
+  <data name="RemoveAction" xml:space="preserve">
+    <value>حذف عملیات</value>
+  </data>
+  <data name="RightStick" xml:space="preserve">
+    <value>استیک راست</value>
+  </data>
+  <data name="Rumble" xml:space="preserve">
+    <value>ویبره</value>
+  </data>
+  <data name="RunAtStartup" xml:space="preserve">
+    <value>اجرا هنگام روشن شدن سیستم</value>
+  </data>
+  <data name="Save" xml:space="preserve">
+    <value>ذخیره</value>
+  </data>
+  <data name="SaveProfile" xml:space="preserve">
+    <value>ذخیره‌ی پروفایل</value>
+  </data>
+  <data name="Settings" xml:space="preserve">
+    <value>تنظیمات</value>
+  </data>
+  <data name="ShowNotifications" xml:space="preserve">
+    <value>نمایش اعلان‌ها</value>
+  </data>
+  <data name="StartMinimized" xml:space="preserve">
+    <value>شروع به‌صورت کوچک‌شده</value>
+  </data>
+  <data name="StartText" xml:space="preserve">
+    <value>شروع</value>
+  </data>
+  <data name="Status" xml:space="preserve">
+    <value>وضعیت</value>
+  </data>
+  <data name="StopText" xml:space="preserve">
+    <value>توقف</value>
+  </data>
+  <data name="TouchScroll" xml:space="preserve">
+    <value>پیمایش لمسی</value>
+  </data>
+  <data name="TouchSlide" xml:space="preserve">
+    <value>کشیدن لمسی</value>
+  </data>
+  <data name="TouchTap" xml:space="preserve">
+    <value>ضربه‌ی لمسی</value>
+  </data>
+  <data name="Trigger" xml:space="preserve">
+    <value>ماشه</value>
+  </data>
+  <data name="WarningsOnly" xml:space="preserve">
+    <value>فقط هشدارها</value>
+  </data>
+  <data name="RumbleMaxSecs" xml:space="preserve">
+    <value>حداکثر ثانیه‌ی ویبره</value>
+  </data>
+  <data name="RumbleMaxSecsTip" xml:space="preserve">
+    <value>توقف خودکار ویبره پس از این تعداد ثانیه (۰ = غیرفعال بودن توقف خودکار)</value>
+  </data>
+  <data name="WindowTitle" xml:space="preserve">
+    <value>عنوان پنجره</value>
+  </data>
+  <data name="MoveUp" xml:space="preserve">
+    <value>جابه‌جایی به بالا</value>
+  </data>
+  <data name="MoveDown" xml:space="preserve">
+    <value>جابه‌جایی به پایین</value>
+  </data>
+  
+  
+  <data name="GamepadTest" xml:space="preserve">
+    <value>تست کنترلر</value>
+  </data>
+  <data name="EnableOutputDataToDS4" xml:space="preserve">
+    <value>فعال‌سازی ارسال داده به DS4</value>
+  </data>
+  <data name="EnableOutputDataToDS4Tip" xml:space="preserve">
+    <value>ارسال دوره‌ای اطلاعات نوار نور و ویبره به کنترلر DS4.
+اگر کنترلر از دریافت این داده‌ها پشتیبانی نمی‌کند، تیک آن را بردارید.
+این تغییرات هنگام اتصال کنترلر اعمال می‌شوند.</value>
+    <comment>To enter a line break into a string resource value in VisualStudio resource editor press Shift+Enter.</comment>
+  </data>
+  <data name="Apply" xml:space="preserve">
+    <value>اعمال</value>
+  </data>
+  <data name="HidNinja" xml:space="preserve">
+    <value>HidNinja</value>
+  </data>
+  <data name="CustomExeName" xml:space="preserve">
+    <value>نام سفارشی فایل اجرایی</value>
+  </data>
+  <data name="CustomExeNameInfo" xml:space="preserve">
+    <value>برخی بازی‌ها در صورت شناسایی DS4Windows.exe / InputMapper.exe در حال اجرا، کنترلر را مسدود می‌کنند.
+راه‌حل این است که نام فایل را به چیز دیگری تغییر دهید تا این مسدودسازی دور زده شود.
+مشخص کردن یک نام جدید در اینجا به به‌روزرسان اجازه می‌دهد نام فایل را بشناسد.</value>
+  </data>
+  <data name="XInputChecker" xml:space="preserve">
+    <value>XInputChecker</value>
+  </data>
+  <data name="Controller5Text" xml:space="preserve">
+    <value>کنترلر ۵</value>
+  </data>
+  <data name="Controller6Text" xml:space="preserve">
+    <value>کنترلر ۶</value>
+  </data>
+  <data name="Controller7Text" xml:space="preserve">
+    <value>کنترلر ۷</value>
+  </data>
+  <data name="Controller8Text" xml:space="preserve">
+    <value>کنترلر ۸</value>
+  </data>
+  <data name="GamepadGyroCameraDescription" xml:space="preserve">
+    <value>خروجی کنترلر را به‌صورت کنترلر استاندارد XInput یا DS4 تنظیم می‌کند.
+ژیروسکوپ به‌عنوان یک جویستیک شبیه‌ماوس تنظیم می‌شود.</value>
+  </data>
+  <data name="GamepadGyroCameraName" xml:space="preserve">
+    <value>کنترلر با ماوس</value>
+  </data>
+  <data name="GamepadPresetDescription" xml:space="preserve">
+    <value>تنظیم کنترلر به‌صورت یک کنترلر استاندارد</value>
+  </data>
+  <data name="GamepadPresetName" xml:space="preserve">
+    <value>کنترلر</value>
+  </data>
+  <data name="KBMGyroMouseDescription" xml:space="preserve">
+    <value>خروجی کنترلر را به کنترل پیش‌فرض صفحه‌کلید و ماوس (KB+M) تنظیم می‌کند.
+برای بازی‌های اول‌شخصی که از کنترلر پشتیبانی نمی‌کنند مفید است.
+ژیروسکوپ به‌عنوان ماوس پیش‌فرض تنظیم شده است.</value>
+  </data>
+  <data name="KBMGyroMouseName" xml:space="preserve">
+    <value>کنترل KB+M همراه با ماوس ژیروسکوپ</value>
+  </data>
+  <data name="KBMPresetDescription" xml:space="preserve">
+    <value>خروجی کنترلر را به کنترل پیش‌فرض صفحه‌کلید و ماوس (KB+M) تنظیم می‌کند.
+برای بازی‌های اول‌شخصی که از کنترلر پشتیبانی نمی‌کنند مفید است.</value>
+  </data>
+  <data name="KBMPresetName" xml:space="preserve">
+    <value>کنترل KB+M</value>
+  </data>
+  <data name="MixedGyroMousePresetDescription" xml:space="preserve">
+    <value>دکمه‌ها و محورهای کنترل را به‌صورت استاندارد تنظیم می‌کند.
+ژیروسکوپ را به‌عنوان ماوس پیش‌فرض تنظیم می‌کند.</value>
+  </data>
+  <data name="MixedGyroMousePresetName" xml:space="preserve">
+    <value>کنترلر با ماوس ژیروسکوپ</value>
+  </data>
+  <data name="MixedPresetDescription" xml:space="preserve">
+    <value>تنظیم خروجی کنترلر به‌صورت ترکیبی از ماوس (استیک راست) + XInput</value>
+  </data>
+  <data name="MixedPresetName" xml:space="preserve">
+    <value>کنترلر با دوربین دقیق</value>
+  </data>
+  <data name="Description" xml:space="preserve">
+    <value>توضیحات</value>
+  </data>
+  <data name="PresetIntroText" xml:space="preserve">
+    <value>می‌خواهید یک پیش‌تنظیم انتخاب کنید؟ انتخاب «خیر» باعث می‌شود ویرایشگر پروفایل با یک پروفایل خالی برای کنترلر باز شود.</value>
+  </data>
+  <data name="Presets" xml:space="preserve">
+    <value>پیش‌تنظیم‌ها</value>
+  </data>
+  <data name="Changelog" xml:space="preserve">
+    <value>تغییرات</value>
+  </data>
+  <data name="Close" xml:space="preserve">
+    <value>بستن</value>
+  </data>
+  <data name="Profiles" xml:space="preserve">
+    <value>پروفایل‌ها</value>
+  </data>
+  <data name="NoControllersConnected" xml:space="preserve">
+    <value>هیچ کنترلری متصل نیست (حداکثر {0})</value>
+  </data>
+  <data name="FlickThreshold" xml:space="preserve">
+    <value>آستانه‌ی فلیک</value>
+  </data>
+  <data name="FlickTime" xml:space="preserve">
+    <value>زمان فلیک</value>
+  </data>
+  <data name="MinAngleThreshold" xml:space="preserve">
+    <value>حداقل آستانه‌ی زاویه</value>
+  </data>
+  <data name="RealWorldCalibration" xml:space="preserve">
+    <value>کالیبراسیون دنیای واقعی</value>
+  </data>
+<data name="RecordBox.FourthMB" xml:space="preserve"><value>دکمه‌ی چهارم ماوس</value></data><data name="SpecialActionEdit.SelectKey" xml:space="preserve"><value>انتخاب یک کلید</value></data><data name="TwoStageMode" xml:space="preserve"><value>حالت دو مرحله‌ای</value></data><data name="SquareStick" xml:space="preserve"><value>استیک مربعی</value></data><data name="IconChoice" xml:space="preserve"><value>انتخاب آیکون</value></data><data name="StickFuzzTooltip" xml:space="preserve"><value>تلورانس حداقل تعداد واحدهایی است که استیک آنالوگ باید در ناحیه‌ی فعال جابه‌جا شود تا خروجی در مپر به‌عنوان تغییریافته ثبت شود. این تنظیم برای استیک‌های فرسوده که نمی‌توانند موقعیت ثابتی داشته باشند مفید است. مقدار بر حسب واحد خام استیک بیان می‌شود.</value></data><data name="Dynamic" xml:space="preserve"><value>پویا</value></data><data name="WakeupFromSuspend" xml:space="preserve"><value>بیدار شدن از حالت تعلیق</value></data><data name="TouchpadMinThresholdTooltip" xml:space="preserve"><value>حداقل مسافت محاسبه‌شده‌ی خروجی، پیش از ارسال رویداد ماوس به سیستم</value></data><data name="SASteeringWheelFuzzTooltip" xml:space="preserve"><value>تلورانس حداقل تعداد واحدهای دستگاهی است که شتاب‌سنج باید در ناحیه‌ی فعال بچرخد تا خروجی در مپر به‌عنوان تغییریافته ثبت شود. مقدار بر حسب واحد خام شتاب‌سنج بیان می‌شود.</value></data><data name="RecordBox.FifthMB" xml:space="preserve"><value>دکمه‌ی پنجم ماوس</value></data><data name="Utils" xml:space="preserve"><value>ابزارها</value></data><data name="CheckEvery" xml:space="preserve"><value>بررسی هر</value></data><data name="AbsoluteMouse" xml:space="preserve"><value>ماوس مطلق</value></data><data name="DS4BTPollRate" xml:space="preserve"><value>نرخ پولینگ بلوتوث DS4</value></data><data name="SpecialActionEdit.UntoggleKeyBy" xml:space="preserve"><value>غیرفعال‌کردن کلید توسط</value></data><data name="SpecialActionEdit.DoubleTapTrigger" xml:space="preserve"><value>ماشه‌ی دو ضربه‌ای</value></data><data name="DeadZone Y" xml:space="preserve"><value>ناحیه‌ی مرده Y</value></data><data name="DualSRumbleModeLegacy" xml:space="preserve"><value>قدیمی (Legacy)</value></data><data name="Light" xml:space="preserve"><value>روشن</value></data><data name="TestLight" xml:space="preserve"><value>آزمایش سبک</value></data><data name="ShowAutoProfileDebugMessages" xml:space="preserve"><value>نمایش پیام‌های دیباگ پروفایل خودکار</value></data><data name="RecordBox.PlayOnce" xml:space="preserve"><value>یک‌بار پخش</value></data><data name="RecordBoxWin.WinTitle" xml:space="preserve"><value>ویرایش ماکرو</value></data><data name="RecordBox.RepeatWhileHeld" xml:space="preserve"><value>تکرار هنگام نگه‌داشتن</value></data><data name="SaveWhere.MultipleSaves" xml:space="preserve"><value>چند محل ذخیره‌سازی شناسایی شد</value></data><data name="SpecialActionEdit.DisconnectBT" xml:space="preserve"><value>قطع اتصال بلوتوث</value></data><data name="SpecialActionEdit.SelectMacro" xml:space="preserve"><value>انتخاب یک ماکرو</value></data><data name="SnapToCenter" xml:space="preserve"><value>چسبیدن به مرکز</value></data><data name="ProcessPriority" xml:space="preserve"><value>اولویت فرایند</value></data><data name="UDPServer" xml:space="preserve"><value>سرور UDP</value></data><data name="Default" xml:space="preserve"><value>پیش‌فرض</value></data><data name="DeltaAcceleration" xml:space="preserve"><value>شتاب دلتا</value></data><data name="ReadingsControl.SixAxisXText" xml:space="preserve"><value>SixAxis: محور X برعکس شده تا خواندن آن راحت‌تر باشد</value></data><data name="ReadingsControl.BatteryZero" xml:space="preserve"><value>باتری: ۰٪</value></data><data name="SpecialActionEdit.MacroRecorded" xml:space="preserve"><value>ماکرو ضبط شد</value></data><data name="Net8NotInstalledWinNotice" xml:space="preserve"><value>نسخه‌ی ۳٫۳ برنامه‌ی DS4Windows نیازمند نصب .NET 8 Desktop Runtime روی سیستم شماست  
+[https://dotnet.microsoft.com/en-us/download/dotnet/thank-you/runtime-desktop-8.0.0-windows-{0}-installer](https://dotnet.microsoft.com/en-us/download/dotnet/thank-you/runtime-desktop-8.0.0-windows-{0}-installer)  
+
+لطفاً برای تأیید مطالعه‌ی این پیام، روی OK کلیک کنید. برای یادآوری مجدد در اجرای بعدی برنامه، روی Cancel کلیک کنید.</value><comment>Can use Markdown syntax</comment></data><data name="SpecialActionEdit.RecordMacro" xml:space="preserve"><value>ضبط یک ماکرو</value></data><data name="SpecialActionEdit.KeepKeyState" xml:space="preserve"><value>حفظ وضعیت کلید</value></data><data name="RenameProfile" xml:space="preserve"><value>تغییر نام</value></data><data name="SpecialActionEdit.HoldTrigger" xml:space="preserve"><value>نگه‌داشتن ماشه</value></data><data name="Task" xml:space="preserve"><value>وظیفه</value></data><data name="Current" xml:space="preserve"><value>فعلی</value></data><data name="MainWin.AbsDisplayMonitor" xml:space="preserve"><value>مانیتور نمایش مطلق</value></data><data name="FlashLightbarAtHighLatency" xml:space="preserve"><value>چشمک‌زدن نوار نور در تأخیر بالا</value></data><data name="DisableVirtualController" xml:space="preserve"><value>غیرفعال کردن کنترلر مجازی</value></data><data name="ScanCode" xml:space="preserve"><value>کد اسکن</value></data><data name="StickMaxOutputTooltip" xml:space="preserve"><value>در برخی موقعیت‌ها، محدود کردن حداکثر مقدار خروجی استیک آنالوگ مفید است. «حداکثر خروجی» مقدار نهایی خروجی استیک را محدود می‌کند.</value></data><data name="BindingWin.AbsMouseRight" xml:space="preserve"><value>ماوس مطلق راست</value></data><data name="BindingWin.ChangeLight" xml:space="preserve"><value>تغییر نور</value></data><data name="Buttons" xml:space="preserve"><value>دکمه‌ها</value></data><data name="SelectedProfile" xml:space="preserve"><value>پروفایل انتخاب‌شده</value></data><data name="SpecialActionEdit.ViaNotification" xml:space="preserve"><value>از طریق اعلان</value></data><data name="SpecialActionEdit.SyncRun" xml:space="preserve"><value>اجرای همگام‌شده</value></data><data name="XAxisOffset" xml:space="preserve"><value>آفست محور X</value></data><data name="LightbarMode" xml:space="preserve"><value>حالت نوار نور</value></data><data name="EaseoutQuad" xml:space="preserve"><value>درجه‌دوم (Easeout Quad)</value></data><data name="RecordBox.LoadPreset" xml:space="preserve"><value>بارگذاری پیش‌تنظیم</value></data><data name="FirstLaunch.DS4EnableText" xml:space="preserve"><value>پشتیبانی از کنترلرهای شناخته‌شده‌ی DualShock 4</value></data><data name="ProfileEditor.VirtualDS4TrigOutput" xml:space="preserve"><value>حالت خروجی ماشه‌ی DS4</value></data><data name="TouchpadTrackballFrictionTooltip" xml:space="preserve"><value>به Trackball مجازی اصطکاک اضافه می‌کند. کاهش اصطکاک زمان حرکت نهایی نشانگر ماوس را افزایش می‌دهد</value></data><data name="Linear" xml:space="preserve"><value>خطی</value></data><data name="FirstLaunch.DeviceIntroText" xml:space="preserve"><value>از آنجا که سایر مپرها (مثل Steam Input) به‌طور پیش‌فرض از چند نوع دستگاه پشتیبانی می‌کنند، DS4Windows به‌طور پیش‌فرض فقط خواندن از کنترلرهای DS4 را فعال می‌کند. می‌توانید پشتیبانی مپر از سایر انواع دستگاه را اینجا مشخص کنید. هنگام استفاده‌ی هم‌زمان از DS4Windows با مپرهای دیگر احتیاط کنید.</value></data><data name="SaveWhere.PickWhere" xml:space="preserve"><value>محل ذخیره‌ی پروفایل‌ها و تنظیمات را انتخاب کنید</value></data><data name="ControllerSupportJoyCon" xml:space="preserve"><value>پشتیبانی از کنترلر JoyCon</value></data><data name="MainWin.OneEuroMinCutoff" xml:space="preserve"><value>حداقل قطع فیلتر 1€</value></data><data name="VerticalScale" xml:space="preserve"><value>مقیاس عمودی</value></data><data name="SkipVersion" xml:space="preserve"><value>رد کردن این نسخه</value></data><data name="SpecialActionEdit.SetUnloadTrigger" xml:space="preserve"><value>تنظیم ماشه‌ی لغو بارگذاری</value></data><data name="RecordBox.AddRumble" xml:space="preserve"><value>افزودن ویبره</value></data><data name="EmulatedController" xml:space="preserve"><value>کنترلر شبیه‌سازی‌شده</value></data><data name="FailedToRetrieveLatestVersion" xml:space="preserve"><value>دریافت آخرین نسخه ناموفق بود</value></data><data name="DualSRumbleForceGenericRescale" xml:space="preserve"><value>استفاده‌ی اجباری از هر دو سطح شدت درصدی (عمومی و مخصوص DualSense)</value></data><data name="SpecialActionEdit.RepeatWhileHeld" xml:space="preserve"><value>تکرار هنگام نگه‌داشتن</value></data><data name="FirstLaunch.DeviceSupport" xml:space="preserve"><value>پشتیبانی دستگاه</value></data><data name="EnableVerboseLog" xml:space="preserve"><value>فعال‌سازی گزارش کامل</value></data><data name="Permanent" xml:space="preserve"><value>دائمی</value></data><data name="CancelCurrentMacro" xml:space="preserve"><value>لغو ماکروی جاری</value></data><data name="StickOuterBindDeadTooltip" xml:space="preserve"><value>آستانه‌ای که با رسیدن استیک به آن، عملیات اجرا می‌شود</value></data><data name="DualSRumbleForceGenericRescale_Tip" xml:space="preserve"><value>توصیه می‌شود غیرفعال بماند.
+
+- غیرفعال: مقیاس ویبره به‌صورت بومی توسط خودِ کنترلر و بر اساس سطح توان تعیین‌شده تنظیم می‌شود (کیفیت بهتر)
+
+- فعال: هم مقیاس‌بندی عمومی ویبره‌ی DS4Windows و هم کنترل بومی DualSense به‌طور هم‌زمان فعال خواهند بود</value></data><data name="SpecialActionEdit.LoadProfile" xml:space="preserve"><value>بارگذاری یک پروفایل</value></data><data name="ControllerSupportDS4" xml:space="preserve"><value>پشتیبانی از کنترلر DS4</value></data><data name="FirstLaunch.WinTitle" xml:space="preserve"><value>اولین اجرا</value></data><data name="UpdaterWin.WinTitle" xml:space="preserve"><value>پنجره‌ی به‌روزرسانی</value></data><data name="Mode" xml:space="preserve"><value>حالت</value></data><data name="AdvancedSupport" xml:space="preserve"><value>پشتیبانی پیشرفته</value></data><data name="MaxOutput" xml:space="preserve"><value>حداکثر خروجی</value></data><data name="ControllerSupportDualSense" xml:space="preserve"><value>پشتیبانی از کنترلر DualSense</value></data><data name="AntiDeadzoneTooltip" xml:space="preserve"><value>Anti-deadzone به‌عنوان یک آفست برای یک محور عمل می‌کند و حداقل مقدار خروجی تولیدشده پس از خروج محور از ناحیه‌ی مرده‌ی تعیین‌شده را مشخص می‌کند. هدف اصلی آن کمک به تطبیق محور با مقدار ناحیه‌ی مرده‌ی تعیین‌شده در یک بازی است. برای مثال، ناحیه‌ی مرده‌ی معمول برای XInput LS در بازی‌ها حدود ۸۰۰۰ (۲۵٪) است. بدون تعیین anti-deadzone، محور باید هم از ناحیه‌ی مرده‌ی تعیین‌شده در DS4Windows و هم از ناحیه‌ی مرده‌ی تعیین‌شده‌ی بازی عبور کند.</value></data><data name="ChangeOnNewDeviceConn" xml:space="preserve"><value>تغییرات با اتصال دستگاه جدید اعمال می‌شوند</value></data><data name="Radial" xml:space="preserve"><value>شعاعی</value></data><data name="OutputCurve" xml:space="preserve"><value>منحنی خروجی</value></data><data name="Touchpad" xml:space="preserve"><value>تاچ‌پد</value></data><data name="AppTheme" xml:space="preserve"><value>پوسته‌ی برنامه</value></data><data name="TouchpadRotationTooltip" xml:space="preserve"><value>حرکت روی تاچ‌پد را بر اساس یک زاویه‌ی چرخش مشخص تنظیم می‌کند. زمانی مفید است که حرکت معمول روی تاچ‌پد یک خط مستقیم نباشد. بازه‌ی مقدار از ۱۸۰- تا ۱۸۰ است. پیش‌فرض ۰ است.</value></data><data name="EnableVerboseLogTip" xml:space="preserve"><value>نمایش پیام‌های گزارش اضافی هنگام اتصال کنترلر</value></data><data name="DeviceOptions" xml:space="preserve"><value>گزینه‌های دستگاه</value></data><data name="Fuzz" xml:space="preserve"><value>تلورانس</value></data><data name="SpecialActionEdit.PressingUnloadTrigger" xml:space="preserve"><value>فشردن ماشه‌ی لغو بارگذاری</value></data><data name="FirstLaunch.Header" xml:space="preserve"><value>پشتیبانی مپر برای دستگاه‌های فعال‌شده</value></data><data name="Plug" xml:space="preserve"><value>اتصال</value></data><data name="CRC32Fail" xml:space="preserve"><value>بررسی صحت داده برای دستگاه بی‌سیم ناموفق بود. دستگاه بسته می‌شود.</value></data><data name="EnableTouchpadToggle" xml:space="preserve"><value>فعال‌سازی سوییچ تاچ‌پد</value></data><data name="Passthru" xml:space="preserve"><value>عبوری (Passthru)</value></data><data name="Toggle" xml:space="preserve"><value>تغییر وضعیت</value></data><data name="Yaw" xml:space="preserve"><value>چرخش حول محور عمودی (Yaw)</value></data><data name="Macro" xml:space="preserve"><value>ماکرو</value></data><data name="DeadZoneType" xml:space="preserve"><value>نوع ناحیه‌ی مرده</value></data><data name="ID" xml:space="preserve"><value>شناسه</value></data><data name="RenameProfileWin.TypeNewProfileName" xml:space="preserve"><value>لطفاً نام جدید فایل XML پروفایل انتخاب‌شده را وارد کنید.</value></data><data name="Unbound" xml:space="preserve"><value>تخصیص‌نیافته</value></data><data name="UseSmoothing" xml:space="preserve"><value>استفاده از هموارسازی</value></data><data name="HoldFor" xml:space="preserve"><value>نگه‌داشتن به مدت</value></data><data name="Intro" xml:space="preserve"><value>مقدمه</value></data><data name="SixAxisAccel" xml:space="preserve"><value>شش‌محوره (شتاب‌سنج)</value></data><data name="Multiplier" xml:space="preserve"><value>ضریب</value></data><data name="BindingWin.ChangeMouseSensitivity" xml:space="preserve"><value>تغییر حساسیت ماوس</value></data><data name="Width" xml:space="preserve"><value>عرض</value></data><data name="LaunchProgramWithProfile" xml:space="preserve"><value>اجرای برنامه همراه با پروفایل</value></data><data name="StickOuterBindTooltip" xml:space="preserve"><value>عملیاتی که با عبور حرکت استیک از یک آستانه اجرا می‌شود. برای تطبیق کلیدهای عملیات راه رفتن یا دویدن مفید است. حالت معکوس باعث می‌شود عملیات تا رسیدن به آستانه اجرا شود</value></data><data name="FirstLaunch.DS4EnableCkbLabel" xml:space="preserve"><value>پشتیبانی از دستگاه DS4</value></data><data name="ExportSpecialActions" xml:space="preserve"><value>صادر کردن عملیات‌ها</value></data><data name="StickCalibration" xml:space="preserve"><value>کالیبراسیون استیک</value></data><data name="Roll" xml:space="preserve"><value>غلت (Roll)</value></data><data name="ControllerSupportMoonlight" xml:space="preserve"><value>پشتیبانی از کنترلر مجازی</value></data><data name="Extra" xml:space="preserve"><value>اضافی</value></data><data name="BindingWin.SelectShiftTrigger" xml:space="preserve"><value>انتخاب ماشه‌ی Shift</value></data><data name="BindingWin.KeyAndRelMouse" xml:space="preserve"><value>صفحه‌کلید و ماوس نسبی</value></data><data name="Requested" xml:space="preserve"><value>درخواست‌شده</value></data><data name="IdleDisconnect" xml:space="preserve"><value>قطع اتصال هنگام بی‌کاری</value></data><data name="OutputMode" xml:space="preserve"><value>حالت خروجی</value></data><data name="CopycatTip" xml:space="preserve"><value>برخی فلگ‌های استفاده‌شده برای کنترلرهای DS4 غیر سونی را تغییر می‌دهد. ممکن است پشتیبانی از ویبره و نوار نور را برای برخی کنترلرهای تقلبی DS4 برطرف کند</value></data><data name="OutputSlotMan.XInputNum" xml:space="preserve"><value>شماره‌ی XInput</value></data><data name="ViGEmPluginFailure" xml:space="preserve"><value>پلاگین دستگاه ViGEm با خطا مواجه شد. کد خطا: {0}. احتمالاً یک مشکل داخلی در ViGEmBus است. اتصال بسته می‌شود. اگر مشکل ادامه داشت، لطفاً DS4Windows را ببندید و ویندوز را ری‌استارت کنید.</value></data><data name="CancelCurrentMacroTooltip" xml:space="preserve"><value>مشخص می‌کند آیا اجرای این ماکرو باید ماکروی در حال اجرا را متوقف کند یا نه</value></data><data name="UseCustomSteamFolder" xml:space="preserve"><value>استفاده از پوشه‌ی سفارشی Steam</value></data><data name="DualSRumblePowerLevel_Tip" xml:space="preserve"><value>تنظیم‌کننده‌ی بومی سطح توانِ ویبره‌ی DualSense.
+
+- در حالت دقیق، [حداقل // حداکثر] ویبره برابر خواهد بود با [۱٪ /// سطح توان انتخاب‌شده]
+    - مثال (۶۲٪): [حداقل = ۱٪ /// حداکثر = ۶۲٪]
+
+- در حالت قدیمی (Legacy)، [حداقل /// حداکثر] ویبره تقریباً برابر خواهد بود با [سطح توان − ۱۲٪ /// سطح توان + ۱۲٪]
+    - مثال (۶۲٪): [حداقل = ۵۰٪ /// حداکثر = ۷۴٪]</value></data><data name="White" xml:space="preserve"><value>سفید</value></data><data name="LinkProfileId" xml:space="preserve"><value>پیوند پروفایل/شناسه</value></data><data name="BindingWin.AbsMouseUp" xml:space="preserve"><value>ماوس مطلق بالا</value></data><data name="DeviceType" xml:space="preserve"><value>نوع دستگاه</value></data><data name="SpecialActionEdit.ReleasingUnloadTrigger" xml:space="preserve"><value>رهاکردن ماشه‌ی لغو بارگذاری</value></data><data name="YAxisOffset" xml:space="preserve"><value>آفست محور Y</value></data><data name="HipFireDelay" xml:space="preserve"><value>تأخیر شلیک بدون نشانه‌روی (Hip Fire)</value></data><data name="OutputSlots" xml:space="preserve"><value>اسلات‌های خروجی</value></data><data name="Normal" xml:space="preserve"><value>عادی</value></data><data name="Hours" xml:space="preserve"><value>ساعت</value></data><data name="BindingWin.MacroOn" xml:space="preserve"><value>ماکرو فعال است؛ یک کلید برای غیرفعال‌سازی انتخاب کنید، یا برای ذخیره این پنجره را ببندید</value></data><data name="SpecialActionEdit.LaunchProgram" xml:space="preserve"><value>اجرای یک برنامه</value></data><data name="OuterBtn" xml:space="preserve"><value>دکمه‌ی بیرونی</value></data><data name="SpecialActionEdit.SelectAction" xml:space="preserve"><value>-انتخاب یک عملیات-</value></data><data name="BindingWin.AbsMouseLeft" xml:space="preserve"><value>ماوس مطلق چپ</value></data><data name="ViGEm117MinNeeded" xml:space="preserve"><value>فقط با ViGEmBus نسخه‌ی ۱٫۱۷٫۳۳۳٫۰ و جدیدتر کار می‌کند</value></data><data name="SpecialActionEdit.SixAxisWheelCalib" xml:space="preserve"><value>کالیبراسیون فرمان شش‌محوره</value></data><data name="OuterBtnDead" xml:space="preserve"><value>ناحیه‌ی مرده‌ی دکمه‌ی بیرونی</value></data><data name="MainWin.OneEuroBeta" xml:space="preserve"><value>بتا فیلتر 1€</value></data><data name="Heavy" xml:space="preserve"><value>سنگین</value></data><data name="AntiRadius" xml:space="preserve"><value>ضد شعاع (Anti Radius)</value></data><data name="InverseMotors" xml:space="preserve"><value>معکوس‌کردن موتورها</value></data><data name="LangPackControl.UseLangPack" xml:space="preserve"><value>استفاده از بسته‌ی زبان</value></data><data name="DS4LightbarPassthruDisabled" xml:space="preserve"><value>این قابلیت به‌دلیل مشکلات درایور، فعلاً در برنامه غیرفعال است. امیدواریم در به‌روزرسانی‌های بعدی رفع شود.</value></data><data name="Quadratic" xml:space="preserve"><value>درجه‌دوم</value></data><data name="ColorAndLength" xml:space="preserve"><value>رنگ و طول</value></data><data name="EnableOscServer" xml:space="preserve"><value>فعال‌سازی سرور کنترل</value></data><data name="Pitch" xml:space="preserve"><value>چرخش حول محور عرضی (Pitch)</value></data><data name="HotkeysAbout" xml:space="preserve"><value>کلیدهای میانبر/درباره‌ی برنامه</value></data><data name="VirtualControllerSettings" xml:space="preserve"><value>تنظیمات کنترلر مجازی</value></data><data name="Unplug" xml:space="preserve"><value>قطع اتصال</value></data><data name="Appdata" xml:space="preserve"><value>Appdata</value></data><data name="TouchpadJitterCompTooltip" xml:space="preserve"><value>حرکت‌های خیلی کوچک روی تاچ‌پد را محدود می‌کند. حرکت ناخواسته‌ی نشانگر ماوس هنگام نگه‌داشتن انگشت تقریباً ثابت روی تاچ‌پد را کاهش می‌دهد</value></data><data name="RenameProfileWin.WinTitle" xml:space="preserve"><value>تغییر نام پروفایل</value></data><data name="MaxTravel" xml:space="preserve"><value>حداکثر مسافت حرکت</value></data><data name="Colored" xml:space="preserve"><value>رنگی</value></data><data name="Port" xml:space="preserve"><value>درگاه</value></data><data name="FirstLaunch.SwitchProEnableCkbLabel" xml:space="preserve"><value>پشتیبانی از دستگاه Switch Pro</value></data><data name="MainWin.EnableServer" xml:space="preserve"><value>فعال‌سازی سرور</value></data><data name="OscServerHeading" xml:space="preserve"><value>کنترل و مانیتورینگ OSC خارجی</value></data><data name="Other" xml:space="preserve"><value>سایر</value></data><data name="SharedAccess" xml:space="preserve"><value>دسترسی مشترک</value></data><data name="RecordBox.MacroOrder" xml:space="preserve"><value>ترتیب ماکرو</value></data><data name="MinimizeToTaskbarTip" xml:space="preserve"><value>کوچک کردن به نوار وظیفه به‌جای سینی سیستم (System Tray)</value></data><data name="YCenter" xml:space="preserve"><value>مرکز Y</value></data><data name="DisableVirtualControllerTip" xml:space="preserve"><value>برای کنترلرهای متصلی که از این پروفایل استفاده می‌کنند، کنترلر مجازی ساخته/متصل نشود (با ذخیره‌ی پروفایل اعمال می‌شود)</value></data><data name="AbsoluteMouseOptions" xml:space="preserve"><value>گزینه‌های ماوس مطلق</value></data><data name="AutoProfiles.LogAndNotification" xml:space="preserve"><value>گزارش + اعلان</value></data><data name="FirstLaunch.DSEnableCkbLabel" xml:space="preserve"><value>پشتیبانی از دستگاه DualSense</value></data><data name="EnableOscSender" xml:space="preserve"><value>فعال‌سازی سرویس مانیتورینگ</value></data><data name="DeadZone" xml:space="preserve"><value>ناحیه‌ی مرده</value></data><data name="ControllerRegOptWin.LinkMode" xml:space="preserve"><value>حالت اتصال (Link Mode)</value></data><data name="TouchpadSlideTooltip" xml:space="preserve"><value>حساسیت مورد استفاده برای فعال‌سازی عملکرد اسکرول چرخ ماوس با چند لمس</value></data><data name="Black" xml:space="preserve"><value>مشکی</value></data><data name="TestHeavy" xml:space="preserve"><value>آزمایش سنگین</value></data><data name="ProfileSwitchNotification" xml:space="preserve"><value>نمایش اعلان تعویض پروفایل</value></data><data name="PresetOptWin.PresetMenu" xml:space="preserve"><value>منوی پیش‌تنظیم</value></data><data name="Accept" xml:space="preserve"><value>پذیرفتن</value></data><data name="MouseOffset" xml:space="preserve"><value>جابجایی ماوس</value></data><data name="Enabled" xml:space="preserve"><value>فعال</value></data><data name="Add" xml:space="preserve"><value>افزودن</value></data><data name="MouseSensitivity" xml:space="preserve"><value>حساسیت ماوس</value></data><data name="DisconnectFromBtWhenStopping" xml:space="preserve"><value>قطع بلوتوث هنگام توقف</value></data><data name="Mouse" xml:space="preserve"><value>ماوس</value></data><data name="ControllerRegOptWin.MuteLEDMode" xml:space="preserve"><value>حالت LED بی‌صدا (Mute)</value></data><data name="UseController" xml:space="preserve"><value>استفاده از کنترلر</value></data><data name="HidHideConfigClient" xml:space="preserve"><value>کلاینت تنظیمات HidHide</value></data><data name="SwipeTouchpadToSwitchProfiles" xml:space="preserve"><value>کشیدن روی تاچ‌پد برای تعویض پروفایل</value></data><data name="Sensitivity" xml:space="preserve"><value>حساسیت</value></data><data name="FirstLaunch.DSEnableText" xml:space="preserve"><value>پشتیبانی از کنترلرهای DualSense (PS5). مدل پایه و DS Edge</value></data><data name="SaveWhere.WinTitle" xml:space="preserve"><value>محل ذخیره‌سازی</value></data><data name="FirstLaunch.DS3EnableCkbLabel" xml:space="preserve"><value>پشتیبانی از دستگاه DS3</value></data><data name="RevertToDefaultProfileOnUnknown" xml:space="preserve"><value>بازگشت به پروفایل پیش‌فرض در صورت ناشناخته بودن</value></data><data name="OK" xml:space="preserve"><value>تأیید</value></data><data name="Copycat" xml:space="preserve"><value>شبیه‌ساز (Copycat)</value></data><data name="DS4OutputTriggersDefault" xml:space="preserve"><value>پیش‌فرض (آنالوگ + دکمه‌ها)</value></data><data name="Notification" xml:space="preserve"><value>اعلان</value></data><data name="RecordBox.InsertWait" xml:space="preserve"><value>درج توقف</value></data><data name="Confirm" xml:space="preserve"><value>تأیید</value></data><data name="AntiSnapbackTiming" xml:space="preserve"><value>زمان‌بندی ضد بازگشت ناگهانی (Anti Snapback)</value></data><data name="OuterBind" xml:space="preserve"><value>اتصال بیرونی (Outer Bind)</value></data><data name="SaveWhere.AppDataDescText" xml:space="preserve"><value>برای کسانی که نصب معمولی را ترجیح می‌دهند. تنظیمات در %appdata%\DS4Windows ذخیره می‌شود</value></data><data name="RecordBox.SavePreset" xml:space="preserve"><value>ذخیره‌ی پیش‌تنظیم</value></data><data name="DetectedControllers" xml:space="preserve"><value>کنترلرهای شناسایی‌شده</value></data><data name="Analog" xml:space="preserve"><value>آنالوگ</value></data><data name="Custom" xml:space="preserve"><value>سفارشی</value></data><data name="BindingWin.AbsMouseDown" xml:space="preserve"><value>ماوس مطلق پایین</value></data><data name="ExclusiveAccess" xml:space="preserve"><value>دسترسی انحصاری</value></data><data name="SpecialActionEdit.CheckBattery" xml:space="preserve"><value>بررسی عمر باتری</value></data><data name="EnhancedPrecision" xml:space="preserve"><value>دقت افزایش‌یافته</value></data><data name="Days" xml:space="preserve"><value>روز</value></data><data name="FullBtnPull" xml:space="preserve"><value>کشش کامل دکمه</value></data><data name="FirstLaunch.SwitchProEnableText" xml:space="preserve"><value>پشتیبانی از کنترلرهای Switch Pro (نینتندو سوییچ)</value></data><data name="AutoProfiles.DisplaySwitchVia" xml:space="preserve"><value>نمایش تعویض پروفایل از طریق</value></data><data name="HidGuardianAccess" xml:space="preserve"><value>دسترسی HidGuardian</value></data><data name="TurnOffDS4WindowsTemporarily" xml:space="preserve"><value>خاموش کردن موقت DS4Windows</value></data><data name="FutureNetNotInstalled" xml:space="preserve"><value>.NET 5 Runtime روی سیستم شما یافت نشد. لطفاً برای سازگاری با نسخه‌های آینده‌ی DS4Windows، آن را دانلود و نصب کنید. با بستن این پنجره به صفحه‌ی دانلود .NET 5 Runtime هدایت می‌شوید.</value></data><data name="XCenter" xml:space="preserve"><value>مرکز X</value></data><data name="FirstLaunch.JoyConEnableText" xml:space="preserve"><value>پشتیبانی از کنترلرهای JoyCon (نینتندو سوییچ)</value></data><data name="RealTimeNoAdmin" xml:space="preserve"><value>انتخاب اولویت بلادرنگ (Real-time) نیازمند اجرای برنامه در حالت مدیر (Admin) است.</value></data><data name="MouseVerticalScale" xml:space="preserve"><value>مقیاس عمودی ماوس</value></data><data name="AntiSnapback" xml:space="preserve"><value>ضد بازگشت ناگهانی (Anti Snapback)</value></data><data name="FlickStick" xml:space="preserve"><value>استیک فلیک (Flick Stick)</value></data><data name="SpecialActionEdit.ViaLightbar" xml:space="preserve"><value>از طریق نوار نور</value></data><data name="SpecialActionEdit.TapTrigger" xml:space="preserve"><value>ماشه‌ی ضربه‌ای</value></data><data name="ProgramFolder" xml:space="preserve"><value>پوشه‌ی برنامه</value></data><data name="Dark" xml:space="preserve"><value>تیره</value></data><data name="Rotation" xml:space="preserve"><value>چرخش</value></data><data name="UpgradeNetCaption" xml:space="preserve"><value>لطفاً .NET Runtime را به‌روزرسانی کنید</value></data><data name="BindingWin.RecordAMacro" xml:space="preserve"><value>ضبط یک ماکرو</value></data><data name="SpecialActionEdit.MultiAction" xml:space="preserve"><value>دکمه‌ی چند-عملیاتی</value></data><data name="DirectionalSwipe" xml:space="preserve"><value>حرکت جهت‌دار (Swipe)</value></data><data name="EasingDuration" xml:space="preserve"><value>مدت‌زمان نرم‌شدن (Easing)</value></data><data name="UnloadTrigger" xml:space="preserve"><value>ماشه‌ی لغو بارگذاری</value></data><data name="TouchpadTapTooltip" xml:space="preserve"><value>با یک ضربه‌ی لمسی روی تاچ‌پد، کلیک چپ ماوس فعال می‌شود. حداکثر بازه‌ی زمانی برابر با (مقدار × ۲) میلی‌ثانیه است.</value></data><data name="Controls" xml:space="preserve"><value>کنترل‌ها</value></data><data name="MouseJoystick" xml:space="preserve"><value>جویستیک ماوس</value></data><data name="SpecialActionEdit.UnloadTriggerRelease" xml:space="preserve"><value>لغو بارگذاری با رهاشدن ماشه</value></data><data name="EaseoutCubic" xml:space="preserve"><value>مکعبی (Easeout Cubic)</value></data><data name="Net8NoticeWin.WinTitle" xml:space="preserve"><value>.NET 8 یافت نشد</value></data><data name="UseDs3PitchRollSim" xml:space="preserve"><value>[آزمایشی] استفاده از شبیه‌سازی ژیروسکوپ کنترلر DS3</value></data><data name="DualSRumbleModeDisabled" xml:space="preserve"><value>غیرفعال</value></data><data name="ControllerRegOptWin.PlayerLEDMode" xml:space="preserve"><value>حالت LED بازیکن</value></data><data name="DualSRumbleModes_Tip" xml:space="preserve"><value>حالت دقیق (توصیه‌شده):
+- حس ویبره‌ی DualShock 4 / ایکس‌باکس ۳۶۰ را بهتر شبیه‌سازی می‌کند
+- افکت‌های ویبره‌ی مدنظر بازی را دقیق‌تر اجرا می‌کند
+- ویبره عمق بیشتری دارد. در یک سطح توان یکسان، اختلاف بین حداقل و حداکثر فعال‌سازی ویبره در بازی بیشتر است
+و از خیلی کم تا حداکثر شدتِ سطح توانِ تعیین‌شده متغیر است
+
+حالت قدیمی (Legacy):
+- به‌طور کلی قوی‌تر، اما بدون عمق
+- حسی «تیزتر» دارد
+- حداقل و حداکثر فعال‌سازی در بازی، به‌ترتیب، کمی پایین‌تر و کمی بالاتر از شدتِ سطح توانِ انتخاب‌شده خواهد بود
+
+غیرفعال:
+- ویبره را کاملاً غیرفعال می‌کند</value></data><data name="TriggerEffect" xml:space="preserve"><value>افکت ماشه</value></data><data name="DeadZone X" xml:space="preserve"><value>ناحیه‌ی مرده X</value></data><data name="Height" xml:space="preserve"><value>ارتفاع</value></data><data name="SpecialActionEdit.RunTriggerRelease" xml:space="preserve"><value>اجرا هنگام رهاشدن ماشه</value></data><data name="DualSRumbleSpecificSettings" xml:space="preserve"><value>تنظیمات اختصاصی ویبره‌ی DualSense</value></data><data name="StickRotationTooltip" xml:space="preserve"><value>+ = ساعت‌گرد. - = پادساعت‌گرد.
+
+تنظیم چرخش برای اصلاح جهت‌گیری استیک آنالوگ در صورتی است که هنگام حرکت‌دادن استیک، انگشت شست کمی جابه‌جا می‌شود. برای مثال، هنگامی که استیک کاملاً به سمت شمال حرکت می‌کند، ممکن است شست کمی از مرکز جابه‌جا شده باشد. مقدار استفاده‌شده، تعداد درجه‌هایی است که برای تنظیم مقدار نهایی خروجی محور به کار می‌رود. بازه‌ی مقدار از ۱۸۰- تا ۱۸۰ است. پیش‌فرض ۰ است.</value></data><data name="ReadingsControl.InputDelayNA" xml:space="preserve"><value>تأخیر ورودی: نامشخص</value></data><data name="MaxZone" xml:space="preserve"><value>حداکثر ناحیه</value></data><data name="ControllerRegOptWin.WinTitle" xml:space="preserve"><value>گزینه‌های نوع کنترلر</value></data><data name="RecordBox.DoubleClickWaitEdit" xml:space="preserve"><value>برای ویرایش زمان، روی یک «توقف» دوبار کلیک کنید</value></data><data name="PresetOptWin.OutputController" xml:space="preserve"><value>کنترلر خروجی</value></data><data name="SpecialActionEdit.HoldFor" xml:space="preserve"><value>نگه‌داشتن به مدت</value></data><data name="No" xml:space="preserve"><value>خیر</value></data><data name="ShiftModifier" xml:space="preserve"><value>تغییردهنده‌ی Shift</value></data><data name="SolidColor" xml:space="preserve"><value>رنگ ثابت</value></data><data name="Regular" xml:space="preserve"><value>عادی</value></data><data name="OutputSlotMan.InputNum" xml:space="preserve"><value>شماره‌ی ورودی</value></data><data name="MinimizeToTaskbar" xml:space="preserve"><value>کوچک کردن به نوار وظیفه</value></data><data name="GyroTriggerJitterCompensationTooltip" xml:space="preserve"><value>برای جبران لرزش دستگاه، محدودیت بیشتری در ابتدای منحنی اعمال می‌کند</value></data><data name="StickOuterBindInvertTooltip" xml:space="preserve"><value>باعث می‌شود «اتصال بیرونی» پیش از رسیدن به آستانه اجرا شود. با عبور از آستانه، عملیات رها می‌شود</value></data><data name="GyroControlsAccel" xml:space="preserve"><value>کنترل‌ها (شتاب‌سنج)</value></data><data name="RunAs" xml:space="preserve"><value>اجرا به‌عنوان</value></data><data name="Program" xml:space="preserve"><value>برنامه</value></data><data name="MinTravel" xml:space="preserve"><value>حداقل مسافت حرکت</value></data><data name="DualSRumbleModeNPowerLevelTxt" xml:space="preserve"><value>حالت ویبره و سطح شدت:</value></data><data name="CreateLightbarMacro" xml:space="preserve"><value>ساخت ماکروی نوار نور</value></data><data name="RecordBox.UseActionToRecord" xml:space="preserve"><value>برای ضبط از صفحه‌کلید/ماوس + کنترلر ۱ استفاده کنید</value></data><data name="Yes" xml:space="preserve"><value>بله</value></data><data name="TouchpadTrackballEnableTooltip" xml:space="preserve"><value>پس از برداشتن انگشت، به حرکت روی تاچ‌پد اینرسی (مومنتوم) اضافه می‌کند. باعث می‌شود نشانگر ماوس فراتر از فضای محدود تاچ‌پد هم حرکت کند</value></data><data name="Axial" xml:space="preserve"><value>محوری (Axial)</value></data><data name="AntiDeadZone" xml:space="preserve"><value>ناحیه‌ی ضد-مرده (Anti-dead Zone)</value></data><data name="DualSRumbleModeAccurate" xml:space="preserve"><value>دقیق</value></data><data name="Cubic" xml:space="preserve"><value>مکعبی</value></data><data name="MinFactor" xml:space="preserve"><value>حداقل ضریب</value></data><data name="MouseAcceleration" xml:space="preserve"><value>شتاب ماوس</value></data><data name="EnableInterpretingOscMonitoring" xml:space="preserve"><value>تفسیر پیام‌های مانیتورینگ</value></data><data name="BindingWin.AbsMouse" xml:space="preserve"><value>ماوس مطلق</value></data><data name="ControllerSupportDS3" xml:space="preserve"><value>پشتیبانی از کنترلر DS3</value></data><data name="HidHideAccess" xml:space="preserve"><value>دسترسی HidHide</value></data><data name="OutContNotice" xml:space="preserve"><value>نوع کنترلر مجازی خروجی را انتخاب کنید (با ذخیره‌ی پروفایل اعمال می‌شود)</value></data><data name="DualSRumbleModePassthru" xml:space="preserve"><value>عبوری (Passthru)</value></data><data name="FlashRate" xml:space="preserve"><value>نرخ چشمک‌زدن</value></data><data name="BindingWin.KeyboardAndMouse" xml:space="preserve"><value>صفحه‌کلید و ماوس</value></data><data name="RecordBox.ChangeLightbarColor" xml:space="preserve"><value>تغییر رنگ نوار نور</value></data><data name="RecordBox.RecordDelays" xml:space="preserve"><value>ضبط تأخیرها</value></data><data name="SpecialActionEdit.PressKey" xml:space="preserve"><value>فشردن/تغییر وضعیت کلید</value></data><data name="SpecialActionEdit.CalibrateGyro" xml:space="preserve"><value>کالیبراسیون ژیروسکوپ</value></data><data name="HideDS4Controller" xml:space="preserve"><value>پنهان کردن کنترلر DS4</value></data><data name="StickInputCurveTooltip" xml:space="preserve"><value>تنظیم قدیمی و منسوخ. تلاش برای اعمال یک منحنی بر اساس مختصات خام ورودی، پیش از اعمال اطلاعات ناحیه‌ی مرده. رفتار نامنظمی دارد</value></data><data name="HidHide" xml:space="preserve"><value>HidHide</value></data><data name="FirstLaunch.DS3EnableText" xml:space="preserve"><value>پشتیبانی از کنترلرهای DualShock 3 (PS3). نیازمند استفاده از درایور DsHidMini از پروژه‌ی ViGEm (nefarius) است.</value></data><data name="AutomaticallyRecalibrateStick" xml:space="preserve"><value>کالیبراسیون خودکار مجدد استیک</value></data><data name="Test" xml:space="preserve"><value>آزمایش</value></data><data name="AxisConfig" xml:space="preserve"><value>تنظیمات محور (Axis)</value></data><data name="ControllerSupportSwitchPro" xml:space="preserve"><value>پشتیبانی از کنترلر Switch Pro</value></data><data name="FirstLaunch.JoyConEnableCkbLabel" xml:space="preserve"><value>پشتیبانی از دستگاه JoyCon</value></data><data name="StickMaxOutputForceTooltip" xml:space="preserve"><value>همیشه تنظیم حداکثر خروجی را اعمال کن. برای «حداکثر خروجی» برابر با ۱۰۰٪ و محدودکردن مقدار به یک خروجی دایره‌ای مفید است</value></data><data name="Active" xml:space="preserve"><value>فعال</value></data><data name="SaveWhere.ProgramFolderDescText" xml:space="preserve"><value>برای کسانی که برنامه‌ی پرتابل را ترجیح می‌دهند.
+نکته: اگر برنامه در پوشه‌ای با نیاز به دسترسی ادمین و بدون UAC باشد، این گزینه کار نمی‌کند</value></data><data name="ControllerRegOptWin.EnableHomeLED" xml:space="preserve"><value>فعال‌سازی LED دکمه‌ی Home</value></data><data name="Lightbar" xml:space="preserve"><value>نوار نور</value></data><data name="ControllerRegOptWin.JoinedGyroProvider" xml:space="preserve"><value>ارائه‌دهنده‌ی ژیروسکوپ ترکیبی</value></data><data name="SaveWhere.DontDelete" xml:space="preserve"><value>تنظیمات دیگر را هنوز حذف نکن</value></data><data name="Welcome.Step3BluetoothHelpText" xml:space="preserve"><value>پس از شروع چشمک‌زدن، به تنظیمات بلوتوث بروید و به «Wireless Controller» متصل شوید. اگر خواسته شد، کد جفت‌سازی ۰۰۰۰ را وارد کنید. بعد از جفت‌سازی، آماده‌اید. لذت ببرید!</value></data><data name="Welcome.Step4HelpText" xml:space="preserve"><value>از HidHide برای تنظیم و پنهان‌کردن کنترلرهای ورودی از سایر برنامه‌های در حال اجرا استفاده کنید. برخی بازی‌ها نیاز دارند فقط یک کنترلر وجود داشته باشد، وگرنه ورودی دوگانه در بازی مشکل ایجاد می‌کند.</value></data><data name="Welcome.Step3HelpText" xml:space="preserve"><value>مرحله‌ی ۳: اتصال کنترلر DualShock 4.
+برای اتصال سیمی/USB:
+کافی است یک کابل micro-USB را به سیستم و DualShock 4 وصل کنید.
+
+برای اتصال بلوتوث (اختیاری): دکمه‌ی PS و Share را به مدت ۳ ثانیه نگه دارید. نوار نور شروع به چشمک‌زدن دوتایی می‌کند.</value><comment>To enter a line break into a string resource value in VisualStudio resource editor press Shift+Enter.</comment></data><data name="Welcome.Step2HelpText" xml:space="preserve"><value>اگر قبلاً از یک کنترلر ۳۶۰ روی این سیستم استفاده کرده‌اید، می‌توانید این مرحله را رد کنید.</value></data><data name="Welcome.Step4Text" xml:space="preserve"><value>(اختیاری) مرحله‌ی ۴: نصب درایور HidHide</value></data><data name="Welcome.Step1HelpText" xml:space="preserve"><value>اگر بعد از نصب این پنجره دوباره ظاهر شد، ممکن است لازم باشد سیستم را ری‌استارت کنید.</value></data><data name="Welcome.Step1Text" xml:space="preserve"><value>مرحله‌ی ۱: نصب درایور ViGEmBus</value></data><data name="Welcome.BluetoothSettings" xml:space="preserve"><value>تنظیمات بلوتوث</value></data><data name="Welcome.WinTitle" xml:space="preserve"><value>به DS4Windows خوش آمدید</value></data><data name="Welcome.Step5Text" xml:space="preserve"><value>(اختیاری) مرحله‌ی ۵: نصب درایور FakerInput</value></data><data name="Welcome.Step2Text" xml:space="preserve"><value>مرحله‌ی ۲: در ویندوز ۷، درایور ۳۶۰ را نصب کنید</value></data><data name="Welcome.Step5HelpText" xml:space="preserve"><value>از درایور FakerInput برای فراهم‌کردن صفحه‌کلید مجازی، ماوس نسبی و ماوس مطلق در سطح سیستم استفاده کنید. این کار باعث می‌شود رویدادهای مجازی صفحه‌کلید و ماوس در مواقعی که SendInput کار نمی‌کند نیز قابل استفاده باشند؛ مثل پردازش‌ها و بازی‌های دارای دسترسی بالا، پیام‌های UAC و سیستم‌های ضدتقلبی که رویدادهای SendInput را مسدود می‌کنند. استفاده از FakerInput برای کارکرد DS4Windows با برخی بازی‌های دارای محافظت ضدتقلب مانند Valorant ضروری است.</value></data><data name="AutoProfPathTip" xml:space="preserve"><value>مسیر پردازش. ^ABC = تطبیق در ابتدای رشته (^) | ABC$ = تطبیق در انتهای رشته ($) | *ABC = شامل شدن رشته (*)</value></data><data name="AutoProfTitleTip" xml:space="preserve"><value>عنوان پنجره. ^ABC = تطبیق در ابتدای رشته (^) | ABC$ = تطبیق در انتهای رشته ($) | *ABC = شامل شدن رشته (*)</value></data><data name="Finished" xml:space="preserve"><value>پایان</value></data><data name="PresetOptWin.WinTitle" xml:space="preserve"><value>انتخاب پیش‌تنظیم</value></data><data name="ViGEmBusNotInstalled" xml:space="preserve"><value>ViGEmBus نصب نیست</value></data><data name="ViGEmBusUnsupportedVersion" xml:space="preserve"><value>نسخه‌ی پشتیبانی‌نشده‌ی ViGEmBus پیدا شد ({0}). لطفاً حداقل نسخه‌ی ۱٫۱۷٫۳۳۳٫۰ از ViGEmBus را نصب کنید.</value></data><data name="ViGEmBusConnectFailed" xml:space="preserve"><value>اتصال به ViGEmBus برقرار نشد. لطفاً وضعیت دستگاه System را در Device Manager، و نصب‌بودن Visual C++ 2017 Redistributable را بررسی کنید.</value></data><data name="AddWindowTitleRule" xml:space="preserve"><value>افزودن قانون عنوان پنجره</value></data><data name="WindowTitleRule" xml:space="preserve"><value>قانون عنوان پنجره</value></data><data name="SendGameFeedbackToPhysicalController" xml:space="preserve"><value>ارسال فیدبک بازی به کنترلر فیزیکی</value></data><data name="SendGameFeedbackToPhysicalControllerTip" xml:space="preserve"><value>پیشنهاد می‌شه روشن بمونه. ویبره، هپتیک‌های تبدیل‌شده‌ی DualSense، افکت‌های سازگار adaptive trigger و نور کنترلر رو از بازی به کنترلر فیزیکیِ وصل‌شده می‌فرسته. فقط وقتی خاموشش کن که کنترلر نتونه خروجی بگیره؛ غیرفعال کردنش این افکت‌های فیدبک بازی رو حذف می‌کنه. بعد از تغییر این تنظیم، کنترلر رو دوباره وصل کن.</value></data><data name="About.HeaderLabel" xml:space="preserve"><value>DS4Windows - نسخه‌ی hbashton (نسخه‌ی </value></data><data name="About.TabHotkeys" xml:space="preserve"><value>میانبرها</value></data><data name="About.HotkeysText" xml:space="preserve"><value>از HidHide برای جلوگیری از ورودی دوگانه استفاده کن: کنترلر فیزیکی رو از دید بازی‌ها پنهان می‌کنه در حالی که DS4Windows همچنان ازش استفاده می‌کنه، و از ورودی تکراری جلوگیری می‌کنه
+کلیک روی سمت چپ تاچ‌پد: لمس چپ
+کلیک روی سمت راست تاچ‌پد: لمس راست
+کلیک تاچ‌پد با ۲ انگشت: چندلمسی
+کلیک روی بخش بالایی تاچ‌پد: لمس بالا
+PS + Options یا نگه‌داشتن PS به مدت ۱۰ ثانیه: قطع اتصال کنترلر (فقط روی بلوتوث)
+لمس تاچ‌پد + PS: خاموش کردن حرکت تاچ‌پد (کلیک هنوز کار می‌کنه)
+کلیک پایین‌سمت‌راست پد: کلیک راست (بهتره وقتی سمت راست به‌عنوان دکمه‌ی ماوس استفاده می‌شه)
+دو انگشت بالا/پایین روی تاچ‌پد*: اسکرول بالا/پایین
+لمس و نگه‌داشتن تاچ‌پد*: درگ با کلیک چپ ماوس
+سوایپ دوانگشتی چپ یا راست روی تاچ‌پد: چرخش بین پروفایل‌ها
+تغییردهنده‌ی Shift: نگه‌داشتن یه اکشن برای استفاده از یه سری کنترل دیگه
+هنگام مپ کردن کیبورد و ماوس:
+Toggle: کلید توی حالت «فشرده» می‌مونه تا دوباره فشرده بشه
+Macro: چند کلید رو به یه ورودی اختصاص بده
+Scan Code: کلیدها جور دیگه‌ای تفسیر می‌شن. ممکنه برای بعضی بازی‌ها لازم باشه
+*اگه فعال باشه</value></data><data name="About.TabLicense" xml:space="preserve"><value>مجوز</value></data><data name="About.TabCredits" xml:space="preserve"><value>دست‌اندرکاران</value></data><data name="About.SourceLink" xml:space="preserve"><value>کد منبع</value></data><data name="About.ContributorsLink" xml:space="preserve"><value>مشارکت‌کنندگان</value></data><data name="About.Translators" xml:space="preserve"><value>مترجم‌ها:</value></data><data name="About.TabExtras" xml:space="preserve"><value>امکانات جانبی</value></data><data name="About.ProjectUrl" xml:space="preserve"><value>آدرس پروژه:</value></data><data name="About.Description" xml:space="preserve"><value>توضیحات</value></data><data name="About.HidHideDesc" xml:space="preserve"><value>از HidHide برای پنهان کردن و تنظیم هر کنترلر ورودی از سایر برنامه‌های در حال اجرا روی سیستمت استفاده کن. بعضی بازی‌ها نیاز دارن فقط یه کنترلر وجود داشته باشه وگرنه ورودی دوگانه توی بازی مشکل ایجاد می‌کنه. نوشته‌ی nefarius.</value></data><data name="About.FakerInputDesc" xml:space="preserve"><value>از درایور FakerInput برای فراهم کردن صفحه‌کلید مجازی، ماوس نسبی و ماوس مطلق در سطح سیستم استفاده کن. این کار باعث می‌شه رویدادهای مجازی کیبورد و ماوس حتی وقتی SendInput کار نمی‌کنه هم قابل استفاده باشن؛ مثل پردازش‌ها و بازی‌های دارای دسترسی بالا، پیام‌های UAC و سیستم‌های ضدتقلب که رویدادهای SendInput رو مسدود می‌کنن. استفاده از FakerInput برای کار کردن DS4Windows با بعضی بازی‌های دارای محافظت ضدتقلب مثل Valorant لازمه.</value></data><data name="Overview.NoControllerSelected" xml:space="preserve"><value>هیچ کنترلری انتخاب نشده</value></data><data name="Overview.NoControllerHint" xml:space="preserve"><value>یه کنترلر وصل کن، بعد از کارت‌های دستگاه بالا-سمت‌چپ انتخابش کن.</value></data><data name="Overview.SelectedControllerLabel" xml:space="preserve"><value>کنترلر انتخاب‌شده</value></data><data name="Overview.ProfileLabel" xml:space="preserve"><value>پروفایل  </value></data><data name="Overview.BatteryLabel" xml:space="preserve"><value>باتری</value></data><data name="Overview.ConnectionLabel" xml:space="preserve"><value>اتصال</value></data><data name="Overview.ReportIntervalLabel" xml:space="preserve"><value>فاصله و نرخ گزارش ورودی مشاهده‌شده</value></data><data name="Overview.ReportIntervalTip" xml:space="preserve"><value>فاصله و نرخ تحویل ورودی مشاهده‌شده. کنترلرهای ترکیبی از ریتم گزارش ترکیبی خودشون استفاده می‌کنن. این زمان تکمیل کرنل یا تأخیر سرتاسری بازی نیست.</value></data><data name="Overview.ActiveProfileLabel" xml:space="preserve"><value>پروفایل فعال</value></data><data name="Overview.ActiveProfileHint" xml:space="preserve"><value>تنظیمات زیر روی این پروفایل ذخیره می‌شن</value></data><data name="Overview.EmulatedDeviceLabel" xml:space="preserve"><value>دستگاه شبیه‌سازی‌شده</value></data><data name="Overview.EmulatedDeviceHint" xml:space="preserve"><value>از طریق پروفایل فعال اعمال می‌شه</value></data><data name="Overview.ControllerStatusLabel" xml:space="preserve"><value>وضعیت کنترلر</value></data><data name="Overview.QuickProfileControlsTitle" xml:space="preserve"><value>کنترل‌های سریع پروفایل</value></data><data name="Overview.QuickProfileControlsDesc" xml:space="preserve"><value>هر تغییری روی پروفایل فعال کنترلر انتخاب‌شده ذخیره و خودکار اعمال می‌شه.</value></data><data name="Overview.EmulatedControllerTitle" xml:space="preserve"><value>کنترلر شبیه‌سازی‌شده</value></data><data name="Overview.EmulatedControllerDesc" xml:space="preserve"><value>کنترلر مجازی که به بازی‌ها نشون داده می‌شه.</value></data><data name="Overview.EmulatedControllerNote" xml:space="preserve"><value>تغییر این تنظیم پروفایل رو ذخیره می‌کنه، بعد یه بار خروجی رو به‌صورت کنترل‌شده ری‌لود می‌کنه.</value></data><data name="Overview.StreamAudioToggle" xml:space="preserve"><value>پخش صدا روی کنترلر</value></data><data name="Overview.StreamAudioTip" xml:space="preserve"><value>صدای انتخاب‌شده رو به کنترلر استریم می‌کنه. از اسپیکر داخلیش استفاده می‌کنه مگه اینکه «فقط هدست» صدا رو منحصراً به پورت AUX بفرسته.</value></data><data name="Overview.HeadsetOnlyToggle" xml:space="preserve"><value>فقط هدست (بی‌صدا کردن اسپیکر کنترلر)</value></data><data name="Overview.HeadsetOnlyTip" xml:space="preserve"><value>اسپیکر داخلی رو بی‌صدا می‌کنه در حالی که استریم از طریق هدستی که به پورت AUX کنترلر وصله ادامه پیدا می‌کنه.</value></data><data name="Overview.AudioSourceLabel" xml:space="preserve"><value>منبع صدا</value></data><data name="Overview.AudioSourceTip" xml:space="preserve"><value>پیش‌فرض میکس معمولی خروجی رو می‌گیره. یه برنامه انتخاب کن تا فقط صدای همون استریم بشه.</value></data><data name="Overview.RefreshAudioSourcesTip" xml:space="preserve"><value>بازخوانی منابع صوتی در حال اجرا</value></data><data name="Overview.AudioHapticsOverrideNotice" xml:space="preserve"><value>Audio Haptics داره این استریم رو تأمین می‌کنه. برای انتخاب منبع دیگه، «پخش این برنامه از طریق کنترلر» رو خاموش کن.</value></data><data name="Overview.UsbHeadsetTitle" xml:space="preserve"><value>استفاده از هدست روی USB</value></data><data name="Overview.UsbHeadsetStep1" xml:space="preserve"><value>Switch 2 Pro خودت رو با USB وصل کن و هدفون یا هدست بزن. توی تنظیمات بازی یا صدای ویندوز، Headphones (Switch 2 Pro Controller) رو انتخاب کن. صدا رو از همون‌جا تنظیم کن.</value></data><data name="Overview.UsbHeadsetStep2" xml:space="preserve"><value>برای چت صوتی، Microphone (Switch 2 Pro Controller) رو انتخاب کن و از هدستی با میکروفون استفاده کن.</value></data><data name="Overview.UsbHeadsetNote" xml:space="preserve"><value>مستقل از کنترلر مجازیت کار می‌کنه. صدای هدست بلوتوث هنوز پشتیبانی نمی‌شه.</value></data><data name="Overview.OpenSoundSettingsBtn" xml:space="preserve"><value>باز کردن تنظیمات صدای ویندوز</value></data><data name="Overview.OpenSoundSettingsTip" xml:space="preserve"><value>انتخاب کن صدای بازی و چت صوتیت کجا بره.</value></data><data name="Overview.OutputLevelsTitle" xml:space="preserve"><value>سطح‌های خروجی</value></data><data name="Overview.ControllerSpeakerLabel" xml:space="preserve"><value>اسپیکر کنترلر</value></data><data name="Overview.HeadsetAuxLabel" xml:space="preserve"><value>هدست / AUX</value></data><data name="Overview.HeadsetAuxTip" xml:space="preserve"><value>جک هدست کنترلر رو مستقل از اسپیکر داخلیش کنترل می‌کنه.</value></data><data name="Overview.SpeakerProcessingTitle" xml:space="preserve"><value>پردازش اسپیکر</value></data><data name="Overview.DynamicRangeLabel" xml:space="preserve"><value>محدوده‌ی دینامیک</value></data><data name="Overview.DynamicRangeTip" xml:space="preserve"><value>جزئیات کم‌صدا رو بالا می‌بره و افکت‌های بلند رو بدون تأخیر پیش‌بینی، امن مهار می‌کنه.</value></data><data name="Overview.Off" xml:space="preserve"><value>خاموش</value></data><data name="Overview.Balanced" xml:space="preserve"><value>متعادل</value></data><data name="Overview.Strong" xml:space="preserve"><value>قوی</value></data><data name="Overview.BassBodyLabel" xml:space="preserve"><value>بیس / بدنه</value></data><data name="Overview.BassBodyTip" xml:space="preserve"><value>حدود ۲۰۰ هرتز بدنه اضافه می‌کنه و در همون حال ساب‌بیس غیرقابل‌استفاده رو فیلتر می‌کنه.</value></data><data name="Overview.MicrophoneTitle" xml:space="preserve"><value>میکروفون</value></data><data name="Overview.MicrophoneLevelLabel" xml:space="preserve"><value>سطح میکروفون</value></data><data name="Overview.NoiseSuppressionLabel" xml:space="preserve"><value>حذف نویز</value></data><data name="Overview.NvidiaAI" xml:space="preserve"><value>NVIDIA AI</value></data><data name="Overview.QuickActionsTitle" xml:space="preserve"><value>اکشن‌های سریع</value></data><data name="Overview.QuickActionsDesc" xml:space="preserve"><value>برو توی ادیتور کامل یا کنترلر فیزیکی انتخاب‌شده رو مدیریت کن.</value></data><data name="Overview.EditActiveProfileBtn" xml:space="preserve"><value>ویرایش پروفایل فعال</value></data><data name="Overview.ControllerDetailsBtn" xml:space="preserve"><value>جزئیات کنترلر</value></data><data name="Overview.LightbarControlsBtn" xml:space="preserve"><value>کنترل‌های نوار نور</value></data><data name="Overview.LightbarControlsTip" xml:space="preserve"><value>از کنترل‌های نوار نور پروفایل استفاده کن یا یه رنگ سفارشی موقت انتخاب کن</value></data><data name="Overview.DisconnectBtn" xml:space="preserve"><value>قطع اتصال</value></data><data name="AudioHaptics.Enabled" xml:space="preserve"><value>فعال</value></data><data name="AudioHaptics.Title" xml:space="preserve"><value>Audio Haptics</value></data><data name="AudioHaptics.Subtitle" xml:space="preserve"><value>فیدبک کنترلر بر پایه‌ی صدا</value></data><data name="AudioHaptics.Low" xml:space="preserve"><value>کم</value></data><data name="AudioHaptics.Medium" xml:space="preserve"><value>متوسط</value></data><data name="AudioHaptics.High" xml:space="preserve"><value>زیاد</value></data><data name="AudioHaptics.SourceLabel" xml:space="preserve"><value>منبع</value></data><data name="AudioHaptics.RefreshSourcesTip" xml:space="preserve"><value>بازخوانی نشست‌های صوتی در حال اجرا</value></data><data name="AudioHaptics.SourceScopeHelp" xml:space="preserve"><value>صدای سیستم فقط از خروجی پیش‌فرض ویندوز استفاده می‌کنه، نه هر خروجی Sonar. یه برنامه انتخاب کن تا صداش روی هر خروجی‌ای دنبال بشه.</value></data><data name="AudioHaptics.AutoFollowGamesTitle" xml:space="preserve"><value>دنبال کردن خودکار بازی‌ها</value></data><data name="AudioHaptics.AutoFollowGamesDesc" xml:space="preserve"><value>با استفاده از رکوردهای بازی ویندوز و منیفست‌های لانچرهای نصب‌شده، به صدای بازی فعال سوییچ می‌کنه.</value></data><data name="AudioHaptics.AutoFollowGamesTip" xml:space="preserve"><value>بازی‌های شناسایی‌شده توسط ویندوز، استیم، Epic یا GOG رو دنبال می‌کنه. برنامه‌ی انتخاب‌شده به‌عنوان جایگزین باقی می‌مونه.</value></data><data name="AudioHaptics.PlayThroughControllerTitle" xml:space="preserve"><value>پخش برنامه از طریق کنترلر</value></data><data name="AudioHaptics.PlayThroughControllerDesc" xml:space="preserve"><value>این برنامه‌ی انتخاب‌شده رو هم به اسپیکر کنترلر و هدست AUX استریم می‌کنه.</value></data><data name="AudioHaptics.PlayThroughControllerTip" xml:space="preserve"><value>وقتی فعاله، جایگزین «منبع صدای کنترلر» توی بخش Advanced می‌شه. انتخاب منبع دیگه از اونجا این override رو آزاد می‌کنه.</value></data><data name="AudioHaptics.HeadsetOnlyTitle" xml:space="preserve"><value>فقط هدست</value></data><data name="AudioHaptics.HeadsetOnlyDesc" xml:space="preserve"><value>برنامه‌ی گرفته‌شده رو فقط از طریق پورت AUX کنترلر می‌فرسته.</value></data><data name="AudioHaptics.HeadsetOnlyTip" xml:space="preserve"><value>صدای برنامه‌ی گرفته‌شده رو به هدفونِ وصل‌شده به کنترلر می‌فرسته و اسپیکر کنترلر رو بی‌صدا می‌کنه.</value></data><data name="AudioHaptics.ModeLabel" xml:space="preserve"><value>حالت</value></data><data name="AudioHaptics.MixMode" xml:space="preserve"><value>ترکیب</value></data><data name="AudioHaptics.MixModeTip" xml:space="preserve"><value>فیدبک بر پایه‌ی صدا رو به هپتیک و ویبره‌ی بازی اضافه می‌کنه.</value></data><data name="AudioHaptics.ReplaceMode" xml:space="preserve"><value>جایگزینی</value></data><data name="AudioHaptics.ReplaceModeTip" xml:space="preserve"><value>فقط از فیدبک بر پایه‌ی صدا استفاده کن.</value></data><data name="AudioHaptics.ResponseTitle" xml:space="preserve"><value>پاسخ</value></data><data name="AudioHaptics.ResponseSubtitle" xml:space="preserve"><value>تمرکز فرکانسی و شدت</value></data><data name="AudioHaptics.BassFocusLabel" xml:space="preserve"><value>تمرکز بیس</value></data><data name="AudioHaptics.BassFocusTip" xml:space="preserve"><value>انتخاب کن کدوم بازه‌ی فرکانس پایین تبدیل به ویبره بشه.</value></data><data name="AudioHaptics.ResponseLabel" xml:space="preserve"><value>پاسخ</value></data><data name="AudioHaptics.ResponseTip" xml:space="preserve"><value>کنترل کن هپتیک چقدر شدید واکنش نشون بده، مخصوصاً به قله‌ها.</value></data><data name="AudioHaptics.Subtle" xml:space="preserve"><value>ملایم</value></data><data name="AudioHaptics.Dynamic" xml:space="preserve"><value>دینامیک</value></data><data name="AudioHaptics.Aggressive" xml:space="preserve"><value>تهاجمی</value></data><data name="AudioHaptics.RampLabel" xml:space="preserve"><value>شیب افزایش</value></data><data name="AudioHaptics.RampTip" xml:space="preserve"><value>کنترل کن هپتیک با صدا چقدر سریع بالا بیاد.</value></data><data name="AudioHaptics.SlowRamp" xml:space="preserve"><value>شیب کند</value></data><data name="AudioHaptics.MediumRamp" xml:space="preserve"><value>شیب متوسط</value></data><data name="AudioHaptics.FastRamp" xml:space="preserve"><value>شیب سریع</value></data><data name="AudioHaptics.InstantRamp" xml:space="preserve"><value>شیب آنی</value></data><data name="AudioHaptics.FadeLabel" xml:space="preserve"><value>محو شدن</value></data><data name="AudioHaptics.FadeTip" xml:space="preserve"><value>کنترل کن هپتیک بعد از افت صدا چقدر سریع محو بشه.</value></data><data name="AudioHaptics.FastFade" xml:space="preserve"><value>محو سریع</value></data><data name="AudioHaptics.MediumFade" xml:space="preserve"><value>محو متوسط</value></data><data name="AudioHaptics.SlowFade" xml:space="preserve"><value>محو کند</value></data><data name="AudioHaptics.LongFade" xml:space="preserve"><value>محو طولانی</value></data><data name="AudioHaptics.StatusDisabled" xml:space="preserve"><value>Audio Haptics غیرفعاله.</value></data><data name="AudioHaptics.SystemAudio" xml:space="preserve"><value>صدای سیستم</value></data><data name="MappingLive.Title" xml:space="preserve"><value>ورودی زنده</value></data><data name="MappingLive.Subtitle" xml:space="preserve"><value>کنترلر فیزیکی · قبل از ریمپ</value></data><data name="MappingLive.Waiting" xml:space="preserve"><value>در انتظار</value></data><data name="MappingLive.LeftStick" xml:space="preserve"><value>استیک چپ</value></data><data name="MappingLive.RightStick" xml:space="preserve"><value>استیک راست</value></data><data name="MappingLive.PressedLabel" xml:space="preserve"><value>فشرده‌شده</value></data><data name="MappingLive.NoControllerHint" xml:space="preserve"><value>یه کنترلر وصل کن، بعد این ادیتور رو دوباره باز کن.</value></data><data name="TriggerLab.OverrideBadge" xml:space="preserve"><value>بای‌پس لب</value></data><data name="TriggerLab.EffectDesign" xml:space="preserve"><value>طراحی افکت</value></data><data name="TriggerLab.Linked" xml:space="preserve"><value>لینک‌شده</value></data><data name="TriggerLab.LinkedTip" xml:space="preserve"><value>از یه طراحی افکت مشترک برای L2 و R2 استفاده کن. پریست‌ها، حالت‌ها و اسلایدرها بین دو طرف آینه می‌شن؛ سوییچ Active هر تریگر مستقل می‌مونه.</value></data><data name="TriggerLab.Split" xml:space="preserve"><value>جدا</value></data><data name="TriggerLab.SplitTip" xml:space="preserve"><value>برای L2 و R2 طراحی افکت جداگونه تنظیم کن. برگشتن به Split آخرین تنظیمات مستقلت رو، از جمله اینکه کدوم تریگر فعال بود، برمی‌گردونه.</value></data><data name="TriggerLab.Enabled" xml:space="preserve"><value>فعال</value></data><data name="TriggerLab.BehaviorNote" xml:space="preserve"><value>افکت‌های فعالِ لب، خروجی adaptive trigger بازی که وارد می‌شه رو override می‌کنن.</value></data><data name="ViiperPrompt.WinTitle" xml:space="preserve"><value>راه‌اندازی کنترلر مجازی VIIPER</value></data><data name="ViiperPrompt.Close" xml:space="preserve"><value>بستن</value></data><data name="ViiperPrompt.Heading" xml:space="preserve"><value>VIIPER نیاز به توجه داره</value></data><data name="ViiperPrompt.Summary" xml:space="preserve"><value>این پروفایل از خروجی کنترلر مجازی VIIPER استفاده می‌کنه.</value></data><data name="ViiperPrompt.RequirementsHeading" xml:space="preserve"><value>چیزهایی که DS4Windows نیاز داره</value></data><data name="ViiperPrompt.RequirementsText" xml:space="preserve"><value>• سرور/هلپر VIIPER&#x0a;• درایور USB/IP ویندوز usbip-win2</value></data><data name="ViiperPrompt.CurrentStatus" xml:space="preserve"><value>وضعیت فعلی</value></data><data name="ViiperPrompt.ExistingHeading" xml:space="preserve"><value>یه VIIPER رقیب شناسایی شد</value></data><data name="ViiperPrompt.ExistingDescription" xml:space="preserve"><value>این فایل اجرایی elevate یا انتخاب نمی‌شه. Install یا Repair از بک‌اند تأییدشده‌ی Program Files استفاده می‌کنه و فقط فایل‌های قدیمیِ شناخته‌شده‌ی VIIPER رو حذف می‌کنه:</value></data><data name="ViiperPrompt.SuppressPrompt" xml:space="preserve"><value>این پیام راه‌اندازی رو دیگه نشون نده</value></data><data name="ViiperPrompt.SuppressPromptTip" xml:space="preserve"><value>می‌تونی بعداً از Settings → VIIPER Virtual Controller Support دوباره پیام‌های راه‌اندازی رو روشن کنی.</value></data><data name="ViiperPrompt.PortableWarning" xml:space="preserve"><value>«پرتابل نگه‌داشتن DS4Windows» این برنامه رو دقیقاً همون‌جایی که هست می‌ذاره، در حالی که بک‌اند elevated VIIPER رو توی Program Files محافظت‌شده نصب می‌کنه. Standard هم فقط فایل‌های متعلق به پکیجِ DS4Windows رو به Program Files منتقل می‌کنه. پروفایل‌ها، تنظیمات و فایل‌های ناشناخته همیشه حفظ می‌شن.</value></data><data name="ViiperPrompt.NotNow" xml:space="preserve"><value>الان نه</value></data><data name="ViiperPrompt.InstallPortable" xml:space="preserve"><value>پرتابل نگه‌داشتن DS4Windows</value></data><data name="ViiperPrompt.InstallStandard" xml:space="preserve"><value>نصب استاندارد</value></data><data name="ViiperProgress.WinTitle" xml:space="preserve"><value>راه‌اندازی VIIPER</value></data><data name="ViiperProgress.Heading" xml:space="preserve"><value>در حال راه‌اندازی VIIPER</value></data><data name="ViiperProgress.Summary" xml:space="preserve"><value>DS4Windows داره بک‌اند کامل کنترلر رو تأیید می‌کنه.</value></data><data name="ViiperProgress.PreparingPackage" xml:space="preserve"><value>در حال آماده‌سازی پکیج تأییدشده...</value></data><data name="ViiperProgress.StepVerifyFiles" xml:space="preserve"><value>• تأیید فایل‌های پکیج‌شده</value></data><data name="ViiperProgress.StepInstallViiper" xml:space="preserve"><value>• نصب VIIPER 0.1.5-rc4.6</value></data><data name="ViiperProgress.StepVerifyUsbip" xml:space="preserve"><value>• تأیید USB-IP 0.9.7.7</value></data><data name="ViiperProgress.StepVerifyStartup" xml:space="preserve"><value>• تأیید استارتاپ و API</value></data><data name="ViiperProgress.DetailText" xml:space="preserve"><value>این پنجره رو باز نگه دار. راه‌اندازی خودکار تموم می‌شه.</value></data><data name="SwipeEditor.WinTitle" xml:space="preserve"><value>تنظیم پروفایل‌های سوایپ</value></data><data name="SwipeEditor.Instructions" xml:space="preserve"><value>پروفایل‌هایی که سوایپ دوانگشتی تاچ‌پد اجازه داره بینشون سوییچ کنه رو تیک بزن. اگه هیچی تیک نخوره، سوایپ بین همه‌ی پروفایل‌ها می‌چرخه (رفتار پیش‌فرض).</value></data><data name="SwipeEditor.SelectAll" xml:space="preserve"><value>انتخاب همه</value></data><data name="SwipeEditor.ClearAll" xml:space="preserve"><value>پاک کردن همه</value></data><data name="Switch2Calib.WinTitle" xml:space="preserve"><value>کالیبراسیون استیک Switch 2</value></data><data name="Switch2Calib.Heading" xml:space="preserve"><value>استیک‌هات رو کالیبره کن</value></data><data name="Switch2Calib.ClosingWarning" xml:space="preserve"><value>بستن پنجره، capture و فعال‌سازی زنده رو لغو می‌کنه. یه ذخیره‌سازی که از قبل در حال نوشتن روی دیسکه ممکنه هنوز تموم بشه؛ بستن پنجره اون نوشتن رو لغو نمی‌کنه.</value></data><data name="Switch2Calib.CloseBtn" xml:space="preserve"><value>_بستن</value></data><data name="Switch2Calib.PhysicalStickLabel" xml:space="preserve"><value>استیک فیزیکی</value></data><data name="Switch2Calib.StartBtn" xml:space="preserve"><value>_شروع کالیبراسیون</value></data><data name="Switch2Calib.SaveBtn" xml:space="preserve"><value>ذخیره‌ی _کالیبراسیون</value></data><data name="Switch2Calib.CancelBtn" xml:space="preserve"><value>_لغو capture</value></data><data name="Switch2Calib.StorageNote" xml:space="preserve"><value>کالیبراسیون روی همین PC برای این استیک فیزیکی ذخیره می‌شه، نه توی یه پروفایل یا حافظه‌ی کنترلر. رکوردهای USB و بلوتوث ممکنه جدا باشن. ورودی مپ‌شده‌ی کنترلر تا وقتی کالیبراسیون فعاله، آزاد می‌مونه.</value></data><data name="Switch2Calib.ResetBtn" xml:space="preserve"><value>_ریست کالیبراسیون PC این استیک…</value></data><data name="StickCalib.WinTitle" xml:space="preserve"><value>کالیبراسیون استیک</value></data><data name="StickCalib.Instructions" xml:space="preserve"><value>لطفاً استیکت رو چند بار به سمت‌ها حرکت بده و رهاش کن، بعد که تموم شد Save رو بزن.</value></data><data name="TouchButton.ActivationMode" xml:space="preserve"><value>حالت فعال‌سازی دکمه</value></data></root>

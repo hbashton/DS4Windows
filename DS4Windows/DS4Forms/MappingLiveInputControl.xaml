@@ -1,6 +1,9 @@
 <UserControl x:Class="DS4WinWPF.DS4Forms.MappingLiveInputControl"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:lex="http://wpflocalizeextension.codeplex.com"
+             lex:ResxLocalizationProvider.DefaultAssembly="DS4Windows"
+             lex:ResxLocalizationProvider.DefaultDictionary="Strings"
              Focusable="False" Foreground="{DynamicResource ForegroundColor}">
     <Border Background="{DynamicResource RaisedBackgroundColor}"
             BorderBrush="{DynamicResource BorderColor}" BorderThickness="1"
@@ -14,11 +17,11 @@
             <Grid>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                 <StackPanel>
-                    <TextBlock Text="Live input" FontWeight="SemiBold" FontSize="12" />
-                    <TextBlock Text="Physical controller · before remapping" FontSize="10" Margin="0,2,0,0"
+                    <TextBlock Text="{lex:Loc MappingLive.Title}" FontWeight="SemiBold" FontSize="12" />
+                    <TextBlock Text="{lex:Loc MappingLive.Subtitle}" FontSize="10" Margin="0,2,0,0"
                                Foreground="{DynamicResource MutedForegroundColor}" />
                 </StackPanel>
-                <TextBlock x:Name="liveStatus" Grid.Column="1" Text="Waiting" FontSize="10"
+                <TextBlock x:Name="liveStatus" Grid.Column="1" Text="{lex:Loc MappingLive.Waiting}" FontSize="10"
                            Foreground="{DynamicResource MutedForegroundColor}" VerticalAlignment="Center" Margin="8,0,0,0" />
             </Grid>
             <Grid Grid.Row="1" Margin="0,9,0,8">
@@ -31,7 +34,7 @@
                         <Ellipse x:Name="leftStickDot" Width="8" Height="8" Canvas.Left="20" Canvas.Top="20" Fill="{DynamicResource AccentColor}" />
                     </Canvas>
                     <StackPanel Margin="7,0,5,0" VerticalAlignment="Center">
-                        <TextBlock Text="L stick" FontWeight="SemiBold" FontSize="10" />
+                        <TextBlock Text="{lex:Loc MappingLive.LeftStick}" FontWeight="SemiBold" FontSize="10" />
                         <TextBlock x:Name="leftStickValue" Text="X —&#x0a;Y —" FontSize="10" Margin="0,3,0,0"
                                    Foreground="{DynamicResource MutedForegroundColor}" />
                     </StackPanel>
@@ -44,7 +47,7 @@
                         <Ellipse x:Name="rightStickDot" Width="8" Height="8" Canvas.Left="20" Canvas.Top="20" Fill="{DynamicResource AccentColor}" />
                     </Canvas>
                     <StackPanel Margin="7,0,5,0" VerticalAlignment="Center">
-                        <TextBlock Text="R stick" FontWeight="SemiBold" FontSize="10" />
+                        <TextBlock Text="{lex:Loc MappingLive.RightStick}" FontWeight="SemiBold" FontSize="10" />
                         <TextBlock x:Name="rightStickValue" Text="X —&#x0a;Y —" FontSize="10" Margin="0,3,0,0"
                                    Foreground="{DynamicResource MutedForegroundColor}" />
                     </StackPanel>
@@ -64,9 +67,9 @@
             </Grid>
             <Grid Grid.Row="2">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                <TextBlock Text="PRESSED" FontSize="9" FontWeight="SemiBold" Margin="0,0,10,0"
+                <TextBlock Text="{lex:Loc MappingLive.PressedLabel}" FontSize="9" FontWeight="SemiBold" Margin="0,0,10,0"
                            Foreground="{DynamicResource MutedForegroundColor}" VerticalAlignment="Center" />
-                <TextBlock x:Name="pressedButtons" Grid.Column="1" Text="Connect a controller, then reopen this editor."
+                <TextBlock x:Name="pressedButtons" Grid.Column="1" Text="{lex:Loc MappingLive.NoControllerHint}"
                            FontSize="11" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource AccentColor}" />
             </Grid>
         </Grid>

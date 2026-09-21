@@ -1,0 +1,824 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    Microsoft ResX Schema
+
+    Version 2.0
+
+    The primary goals of this format is to allow a simple XML format
+    that is mostly human readable. The generation and parsing of the
+    various data types are done through the TypeConverter classes
+    associated with the data types.
+
+    Example:
+
+    ... ado.net/XML headers & schema ...
+    <resheader name="resmimetype">text/microsoft-resx</resheader>
+    <resheader name="version">2.0</resheader>
+    <resheader name="reader">System.Resources.ResXResourceReader, System.Windows.Forms, ...</resheader>
+    <resheader name="writer">System.Resources.ResXResourceWriter, System.Windows.Forms, ...</resheader>
+    <data name="Name1"><value>this is my long string</value><comment>this is a comment</comment></data>
+    <data name="Color1" type="System.Drawing.Color, System.Drawing">Blue</data>
+    <data name="Bitmap1" mimetype="application/x-microsoft.net.object.binary.base64">
+        <value>[base64 mime encoded serialized .NET Framework object]</value>
+    </data>
+    <data name="Icon1" type="System.Drawing.Icon, System.Drawing" mimetype="application/x-microsoft.net.object.bytearray.base64">
+        <value>[base64 mime encoded string representing a byte array form of the .NET Framework object]</value>
+        <comment>This is a comment</comment>
+    </data>
+
+    There are any number of "resheader" rows that contain simple
+    name/value pairs.
+
+    Each data row contains a name, and value. The row also contains a
+    type or mimetype. Type corresponds to a .NET class that support
+    text/value conversion through the TypeConverter architecture.
+    Classes that don't support this are serialized and stored with the
+    mimetype set.
+
+    The mimetype is used for serialized objects, and tells the
+    ResXResourceReader how to depersist the object. This is currently not
+    extensible. For a given mimetype the value must be set accordingly:
+
+    Note - application/x-microsoft.net.object.binary.base64 is the format
+    that the ResXResourceWriter will generate, however the reader can
+    read any of the formats listed below.
+
+    mimetype: application/x-microsoft.net.object.binary.base64
+    value   : The object must be serialized with
+            : System.Runtime.Serialization.Formatters.Binary.BinaryFormatter
+            : and then encoded with base64 encoding.
+
+    mimetype: application/x-microsoft.net.object.soap.base64
+    value   : The object must be serialized with
+            : System.Runtime.Serialization.Formatters.Soap.SoapFormatter
+            : and then encoded with base64 encoding.
+
+    mimetype: application/x-microsoft.net.object.bytearray.base64
+    value   : The object must be serialized into a byte array
+            : using a System.ComponentModel.TypeConverter
+            : and then encoded with base64 encoding.
+    -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="ActionExists" xml:space="preserve">
+    <value>שם זה כבר בשימוש עבור פעולה זו</value>
+  </data>
+  <data name="AddingToList" xml:space="preserve">
+    <value>מוסיף לרשימה...</value>
+  </data>
+  <data name="AddPrograms" xml:space="preserve">
+    <value>הוסף תוכניות</value>
+  </data>
+  <data name="ALocactionNeeded" xml:space="preserve">
+    <value>יש לבחור מיקום כדי להמשיך</value>
+  </data>
+  <data name="AlwaysRainbow" xml:space="preserve">
+    <value>מצב קשת בענן תמיד</value>
+  </data>
+  <data name="AssignProfile" xml:space="preserve">
+    <value>הקצה לבקר *number*</value>
+  </data>
+  <data name="Battery" xml:space="preserve">
+    <value>סוללה: *number*%</value>
+  </data>
+  <data name="BestUsedRightSide" xml:space="preserve">
+    <value>מומלץ לשימוש עם הצד הימני כפונקציית עכבר</value>
+  </data>
+  <data name="Browse" xml:space="preserve">
+    <value>עיון...</value>
+  </data>
+  <data name="BTPollRate" xml:space="preserve">
+    <value>קובע את קצב התשאול המשמש עבור חומרת ה-DS4 בעת חיבור דרך בלוטות'. (חל בשמירת הפרופיל)</value>
+  </data>
+  <data name="CannotMoveFiles" xml:space="preserve">
+    <value>לא ניתן להעביר קבצים למיקום החדש, אנא שנה את שם התיקייה DS4Tool ל-"DS4Windows"</value>
+  </data>
+  <data name="CannotWriteHere" xml:space="preserve">
+    <value>לא ניתן לכתוב במיקום הנוכחי. להעתיק הגדרות ל-appdata?</value>
+  </data>
+  <data name="ChargeController" xml:space="preserve">
+    <value>טען את הסוללה</value>
+  </data>
+  <data name="Charged" xml:space="preserve">
+    <value>טעונה</value>
+  </data>
+  <data name="Charging" xml:space="preserve">
+    <value>בטעינה: *number*%</value>
+  </data>
+  <data name="CheckBattery" xml:space="preserve">
+    <value>בדוק סוללה</value>
+  </data>
+  <data name="CloseConfirm" xml:space="preserve">
+    <value>פעולה זו תנתק את כל הבקרים המחוברים שלך. להמשיך?</value>
+  </data>
+  <data name="CloseDS4W" xml:space="preserve">
+    <value>לסגור את DS4Windows?</value>
+  </data>
+  <data name="CloseMinimize" xml:space="preserve">
+    <value>סגירת החלון הראשי רק ממזערת את האפליקציה. יציאה מהאפליקציה תתבצע דרך סמל ההתראות</value>
+  </data>
+  <data name="Color" xml:space="preserve">
+    <value>צבע</value>
+  </data>
+  <data name="ColorByBattery" xml:space="preserve">
+    <value>צבע לפי אחוז סוללה</value>
+  </data>
+  <data name="Confirm" xml:space="preserve">
+    <value>אישור...</value>
+  </data>
+  <data name="Connecting" xml:space="preserve">
+    <value>מתחבר...</value>
+  </data>
+  <data name="ContextEdit" xml:space="preserve">
+    <value>ערוך פרופיל עבור בקר *number*</value>
+  </data>
+  <data name="ContextNew" xml:space="preserve">
+    <value>צור פרופיל עבור בקר *number*</value>
+  </data>
+  <data name="ControllerWasRemoved" xml:space="preserve">
+    <value>הבקר *Mac address* הוסר או איבד את החיבור</value>
+  </data>
+  <data name="CopyComplete" xml:space="preserve">
+    <value>ההעתקה הושלמה, אנא הפעל מחדש את DS4Windows והסר את ההגדרות מתיקיית התוכנית</value>
+  </data>
+  <data name="CopyFullColor" xml:space="preserve">
+    <value>לחץ להעתקת הצבע המלא</value>
+  </data>
+  <data name="CouldNotOpenDS4" xml:space="preserve">
+    <value>אזהרה: לא ניתן היה לפתוח את DS4 *Mac address* באופן בלעדי.</value>
+  </data>
+  <data name="Day" xml:space="preserve">
+    <value>יום</value>
+  </data>
+  <data name="Days" xml:space="preserve">
+    <value>ימים</value>
+  </data>
+  <data name="DeleteProfile" xml:space="preserve">
+    <value>למחוק פרופיל?</value>
+  </data>
+  <data name="DimByBattery" xml:space="preserve">
+    <value>עמעום לפי אחוז סוללה</value>
+  </data>
+  <data name="DisconnectBT" xml:space="preserve">
+    <value>נתק בלוטות'</value>
+  </data>
+  <data name="Disconnected" xml:space="preserve">
+    <value>מנותק</value>
+  </data>
+  <data name="Downloading" xml:space="preserve">
+    <value>מוריד *number*%</value>
+  </data>
+  <data name="DownloadVersion" xml:space="preserve">
+    <value>להוריד גרסה *number* עכשיו?</value>
+  </data>
+  <data name="DownText" xml:space="preserve">
+    <value>למטה</value>
+  </data>
+  <assembly alias="System.Windows.Forms" name="System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089" />
+  <data name="DS4" type="System.Resources.ResXFileRef, System.Windows.Forms">
+    <value>..\Resources\DS4.ico;System.Drawing.Icon, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a</value>
+  </data>
+  <data name="DS4Update" xml:space="preserve">
+    <value>עדכון ל-DS4Windows זמין!</value>
+  </data>
+  <data name="DS4W" type="System.Resources.ResXFileRef, System.Windows.Forms">
+    <value>..\Resources\DS4W.ico;System.Drawing.Icon, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a</value>
+  </data>
+  <data name="DS4WindowsCannotEditHere" xml:space="preserve">
+    <value>DS4Windows אינו יכול לערוך הגדרות כאן, זה ייסגר כעת</value>
+  </data>
+  <data name="DS4W___White" type="System.Resources.ResXFileRef, System.Windows.Forms">
+    <value>..\Resources\DS4W - White.ico;System.Drawing.Icon, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a</value>
+  </data>
+  <data name="EditProfile" xml:space="preserve">
+    <value>ערוך</value>
+  </data>
+  <data name="FallBack" xml:space="preserve">
+    <value>חזרה</value>
+  </data>
+  <data name="FallBackTo" xml:space="preserve">
+    <value>חזרה ל-*button*</value>
+  </data>
+  <data name="FifthMouseDown" xml:space="preserve">
+    <value>לחיצת כפתור עכבר חמישי</value>
+  </data>
+  <data name="FifthMouseUp" xml:space="preserve">
+    <value>שחרור כפתור עכבר חמישי</value>
+  </data>
+  <data name="FlashAtTip" xml:space="preserve">
+    <value>לחץ לשינוי צבע ההבהוב. שחור = צבע ברירת מחדל</value>
+  </data>
+  <data name="FlushHID" xml:space="preserve">
+    <value>נקה HID</value>
+  </data>
+  <data name="FlushHIDTip" xml:space="preserve">
+    <value>נקה את תור ה-HID לאחר כל קריאה</value>
+  </data>
+  <data name="FoundController" xml:space="preserve">
+    <value>נמצא בקר:</value>
+  </data>
+  <data name="FourthMouseDown" xml:space="preserve">
+    <value>לחיצת כפתור עכבר רביעי</value>
+  </data>
+  <data name="FourthMouseUp" xml:space="preserve">
+    <value>שחרור כפתור עכבר רביעי</value>
+  </data>
+  <data name="Full" xml:space="preserve">
+    <value>מלא</value>
+  </data>
+  <data name="GyroReadout" xml:space="preserve">
+    <value>לחץ לקריאה מתקדמת של חיישן Sixaxis</value>
+  </data>
+  <data name="GyroTriggerBehavior" xml:space="preserve">
+    <value>סמן כדי שחיישן התנועה יישאר פעיל בזמן שהטריגר פעיל. בטל סימון כדי להשבית את חיישן התנועה בזמן שהטריגר פעיל.</value>
+  </data>
+  <data name="GyroX" xml:space="preserve">
+    <value>GyroX, הטיה שמאלה וימינה</value>
+  </data>
+  <data name="GyroY" xml:space="preserve">
+    <value>GyroY, הטיה קדימה ואחורה</value>
+  </data>
+  <data name="GyroZ" xml:space="preserve">
+    <value>GyroZ, הטיה למעלה ולמטה</value>
+  </data>
+  <data name="Hour" xml:space="preserve">
+    <value>שעה</value>
+  </data>
+  <data name="Hours" xml:space="preserve">
+    <value>שעות</value>
+  </data>
+  <data name="HoverOverItems" xml:space="preserve">
+    <value>רחף מעל פריטים כדי לראות תיאור או מידע נוסף</value>
+  </data>
+  <data name="IfRemovingDS4Windows" xml:space="preserve">
+    <value>אם אתה מסיר את DS4Windows, תוכל למחוק את ההגדרות דרך קישור תיקיית הפרופילים</value>
+  </data>
+  <data name="InputDelay" xml:space="preserve">
+    <value>מרווח הדיווח הפיזי שנצפה: {0:0.##} ms</value>
+  </data>
+  <data name="InstallComplete" xml:space="preserve">
+    <value>ההתקנה הושלמה</value>
+  </data>
+  <data name="InstallDriver" xml:space="preserve">
+    <value>התקן דרייברים כאן</value>
+  </data>
+  <data name="InstallFailed" xml:space="preserve">
+    <value>ההתקנה נכשלה, אנא נסה שוב</value>
+  </data>
+  <data name="Installing" xml:space="preserve">
+    <value>מתקין...</value>
+  </data>
+  <data name="Jitter" xml:space="preserve">
+    <value>השתמש ב-Sixaxis כדי לסייע בחישוב תנועת לוח המגע</value>
+  </data>
+  <data name="KeepThisSize" xml:space="preserve">
+    <value>שמור על גודל חלון זה לאחר הסגירה</value>
+  </data>
+  <data name="LanguagePackApplyRestartRequired" xml:space="preserve">
+    <value>שינוי חבילת השפה ייכנס לתוקף לאחר הפעלה מחדש של אפליקציית DS4Windows.</value>
+  </data>
+  <data name="LatencyNotOverTen" xml:space="preserve">
+    <value>השהיית בקר *number* כעת מתחת ל-10 מילישניות</value>
+  </data>
+  <data name="LatencyOverTen" xml:space="preserve">
+    <value>השהיית בקר {0} מעל 10 מילישניות ({1} ms)</value>
+  </data>
+  <data name="LaunchProgram" xml:space="preserve">
+    <value>הפעל *program*</value>
+  </data>
+  <data name="LightByBatteryTip" xml:space="preserve">
+    <value>עמעם תאורה גם לפי זמן חוסר פעילות אם מופעל כאשר ה-DS4 טעון במלואו</value>
+  </data>
+  <data name="Loading" xml:space="preserve">
+    <value>טוען...</value>
+  </data>
+  <data name="LoadProfile" xml:space="preserve">
+    <value>טען *profile*</value>
+  </data>
+  <data name="Macro" xml:space="preserve">
+    <value>מאקרו</value>
+  </data>
+  <data name="MacroRecorded" xml:space="preserve">
+    <value>המאקרו הוקלט</value>
+  </data>
+  <data name="MakeNewProfile" xml:space="preserve">
+    <value>צור פרופיל חדש</value>
+  </data>
+  <data name="MultiAction" xml:space="preserve">
+    <value>כפתור רב-פעולות</value>
+  </data>
+  <data name="NA" xml:space="preserve">
+    <value>לא זמין</value>
+  </data>
+  <data name="New" xml:space="preserve">
+    <value>חדש</value>
+  </data>
+  <data name="NoMacroRecorded" xml:space="preserve">
+    <value>לא הוקלט מאקרו</value>
+  </data>
+  <data name="noneProfile" xml:space="preserve">
+    <value>(ללא)</value>
+  </data>
+  <data name="NoneText" xml:space="preserve">
+    <value>ללא</value>
+  </data>
+  <data name="NoProfileLoaded" xml:space="preserve">
+    <value>לא נטען פרופיל</value>
+  </data>
+  <data name="NotUsingProfile" xml:space="preserve">
+    <value>הבקר {0} אינו משתמש בפרופיל. רמת הסוללה היא {1}%</value>
+  </data>
+  <data name="NotValid" xml:space="preserve">
+    <value>לא תקין</value>
+  </data>
+  <data name="OpeningInstaller" xml:space="preserve">
+    <value>פותח את המתקין</value>
+  </data>
+  <data name="OpenScpDriver" xml:space="preserve">
+    <value>אנא פתח את ScpDriver.exe</value>
+  </data>
+  <data name="OtherFileLocation" xml:space="preserve">
+    <value>, קבצי מיקומים אחרים יימחקו</value>
+  </data>
+  <data name="PleaseDownloadUpdater" xml:space="preserve">
+    <value>אנא הורד כעת את התוכנית לעדכון, מקם אותה בתיקיית התוכניות ושנה את שמה ל-DS4Updater.exe אם אתה על x86, ואז בדוק עדכונים שוב. DS4Windows ינסה לפתוח את דף ההפצה של DS4Updater עם סגירת חלון זה.</value>
+  </data>
+  <data name="PleaseImport" xml:space="preserve">
+    <value>אנא ייבא או צור פרופיל</value>
+  </data>
+  <data name="PlusNewProfile" xml:space="preserve">
+    <value>פרופיל חדש</value>
+  </data>
+  <data name="ProfileCannotRestore" xml:space="preserve">
+    <value>לא ניתן לשחזר את *Profile name*.</value>
+  </data>
+  <data name="ProfileFolderMoved" xml:space="preserve">
+    <value>תיקיית הפרופילים הועברה לתיקיית התוכנית</value>
+  </data>
+  <data name="Programs" xml:space="preserve">
+    <value>תוכניות</value>
+  </data>
+  <data name="QuickCharge" xml:space="preserve">
+    <value>נתק בלוטות' אוטומטית בעת חיבור ל-USB</value>
+  </data>
+  <data name="QuitOtherPrograms" xml:space="preserve">
+    <value>סגור אפליקציות שמחזיקות כרגע בבקר הפיזי לפני הפעלת 'השתמש ב-HidHide כדי למנוע קלט כפול'.</value>
+  </data>
+  <data name="RecordText" xml:space="preserve">
+    <value>הקלטה</value>
+  </data>
+  <data name="RightClickPresets" xml:space="preserve">
+    <value>לחץ קליק ימני כדי להגדיר הגדרות מוכנות מראש עבור קבוצת פקדים</value>
+  </data>
+  <data name="RunAtStartup" xml:space="preserve">
+    <value>מורה ל-Windows להפעיל את DS4Windows לאחר הכניסה למערכת</value>
+  </data>
+  <data name="SaveRecordedMacro" xml:space="preserve">
+    <value>לשמור את המאקרו המוקלט?</value>
+  </data>
+  <data name="ScanCode" xml:space="preserve">
+    <value>Scan Code</value>
+  </data>
+  <data name="SearchingController" xml:space="preserve">
+    <value>מחפש בקרים...</value>
+  </data>
+  <data name="SelectActionTitle" xml:space="preserve">
+    <value>בחר פעולה עבור *action*</value>
+  </data>
+  <data name="SelectMacro" xml:space="preserve">
+    <value>בחר מאקרו</value>
+  </data>
+  <data name="SetRegularTrigger" xml:space="preserve">
+    <value>הגדר טריגר רגיל</value>
+  </data>
+  <data name="SetUnloadTrigger" xml:space="preserve">
+    <value>הגדר טריגר ביטול</value>
+  </data>
+  <data name="Shortcuts" xml:space="preserve">
+    <value>קיצורי דרך</value>
+  </data>
+  <data name="SASteeringWheelEmulationCalibrate" xml:space="preserve">
+    <value>כיול הדמיית הגה בחיישן שישה צירים</value>
+  </data>
+  <data name="SASteeringWheelEmulationCalibrateInstruction1" xml:space="preserve">
+    <value>(1) מרכז את הבקר, החזק אותו יציב ולחץ על "X"</value>
+  </data>
+  <data name="SASteeringWheelEmulationCalibrateInstruction2" xml:space="preserve">
+    <value>(2) סובב למיקום 90 מעלות שמאלה (או ימינה) ולחץ על "X"</value>
+  </data>
+  <data name="SASteeringWheelEmulationCalibrateInstruction3" xml:space="preserve">
+    <value>(3) סובב למיקום 90 מעלות ימינה (או שמאלה) ולחץ על "X"</value>
+  </data>
+  <data name="SASteeringWheelEmulationCalibrateInstruction" xml:space="preserve">
+    <value>כל נקודות הכיול נקבעות כאשר צבע פס התאורה משתנה לירוק. תוך כדי סיבוב הבקר, צבע פס התאורה מהבהב כאשר הבקר נמצא בנקודת כיול. אשר את הכיול בכפתור OK</value>
+  </data>
+  <data name="SASteeringWheelEmulationCalibrateNoControllerError" xml:space="preserve">
+    <value>לא ניתן לכייל ערכי הדמיית הגה עם חיישן תנועה (sixaxis) ללא בקר. חבר בקר דרך בלוטות' או USB</value>
+  </data>
+  <data name="SASteeringWheelEmulationCalibrateNoneAxisError" xml:space="preserve">
+    <value>אפשרות ציר הדמיית ההגה עם חיישן התנועה מוגדרת ל-NONE (ההדמיה אינה בשימוש). אנא בחר אפשרות ציר לפני כיול הדמיית ההגה עם חיישן שישה צירים</value>
+  </data>
+  <data name="SixAxisReading" xml:space="preserve">
+    <value>לחץ לקריאה מתקדמת של Sixaxis</value>
+  </data>
+  <data name="Starting" xml:space="preserve">
+    <value>מתחיל...</value>
+  </data>
+  <data name="StartText" xml:space="preserve">
+    <value>התחל</value>
+  </data>
+  <data name="Step1" xml:space="preserve">
+    <value>שלב 1: התקן את מנגנון ה-VIIPER</value>
+  </data>
+  <data name="StopHText" xml:space="preserve">
+    <value>עצור חזק</value>
+  </data>
+  <data name="StopLText" xml:space="preserve">
+    <value>עצור קל</value>
+  </data>
+  <data name="StoppedDS4Windows" xml:space="preserve">
+    <value>DS4Windows נעצר</value>
+  </data>
+  <data name="StoppingDS4" xml:space="preserve">
+    <value>עוצר בקרי קלט DS4</value>
+  </data>
+  <data name="StoppingX360" xml:space="preserve">
+    <value>עוצר בקרי פלט וירטואליים</value>
+  </data>
+  <data name="StopText" xml:space="preserve">
+    <value>עצור</value>
+  </data>
+  <data name="SwipeDown" xml:space="preserve">
+    <value>החלק למטה</value>
+  </data>
+  <data name="SwipeLeft" xml:space="preserve">
+    <value>החלק שמאלה</value>
+  </data>
+  <data name="SwipeRight" xml:space="preserve">
+    <value>החלק ימינה</value>
+  </data>
+  <data name="SwipeTouchpad" xml:space="preserve">
+    <value>החלק בלוח המגע כדי לשנות פרופילים</value>
+  </data>
+  <data name="SwipeUp" xml:space="preserve">
+    <value>החלק למעלה</value>
+  </data>
+  <data name="TapAndHold" xml:space="preserve">
+    <value>הקש והחזק כדי לגרור, עיכוב קל בהקשות בודדות</value>
+  </data>
+  <data name="TestHText" xml:space="preserve">
+    <value>בדיקה חזקה</value>
+  </data>
+  <data name="TestLText" xml:space="preserve">
+    <value>בדיקה קלה</value>
+  </data>
+  <data name="TestText" xml:space="preserve">
+    <value>בדיקה</value>
+  </data>
+  <data name="TextDocs" xml:space="preserve">
+    <value>מסמך טקסט (*.txt)</value>
+  </data>
+  <data name="TiltDown" xml:space="preserve">
+    <value>הטה למטה</value>
+  </data>
+  <data name="TiltLeft" xml:space="preserve">
+    <value>הטה שמאלה</value>
+  </data>
+  <data name="TiltRight" xml:space="preserve">
+    <value>הטה ימינה</value>
+  </data>
+  <data name="TiltUp" xml:space="preserve">
+    <value>הטה למעלה</value>
+  </data>
+  <data name="TouchpadMovementOff" xml:space="preserve">
+    <value>תנועת לוח המגע כבויה כעת</value>
+  </data>
+  <data name="TouchpadMovementOn" xml:space="preserve">
+    <value>תנועת לוח המגע פעילה כעת</value>
+  </data>
+  <data name="TouchpadOffTip" xml:space="preserve">
+    <value>הפעל מחדש בלחיצה על PS+Touchpad</value>
+  </data>
+  <data name="TwoFingerSwipe" xml:space="preserve">
+    <value>החלקת שתי אצבעות על לוח המגע שמאלה או ימינה</value>
+  </data>
+  <data name="TypeNewName" xml:space="preserve">
+    <value>הקלד כאן את השם החדש</value>
+  </data>
+  <data name="TypeProfileName" xml:space="preserve">
+    <value>הקלד כאן את שם הפרופיל</value>
+  </data>
+  <data name="UACTask" xml:space="preserve">
+    <value>עליך להפעיל את DS4Windows כמנהל כדי להפעיל מצב זה.</value>
+  </data>
+  <data name="Unassigned" xml:space="preserve">
+    <value>לא הוקצה</value>
+  </data>
+  <data name="UpText" xml:space="preserve">
+    <value>למעלה</value>
+  </data>
+  <data name="UpToDate" xml:space="preserve">
+    <value>אפליקציית DS4Windows מעודכנת.</value>
+  </data>
+  <data name="UseControllerForMapping" xml:space="preserve">
+    <value>תוכל גם להשתמש בבקר שלך כדי לשנות פקדים</value>
+  </data>
+  <data name="UsingExclusive" xml:space="preserve">
+    <value>משתמש במצב בלעדי</value>
+  </data>
+  <data name="UsingProfile" xml:space="preserve">
+    <value>הבקר {0} משתמש בפרופיל "{1}". רמת הסוללה היא {2}%</value>
+  </data>
+  <data name="UsingShared" xml:space="preserve">
+    <value>משתמש במצב משותף</value>
+  </data>
+  <data name="UsingTPSwipes" xml:space="preserve">
+    <value>פעולה זו משביתה את לוח המגע כעכבר</value>
+  </data>
+  <data name="ValidName" xml:space="preserve">
+    <value>אנא הזן שם תקין</value>
+  </data>
+  <data name="WaitMS" xml:space="preserve">
+    <value>המתן *number* מ"ש</value>
+  </data>
+  <data name="WillKeep" xml:space="preserve">
+    <value>יישמר</value>
+  </data>
+  <data name="XMLFiles" xml:space="preserve">
+    <value>קבצי XML (*.xml)</value>
+  </data>
+  <data name="EnableTouchToggle" xml:space="preserve">
+    <value>אפשר להחליף את פונקציית העכבר של לוח המגע עם PS + לחיצה על לוח המגע.</value>
+  </data>
+  <data name="UdpServer" xml:space="preserve">
+    <value>הפעל שרת UDP. כתובת ופורט האזנה של השרת. אפשרויות ערך כתובת: 127.0.0.1 localhost בלבד | 0.0.0.0 כל הכתובות | שם מארח או כתובת IP ספציפיים.</value>
+  </data>
+  <data name="AutoProfilePathAndWindowTitleEditTip" xml:space="preserve">
+    <value>^ABC = התאמה בתחילת המחרוזת (^) | ABC$ = התאמה בסוף המחרוזת ($) | *ABC = מכיל מחרוזת (*)</value>
+  </data>
+  <data name="ShowAutoProfileDebugLogTip" xml:space="preserve">
+    <value>אם מופעל, עמוד לשונית ה-Log מציג הודעות מפורטות על אירועי פרופיל אוטומטי.</value>
+  </data>
+  <data name="MacroScanCodeTip" xml:space="preserve">
+    <value>השתמש בערך קוד סריקה (Scan Code) של מקשי המקלדת במאקרו</value>
+  </data>
+  <data name="MacroRunOnReleaseTip" xml:space="preserve">
+    <value>הפעל מאקרו בשחרור מקש הטריגר</value>
+  </data>
+  <data name="MacroSynchronizedRunTip" xml:space="preserve">
+    <value>הפעל מספר מאקרואים בסדר מסונכרן אם לאותו טריגר יש מספר מאקרואים (מאקרו הלחיצה מסתיים לפני הפעלת מאקרו השחרור)</value>
+  </data>
+  <data name="MacroRepeatTip" xml:space="preserve">
+    <value>חזור על המאקרו בזמן שמקש הטריגר מוחזק לחוץ</value>
+  </data>
+  <data name="MacroKeepKeyStateTip" xml:space="preserve">
+    <value>שמור על מצב המקש האחרון כאשר ביצוע המאקרו הושלם (כלומר אם מקש נשאר במצב לחוץ הוא לא יאופס אוטומטית למצב ברירת המחדל)</value>
+  </data>
+  <data name="SquareStickRoundness" xml:space="preserve">
+    <value>עגילות פינות הסטיק המרובע</value>
+  </data>
+  <data name="XMLActionsCorrupt" xml:space="preserve">
+    <value>קובץ Actions.xml היה פגום. מתחיל מחדש.</value>
+  </data>
+  <data name="OscServer" xml:space="preserve">
+    <value>הפעל שרת OSC. האזן לפורט בכל הכתובות.</value>
+  </data>
+  <data name="UsingAutoTempProfile" xml:space="preserve">
+    <value>הבקר {0} משתמש בפרופיל זמני "{1}"</value>
+  </data>
+  <data name="DinputOnly" xml:space="preserve">
+    <value />
+  </data>
+  <data name="OutContNotice" xml:space="preserve">
+    <value>בחר את סוג בקר הפלט הווירטואלי (חל בשמירת הפרופיל)</value>
+  </data>
+  <data name="TouchStarted" xml:space="preserve">
+    <value>המגע התחיל</value>
+  </data>
+  <data name="TouchEnded" xml:space="preserve">
+    <value>המגע הסתיים</value>
+  </data>
+
+  <data name="Cancel" xml:space="preserve"><value>ביטול</value></data>
+  <data name="Save" xml:space="preserve"><value>שמור</value></data>
+  <data name="AHStatusSelectController" xml:space="preserve"><value>בחר בקר</value></data>
+  <data name="AHStatusNoSource" xml:space="preserve"><value>אין מקור</value></data>
+  <data name="AHStatusOff" xml:space="preserve"><value>כבוי</value></data>
+  <data name="AHStatusSavedToProfile" xml:space="preserve"><value>נשמר בפרופיל</value></data>
+  <data name="AHStatusActive" xml:space="preserve"><value>פעיל</value></data>
+  <data name="AHSourceControllerAudio" xml:space="preserve"><value>שמע הבקר</value></data>
+  <data name="AHSourceAutoGameDetection" xml:space="preserve"><value>זיהוי אוטומטי של משחק</value></data>
+  <data name="AHSourceSelectedApp" xml:space="preserve"><value>האפליקציה שנבחרה</value></data>
+  <data name="AHSourceSystemAudioDefault" xml:space="preserve"><value>שמע המערכת · יציאת ברירת מחדל</value></data>
+  <data name="MLLive" xml:space="preserve"><value>חי</value></data>
+  <data name="MLWaiting" xml:space="preserve"><value>ממתין</value></data>
+  <data name="MLControllerChanged" xml:space="preserve"><value>הבקר השתנה</value></data>
+  <data name="MLNoRecentInput" xml:space="preserve"><value>אין קלט אחרון</value></data>
+  <data name="MLReopenForNewController" xml:space="preserve"><value>פתח מחדש את העורך כדי להציג תצוגה מקדימה של הבקר החדש.</value></data>
+  <data name="MLControllerDisconnectedReopen" xml:space="preserve"><value>הבקר נותק. התחבר מחדש ופתח מחדש את העורך.</value></data>
+  <data name="MLWaitingForFreshInput" xml:space="preserve"><value>ממתין לקלט טרי מהבקר…</value></data>
+  <data name="MLWaitingForInput" xml:space="preserve"><value>ממתין לקלט מהבקר…</value></data>
+  <data name="MLOpenFromConnectedController" xml:space="preserve"><value>פתח פרופיל זה מבקר מחובר.</value></data>
+  <data name="MLNoButtonsPressed" xml:space="preserve"><value>אין כפתורים לחוצים</value></data>
+  <data name="VPCitrixHeading" xml:space="preserve"><value>VIIPER הושהה למען בטיחות המערכת</value></data>
+  <data name="VPCitrixSummary" xml:space="preserve"><value>מנטר USB מתנגש של Citrix פעיל.</value></data>
+  <data name="VPCitrixRequirements" xml:space="preserve"><value>• השבת רק את הפניית ה-USB הכללית של Citrix
+• הפעל מחדש את Windows לפני הפעלת VIIPER שוב</value></data>
+  <data name="VPDisableConflictingUsbMonitor" xml:space="preserve"><value>השבת מנטר USB מתנגש</value></data>
+  <data name="VPContinueWithoutVirtualOutput" xml:space="preserve"><value>המשך ללא פלט וירטואלי</value></data>
+  <data name="VPUsbipReplaceHeading" xml:space="preserve"><value>יש להחליף את גרסת USB-IP</value></data>
+  <data name="VPVerificationFailedHeading" xml:space="preserve"><value>אימות VIIPER נכשל</value></data>
+  <data name="VPVerificationFailedSummary" xml:space="preserve"><value>ה-VIIPER המותקן אינו תואם לחבילת DS4Windows זו.</value></data>
+  <data name="VPVerifiedUpdateRequired" xml:space="preserve"><value>נדרש עדכון מאומת</value></data>
+  <data name="VPUsbipReplaceRequirements" xml:space="preserve"><value>• התקן ואמת את VIIPER 0.1.5-rc4.6 המצורף
+• הסר בבטחה את חבילת ה-USB-IP הלא נתמכת
+• הפעל מחדש, ואז השלם את התקנת USB-IP 0.9.7.7</value></data>
+  <data name="VPVerificationFailedRequirements" xml:space="preserve"><value>• התקן את גרסת ה-VIIPER המצורפת המדויקת
+• בחר DS4Windows מנוהל או נייד
+• המנגנון הבלתי מאומת לא יופעל</value></data>
+  <data name="VPRepairViiperUsbip" xml:space="preserve"><value>תקן VIIPER + USB-IP</value></data>
+  <data name="VPInstallStandard" xml:space="preserve"><value>התקנה רגילה</value></data>
+  <data name="VPKeepPortable" xml:space="preserve"><value>השאר את DS4Windows נייד</value></data>
+  <data name="VPSetupRequiredHeading" xml:space="preserve"><value>נדרשת הגדרת VIIPER</value></data>
+  <data name="VPRequiredBeforeRun" xml:space="preserve"><value>נדרש לפני שDS4Windows יכול לפעול</value></data>
+  <data name="VPMandatoryRequirements" xml:space="preserve"><value>• התקן את VIIPER 0.1.5-rc4.6 המצורף
+• התקן ואמת USB-IP 0.9.7.7
+• הפעל את DS4Windows רק לאחר שבדיקת זמן הריצה עוברת</value></data>
+  <data name="VPInstallRepair" xml:space="preserve"><value>התקן / תקן</value></data>
+  <data name="VPVerifyingPackage" xml:space="preserve"><value>מאמת את חבילת DS4Windows...</value></data>
+  <data name="TLActiveLabel" xml:space="preserve"><value>פעיל</value></data>
+  <data name="TLLeftTrigger" xml:space="preserve"><value>טריגר שמאלי</value></data>
+  <data name="TLRightTrigger" xml:space="preserve"><value>טריגר ימני</value></data>
+  <data name="TLShapeTriggerFeelFormat" xml:space="preserve"><value>עצב את תחושת הטריגר {0}</value></data>
+  <data name="TLSaveProfileTip" xml:space="preserve"><value>שמור פרופיל טריגר חדש</value></data>
+  <data name="TLRenameProfileTip" xml:space="preserve"><value>שנה שם פרופיל טריגר</value></data>
+  <data name="TLDeleteProfileTip" xml:space="preserve"><value>מחק פרופיל טריגר</value></data>
+  <data name="TLModeFeedback" xml:space="preserve"><value>משוב</value></data>
+  <data name="TLModeWeapon" xml:space="preserve"><value>נשק</value></data>
+  <data name="TLModeVibration" xml:space="preserve"><value>רטט</value></data>
+  <data name="TLMeterStart" xml:space="preserve"><value>התחלה</value></data>
+  <data name="TLMeterWall" xml:space="preserve"><value>קיר</value></data>
+  <data name="TLMeterForce" xml:space="preserve"><value>כוח</value></data>
+  <data name="TLPreview" xml:space="preserve"><value>תצוגה מקדימה</value></data>
+  <data name="TLResetFormat" xml:space="preserve"><value>אפס {0}</value></data>
+  <data name="TLGameRumbleTitle" xml:space="preserve"><value>רטט רעש המשחק</value></data>
+  <data name="TLGameRumbleDescFormat" xml:space="preserve"><value>שדר את מנוע הרטט {0} של HID של המשחק אל {1} כאפקט רטט בהשהיה נמוכה.</value></data>
+  <data name="TLHeavyLeft" xml:space="preserve"><value>חזק / שמאלי</value></data>
+  <data name="TLLightRight" xml:space="preserve"><value>קל / ימני</value></data>
+  <data name="TLGameRumbleTipFormat" xml:space="preserve"><value>הפעל באופן עצמאי רטט רעש משחק עבור {0}. זה אינו מקשר לטריגר השני.</value></data>
+  <data name="TLFullPullActionTitle" xml:space="preserve"><value>פעולת לחיצה מלאה</value></data>
+  <data name="TLEndOfTravelBadge" xml:space="preserve"><value>סוף המסלול</value></data>
+  <data name="TLFullPullDescFormat" xml:space="preserve"><value>כאשר {0} נלחץ לגמרי, הפעל את הפעולה שלהלן באמצעות ההתנהגות שנבחרה.</value></data>
+  <data name="TLAssignedActionLabel" xml:space="preserve"><value>פעולה מוקצית</value></data>
+  <data name="TLChangeLabel" xml:space="preserve"><value>שנה  ›</value></data>
+  <data name="TLBehaviorLabel" xml:space="preserve"><value>התנהגות</value></data>
+  <data name="TLDelayLabel" xml:space="preserve"><value>השהיה</value></data>
+  <data name="TLSelectControllerOrProfile" xml:space="preserve"><value>בחר בקר או פרופיל</value></data>
+  <data name="TLSelectToOpen" xml:space="preserve"><value>בחר בקר או פרופיל כדי לפתוח את Trigger Lab.</value></data>
+  <data name="TLSavedCustomEffect" xml:space="preserve"><value>אפקט מותאם אישית נשמר.</value></data>
+  <data name="TLSaveProfileDialogTitle" xml:space="preserve"><value>שמור פרופיל טריגר</value></data>
+  <data name="TLDefaultCustomTriggerNameFormat" xml:space="preserve"><value>טריגר מותאם אישית {0}</value></data>
+  <data name="TLCustom" xml:space="preserve"><value>מותאם אישית</value></data>
+  <data name="TLDeleteConfirmFormat" xml:space="preserve"><value>למחוק את {0}?</value></data>
+  <data name="TLDialogTitle" xml:space="preserve"><value>Trigger Lab</value></data>
+  <data name="TLModeOff" xml:space="preserve"><value>כבוי</value></data>
+  <data name="TLModeOffDesc" xml:space="preserve"><value>רק פעולת הטריגר הרגילה פועלת.</value></data>
+  <data name="TLModeAddAtFullPull" xml:space="preserve"><value>הוסף בלחיצה מלאה</value></data>
+  <data name="TLModeAddAtFullPullDesc" xml:space="preserve"><value>השאר את פעולת הטריגר הרגילה פעילה והפעל גם את פעולת הלחיצה המלאה בסוף המסלול.</value></data>
+  <data name="TLModeReplaceAtFullPull" xml:space="preserve"><value>החלף בלחיצה מלאה</value></data>
+  <data name="TLModeReplaceAtFullPullDesc" xml:space="preserve"><value>שחרר את פעולת הטריגר הרגילה והחלף אותה בפעולת הלחיצה המלאה בסוף המסלול.</value></data>
+  <data name="TLModeHairTrigger" xml:space="preserve"><value>טריגר שערה</value></data>
+  <data name="TLModeHairTriggerDesc" xml:space="preserve"><value>הפעל את שתי הפעולות בלחיצה מלאה, ואז שחרר את שתיהן ברגע שהטריגר מתרחק מנקודת העצירה.</value></data>
+  <data name="TLModeHipFire" xml:space="preserve"><value>ירי מהיר</value></data>
+  <data name="TLModeHipFireDesc" xml:space="preserve"><value>המתן להשהיה שנבחרה, ואז הפעל את הפעולה הרגילה או את פעולת הלחיצה המלאה בהתאם למידת הלחיצה על הטריגר.</value></data>
+  <data name="TLModeHipFireExclusive" xml:space="preserve"><value>ירי מהיר (בלעדי)</value></data>
+  <data name="TLModeHipFireExclusiveDesc" xml:space="preserve"><value>המתן להשהיה שנבחרה והפעל רק פעולה אחת: לחיצה רגילה או לחיצה מלאה.</value></data>
+  <data name="TouchButtonModeClick" xml:space="preserve"><value>קליק</value></data>
+  <data name="TouchButtonModeTouch" xml:space="preserve"><value>מגע</value></data>
+  <data name="TouchButtonModeRelease" xml:space="preserve"><value>שחרור</value></data>
+  <data name="Switch2CalibLeftStick" xml:space="preserve"><value>סטיק שמאלי</value></data>
+  <data name="Switch2CalibRightStick" xml:space="preserve"><value>סטיק ימני</value></data>
+  <data name="Switch2CalibProControllerName" xml:space="preserve"><value>Switch 2 Pro Controller</value></data>
+  <data name="Switch2CalibJoinedJoyCon" xml:space="preserve"><value>Joy-Con 2 מאוחד</value></data>
+  <data name="Switch2CalibJoyConLeft" xml:space="preserve"><value>Joy-Con 2 (שמאלי)</value></data>
+  <data name="Switch2CalibJoyConRight" xml:space="preserve"><value>Joy-Con 2 (ימני)</value></data>
+  <data name="Switch2CalibUsbSuffix" xml:space="preserve"><value> · USB</value></data>
+  <data name="Switch2CalibBluetoothSuffix" xml:space="preserve"><value> · בלוטות'</value></data>
+  <data name="Switch2CalibChoosePhysicalStick" xml:space="preserve"><value>בחר סטיק פיזי</value></data>
+  <data name="Switch2CalibInitialInstructions" xml:space="preserve"><value>סובב את הסטיק הנבחר סביב כל קצהו, ואז תן לו לנוח במרכז. שום דבר לא נשמר עד שתבחר בשמירת כיול.</value></data>
+  <data name="Switch2CalibPcActive" xml:space="preserve"><value>כיול המחשב פעיל עבור סטיק זה.</value></data>
+  <data name="Switch2CalibUsingOriginal" xml:space="preserve"><value>נעשה שימוש בכיול המקורי של הבקר, או בברירות המחדל אם אינן זמינות.</value></data>
+  <data name="Switch2CalibNotStarted" xml:space="preserve"><value>לא התחיל</value></data>
+  <data name="Switch2CalibResetConfirmFormat" xml:space="preserve"><value>להסיר את כיול המחשב עבור ה{0} בבקר זה?
+
+הכיול המקורי של היצרן לא ישתנה. סטיקים ובקרים אחרים לא יושפעו.</value></data>
+  <data name="Switch2CalibPreparingReset" xml:space="preserve"><value>מכין איפוס</value></data>
+  <data name="Switch2CalibPreparingCalibration" xml:space="preserve"><value>מכין כיול</value></data>
+  <data name="Switch2CalibReleasingInput" xml:space="preserve"><value>משחרר את הקלט הממופה של בקר זה…</value></data>
+  <data name="Switch2CalibPleaseWait" xml:space="preserve"><value>אנא המתן</value></data>
+  <data name="Switch2CalibCouldNotStart" xml:space="preserve"><value>הכיול לא הצליח להתחיל</value></data>
+  <data name="Switch2CalibCouldNotStartDetail" xml:space="preserve"><value>המתן לקלט חי מהבקר וסיים כל כיול אחר, ואז נסה שוב. נדרשים זהות בקר זכורה ואחסון כיול הניתן לכתיבה במחשב.</value></data>
+  <data name="Switch2CalibCouldNotStartError" xml:space="preserve"><value>הכיול לא הצליח להתחיל. לא נשמר כיול.</value></data>
+  <data name="Switch2CalibResettingPc" xml:space="preserve"><value>מאפס כיול מחשב</value></data>
+  <data name="Switch2CalibSavingPc" xml:space="preserve"><value>שומר כיול מחשב</value></data>
+  <data name="Switch2CalibInputReleasedWhileSaving" xml:space="preserve"><value>קלט הבקר נשאר משוחרר בזמן שהתוצאה נשמרת ומוחלת.</value></data>
+  <data name="Switch2CalibResetDone" xml:space="preserve"><value>כיול המחשב אופס</value></data>
+  <data name="Switch2CalibSaveDone" xml:space="preserve"><value>הכיול נשמר</value></data>
+  <data name="Switch2CalibCanCalibrateAnother" xml:space="preserve"><value>תוכל לכייל סטיק אחר או לסגור חלון זה.</value></data>
+  <data name="Switch2CalibResetResultFormat" xml:space="preserve"><value>{0}: העקיפה של המחשב הוסרה. כיול המקור פעיל שוב.</value></data>
+  <data name="Switch2CalibSaveResultFormat" xml:space="preserve"><value>{0}: נשמר במחשב זה והוחל על חיבור בקר זה.</value></data>
+  <data name="Switch2CalibComplete" xml:space="preserve"><value>הושלם</value></data>
+  <data name="Switch2CalibStorageFailed" xml:space="preserve"><value>לא ניתן היה לעדכן את קובץ כיול המחשב. הכיול החי הקודם לא השתנה. נסה שוב לשמור כיול או בטל.</value></data>
+  <data name="Switch2CalibNotReady" xml:space="preserve"><value>הפעולה עדיין לא מוכנה להסתיים. המתן לדגימות תקפות או בטל ונסה שוב.</value></data>
+  <data name="Switch2CalibEnded" xml:space="preserve"><value>הכיול הסתיים</value></data>
+  <data name="Switch2CalibReopenBeforeRetry" xml:space="preserve"><value>סגור חלון זה ופתח מחדש את הכיול מהבקר הנוכחי לפני שתנסה שוב.</value></data>
+  <data name="Switch2CalibNotApplied" xml:space="preserve"><value>לא הוחל</value></data>
+  <data name="Switch2CalibStoredNotApplied" xml:space="preserve"><value>קובץ המחשב עודכן, אך השינוי לא הוחל על החיבור הפעיל. התחבר מחדש כדי לטעון אותו, או אפס אותו במפורש. ביטול אינו יכול לבטל כתיבה שכבר בתהליך.</value></data>
+  <data name="Switch2CalibNoLongerCurrent" xml:space="preserve"><value>פעולה זו אינה עדכנית יותר. היא לא השלימה שינוי כיול.</value></data>
+  <data name="Switch2CalibFinishFailed" xml:space="preserve"><value>הכיול לא הצליח להסתיים. לא ניתן היה לאשר את תוצאת הקובץ; התחבר מחדש ובדוק את הסטיק הנבחר לפני שתנסה שוב.</value></data>
+  <data name="Switch2CalibCancelled" xml:space="preserve"><value>הכיול בוטל</value></data>
+  <data name="Switch2CalibResumeInput" xml:space="preserve"><value>קלט הבקר הרגיל יכול להתחדש. תוכל להתחיל שוב כשתהיה מוכן.</value></data>
+  <data name="Switch2CalibSaveInProgress" xml:space="preserve"><value>שמירה שכבר בתהליך עשויה עדיין לעדכן את קובץ המחשב. תוצאתה הסופית תופיע כאן.</value></data>
+  <data name="Switch2CalibDiscarded" xml:space="preserve"><value>הלכידה הלא שמורה נמחקה; הכיול הקיים לא השתנה.</value></data>
+  <data name="Switch2CalibCancelledStatus" xml:space="preserve"><value>בוטל</value></data>
+  <data name="Switch2CalibChangedRetry" xml:space="preserve"><value>הבקר או הכיול השתנו. התחל שוב מהבקר הנוכחי.</value></data>
+  <data name="Switch2CalibNotSaved" xml:space="preserve"><value>לא נשמר</value></data>
+  <data name="Switch2CalibRotateHeadingFormat" xml:space="preserve"><value>1 · סובב את ה{0}</value></data>
+  <data name="Switch2CalibRotateInstructions" xml:space="preserve"><value>נוע לאט סביב כל הקצה החיצוני בשני הכיוונים. המשך לנוע עד שלב זה יושלם; הפסקות אינן נספרות.</value></data>
+  <data name="Switch2CalibMovingSecondsFormat" xml:space="preserve"><value>{0} שניות תנועה נותרו</value></data>
+  <data name="Switch2CalibSettleHeading" xml:space="preserve"><value>2 · שחרר את הסטיק</value></data>
+  <data name="Switch2CalibSettleInstructions" xml:space="preserve"><value>הסר את ידך מהסטיק ותן לו לחזור למרכז.</value></data>
+  <data name="Switch2CalibWaitingRest" xml:space="preserve"><value>ממתין לשתי שניות מנוחה</value></data>
+  <data name="Switch2CalibCenterHeading" xml:space="preserve"><value>3 · הישאר ללא תזוזה</value></data>
+  <data name="Switch2CalibCenterInstructions" xml:space="preserve"><value>השאר את הסטיק ללא מגע בזמן שהמרכז שלו נמדד. נגיעה בו מפעילה מחדש את תקופת המנוחה.</value></data>
+  <data name="Switch2CalibStillSecondsFormat" xml:space="preserve"><value>{0} שניות מנוחה נותרו</value></data>
+  <data name="Switch2CalibReadyToReset" xml:space="preserve"><value>מוכן לאיפוס</value></data>
+  <data name="Switch2CalibReadyToSave" xml:space="preserve"><value>מוכן לשמירה</value></data>
+  <data name="Switch2CalibChooseSaveOrCancel" xml:space="preserve"><value>בחר בשמירת כיול כדי להחיל תוצאה זו, או בביטול כדי לבטל אותה.</value></data>
+  <data name="Switch2CalibReady" xml:space="preserve"><value>מוכן</value></data>
+  <data name="Switch2CalibMoreTravelNeeded" xml:space="preserve"><value>נדרשת תנועת סטיק נוספת</value></data>
+  <data name="Switch2CalibReachFullEdge" xml:space="preserve"><value>בטל ונסה שוב. הגע לקצה המלא בכל כיוון, ואז תן לסטיק למרכז את עצמו.</value></data>
+  <data name="Switch2CalibRejected" xml:space="preserve"><value>הכיול נדחה</value></data>
+  <data name="Switch2CalibStartNewWhenReady" xml:space="preserve"><value>התחל כיול חדש כשהבקר מוכן.</value></data>
+  <data name="Switch2CalibContextChanged" xml:space="preserve"><value>הקשר הבקר השתנה</value></data>
+  <data name="Switch2CalibContextChangedDetail" xml:space="preserve"><value>הבקר, הפרופיל או הזוג השתנו. סגור חלון זה ופתח מחדש את הכיול מהבקר שברצונך להשתמש בו.</value></data>
+  <data name="Switch2CalibStopped" xml:space="preserve"><value>הכיול נעצר</value></data>
+  <data name="Switch2CalibResetDialogTitle" xml:space="preserve"><value>איפוס כיול מחשב לסטיק</value></data>
+</root>

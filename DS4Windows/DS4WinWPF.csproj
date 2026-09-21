@@ -520,6 +520,15 @@
 		<EmbeddedResource Update="Properties\Resources.zh-hans.resx">
 			<DependentUpon>Resources.resx</DependentUpon>
 		</EmbeddedResource>
+		<EmbeddedResource Update="Properties\Resources.fa.resx">
+			<DependentUpon>Resources.resx</DependentUpon>
+		</EmbeddedResource>
+		<EmbeddedResource Update="Properties\Resources.ar.resx">
+			<DependentUpon>Resources.resx</DependentUpon>
+		</EmbeddedResource>
+		<EmbeddedResource Update="Properties\Resources.he.resx">
+			<DependentUpon>Resources.resx</DependentUpon>
+		</EmbeddedResource>
 	</ItemGroup>
 
 	<ItemGroup>
@@ -547,6 +556,9 @@
 			<DependentUpon>Strings.resx</DependentUpon>
 		</EmbeddedResource>
 		<EmbeddedResource Update="Translations\Strings.es.resx">
+			<DependentUpon>Strings.resx</DependentUpon>
+		</EmbeddedResource>
+		<EmbeddedResource Update="Translations\Strings.fa.resx">
 			<DependentUpon>Strings.resx</DependentUpon>
 		</EmbeddedResource>
 		<EmbeddedResource Update="Translations\Strings.fi.resx">

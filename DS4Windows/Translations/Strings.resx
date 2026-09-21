@@ -1490,4 +1490,201 @@ Please click OK to confirm that you have read the message. Press Cancel to be re
   <data name="InverseMotors" xml:space="preserve">
     <value>Inverse motors</value>
   </data>
+
+  <data name="About.HeaderLabel" xml:space="preserve"><value>DS4Windows - hbashton Build (Version </value></data>
+  <data name="About.TabHotkeys" xml:space="preserve"><value>Hotkeys</value></data>
+  <data name="About.HotkeysText" xml:space="preserve"><value>Use HidHide to Prevent Double Input: Hides the physical controller from games while DS4Windows continues using it, preventing duplicate inputs
+Click left side of touchpad: Left Touch
+Click right side of touchpad: Right Touch
+Click touchpad with 2 fingers: Multitouch
+Click upper part of touchpad: Upper Touch
+PS + Options or hold PS for 10 secs: Disconnect Controller (Only on Bluetooth)
+Touch Touchpad + PS: Turn off touchpad movement (clicking still works)
+Pad click on lower right: Right click (Best used when right side is used as a mouse button)
+Two fingers up/down on touchpad*: Scroll Up/Down
+Tap then hold touchpad*: Left mouse drag
+2 finger touchpad swipe left or right: Cycle through profiles
+Shift Modifer: Hold an action to use another set of controls
+When mapping keyboard and mouse:
+Toggle: The key will remain in a "held down" state until pressed again
+Macro: Assign multiple keys to one input
+Scan Code: Keys are interpreted differently. May be needed for certain games
+*If enabled</value></data>
+  <data name="About.TabLicense" xml:space="preserve"><value>License</value></data>
+  <data name="About.TabCredits" xml:space="preserve"><value>Credits</value></data>
+  <data name="About.SourceLink" xml:space="preserve"><value>Source</value></data>
+  <data name="About.ContributorsLink" xml:space="preserve"><value>Contributors</value></data>
+  <data name="About.Translators" xml:space="preserve"><value>Translators:</value></data>
+  <data name="About.TabExtras" xml:space="preserve"><value>Extras</value></data>
+  <data name="About.ProjectUrl" xml:space="preserve"><value>Project URL:</value></data>
+  <data name="About.Description" xml:space="preserve"><value>Description</value></data>
+  <data name="About.HidHideDesc" xml:space="preserve"><value>Use HidHide to configure and hide any input controllers from other apps running on your system. Some games require only one controller to be present or double input will cause problems in game. Written by nefarius.</value></data>
+  <data name="About.FakerInputDesc" xml:space="preserve"><value>Use FakerInput driver to expose system-wide virtual keyboard, relative mouse, and absolute mouse. Allows virtual KB+M events to be usable in some situations when SendInput fails. Such situations are elevated process and games, UAC prompts, and anti-cheat systems that block SendInput events. Use of FakerInput is necessary to allow DS4Windows to work with some games with anti-cheat protection like Valorant.</value></data>
+
+  <data name="Overview.NoControllerSelected" xml:space="preserve"><value>No controller selected</value></data>
+  <data name="Overview.NoControllerHint" xml:space="preserve"><value>Connect a controller, then choose it from the device cards in the upper-left corner.</value></data>
+  <data name="Overview.SelectedControllerLabel" xml:space="preserve"><value>SELECTED CONTROLLER</value></data>
+  <data name="Overview.ProfileLabel" xml:space="preserve"><value>Profile  </value></data>
+  <data name="Overview.BatteryLabel" xml:space="preserve"><value>BATTERY</value></data>
+  <data name="Overview.ConnectionLabel" xml:space="preserve"><value>CONNECTION</value></data>
+  <data name="Overview.ReportIntervalLabel" xml:space="preserve"><value>Observed input report interval · rate</value></data>
+  <data name="Overview.ReportIntervalTip" xml:space="preserve"><value>Observed input delivery interval and rate. Joined controllers use their composite report cadence. This is not kernel completion time or end-to-end game latency.</value></data>
+  <data name="Overview.ActiveProfileLabel" xml:space="preserve"><value>ACTIVE PROFILE</value></data>
+  <data name="Overview.ActiveProfileHint" xml:space="preserve"><value>Settings below save to this profile</value></data>
+  <data name="Overview.EmulatedDeviceLabel" xml:space="preserve"><value>EMULATED DEVICE</value></data>
+  <data name="Overview.EmulatedDeviceHint" xml:space="preserve"><value>Applied through the active profile</value></data>
+  <data name="Overview.ControllerStatusLabel" xml:space="preserve"><value>CONTROLLER STATUS</value></data>
+  <data name="Overview.QuickProfileControlsTitle" xml:space="preserve"><value>Quick profile controls</value></data>
+  <data name="Overview.QuickProfileControlsDesc" xml:space="preserve"><value>Every change is saved to the selected controller's active profile and applied automatically.</value></data>
+  <data name="Overview.EmulatedControllerTitle" xml:space="preserve"><value>Emulated controller</value></data>
+  <data name="Overview.EmulatedControllerDesc" xml:space="preserve"><value>The virtual controller presented to games.</value></data>
+  <data name="Overview.EmulatedControllerNote" xml:space="preserve"><value>Changing this setting saves the profile, then performs one controlled output reload.</value></data>
+  <data name="Overview.StreamAudioToggle" xml:space="preserve"><value>Stream audio to controller</value></data>
+  <data name="Overview.StreamAudioTip" xml:space="preserve"><value>Streams the selected audio to the controller. Uses its built-in speaker unless Headset only routes it exclusively to the AUX port.</value></data>
+  <data name="Overview.HeadsetOnlyToggle" xml:space="preserve"><value>Headset only (mute controller speaker)</value></data>
+  <data name="Overview.HeadsetOnlyTip" xml:space="preserve"><value>Mutes the built-in speaker while continuing the stream through a headset connected to the controller's AUX port.</value></data>
+  <data name="Overview.AudioSourceLabel" xml:space="preserve"><value>Audio source</value></data>
+  <data name="Overview.AudioSourceTip" xml:space="preserve"><value>Default captures the normal endpoint mix. Choose an app to stream only that app.</value></data>
+  <data name="Overview.RefreshAudioSourcesTip" xml:space="preserve"><value>Refresh running audio sources</value></data>
+  <data name="Overview.AudioHapticsOverrideNotice" xml:space="preserve"><value>Audio Haptics is supplying this stream. Turn off Play this app through controller to choose another source.</value></data>
+  <data name="Overview.UsbHeadsetTitle" xml:space="preserve"><value>Use a headset over USB</value></data>
+  <data name="Overview.UsbHeadsetStep1" xml:space="preserve"><value>Connect your Switch 2 Pro by USB and plug in headphones or a headset. Choose Headphones (Switch 2 Pro Controller) in your game or Windows Sound settings. Adjust the volume there.</value></data>
+  <data name="Overview.UsbHeadsetStep2" xml:space="preserve"><value>For voice chat, choose Microphone (Switch 2 Pro Controller) and use a headset with a microphone.</value></data>
+  <data name="Overview.UsbHeadsetNote" xml:space="preserve"><value>Works independently of your virtual controller. Bluetooth headset audio is not supported yet.</value></data>
+  <data name="Overview.OpenSoundSettingsBtn" xml:space="preserve"><value>Open Windows Sound settings</value></data>
+  <data name="Overview.OpenSoundSettingsTip" xml:space="preserve"><value>Choose where your game sound and voice chat go.</value></data>
+  <data name="Overview.OutputLevelsTitle" xml:space="preserve"><value>Output levels</value></data>
+  <data name="Overview.ControllerSpeakerLabel" xml:space="preserve"><value>Controller speaker</value></data>
+  <data name="Overview.HeadsetAuxLabel" xml:space="preserve"><value>Headset / AUX</value></data>
+  <data name="Overview.HeadsetAuxTip" xml:space="preserve"><value>Controls the controller headset jack independently from its built-in speaker.</value></data>
+  <data name="Overview.SpeakerProcessingTitle" xml:space="preserve"><value>Speaker processing</value></data>
+  <data name="Overview.DynamicRangeLabel" xml:space="preserve"><value>Dynamic range</value></data>
+  <data name="Overview.DynamicRangeTip" xml:space="preserve"><value>Raises quiet detail and safely restrains loud effects without look-ahead latency.</value></data>
+  <data name="Overview.Off" xml:space="preserve"><value>Off</value></data>
+  <data name="Overview.Balanced" xml:space="preserve"><value>Balanced</value></data>
+  <data name="Overview.Strong" xml:space="preserve"><value>Strong</value></data>
+  <data name="Overview.BassBodyLabel" xml:space="preserve"><value>Bass / body</value></data>
+  <data name="Overview.BassBodyTip" xml:space="preserve"><value>Adds body around 200 Hz while filtering unusable sub-bass.</value></data>
+  <data name="Overview.MicrophoneTitle" xml:space="preserve"><value>Microphone</value></data>
+  <data name="Overview.MicrophoneLevelLabel" xml:space="preserve"><value>Microphone level</value></data>
+  <data name="Overview.NoiseSuppressionLabel" xml:space="preserve"><value>Noise suppression</value></data>
+  <data name="Overview.NvidiaAI" xml:space="preserve"><value>NVIDIA AI</value></data>
+  <data name="Overview.QuickActionsTitle" xml:space="preserve"><value>Quick actions</value></data>
+  <data name="Overview.QuickActionsDesc" xml:space="preserve"><value>Jump into the full editor or manage the selected physical controller.</value></data>
+  <data name="Overview.EditActiveProfileBtn" xml:space="preserve"><value>Edit active profile</value></data>
+  <data name="Overview.ControllerDetailsBtn" xml:space="preserve"><value>Controller details</value></data>
+  <data name="Overview.LightbarControlsBtn" xml:space="preserve"><value>Lightbar controls</value></data>
+  <data name="Overview.LightbarControlsTip" xml:space="preserve"><value>Use profile lightbar controls or choose a temporary custom color</value></data>
+  <data name="Overview.DisconnectBtn" xml:space="preserve"><value>Disconnect</value></data>
+
+  <data name="AudioHaptics.Enabled" xml:space="preserve"><value>Enabled</value></data>
+  <data name="AudioHaptics.Title" xml:space="preserve"><value>Audio Haptics</value></data>
+  <data name="AudioHaptics.Subtitle" xml:space="preserve"><value>Audio-driven controller feedback</value></data>
+  <data name="AudioHaptics.Low" xml:space="preserve"><value>Low</value></data>
+  <data name="AudioHaptics.Medium" xml:space="preserve"><value>Medium</value></data>
+  <data name="AudioHaptics.High" xml:space="preserve"><value>High</value></data>
+  <data name="AudioHaptics.SourceLabel" xml:space="preserve"><value>SOURCE</value></data>
+  <data name="AudioHaptics.RefreshSourcesTip" xml:space="preserve"><value>Refresh running audio sessions</value></data>
+  <data name="AudioHaptics.SourceScopeHelp" xml:space="preserve"><value>System audio uses only Windows' default output, not every Sonar output. Choose an app to follow its audio on any output.</value></data>
+  <data name="AudioHaptics.AutoFollowGamesTitle" xml:space="preserve"><value>Automatically follow games</value></data>
+  <data name="AudioHaptics.AutoFollowGamesDesc" xml:space="preserve"><value>Switch to the active game's audio using Windows game records and installed launcher manifests.</value></data>
+  <data name="AudioHaptics.AutoFollowGamesTip" xml:space="preserve"><value>Follows games recognized by Windows, Steam, Epic, or GOG. The selected app remains the fallback.</value></data>
+  <data name="AudioHaptics.PlayThroughControllerTitle" xml:space="preserve"><value>Play app through controller</value></data>
+  <data name="AudioHaptics.PlayThroughControllerDesc" xml:space="preserve"><value>Also stream this selected app to the controller speaker and AUX headset.</value></data>
+  <data name="AudioHaptics.PlayThroughControllerTip" xml:space="preserve"><value>Overrides Advanced &gt; Controller audio source while enabled. Choosing another source there releases this override.</value></data>
+  <data name="AudioHaptics.HeadsetOnlyTitle" xml:space="preserve"><value>Headset only</value></data>
+  <data name="AudioHaptics.HeadsetOnlyDesc" xml:space="preserve"><value>Send the captured app only through the controller AUX port.</value></data>
+  <data name="AudioHaptics.HeadsetOnlyTip" xml:space="preserve"><value>Routes captured app audio to headphones connected to the controller and mutes the controller speaker.</value></data>
+  <data name="AudioHaptics.ModeLabel" xml:space="preserve"><value>MODE</value></data>
+  <data name="AudioHaptics.MixMode" xml:space="preserve"><value>Mix</value></data>
+  <data name="AudioHaptics.MixModeTip" xml:space="preserve"><value>Add audio-derived feedback to game haptics and rumble.</value></data>
+  <data name="AudioHaptics.ReplaceMode" xml:space="preserve"><value>Replace</value></data>
+  <data name="AudioHaptics.ReplaceModeTip" xml:space="preserve"><value>Use only audio-derived feedback.</value></data>
+  <data name="AudioHaptics.ResponseTitle" xml:space="preserve"><value>Response</value></data>
+  <data name="AudioHaptics.ResponseSubtitle" xml:space="preserve"><value>Frequency focus and strength</value></data>
+  <data name="AudioHaptics.BassFocusLabel" xml:space="preserve"><value>Bass Focus</value></data>
+  <data name="AudioHaptics.BassFocusTip" xml:space="preserve"><value>Choose which low-frequency region becomes vibration.</value></data>
+  <data name="AudioHaptics.ResponseLabel" xml:space="preserve"><value>Response</value></data>
+  <data name="AudioHaptics.ResponseTip" xml:space="preserve"><value>Control how strongly haptics react, especially to peaks.</value></data>
+  <data name="AudioHaptics.Subtle" xml:space="preserve"><value>Subtle</value></data>
+  <data name="AudioHaptics.Dynamic" xml:space="preserve"><value>Dynamic</value></data>
+  <data name="AudioHaptics.Aggressive" xml:space="preserve"><value>Aggressive</value></data>
+  <data name="AudioHaptics.RampLabel" xml:space="preserve"><value>Ramp</value></data>
+  <data name="AudioHaptics.RampTip" xml:space="preserve"><value>Control how quickly haptics rise with the sound.</value></data>
+  <data name="AudioHaptics.SlowRamp" xml:space="preserve"><value>Slow Ramp</value></data>
+  <data name="AudioHaptics.MediumRamp" xml:space="preserve"><value>Medium Ramp</value></data>
+  <data name="AudioHaptics.FastRamp" xml:space="preserve"><value>Fast Ramp</value></data>
+  <data name="AudioHaptics.InstantRamp" xml:space="preserve"><value>Instant Ramp</value></data>
+  <data name="AudioHaptics.FadeLabel" xml:space="preserve"><value>Fade</value></data>
+  <data name="AudioHaptics.FadeTip" xml:space="preserve"><value>Control how quickly haptics fade after the sound drops.</value></data>
+  <data name="AudioHaptics.FastFade" xml:space="preserve"><value>Fast Fade</value></data>
+  <data name="AudioHaptics.MediumFade" xml:space="preserve"><value>Medium Fade</value></data>
+  <data name="AudioHaptics.SlowFade" xml:space="preserve"><value>Slow Fade</value></data>
+  <data name="AudioHaptics.LongFade" xml:space="preserve"><value>Long Fade</value></data>
+  <data name="AudioHaptics.StatusDisabled" xml:space="preserve"><value>Audio Haptics is disabled.</value></data>
+  <data name="AudioHaptics.SystemAudio" xml:space="preserve"><value>System audio</value></data>
+
+  <data name="MappingLive.Title" xml:space="preserve"><value>Live input</value></data>
+  <data name="MappingLive.Subtitle" xml:space="preserve"><value>Physical controller · before remapping</value></data>
+  <data name="MappingLive.Waiting" xml:space="preserve"><value>Waiting</value></data>
+  <data name="MappingLive.LeftStick" xml:space="preserve"><value>L stick</value></data>
+  <data name="MappingLive.RightStick" xml:space="preserve"><value>R stick</value></data>
+  <data name="MappingLive.PressedLabel" xml:space="preserve"><value>PRESSED</value></data>
+  <data name="MappingLive.NoControllerHint" xml:space="preserve"><value>Connect a controller, then reopen this editor.</value></data>
+
+  <data name="TriggerLab.OverrideBadge" xml:space="preserve"><value>LAB OVERRIDE</value></data>
+  <data name="TriggerLab.EffectDesign" xml:space="preserve"><value>Effect design</value></data>
+  <data name="TriggerLab.Linked" xml:space="preserve"><value>Linked</value></data>
+  <data name="TriggerLab.LinkedTip" xml:space="preserve"><value>Use one shared effect design for L2 and R2. Presets, modes, and sliders mirror between both sides; each trigger's Active switch remains independent.</value></data>
+  <data name="TriggerLab.Split" xml:space="preserve"><value>Split</value></data>
+  <data name="TriggerLab.SplitTip" xml:space="preserve"><value>Configure separate effect designs for L2 and R2. Returning to Split restores your last independent settings, including which trigger was active.</value></data>
+  <data name="TriggerLab.Enabled" xml:space="preserve"><value>Enabled</value></data>
+  <data name="TriggerLab.BehaviorNote" xml:space="preserve"><value>Active lab effects override incoming game adaptive-trigger output.</value></data>
+
+  <data name="ViiperPrompt.WinTitle" xml:space="preserve"><value>VIIPER virtual controller setup</value></data>
+  <data name="ViiperPrompt.Close" xml:space="preserve"><value>Close</value></data>
+  <data name="ViiperPrompt.Heading" xml:space="preserve"><value>VIIPER needs attention</value></data>
+  <data name="ViiperPrompt.Summary" xml:space="preserve"><value>This profile uses a VIIPER virtual controller output.</value></data>
+  <data name="ViiperPrompt.RequirementsHeading" xml:space="preserve"><value>What DS4Windows needs</value></data>
+  <data name="ViiperPrompt.RequirementsText" xml:space="preserve"><value>• VIIPER helper/server&#x0a;• usbip-win2 Windows USB/IP driver</value></data>
+  <data name="ViiperPrompt.CurrentStatus" xml:space="preserve"><value>Current status</value></data>
+  <data name="ViiperPrompt.ExistingHeading" xml:space="preserve"><value>Competing VIIPER detected</value></data>
+  <data name="ViiperPrompt.ExistingDescription" xml:space="preserve"><value>This executable will not be elevated or selected. Install or Repair uses the verified Program Files backend and removes only recognized legacy VIIPER files:</value></data>
+  <data name="ViiperPrompt.SuppressPrompt" xml:space="preserve"><value>Don't show this setup prompt again</value></data>
+  <data name="ViiperPrompt.SuppressPromptTip" xml:space="preserve"><value>You can turn setup prompts back on from Settings → VIIPER Virtual Controller Support.</value></data>
+  <data name="ViiperPrompt.PortableWarning" xml:space="preserve"><value>Keep DS4Windows portable leaves this app exactly where it is, while installing the elevated VIIPER backend in protected Program Files. Standard also moves only package-owned DS4Windows files into Program Files. Profiles, settings, and unrecognized files are always preserved.</value></data>
+  <data name="ViiperPrompt.NotNow" xml:space="preserve"><value>Not now</value></data>
+  <data name="ViiperPrompt.InstallPortable" xml:space="preserve"><value>Keep DS4Windows portable</value></data>
+  <data name="ViiperPrompt.InstallStandard" xml:space="preserve"><value>Install standard</value></data>
+
+  <data name="ViiperProgress.WinTitle" xml:space="preserve"><value>VIIPER setup</value></data>
+  <data name="ViiperProgress.Heading" xml:space="preserve"><value>Setting up VIIPER</value></data>
+  <data name="ViiperProgress.Summary" xml:space="preserve"><value>DS4Windows is verifying the complete controller backend.</value></data>
+  <data name="ViiperProgress.PreparingPackage" xml:space="preserve"><value>Preparing verified package...</value></data>
+  <data name="ViiperProgress.StepVerifyFiles" xml:space="preserve"><value>• Verify packaged files</value></data>
+  <data name="ViiperProgress.StepInstallViiper" xml:space="preserve"><value>• Install VIIPER 0.1.5-rc4.6</value></data>
+  <data name="ViiperProgress.StepVerifyUsbip" xml:space="preserve"><value>• Verify USB-IP 0.9.7.7</value></data>
+  <data name="ViiperProgress.StepVerifyStartup" xml:space="preserve"><value>• Verify startup and API</value></data>
+  <data name="ViiperProgress.DetailText" xml:space="preserve"><value>Keep this window open. Setup will finish automatically.</value></data>
+
+  <data name="SwipeEditor.WinTitle" xml:space="preserve"><value>Config Swipe Profiles</value></data>
+  <data name="SwipeEditor.Instructions" xml:space="preserve"><value>Tick the profiles the two-finger touchpad swipe is allowed to switch between. If nothing is ticked, the swipe cycles through every profile (default behaviour).</value></data>
+  <data name="SwipeEditor.SelectAll" xml:space="preserve"><value>Select All</value></data>
+  <data name="SwipeEditor.ClearAll" xml:space="preserve"><value>Clear All</value></data>
+
+  <data name="Switch2Calib.WinTitle" xml:space="preserve"><value>Switch 2 stick calibration</value></data>
+  <data name="Switch2Calib.Heading" xml:space="preserve"><value>Calibrate your sticks</value></data>
+  <data name="Switch2Calib.ClosingWarning" xml:space="preserve"><value>Closing cancels capture and live activation. A save already writing to disk may still finish; closing does not undo that write.</value></data>
+  <data name="Switch2Calib.CloseBtn" xml:space="preserve"><value>_Close</value></data>
+  <data name="Switch2Calib.PhysicalStickLabel" xml:space="preserve"><value>PHYSICAL STICK</value></data>
+  <data name="Switch2Calib.StartBtn" xml:space="preserve"><value>_Start calibration</value></data>
+  <data name="Switch2Calib.SaveBtn" xml:space="preserve"><value>Sa_ve calibration</value></data>
+  <data name="Switch2Calib.CancelBtn" xml:space="preserve"><value>_Cancel capture</value></data>
+  <data name="Switch2Calib.StorageNote" xml:space="preserve"><value>Calibration is saved on this PC for this physical stick, not in a profile or the controller's memory. USB and Bluetooth records may be separate. Mapped controller input is released while calibration is active.</value></data>
+  <data name="Switch2Calib.ResetBtn" xml:space="preserve"><value>_Reset this stick's PC calibration…</value></data>
+
+  <data name="StickCalib.WinTitle" xml:space="preserve"><value>StickCalibration</value></data>
+  <data name="StickCalib.Instructions" xml:space="preserve"><value>Please move your stick to the sides and release it a few times, then after you are done press Save.</value></data>
+
+  <data name="TouchButton.ActivationMode" xml:space="preserve"><value>Button Activation Mode</value></data>
 </root>

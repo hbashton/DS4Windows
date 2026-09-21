@@ -45,7 +45,7 @@
                         <Run Text="{lex:Loc Welcome.BluetoothSettings}" />
                     </Hyperlink>
                 </TextBlock>
-                <Image Source="{Binding Source={StaticResource resourcePaths}, Path=PairmodePNG}" Height="80" DockPanel.Dock="Top" />
+                <Image Source="{Binding Source={StaticResource resourcePaths}, Path=PairmodePNG}" Height="80" DockPanel.Dock="Top" FlowDirection="LeftToRight" />
             </DockPanel>
 
             <StackPanel x:Name="step4HidHidePanel" DockPanel.Dock="Top" Margin="0,8,0,0">

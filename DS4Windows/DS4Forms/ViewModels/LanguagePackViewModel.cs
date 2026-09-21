@@ -86,7 +86,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 if (newValue != Global.UseLang)
                 {
                     Global.UseLang = newValue;
-                    //Global.Save();
+                    Global.Save();
                     result = true;
                 }
             }

@@ -436,4 +436,531 @@
   <data name="RealWorldCalibration" xml:space="preserve">
     <value>כיול לפי העולם האמיתי</value>
   </data>
+
+  <data name="About.ContributorsLink" xml:space="preserve"><value>תורמים</value></data>
+  <data name="About.Description" xml:space="preserve"><value>תיאור</value></data>
+  <data name="About.FakerInputDesc" xml:space="preserve"><value>השתמש בדרייבר FakerInput כדי לחשוף מקלדת וירטואלית, עכבר יחסי ועכבר מוחלט ברמת המערכת. זה מאפשר שימוש באירועי מקלדת ועכבר וירטואליים במצבים מסוימים שבהם SendInput נכשל. מצבים כאלה כוללים תהליכים ומשחקים עם הרשאות מוגברות, בקשות UAC, ומערכות אנטי-צ'יט שחוסמות אירועי SendInput. השימוש ב-FakerInput נחוץ כדי לאפשר ל-DS4Windows לעבוד עם משחקים מסוימים בעלי הגנת אנטי-צ'יט כמו Valorant.</value></data>
+  <data name="About.HeaderLabel" xml:space="preserve"><value>DS4Windows - גרסת hbashton (גרסה </value></data>
+  <data name="About.HidHideDesc" xml:space="preserve"><value>השתמש ב-HidHide כדי להגדיר ולהסתיר בקרי קלט מתוכנות אחרות הפועלות במערכת שלך. משחקים מסוימים דורשים שרק בקר אחד יהיה נוכח, אחרת קלט כפול יגרום לבעיות במשחק. נכתב על ידי nefarius.</value></data>
+  <data name="About.HotkeysText" xml:space="preserve"><value>השתמש ב-HidHide כדי למנוע קלט כפול: מסתיר את הבקר הפיזי מהמשחקים בזמן ש-DS4Windows ממשיך להשתמש בו, ומונע קלט כפול
+לחיצה על הצד השמאלי של לוח המגע: מגע שמאלי
+לחיצה על הצד הימני של לוח המגע: מגע ימני
+לחיצה על לוח המגע בשתי אצבעות: מגע מרובה
+לחיצה על החלק העליון של לוח המגע: מגע עליון
+PS + Options או החזקת PS למשך 10 שניות: ניתוק הבקר (רק בבלוטות')
+מגע בלוח המגע + PS: כיבוי תנועת לוח המגע (הלחיצה עדיין פועלת)
+לחיצה בפינה הימנית התחתונה של לוח המגע: לחיצה ימנית (מומלץ כשמשתמשים בצד הימני ככפתור עכבר)
+שתי אצבעות למעלה/למטה על לוח המגע*: גלילה למעלה/למטה
+מגע ואז החזקה על לוח המגע*: גרירה עם לחצן שמאלי בעכבר
+החלקת שתי אצבעות שמאלה או ימינה על לוח המגע: מעבר בין פרופילים
+מקש Shift: החזק פעולה כדי להשתמש בקבוצת פקדים אחרת
+בעת מיפוי מקלדת ועכבר:
+Toggle: המקש יישאר במצב "לחוץ" עד שיילחץ שוב
+Macro: הקצה מספר מקשים לקלט אחד
+Scan Code: המקשים מתפרשים אחרת. עשוי להידרש במשחקים מסוימים
+*אם מופעל</value></data>
+  <data name="About.ProjectUrl" xml:space="preserve"><value>כתובת הפרויקט:</value></data>
+  <data name="About.SourceLink" xml:space="preserve"><value>קוד מקור</value></data>
+  <data name="About.TabCredits" xml:space="preserve"><value>תורמים</value></data>
+  <data name="About.TabExtras" xml:space="preserve"><value>תוספות</value></data>
+  <data name="About.TabHotkeys" xml:space="preserve"><value>קיצורי מקלדת</value></data>
+  <data name="About.TabLicense" xml:space="preserve"><value>רישיון</value></data>
+  <data name="About.Translators" xml:space="preserve"><value>מתרגמים:</value></data>
+  <data name="AbsoluteMouse" xml:space="preserve"><value>עכבר מוחלט</value></data>
+  <data name="AbsoluteMouseOptions" xml:space="preserve"><value>אפשרויות עכבר מוחלט</value></data>
+  <data name="Accept" xml:space="preserve"><value>אישור</value></data>
+  <data name="Active" xml:space="preserve"><value>פעיל</value></data>
+  <data name="Add" xml:space="preserve"><value>הוסף</value></data>
+  <data name="AddWindowTitleRule" xml:space="preserve"><value>הוסף כלל כותרת חלון</value></data>
+  <data name="AdvancedSupport" xml:space="preserve"><value>תמיכה מתקדמת</value></data>
+  <data name="Analog" xml:space="preserve"><value>אנלוגי</value></data>
+  <data name="AntiDeadZone" xml:space="preserve"><value>אנטי-אזור מת</value></data>
+  <data name="AntiDeadzoneTooltip" xml:space="preserve"><value>אנטי-אזור מת פועל כהיסט לשימוש עם ציר, ומציין את ערך הפלט המינימלי שנוצר לאחר שהציר יצא מהאזור המת שהוגדר לו. מטרתו העיקרית היא לסייע במיפוי ציר לערך האזור המת שהוגדר עבור ציר במשחק וידאו. לדוגמה, האזור המת הטיפוסי שמוגדר ל-XInput LS במשחק וידאו הוא בסביבות 8000 (25%). ללא הגדרת אנטי-אזור מת, ציר יצטרך לנוע מעבר לאזור המת שהוגדר ב-DS4Windows יחד עם האזור המת שהוגדר לציר במשחק.</value></data>
+  <data name="AntiRadius" xml:space="preserve"><value>אנטי-רדיוס</value></data>
+  <data name="AntiSnapback" xml:space="preserve"><value>מניעת קפיצה חזרה</value></data>
+  <data name="AntiSnapbackTiming" xml:space="preserve"><value>תזמון מניעת קפיצה חזרה</value></data>
+  <data name="AppTheme" xml:space="preserve"><value>ערכת נושא לאפליקציה</value></data>
+  <data name="Appdata" xml:space="preserve"><value>Appdata</value></data>
+  <data name="AudioHaptics.Aggressive" xml:space="preserve"><value>אגרסיבי</value></data>
+  <data name="AudioHaptics.AutoFollowGamesDesc" xml:space="preserve"><value>עובר לשמע המשחק הפעיל באמצעות רישומי משחקים של Windows ומניפסטים של תוכנות הפעלה מותקנות.</value></data>
+  <data name="AudioHaptics.AutoFollowGamesTip" xml:space="preserve"><value>עוקב אחר משחקים המזוהים על ידי Windows, Steam, Epic או GOG. האפליקציה שנבחרה נשארת כברירת מחדל חלופית.</value></data>
+  <data name="AudioHaptics.AutoFollowGamesTitle" xml:space="preserve"><value>מעקב אוטומטי אחר משחקים</value></data>
+  <data name="AudioHaptics.BassFocusLabel" xml:space="preserve"><value>מיקוד באסים</value></data>
+  <data name="AudioHaptics.BassFocusTip" xml:space="preserve"><value>בחר איזה טווח תדרים נמוכים הופך לרטט.</value></data>
+  <data name="AudioHaptics.Dynamic" xml:space="preserve"><value>דינמי</value></data>
+  <data name="AudioHaptics.Enabled" xml:space="preserve"><value>מופעל</value></data>
+  <data name="AudioHaptics.FadeLabel" xml:space="preserve"><value>דעיכה</value></data>
+  <data name="AudioHaptics.FadeTip" xml:space="preserve"><value>שלוט במהירות שבה הרטט הלמישי דועך לאחר ירידת הצליל.</value></data>
+  <data name="AudioHaptics.FastFade" xml:space="preserve"><value>דעיכה מהירה</value></data>
+  <data name="AudioHaptics.FastRamp" xml:space="preserve"><value>עלייה מהירה</value></data>
+  <data name="AudioHaptics.HeadsetOnlyDesc" xml:space="preserve"><value>שולח את האפליקציה שנלכדה רק דרך יציאת ה-AUX של הבקר.</value></data>
+  <data name="AudioHaptics.HeadsetOnlyTip" xml:space="preserve"><value>מנתב את שמע האפליקציה שנלכדה לאוזניות המחוברות לבקר ומשתיק את הרמקול של הבקר.</value></data>
+  <data name="AudioHaptics.HeadsetOnlyTitle" xml:space="preserve"><value>אוזניות בלבד</value></data>
+  <data name="AudioHaptics.High" xml:space="preserve"><value>גבוה</value></data>
+  <data name="AudioHaptics.InstantRamp" xml:space="preserve"><value>עלייה מיידית</value></data>
+  <data name="AudioHaptics.LongFade" xml:space="preserve"><value>דעיכה ארוכה</value></data>
+  <data name="AudioHaptics.Low" xml:space="preserve"><value>נמוך</value></data>
+  <data name="AudioHaptics.Medium" xml:space="preserve"><value>בינוני</value></data>
+  <data name="AudioHaptics.MediumFade" xml:space="preserve"><value>דעיכה בינונית</value></data>
+  <data name="AudioHaptics.MediumRamp" xml:space="preserve"><value>עלייה בינונית</value></data>
+  <data name="AudioHaptics.MixMode" xml:space="preserve"><value>מיזוג</value></data>
+  <data name="AudioHaptics.MixModeTip" xml:space="preserve"><value>מוסיף משוב למישי מבוסס-שמע לרטט המשחק הרגיל.</value></data>
+  <data name="AudioHaptics.ModeLabel" xml:space="preserve"><value>מצב</value></data>
+  <data name="AudioHaptics.PlayThroughControllerDesc" xml:space="preserve"><value>משדר גם את האפליקציה שנבחרה לרמקול הבקר ולאוזניות ה-AUX.</value></data>
+  <data name="AudioHaptics.PlayThroughControllerTip" xml:space="preserve"><value>עוקף את "מקור שמע הבקר" בסעיף Advanced בזמן שהוא פעיל. בחירת מקור אחר משם משחררת את העקיפה הזו.</value></data>
+  <data name="AudioHaptics.PlayThroughControllerTitle" xml:space="preserve"><value>נגן אפליקציה דרך הבקר</value></data>
+  <data name="AudioHaptics.RampLabel" xml:space="preserve"><value>עלייה</value></data>
+  <data name="AudioHaptics.RampTip" xml:space="preserve"><value>שלוט במהירות שבה הרטט הלמישי עולה עם הצליל.</value></data>
+  <data name="AudioHaptics.RefreshSourcesTip" xml:space="preserve"><value>רענן הפעלות שמע פעילות</value></data>
+  <data name="AudioHaptics.ReplaceMode" xml:space="preserve"><value>החלפה</value></data>
+  <data name="AudioHaptics.ReplaceModeTip" xml:space="preserve"><value>השתמש רק במשוב מבוסס-שמע.</value></data>
+  <data name="AudioHaptics.ResponseLabel" xml:space="preserve"><value>תגובה</value></data>
+  <data name="AudioHaptics.ResponseSubtitle" xml:space="preserve"><value>מיקוד תדרים ועוצמה</value></data>
+  <data name="AudioHaptics.ResponseTip" xml:space="preserve"><value>שלוט בעוצמת התגובה של הרטט הלמישי, בעיקר לשיאים.</value></data>
+  <data name="AudioHaptics.ResponseTitle" xml:space="preserve"><value>תגובה</value></data>
+  <data name="AudioHaptics.SlowFade" xml:space="preserve"><value>דעיכה איטית</value></data>
+  <data name="AudioHaptics.SlowRamp" xml:space="preserve"><value>עלייה איטית</value></data>
+  <data name="AudioHaptics.SourceLabel" xml:space="preserve"><value>מקור</value></data>
+  <data name="AudioHaptics.SourceScopeHelp" xml:space="preserve"><value>שמע המערכת משתמש רק ביציאת ברירת המחדל של Windows, לא בכל יציאת Sonar. בחר אפליקציה כדי לעקוב אחר השמע שלה בכל יציאה.</value></data>
+  <data name="AudioHaptics.StatusDisabled" xml:space="preserve"><value>Audio Haptics מושבת.</value></data>
+  <data name="AudioHaptics.Subtitle" xml:space="preserve"><value>משוב לבקר מבוסס-שמע</value></data>
+  <data name="AudioHaptics.Subtle" xml:space="preserve"><value>עדין</value></data>
+  <data name="AudioHaptics.SystemAudio" xml:space="preserve"><value>שמע המערכת</value></data>
+  <data name="AudioHaptics.Title" xml:space="preserve"><value>Audio Haptics</value></data>
+  <data name="AutoProfiles.DisplaySwitchVia" xml:space="preserve"><value>הצג מעבר פרופיל דרך</value></data>
+  <data name="AutoProfiles.LogAndNotification" xml:space="preserve"><value>יומן + התראה</value></data>
+  <data name="AutomaticallyRecalibrateStick" xml:space="preserve"><value>כיול אוטומטי מחדש של הסטיק</value></data>
+  <data name="Axial" xml:space="preserve"><value>צירי</value></data>
+  <data name="AxisConfig" xml:space="preserve"><value>הגדרות ציר</value></data>
+  <data name="BindingWin.AbsMouse" xml:space="preserve"><value>עכבר מוחלט</value></data>
+  <data name="BindingWin.AbsMouseDown" xml:space="preserve"><value>עכבר מוחלט למטה</value></data>
+  <data name="BindingWin.AbsMouseLeft" xml:space="preserve"><value>עכבר מוחלט שמאלה</value></data>
+  <data name="BindingWin.AbsMouseRight" xml:space="preserve"><value>עכבר מוחלט ימינה</value></data>
+  <data name="BindingWin.AbsMouseUp" xml:space="preserve"><value>עכבר מוחלט למעלה</value></data>
+  <data name="BindingWin.ChangeLight" xml:space="preserve"><value>שנה תאורה</value></data>
+  <data name="BindingWin.ChangeMouseSensitivity" xml:space="preserve"><value>שנה רגישות עכבר</value></data>
+  <data name="BindingWin.KeyAndRelMouse" xml:space="preserve"><value>מקלדת ועכבר יחסי</value></data>
+  <data name="BindingWin.KeyboardAndMouse" xml:space="preserve"><value>מקלדת ועכבר</value></data>
+  <data name="BindingWin.MacroOn" xml:space="preserve"><value>מאקרו פעיל, בחר מקש לביטול, או סגור חלון זה לשמירה</value></data>
+  <data name="BindingWin.RecordAMacro" xml:space="preserve"><value>הקלט מאקרו</value></data>
+  <data name="BindingWin.SelectShiftTrigger" xml:space="preserve"><value>בחר טריגר Shift</value></data>
+  <data name="Black" xml:space="preserve"><value>שחור</value></data>
+  <data name="Buttons" xml:space="preserve"><value>כפתורים</value></data>
+  <data name="CRC32Fail" xml:space="preserve"><value>בדיקת שלמות הנתונים נכשלה עבור המכשיר האלחוטי. סוגר את המכשיר.</value></data>
+  <data name="CancelCurrentMacro" xml:space="preserve"><value>בטל מאקרו נוכחי</value></data>
+  <data name="CancelCurrentMacroTooltip" xml:space="preserve"><value>קובע האם הפעלת מאקרו זה צריכה לעצור מאקרו אחר הפועל כרגע</value></data>
+  <data name="ChangeOnNewDeviceConn" xml:space="preserve"><value>השינויים ייכנסו לתוקף בחיבור מכשיר חדש</value></data>
+  <data name="CheckEvery" xml:space="preserve"><value>בדוק כל</value></data>
+  <data name="ColorAndLength" xml:space="preserve"><value>צבע ואורך</value></data>
+  <data name="Colored" xml:space="preserve"><value>צבעוני</value></data>
+  <data name="Confirm" xml:space="preserve"><value>אישור</value></data>
+  <data name="ControllerRegOptWin.EnableHomeLED" xml:space="preserve"><value>הפעל נורת LED ראשית</value></data>
+  <data name="ControllerRegOptWin.JoinedGyroProvider" xml:space="preserve"><value>ספק חיישן תנועה משולב</value></data>
+  <data name="ControllerRegOptWin.LinkMode" xml:space="preserve"><value>מצב קישור</value></data>
+  <data name="ControllerRegOptWin.MuteLEDMode" xml:space="preserve"><value>מצב השתקת LED</value></data>
+  <data name="ControllerRegOptWin.PlayerLEDMode" xml:space="preserve"><value>מצב LED שחקן</value></data>
+  <data name="ControllerRegOptWin.WinTitle" xml:space="preserve"><value>אפשרויות סוג בקר</value></data>
+  <data name="ControllerSupportDS3" xml:space="preserve"><value>תמיכה בבקר DS3</value></data>
+  <data name="ControllerSupportDS4" xml:space="preserve"><value>תמיכה בבקר DS4</value></data>
+  <data name="ControllerSupportDualSense" xml:space="preserve"><value>תמיכה בבקר DualSense</value></data>
+  <data name="ControllerSupportJoyCon" xml:space="preserve"><value>תמיכה בבקר JoyCon</value></data>
+  <data name="ControllerSupportMoonlight" xml:space="preserve"><value>תמיכה בבקר וירטואלי</value></data>
+  <data name="ControllerSupportSwitchPro" xml:space="preserve"><value>תמיכה בבקר Switch Pro</value></data>
+  <data name="Controls" xml:space="preserve"><value>פקדים</value></data>
+  <data name="Copycat" xml:space="preserve"><value>Copycat</value></data>
+  <data name="CopycatTip" xml:space="preserve"><value>שנה כמה דגלים המשמשים עבור בקר DS4 שאינו מקורי. זה עשוי לתקן תמיכה ברטט ובתאורה עבור חלק מהעותקים של DS4 מיצרנים אחרים</value></data>
+  <data name="CreateLightbarMacro" xml:space="preserve"><value>צור מאקרו תאורה</value></data>
+  <data name="Cubic" xml:space="preserve"><value>קובי</value></data>
+  <data name="Current" xml:space="preserve"><value>נוכחי</value></data>
+  <data name="Custom" xml:space="preserve"><value>מותאם אישית</value></data>
+  <data name="DS4BTPollRate" xml:space="preserve"><value>קצב תשאול DS4 בבלוטות'</value></data>
+  <data name="DS4LightbarPassthruDisabled" xml:space="preserve"><value>תכונה זו מושבתת כרגע באפליקציה בשל בעיות דרייבר. אנו מקווים שהבעיות ייפתרו בעדכון עתידי.</value></data>
+  <data name="DS4OutputTriggersDefault" xml:space="preserve"><value>ברירת מחדל (אנלוגי + כפתורים)</value></data>
+  <data name="Dark" xml:space="preserve"><value>כהה</value></data>
+  <data name="Days" xml:space="preserve"><value>ימים</value></data>
+  <data name="DeadZone" xml:space="preserve"><value>אזור מת</value></data>
+  <data name="DeadZone X" xml:space="preserve"><value>אזור מת X</value></data>
+  <data name="DeadZone Y" xml:space="preserve"><value>אזור מת Y</value></data>
+  <data name="DeadZoneType" xml:space="preserve"><value>סוג אזור מת</value></data>
+  <data name="Default" xml:space="preserve"><value>ברירת מחדל</value></data>
+  <data name="DeltaAcceleration" xml:space="preserve"><value>תאוצת דלתא</value></data>
+  <data name="DetectedControllers" xml:space="preserve"><value>בקרים שזוהו</value></data>
+  <data name="DeviceOptions" xml:space="preserve"><value>אפשרויות מכשיר</value></data>
+  <data name="DeviceType" xml:space="preserve"><value>סוג מכשיר</value></data>
+  <data name="DirectionalSwipe" xml:space="preserve"><value>החלקה כיוונית</value></data>
+  <data name="DisableVirtualController" xml:space="preserve"><value>השבת בקר וירטואלי</value></data>
+  <data name="DisableVirtualControllerTip" xml:space="preserve"><value>אל תיצור/תשייך בקרים וירטואליים לבקרים המחוברים תחת פרופיל זה (חל בשמירת הפרופיל)</value></data>
+  <data name="DisconnectFromBtWhenStopping" xml:space="preserve"><value>נתק מבלוטות' בעצירה</value></data>
+  <data name="DualSRumbleForceGenericRescale" xml:space="preserve"><value>אילוץ שימוש בשתי רמות העוצמה (כללית וספציפית ל-DualSense)</value></data>
+  <data name="DualSRumbleForceGenericRescale_Tip" xml:space="preserve"><value>מומלץ להשאיר מושבת. |  | - מושבת: הרטט יעובד מחדש באופן טבעי על ידי הבקר בהתאם לרמת העוצמה שהוגדרה (איכות טובה יותר) |  | - מופעל: גם עיבוד הרטט הכללי של DS4Windows וגם הבקרה המקורית של DualSense יהיו פעילים</value></data>
+  <data name="DualSRumbleModeAccurate" xml:space="preserve"><value>מדויק</value></data>
+  <data name="DualSRumbleModeDisabled" xml:space="preserve"><value>מושבת</value></data>
+  <data name="DualSRumbleModeLegacy" xml:space="preserve"><value>ישן</value></data>
+  <data name="DualSRumbleModeNPowerLevelTxt" xml:space="preserve"><value>מצב רטט ורמת עוצמה:</value></data>
+  <data name="DualSRumbleModePassthru" xml:space="preserve"><value>העברה ישירה</value></data>
+  <data name="DualSRumbleModes_Tip" xml:space="preserve"><value>מצב מדויק (מומלץ): | - משחזר טוב יותר את תחושת הרטט של DualShock 4/Xbox 360 | - מבצע בצורה מדויקת יותר את אפקטי הרטט המיועדים של המשחק | - לרטט יש יותר עומק. בתוך אותה רמת עוצמה יש הבדל גדול יותר בין המינימום למקסימום של הפעלת הרטט במשחק, | הנע מנמוך מאוד ועד עוצמת המקסימום של הרמה שהוגדרה |  | מצב ישן: | - חזק יותר באופן כללי, אך חסר עומק | - בעל תחושה "חדה" יותר | - ההפעלה המינימלית והמקסימלית במשחק תהיה, בהתאמה, רק מעט מתחת ומעט מעל לעוצמת הרמה שנבחרה |  | מושבת: | - מבטל את הרטט לחלוטין</value></data>
+  <data name="DualSRumblePowerLevel_Tip" xml:space="preserve"><value>מעבד רמת העוצמה הטבעי של רטט DualSense. |  | - במצב מדויק, ה-[ מינימום // מקסימום ] של הרטט יהיה [ 1% /// רמת העוצמה שנבחרה ] |     - דוגמה (62%): [ מינימום = 1% /// מקסימום = 62% ] |  | - במצב ישן, ה-[מינימום /// מקסימום] של הרטט יהיה בערך [ רמת עוצמה - 12% /// רמת עוצמה + 12% ] |     - דוגמה (62%): [ מינימום = 50% /// מקסימום = 74% ]</value></data>
+  <data name="DualSRumbleSpecificSettings" xml:space="preserve"><value>הגדרות רטט ספציפיות ל-DualSense</value></data>
+  <data name="Dynamic" xml:space="preserve"><value>דינמי</value></data>
+  <data name="EaseoutCubic" xml:space="preserve"><value>Easeout קובי</value></data>
+  <data name="EaseoutQuad" xml:space="preserve"><value>Easeout ריבועי</value></data>
+  <data name="EasingDuration" xml:space="preserve"><value>משך ההחלקה</value></data>
+  <data name="EmulatedController" xml:space="preserve"><value>בקר מדומה</value></data>
+  <data name="EnableInterpretingOscMonitoring" xml:space="preserve"><value>פרש הודעות ניטור</value></data>
+  <data name="EnableOscSender" xml:space="preserve"><value>הפעל שירות ניטור</value></data>
+  <data name="EnableOscServer" xml:space="preserve"><value>הפעל שרת בקרה</value></data>
+  <data name="EnableTouchpadToggle" xml:space="preserve"><value>הפעל החלפת לוח מגע</value></data>
+  <data name="EnableVerboseLog" xml:space="preserve"><value>הפעל יומן מפורט</value></data>
+  <data name="EnableVerboseLogTip" xml:space="preserve"><value>הצג הודעות יומן נוספות כאשר בקר מתחבר</value></data>
+  <data name="Enabled" xml:space="preserve"><value>מופעל</value></data>
+  <data name="EnhancedPrecision" xml:space="preserve"><value>דיוק משופר</value></data>
+  <data name="ExclusiveAccess" xml:space="preserve"><value>גישה בלעדית</value></data>
+  <data name="ExportSpecialActions" xml:space="preserve"><value>ייצא פעולות</value></data>
+  <data name="Extra" xml:space="preserve"><value>נוסף</value></data>
+  <data name="FailedToRetrieveLatestVersion" xml:space="preserve"><value>אחזור הגרסה האחרונה נכשל</value></data>
+  <data name="FirstLaunch.DS3EnableCkbLabel" xml:space="preserve"><value>תמיכה במכשיר DS3</value></data>
+  <data name="FirstLaunch.DS3EnableText" xml:space="preserve"><value>תמיכה בבקרי DualShock 3 (PS3). דורש שימוש בדרייבר DsHidMini מפרויקט ViGEm (nefarius).</value></data>
+  <data name="FirstLaunch.DS4EnableCkbLabel" xml:space="preserve"><value>תמיכה במכשיר DS4</value></data>
+  <data name="FirstLaunch.DS4EnableText" xml:space="preserve"><value>תמיכה בבקרי DualShock 4 מוכרים</value></data>
+  <data name="FirstLaunch.DSEnableCkbLabel" xml:space="preserve"><value>תמיכה במכשיר DualSense</value></data>
+  <data name="FirstLaunch.DSEnableText" xml:space="preserve"><value>תמיכה בבקרי DualSense (PS5). דגם בסיסי ו-DS Edge</value></data>
+  <data name="FirstLaunch.DeviceIntroText" xml:space="preserve"><value>מכיוון שממפים אחרים מפעילים כברירת מחדל תמיכה בסוגי מכשירים מרובים (Steam Input), DS4Windows מפעיל כברירת מחדל רק תמיכה בקריאה מבקרי DS4. באפשרותך לציין כאן תמיכה בממפה עבור סוגי מכשירים נתמכים אחרים. היזהר בעת שימוש ב-DS4Windows יחד עם ממפים אפשריים אחרים הפועלים במקביל.</value></data>
+  <data name="FirstLaunch.DeviceSupport" xml:space="preserve"><value>תמיכה במכשירים</value></data>
+  <data name="FirstLaunch.Header" xml:space="preserve"><value>הפעלת תמיכת ממפה למכשירים</value></data>
+  <data name="FirstLaunch.JoyConEnableCkbLabel" xml:space="preserve"><value>תמיכה במכשיר JoyCon</value></data>
+  <data name="FirstLaunch.JoyConEnableText" xml:space="preserve"><value>תמיכה בבקרי JoyCon (Nintendo Switch)</value></data>
+  <data name="FirstLaunch.SwitchProEnableCkbLabel" xml:space="preserve"><value>תמיכה במכשיר Switch Pro</value></data>
+  <data name="FirstLaunch.SwitchProEnableText" xml:space="preserve"><value>תמיכה בבקרי Switch Pro (Nintendo Switch)</value></data>
+  <data name="FirstLaunch.WinTitle" xml:space="preserve"><value>הפעלה ראשונה</value></data>
+  <data name="FlashLightbarAtHighLatency" xml:space="preserve"><value>הבהב תאורה בזמן השהיה גבוה</value></data>
+  <data name="FlashRate" xml:space="preserve"><value>קצב הבהוב</value></data>
+  <data name="FlickStick" xml:space="preserve"><value>Flick Stick</value></data>
+  <data name="FullBtnPull" xml:space="preserve"><value>לחיצה מלאה על הכפתור</value></data>
+  <data name="FutureNetNotInstalled" xml:space="preserve"><value>.NET 5 Runtime לא זוהה במערכת שלך. אנא הורד והתקן את .NET 5 Runtime כדי להבטיח תאימות עם גרסאות עתידיות של DS4Windows. תופנה לדף ההורדה של .NET 5 Runtime עם סגירת חלון זה.</value></data>
+  <data name="Fuzz" xml:space="preserve"><value>Fuzz</value></data>
+  <data name="GyroControlsAccel" xml:space="preserve"><value>פקדים (Accel)</value></data>
+  <data name="GyroTriggerJitterCompensationTooltip" xml:space="preserve"><value>הוסף ריסון נוסף בקצה הנמוך של העקומה כדי לפצות על רעידות המכשיר</value></data>
+  <data name="Heavy" xml:space="preserve"><value>חזק</value></data>
+  <data name="Height" xml:space="preserve"><value>גובה</value></data>
+  <data name="HidGuardianAccess" xml:space="preserve"><value>גישת HidGuardian</value></data>
+  <data name="HidHide" xml:space="preserve"><value>HidHide</value></data>
+  <data name="HidHideAccess" xml:space="preserve"><value>גישת HidHide</value></data>
+  <data name="HidHideConfigClient" xml:space="preserve"><value>לקוח הגדרות HidHide</value></data>
+  <data name="HideDS4Controller" xml:space="preserve"><value>השתמש ב-HidHide כדי למנוע קלט כפול</value></data>
+  <data name="HipFireDelay" xml:space="preserve"><value>השהיית ירי מהמותן</value></data>
+  <data name="HoldFor" xml:space="preserve"><value>החזק למשך</value></data>
+  <data name="HotkeysAbout" xml:space="preserve"><value>קיצורים/אודות</value></data>
+  <data name="Hours" xml:space="preserve"><value>שעות</value></data>
+  <data name="ID" xml:space="preserve"><value>מזהה</value></data>
+  <data name="IconChoice" xml:space="preserve"><value>בחירת סמל</value></data>
+  <data name="IdleDisconnect" xml:space="preserve"><value>ניתוק בזמן חוסר פעילות</value></data>
+  <data name="Intro" xml:space="preserve"><value>מבוא</value></data>
+  <data name="InverseMotors" xml:space="preserve"><value>הפוך מנועים</value></data>
+  <data name="LangPackControl.UseLangPack" xml:space="preserve"><value>השתמש בחבילת שפה</value></data>
+  <data name="LaunchProgramWithProfile" xml:space="preserve"><value>הפעל תוכנית עם פרופיל</value></data>
+  <data name="Light" xml:space="preserve"><value>קל</value></data>
+  <data name="Lightbar" xml:space="preserve"><value>פס תאורה</value></data>
+  <data name="LightbarMode" xml:space="preserve"><value>מצב פס תאורה</value></data>
+  <data name="Linear" xml:space="preserve"><value>ליניארי</value></data>
+  <data name="LinkProfileId" xml:space="preserve"><value>קשר פרופיל/מזהה</value></data>
+  <data name="Macro" xml:space="preserve"><value>מאקרו</value></data>
+  <data name="MainWin.AbsDisplayMonitor" xml:space="preserve"><value>צג תצוגה מוחלט</value></data>
+  <data name="MainWin.EnableServer" xml:space="preserve"><value>הפעל שרת</value></data>
+  <data name="MainWin.OneEuroBeta" xml:space="preserve"><value>1€ Beta</value></data>
+  <data name="MainWin.OneEuroMinCutoff" xml:space="preserve"><value>1€ MinCutoff</value></data>
+  <data name="MappingLive.LeftStick" xml:space="preserve"><value>סטיק שמאלי</value></data>
+  <data name="MappingLive.NoControllerHint" xml:space="preserve"><value>חבר בקר, ולאחר מכן פתח מחדש את העורך הזה.</value></data>
+  <data name="MappingLive.PressedLabel" xml:space="preserve"><value>לחוצים</value></data>
+  <data name="MappingLive.RightStick" xml:space="preserve"><value>סטיק ימני</value></data>
+  <data name="MappingLive.Subtitle" xml:space="preserve"><value>בקר פיזי · לפני מיפוי מחדש</value></data>
+  <data name="MappingLive.Title" xml:space="preserve"><value>קלט חי</value></data>
+  <data name="MappingLive.Waiting" xml:space="preserve"><value>ממתין</value></data>
+  <data name="MaxOutput" xml:space="preserve"><value>פלט מקסימלי</value></data>
+  <data name="MaxTravel" xml:space="preserve"><value>טווח תנועה מקסימלי</value></data>
+  <data name="MaxZone" xml:space="preserve"><value>אזור מקסימלי</value></data>
+  <data name="MinFactor" xml:space="preserve"><value>מקדם מינימלי</value></data>
+  <data name="MinTravel" xml:space="preserve"><value>טווח תנועה מינימלי</value></data>
+  <data name="MinimizeToTaskbar" xml:space="preserve"><value>מזער לשורת המשימות</value></data>
+  <data name="MinimizeToTaskbarTip" xml:space="preserve"><value>מזער לשורת המשימות במקום למגש המערכת</value></data>
+  <data name="Mode" xml:space="preserve"><value>מצב</value></data>
+  <data name="Mouse" xml:space="preserve"><value>עכבר</value></data>
+  <data name="MouseAcceleration" xml:space="preserve"><value>תאוצת עכבר</value></data>
+  <data name="MouseJoystick" xml:space="preserve"><value>ג'ויסטיק כעכבר</value></data>
+  <data name="MouseOffset" xml:space="preserve"><value>היסט עכבר</value></data>
+  <data name="MouseSensitivity" xml:space="preserve"><value>רגישות עכבר</value></data>
+  <data name="MouseVerticalScale" xml:space="preserve"><value>קנה מידה אנכי של העכבר</value></data>
+  <data name="Multiplier" xml:space="preserve"><value>מכפיל</value></data>
+  <data name="Net8NotInstalledWinNotice" xml:space="preserve"><value>גרסה 3.3 של DS4Windows תדרוש התקנה של .NET 8 Desktop Runtime במערכת שלך   | [https://dotnet.microsoft.com/en-us/download/dotnet/thank-you/runtime-desktop-8.0.0-windows-{0}-installer](https://dotnet.microsoft.com/en-us/download/dotnet/thank-you/runtime-desktop-8.0.0-windows-{0}-installer)   |  | אנא לחץ אישור לאישור שקראת את ההודעה. לחץ ביטול כדי לקבל תזכורת נוספת בהפעלה הבאה של האפליקציה.</value></data>
+  <data name="Net8NoticeWin.WinTitle" xml:space="preserve"><value>.NET 8 לא נמצא</value></data>
+  <data name="No" xml:space="preserve"><value>לא</value></data>
+  <data name="Normal" xml:space="preserve"><value>רגיל</value></data>
+  <data name="Notification" xml:space="preserve"><value>התראה</value></data>
+  <data name="OK" xml:space="preserve"><value>אישור</value></data>
+  <data name="OscServerHeading" xml:space="preserve"><value>בקרה וניטור חיצוניים דרך OSC</value></data>
+  <data name="Other" xml:space="preserve"><value>אחר</value></data>
+  <data name="OutContNotice" xml:space="preserve"><value>בחר את סוג הבקר הווירטואלי הפלט (חל בשמירת הפרופיל)</value></data>
+  <data name="OuterBind" xml:space="preserve"><value>קשירה חיצונית</value></data>
+  <data name="OuterBtn" xml:space="preserve"><value>כפתור חיצוני</value></data>
+  <data name="OuterBtnDead" xml:space="preserve"><value>אזור מת לכפתור חיצוני</value></data>
+  <data name="OutputCurve" xml:space="preserve"><value>עקומת פלט</value></data>
+  <data name="OutputMode" xml:space="preserve"><value>מצב פלט</value></data>
+  <data name="OutputSlotMan.InputNum" xml:space="preserve"><value>מספר קלט #</value></data>
+  <data name="OutputSlotMan.XInputNum" xml:space="preserve"><value>מספר XInput #</value></data>
+  <data name="OutputSlots" xml:space="preserve"><value>חריצי פלט</value></data>
+  <data name="Overview.ActiveProfileHint" xml:space="preserve"><value>ההגדרות שלהלן נשמרות בפרופיל זה</value></data>
+  <data name="Overview.ActiveProfileLabel" xml:space="preserve"><value>פרופיל פעיל</value></data>
+  <data name="Overview.AudioHapticsOverrideNotice" xml:space="preserve"><value>Audio Haptics מספק כרגע את הזרם הזה. כבה את "נגן אפליקציה זו דרך הבקר" כדי לבחור מקור אחר.</value></data>
+  <data name="Overview.AudioSourceLabel" xml:space="preserve"><value>מקור שמע</value></data>
+  <data name="Overview.AudioSourceTip" xml:space="preserve"><value>ברירת המחדל לוכדת את תמהיל נקודת הקצה הרגילה. בחר אפליקציה כדי לשדר רק את השמע של אותה אפליקציה.</value></data>
+  <data name="Overview.Balanced" xml:space="preserve"><value>מאוזן</value></data>
+  <data name="Overview.BassBodyLabel" xml:space="preserve"><value>באס / גוף</value></data>
+  <data name="Overview.BassBodyTip" xml:space="preserve"><value>מוסיף גוף סביב 200 הרץ תוך סינון באס עמוק שאינו שמיש.</value></data>
+  <data name="Overview.BatteryLabel" xml:space="preserve"><value>סוללה</value></data>
+  <data name="Overview.ConnectionLabel" xml:space="preserve"><value>חיבור</value></data>
+  <data name="Overview.ControllerDetailsBtn" xml:space="preserve"><value>פרטי בקר</value></data>
+  <data name="Overview.ControllerSpeakerLabel" xml:space="preserve"><value>רמקול הבקר</value></data>
+  <data name="Overview.ControllerStatusLabel" xml:space="preserve"><value>מצב בקר</value></data>
+  <data name="Overview.DisconnectBtn" xml:space="preserve"><value>נתק</value></data>
+  <data name="Overview.DynamicRangeLabel" xml:space="preserve"><value>טווח דינמי</value></data>
+  <data name="Overview.DynamicRangeTip" xml:space="preserve"><value>מעלה פרטים שקטים ומרסן בבטחה אפקטים רועשים ללא השהיה חזויה.</value></data>
+  <data name="Overview.EditActiveProfileBtn" xml:space="preserve"><value>ערוך פרופיל פעיל</value></data>
+  <data name="Overview.EmulatedControllerDesc" xml:space="preserve"><value>הבקר הווירטואלי המוצג למשחקים.</value></data>
+  <data name="Overview.EmulatedControllerNote" xml:space="preserve"><value>שינוי הגדרה זו שומר את הפרופיל, ולאחר מכן מבצע טעינה מחדש מבוקרת אחת של הפלט.</value></data>
+  <data name="Overview.EmulatedControllerTitle" xml:space="preserve"><value>בקר מדומה</value></data>
+  <data name="Overview.EmulatedDeviceHint" xml:space="preserve"><value>מוחל דרך הפרופיל הפעיל</value></data>
+  <data name="Overview.EmulatedDeviceLabel" xml:space="preserve"><value>מכשיר מדומה</value></data>
+  <data name="Overview.HeadsetAuxLabel" xml:space="preserve"><value>אוזניות / AUX</value></data>
+  <data name="Overview.HeadsetAuxTip" xml:space="preserve"><value>שולט ביציאת האוזניות של הבקר באופן עצמאי מהרמקול המובנה שלו.</value></data>
+  <data name="Overview.HeadsetOnlyTip" xml:space="preserve"><value>משתיק את הרמקול המובנה תוך המשך הזרימה דרך אוזניות המחוברות ליציאת ה-AUX של הבקר.</value></data>
+  <data name="Overview.HeadsetOnlyToggle" xml:space="preserve"><value>אוזניות בלבד (השתקת רמקול הבקר)</value></data>
+  <data name="Overview.LightbarControlsBtn" xml:space="preserve"><value>בקרות פס תאורה</value></data>
+  <data name="Overview.LightbarControlsTip" xml:space="preserve"><value>השתמש בבקרות פס התאורה של הפרופיל או בחר צבע מותאם אישית זמני</value></data>
+  <data name="Overview.MicrophoneLevelLabel" xml:space="preserve"><value>רמת מיקרופון</value></data>
+  <data name="Overview.MicrophoneTitle" xml:space="preserve"><value>מיקרופון</value></data>
+  <data name="Overview.NoControllerHint" xml:space="preserve"><value>חבר בקר, ולאחר מכן בחר אותו מכרטיסי המכשיר בפינה השמאלית העליונה.</value></data>
+  <data name="Overview.NoControllerSelected" xml:space="preserve"><value>לא נבחר בקר</value></data>
+  <data name="Overview.NoiseSuppressionLabel" xml:space="preserve"><value>דיכוי רעש</value></data>
+  <data name="Overview.NvidiaAI" xml:space="preserve"><value>NVIDIA AI</value></data>
+  <data name="Overview.Off" xml:space="preserve"><value>כבוי</value></data>
+  <data name="Overview.OpenSoundSettingsBtn" xml:space="preserve"><value>פתח הגדרות שמע של Windows</value></data>
+  <data name="Overview.OpenSoundSettingsTip" xml:space="preserve"><value>בחר לאן ילכו קול המשחק והצ'אט הקולי שלך.</value></data>
+  <data name="Overview.OutputLevelsTitle" xml:space="preserve"><value>רמות פלט</value></data>
+  <data name="Overview.ProfileLabel" xml:space="preserve"><value>פרופיל  </value></data>
+  <data name="Overview.QuickActionsDesc" xml:space="preserve"><value>עבור לעורך המלא או נהל את הבקר הפיזי שנבחר.</value></data>
+  <data name="Overview.QuickActionsTitle" xml:space="preserve"><value>פעולות מהירות</value></data>
+  <data name="Overview.QuickProfileControlsDesc" xml:space="preserve"><value>כל שינוי נשמר בפרופיל הפעיל של הבקר שנבחר ומוחל אוטומטית.</value></data>
+  <data name="Overview.QuickProfileControlsTitle" xml:space="preserve"><value>בקרות פרופיל מהירות</value></data>
+  <data name="Overview.RefreshAudioSourcesTip" xml:space="preserve"><value>רענן מקורות שמע פעילים</value></data>
+  <data name="Overview.ReportIntervalLabel" xml:space="preserve"><value>מרווח וקצב דיווח קלט שנצפו</value></data>
+  <data name="Overview.ReportIntervalTip" xml:space="preserve"><value>המרווח והקצב שנצפו למשלוח הקלט. בקרים מאוחדים משתמשים בקצב הדיווח המורכב שלהם. זה אינו זמן השלמת ליבה (kernel) או השהיית משחק מקצה לקצה.</value></data>
+  <data name="Overview.SelectedControllerLabel" xml:space="preserve"><value>בקר נבחר</value></data>
+  <data name="Overview.SpeakerProcessingTitle" xml:space="preserve"><value>עיבוד רמקול</value></data>
+  <data name="Overview.StreamAudioTip" xml:space="preserve"><value>משדר את השמע הנבחר לבקר. משתמש ברמקול המובנה שלו אלא אם "אוזניות בלבד" מנתב אותו באופן בלעדי ליציאת ה-AUX.</value></data>
+  <data name="Overview.StreamAudioToggle" xml:space="preserve"><value>שדר שמע לבקר</value></data>
+  <data name="Overview.Strong" xml:space="preserve"><value>חזק</value></data>
+  <data name="Overview.UsbHeadsetNote" xml:space="preserve"><value>פועל באופן עצמאי מהבקר הווירטואלי שלך. שמע אוזניות בבלוטות' עדיין אינו נתמך.</value></data>
+  <data name="Overview.UsbHeadsetStep1" xml:space="preserve"><value>חבר את ה-Switch 2 Pro שלך דרך USB וחבר אוזניות. בחר Headphones (Switch 2 Pro Controller) בהגדרות המשחק או השמע של Windows. כוונן את עוצמת הקול משם.</value></data>
+  <data name="Overview.UsbHeadsetStep2" xml:space="preserve"><value>לצ'אט קולי, בחר Microphone (Switch 2 Pro Controller) והשתמש באוזניות עם מיקרופון.</value></data>
+  <data name="Overview.UsbHeadsetTitle" xml:space="preserve"><value>שימוש באוזניות דרך USB</value></data>
+  <data name="Passthru" xml:space="preserve"><value>העברה ישירה</value></data>
+  <data name="Permanent" xml:space="preserve"><value>קבוע</value></data>
+  <data name="Pitch" xml:space="preserve"><value>Pitch</value></data>
+  <data name="Plug" xml:space="preserve"><value>חבר</value></data>
+  <data name="Port" xml:space="preserve"><value>פורט</value></data>
+  <data name="PresetOptWin.OutputController" xml:space="preserve"><value>בקר פלט</value></data>
+  <data name="PresetOptWin.PresetMenu" xml:space="preserve"><value>תפריט הגדרות מוכנות מראש</value></data>
+  <data name="ProcessPriority" xml:space="preserve"><value>עדיפות תהליך</value></data>
+  <data name="ProfileEditor.VirtualDS4TrigOutput" xml:space="preserve"><value>מצב פלט טריגר DS4</value></data>
+  <data name="ProfileSwitchNotification" xml:space="preserve"><value>הצג התראת מעבר פרופיל</value></data>
+  <data name="Program" xml:space="preserve"><value>תוכנית</value></data>
+  <data name="ProgramFolder" xml:space="preserve"><value>תיקיית התוכנית</value></data>
+  <data name="Quadratic" xml:space="preserve"><value>ריבועי</value></data>
+  <data name="Radial" xml:space="preserve"><value>רדיאלי</value></data>
+  <data name="ReadingsControl.BatteryZero" xml:space="preserve"><value>סוללה: 0%</value></data>
+  <data name="ReadingsControl.InputDelayNA" xml:space="preserve"><value>השהיית קלט: לא זמין</value></data>
+  <data name="ReadingsControl.SixAxisXText" xml:space="preserve"><value>SixAxis: ציר X הפוך כדי להקל על הקריאה</value></data>
+  <data name="RealTimeNoAdmin" xml:space="preserve"><value>בחירת עדיפות בזמן אמת דורשת הפעלת האפליקציה במצב מנהל.</value></data>
+  <data name="RecordBox.AddRumble" xml:space="preserve"><value>הוסף רטט</value></data>
+  <data name="RecordBox.ChangeLightbarColor" xml:space="preserve"><value>שנה צבע פס תאורה</value></data>
+  <data name="RecordBox.DoubleClickWaitEdit" xml:space="preserve"><value>לחץ פעמיים על המתנה כדי לערוך את הזמן</value></data>
+  <data name="RecordBox.FifthMB" xml:space="preserve"><value>כפתור עכבר חמישי</value></data>
+  <data name="RecordBox.FourthMB" xml:space="preserve"><value>כפתור עכבר רביעי</value></data>
+  <data name="RecordBox.InsertWait" xml:space="preserve"><value>הוסף המתנה</value></data>
+  <data name="RecordBox.LoadPreset" xml:space="preserve"><value>טען הגדרה מוכנה מראש</value></data>
+  <data name="RecordBox.MacroOrder" xml:space="preserve"><value>סדר מאקרו</value></data>
+  <data name="RecordBox.PlayOnce" xml:space="preserve"><value>נגן פעם אחת</value></data>
+  <data name="RecordBox.RecordDelays" xml:space="preserve"><value>הקלט השהיות</value></data>
+  <data name="RecordBox.RepeatWhileHeld" xml:space="preserve"><value>חזור בזמן החזקה</value></data>
+  <data name="RecordBox.SavePreset" xml:space="preserve"><value>שמור הגדרה מוכנה מראש</value></data>
+  <data name="RecordBox.UseActionToRecord" xml:space="preserve"><value>השתמש במקלדת/עכבר + בקר 1 כדי להקליט</value></data>
+  <data name="RecordBoxWin.WinTitle" xml:space="preserve"><value>ערוך מאקרו</value></data>
+  <data name="Regular" xml:space="preserve"><value>רגיל</value></data>
+  <data name="RenameProfile" xml:space="preserve"><value>שנה שם</value></data>
+  <data name="RenameProfileWin.TypeNewProfileName" xml:space="preserve"><value>אנא הקלד את השם החדש עבור קובץ ה-XML של הפרופיל הנבחר.</value></data>
+  <data name="RenameProfileWin.WinTitle" xml:space="preserve"><value>שנה שם פרופיל</value></data>
+  <data name="Requested" xml:space="preserve"><value>נדרש</value></data>
+  <data name="RevertToDefaultProfileOnUnknown" xml:space="preserve"><value>חזור לפרופיל ברירת המחדל כאשר לא ידוע</value></data>
+  <data name="Roll" xml:space="preserve"><value>Roll</value></data>
+  <data name="Rotation" xml:space="preserve"><value>סיבוב</value></data>
+  <data name="RunAs" xml:space="preserve"><value>הפעל בתור</value></data>
+  <data name="SASteeringWheelFuzzTooltip" xml:space="preserve"><value>Fuzz קובע את המספר המינימלי של יחידות מכשיר, באזור הפעיל, שבהן Accel צריך לסובב לפני שהפלט נרשם כמשתנה בממפה. הערך מבוטא ביחידות Accel גולמיות.</value></data>
+  <data name="SaveWhere.AppDataDescText" xml:space="preserve"><value>למי שמעדיף התקנה רגילה. ההגדרות נשמרות ב-%appdata%\DS4Windows</value></data>
+  <data name="SaveWhere.DontDelete" xml:space="preserve"><value>אל תמחק עדיין את ההגדרות האחרות</value></data>
+  <data name="SaveWhere.MultipleSaves" xml:space="preserve"><value>זוהו מספר מיקומי שמירה</value></data>
+  <data name="SaveWhere.PickWhere" xml:space="preserve"><value>בחר היכן לשמור פרופילים והגדרות</value></data>
+  <data name="SaveWhere.ProgramFolderDescText" xml:space="preserve"><value>למי שמעדיף תוכנית ניידת. | הערה: אפשרות זו אינה עובדת בתיקיית מנהל ללא UAC</value></data>
+  <data name="SaveWhere.WinTitle" xml:space="preserve"><value>בחר היכן לשמור</value></data>
+  <data name="ScanCode" xml:space="preserve"><value>Scan Code</value></data>
+  <data name="SelectedProfile" xml:space="preserve"><value>פרופיל נבחר</value></data>
+  <data name="SendGameFeedbackToPhysicalController" xml:space="preserve"><value>שלח משוב משחק לבקר הפיזי</value></data>
+  <data name="SendGameFeedbackToPhysicalControllerTip" xml:space="preserve"><value>מומלץ. שולח רטט, משוב למישי מומר של DualSense, אפקטי טריגר אדפטיבי תואמים, ותאורת בקר מהמשחקים לבקר הפיזי המחובר. כבה זאת רק כאשר בקר אינו יכול לקבל פלט; השבתתו מסירה את אפקטי משוב המשחק הללו. חבר מחדש את הבקר לאחר שינוי הגדרה זו.</value></data>
+  <data name="Sensitivity" xml:space="preserve"><value>רגישות</value></data>
+  <data name="SharedAccess" xml:space="preserve"><value>גישה משותפת</value></data>
+  <data name="ShiftModifier" xml:space="preserve"><value>מקש Shift</value></data>
+  <data name="ShowAutoProfileDebugMessages" xml:space="preserve"><value>הצג הודעות ניפוי שגיאות של פרופילים אוטומטיים</value></data>
+  <data name="SixAxisAccel" xml:space="preserve"><value>Six Axis (Accel)</value></data>
+  <data name="SkipVersion" xml:space="preserve"><value>דלג על גרסה</value></data>
+  <data name="SnapToCenter" xml:space="preserve"><value>הצמד למרכז</value></data>
+  <data name="SolidColor" xml:space="preserve"><value>צבע אחיד</value></data>
+  <data name="SpecialActionEdit.CalibrateGyro" xml:space="preserve"><value>כייל חיישן תנועה</value></data>
+  <data name="SpecialActionEdit.CheckBattery" xml:space="preserve"><value>בדוק רמת סוללה</value></data>
+  <data name="SpecialActionEdit.DisconnectBT" xml:space="preserve"><value>נתק מבלוטות'</value></data>
+  <data name="SpecialActionEdit.DoubleTapTrigger" xml:space="preserve"><value>הקשה כפולה על טריגר</value></data>
+  <data name="SpecialActionEdit.HoldFor" xml:space="preserve"><value>החזק למשך</value></data>
+  <data name="SpecialActionEdit.HoldTrigger" xml:space="preserve"><value>החזק טריגר</value></data>
+  <data name="SpecialActionEdit.KeepKeyState" xml:space="preserve"><value>שמור מצב מקש</value></data>
+  <data name="SpecialActionEdit.LaunchProgram" xml:space="preserve"><value>הפעל תוכנית</value></data>
+  <data name="SpecialActionEdit.LoadProfile" xml:space="preserve"><value>טען פרופיל</value></data>
+  <data name="SpecialActionEdit.MacroRecorded" xml:space="preserve"><value>המאקרו הוקלט</value></data>
+  <data name="SpecialActionEdit.MultiAction" xml:space="preserve"><value>כפתור רב-פעולות</value></data>
+  <data name="SpecialActionEdit.PressKey" xml:space="preserve"><value>לחץ/החלף מקש</value></data>
+  <data name="SpecialActionEdit.PressingUnloadTrigger" xml:space="preserve"><value>בלחיצה על טריגר הביטול</value></data>
+  <data name="SpecialActionEdit.RecordMacro" xml:space="preserve"><value>הקלט מאקרו</value></data>
+  <data name="SpecialActionEdit.ReleasingUnloadTrigger" xml:space="preserve"><value>בשחרור טריגר הביטול</value></data>
+  <data name="SpecialActionEdit.RepeatWhileHeld" xml:space="preserve"><value>חזור בזמן החזקה</value></data>
+  <data name="SpecialActionEdit.RunTriggerRelease" xml:space="preserve"><value>הפעל בשחרור הטריגר</value></data>
+  <data name="SpecialActionEdit.SelectAction" xml:space="preserve"><value>-בחר פעולה-</value></data>
+  <data name="SpecialActionEdit.SelectKey" xml:space="preserve"><value>בחר מקש</value></data>
+  <data name="SpecialActionEdit.SelectMacro" xml:space="preserve"><value>בחר מאקרו</value></data>
+  <data name="SpecialActionEdit.SetUnloadTrigger" xml:space="preserve"><value>הגדר טריגר ביטול</value></data>
+  <data name="SpecialActionEdit.SixAxisWheelCalib" xml:space="preserve"><value>כיול הגה עם חיישן שישה צירים</value></data>
+  <data name="SpecialActionEdit.SyncRun" xml:space="preserve"><value>הפעלה מסונכרנת</value></data>
+  <data name="SpecialActionEdit.TapTrigger" xml:space="preserve"><value>הקש טריגר</value></data>
+  <data name="SpecialActionEdit.UnloadTriggerRelease" xml:space="preserve"><value>בטל בשחרור הטריגר</value></data>
+  <data name="SpecialActionEdit.UntoggleKeyBy" xml:space="preserve"><value>בטל החלפת מקש על ידי</value></data>
+  <data name="SpecialActionEdit.ViaLightbar" xml:space="preserve"><value>דרך פס התאורה</value></data>
+  <data name="SpecialActionEdit.ViaNotification" xml:space="preserve"><value>דרך התראה</value></data>
+  <data name="SquareStick" xml:space="preserve"><value>סטיק מרובע</value></data>
+  <data name="StickCalib.Instructions" xml:space="preserve"><value>אנא הזז את הסטיק לצדדים ושחרר אותו מספר פעמים, ולאחר הסיום לחץ על שמור.</value></data>
+  <data name="StickCalib.WinTitle" xml:space="preserve"><value>כיול סטיק</value></data>
+  <data name="StickCalibration" xml:space="preserve"><value>כיול סטיק</value></data>
+  <data name="StickFuzzTooltip" xml:space="preserve"><value>Fuzz קובע את המספר המינימלי של יחידות שהסטיק האנלוגי נע, באזור הפעיל, לפני שהפלט נרשם כמשתנה בממפה. הגדרה זו יכולה להועיל לסטיקים שחוקים שאינם יכולים לשמור על מיקום קבוע. הערך מבוטא ביחידות סטיק גולמיות.</value></data>
+  <data name="StickInputCurveTooltip" xml:space="preserve"><value>הגדרה ישנה שיצאה משימוש. ניסיון להחיל עקומה על בסיס קואורדינטות קלט גולמיות לפני החלת מידע אזור מת כלשהו. לא יציב</value></data>
+  <data name="StickMaxOutputForceTooltip" xml:space="preserve"><value>אכוף תמיד את הגדרת הפלט המקסימלי. שימושי עבור פלט מקסימלי של 100% והגבלת הערך לפלט מעגלי</value></data>
+  <data name="StickMaxOutputTooltip" xml:space="preserve"><value>במצבים מסוימים, עשוי להיות שימושי להגביל את הערך המקסימלי המופק על ידי הסטיק האנלוגי. פלט מקסימלי מאפשר לרסן את ערך הפלט הסופי של הסטיק האנלוגי.</value></data>
+  <data name="StickOuterBindDeadTooltip" xml:space="preserve"><value>הסף שבו פעולה תופעל</value></data>
+  <data name="StickOuterBindInvertTooltip" xml:space="preserve"><value>גורם לקשירה החיצונית להתחיל לפני הגעה לסף. הפעולה משתחררת ברגע שהסף נחצה</value></data>
+  <data name="StickOuterBindTooltip" xml:space="preserve"><value>פעולה שתתבצע כאשר טווח תנועת הסטיק חורג מסף מסוים. שימושי למיפוי מקשים לפעולות הליכה או ריצה. היפוך גורם לפעולה להתחיל ולהמשיך עד הגעה לסף</value></data>
+  <data name="StickRotationTooltip" xml:space="preserve"><value>+ = כיוון השעון. - = נגד כיוון השעון. |  | הגדרת הסיבוב נועדה לסייע בתיקון הכיוון של הסטיק האנלוגי אם האגודל שלך מוסט מעט בעת הזזת הסטיק. לדוגמה, האגודל שלך עשוי להיות מוסט מעט מהמרכז כאשר הסטיק מוזז לגמרי צפונה. האגודלים שלי מוסטים מעט ימינה בעת הזזת סטיק לגמרי צפונה בגלל האופן שבו הידיים שלי אוחזות ב-DS4. הערך המשמש מציין את מספר המעלות המשמשות לכוונון ערך פלט הציר הסופי. הערכים נעים בטווח שבין 180- ל-180. ברירת המחדל היא 0.</value></data>
+  <data name="SwipeEditor.ClearAll" xml:space="preserve"><value>נקה הכל</value></data>
+  <data name="SwipeEditor.Instructions" xml:space="preserve"><value>סמן את הפרופילים שהחלקת לוח המגע בשתי אצבעות רשאית לעבור ביניהם. אם לא סומן דבר, ההחלקה עוברת בין כל הפרופילים (התנהגות ברירת המחדל).</value></data>
+  <data name="SwipeEditor.SelectAll" xml:space="preserve"><value>בחר הכל</value></data>
+  <data name="SwipeEditor.WinTitle" xml:space="preserve"><value>הגדרת פרופילי החלקה</value></data>
+  <data name="SwipeTouchpadToSwitchProfiles" xml:space="preserve"><value>החלק בלוח המגע כדי להחליף פרופילים</value></data>
+  <data name="Switch2Calib.CancelBtn" xml:space="preserve"><value>_בטל לכידה</value></data>
+  <data name="Switch2Calib.CloseBtn" xml:space="preserve"><value>_סגור</value></data>
+  <data name="Switch2Calib.ClosingWarning" xml:space="preserve"><value>סגירה מבטלת את הלכידה וההפעלה החיה. שמירה שכבר כותבת לדיסק עשויה עדיין להסתיים; הסגירה אינה מבטלת את אותה כתיבה.</value></data>
+  <data name="Switch2Calib.Heading" xml:space="preserve"><value>כייל את הסטיקים שלך</value></data>
+  <data name="Switch2Calib.PhysicalStickLabel" xml:space="preserve"><value>סטיק פיזי</value></data>
+  <data name="Switch2Calib.ResetBtn" xml:space="preserve"><value>_אפס את כיול המחשב לסטיק זה…</value></data>
+  <data name="Switch2Calib.SaveBtn" xml:space="preserve"><value>_שמור כיול</value></data>
+  <data name="Switch2Calib.StartBtn" xml:space="preserve"><value>_התחל כיול</value></data>
+  <data name="Switch2Calib.StorageNote" xml:space="preserve"><value>הכיול נשמר במחשב זה עבור הסטיק הפיזי הזה, לא בפרופיל או בזיכרון הבקר. רישומי USB ובלוטות' עשויים להיות נפרדים. קלט הבקר הממופה משתחרר בזמן שהכיול פעיל.</value></data>
+  <data name="Switch2Calib.WinTitle" xml:space="preserve"><value>כיול סטיק Switch 2</value></data>
+  <data name="Task" xml:space="preserve"><value>משימה</value></data>
+  <data name="Test" xml:space="preserve"><value>בדיקה</value></data>
+  <data name="TestHeavy" xml:space="preserve"><value>בדיקה חזקה</value></data>
+  <data name="TestLight" xml:space="preserve"><value>בדיקה קלה</value></data>
+  <data name="Toggle" xml:space="preserve"><value>החלף</value></data>
+  <data name="TouchButton.ActivationMode" xml:space="preserve"><value>מצב הפעלת כפתור</value></data>
+  <data name="Touchpad" xml:space="preserve"><value>לוח מגע</value></data>
+  <data name="TouchpadJitterCompTooltip" xml:space="preserve"><value>מרסן את הקצה הנמוך של תנועת לוח המגע. מפחית תנועת עכבר בשוגג בעת החזקת מיקום כמעט קבוע על לוח המגע</value></data>
+  <data name="TouchpadMinThresholdTooltip" xml:space="preserve"><value>טווח תנועת פלט מחושב מינימלי לפני שאירוע עכבר נשלח למערכת</value></data>
+  <data name="TouchpadRotationTooltip" xml:space="preserve"><value>מכוונן החלקת לוח מגע בזווית סיבוב נתונה. שימושי כאשר החלקת לוח מגע רגילה אינה קו ישר לרוחב. הערכים נעים בטווח שבין 180- ל-180. ברירת המחדל היא 0.</value></data>
+  <data name="TouchpadSlideTooltip" xml:space="preserve"><value>הרגישות המשמשת להפעלת פעולת גלילת גלגלת עכבר מרובת מגע</value></data>
+  <data name="TouchpadTapTooltip" xml:space="preserve"><value>הפעל לחיצה שמאלית בעכבר עם הקשה על לוח המגע. מרווח הזמן המקסימלי מוגדר כ-(ערך × 2) מילישניות.</value></data>
+  <data name="TouchpadTrackballEnableTooltip" xml:space="preserve"><value>מוסיף תנופה להחלקת לוח מגע לאחר הרמת אצבע. מוסיף טווח תנועת עכבר נוסף מעבר למה שאפשרי בשטח המוגבל של לוח המגע</value></data>
+  <data name="TouchpadTrackballFrictionTooltip" xml:space="preserve"><value>הוסף חיכוך לכדור המעקב הווירטואלי. הפחתת חיכוך תגדיל את זמן תנועת מצביע העכבר הסופי</value></data>
+  <data name="TriggerEffect" xml:space="preserve"><value>אפקט טריגר</value></data>
+  <data name="TriggerLab.BehaviorNote" xml:space="preserve"><value>אפקטי מעבדה פעילים עוקפים את פלט הטריגר האדפטיבי הנכנס מהמשחק.</value></data>
+  <data name="TriggerLab.EffectDesign" xml:space="preserve"><value>עיצוב אפקט</value></data>
+  <data name="TriggerLab.Enabled" xml:space="preserve"><value>מופעל</value></data>
+  <data name="TriggerLab.Linked" xml:space="preserve"><value>מקושר</value></data>
+  <data name="TriggerLab.LinkedTip" xml:space="preserve"><value>השתמש בעיצוב אפקט משותף אחד עבור L2 ו-R2. הגדרות מוכנות מראש, מצבים ומחוונים משתקפים בין שני הצדדים; מתג "פעיל" של כל טריגר נשאר עצמאי.</value></data>
+  <data name="TriggerLab.OverrideBadge" xml:space="preserve"><value>עקיפת מעבדה</value></data>
+  <data name="TriggerLab.Split" xml:space="preserve"><value>פיצול</value></data>
+  <data name="TriggerLab.SplitTip" xml:space="preserve"><value>הגדר עיצובי אפקט נפרדים עבור L2 ו-R2. חזרה ל"פיצול" משחזרת את ההגדרות העצמאיות האחרונות שלך, כולל איזה טריגר היה פעיל.</value></data>
+  <data name="TurnOffDS4WindowsTemporarily" xml:space="preserve"><value>כבה את DS4Windows זמנית</value></data>
+  <data name="TwoStageMode" xml:space="preserve"><value>מצב דו-שלבי</value></data>
+  <data name="UDPServer" xml:space="preserve"><value>שרת UDP</value></data>
+  <data name="Unbound" xml:space="preserve"><value>לא מוגדר</value></data>
+  <data name="UnloadTrigger" xml:space="preserve"><value>טריגר ביטול</value></data>
+  <data name="Unplug" xml:space="preserve"><value>נתק</value></data>
+  <data name="UpdaterWin.WinTitle" xml:space="preserve"><value>חלון עדכון</value></data>
+  <data name="UpgradeNetCaption" xml:space="preserve"><value>אנא עדכן את .NET Runtime</value></data>
+  <data name="UseController" xml:space="preserve"><value>השתמש בבקר</value></data>
+  <data name="UseCustomSteamFolder" xml:space="preserve"><value>השתמש בתיקיית Steam מותאמת אישית</value></data>
+  <data name="UseDs3PitchRollSim" xml:space="preserve"><value>[ניסיוני] השתמש בסימולציית חיישן תנועה של DS3</value></data>
+  <data name="UseSmoothing" xml:space="preserve"><value>השתמש בהחלקה</value></data>
+  <data name="Utils" xml:space="preserve"><value>כלי עזר</value></data>
+  <data name="VerticalScale" xml:space="preserve"><value>קנה מידה אנכי</value></data>
+  <data name="ViGEm117MinNeeded" xml:space="preserve"><value>פועל רק עם ViGEmBus 1.17.333.0 ומעלה</value></data>
+  <data name="ViGEmPluginFailure" xml:space="preserve"><value>תוסף מכשיר ViGEm נכשל. קוד שגיאה {0}. ככל הנראה בעיה פנימית ב-ViGEmBus. סוגר את החיבור. אם הבעיה נמשכת, אנא סגור את DS4Windows והפעל מחדש את Windows.</value></data>
+  <data name="ViiperProgress.DetailText" xml:space="preserve"><value>השאר חלון זה פתוח. ההגדרה תסתיים אוטומטית.</value></data>
+  <data name="ViiperProgress.Heading" xml:space="preserve"><value>מגדיר את VIIPER</value></data>
+  <data name="ViiperProgress.PreparingPackage" xml:space="preserve"><value>מכין חבילה מאומתת...</value></data>
+  <data name="ViiperProgress.StepInstallViiper" xml:space="preserve"><value>• התקן VIIPER 0.1.5-rc4.6</value></data>
+  <data name="ViiperProgress.StepVerifyFiles" xml:space="preserve"><value>• אמת קבצים ארוזים</value></data>
+  <data name="ViiperProgress.StepVerifyStartup" xml:space="preserve"><value>• אמת הפעלה ו-API</value></data>
+  <data name="ViiperProgress.StepVerifyUsbip" xml:space="preserve"><value>• אמת USB-IP 0.9.7.7</value></data>
+  <data name="ViiperProgress.Summary" xml:space="preserve"><value>DS4Windows מאמת את מנגנון הבקר המלא.</value></data>
+  <data name="ViiperProgress.WinTitle" xml:space="preserve"><value>הגדרת VIIPER</value></data>
+  <data name="ViiperPrompt.Close" xml:space="preserve"><value>סגור</value></data>
+  <data name="ViiperPrompt.CurrentStatus" xml:space="preserve"><value>מצב נוכחי</value></data>
+  <data name="ViiperPrompt.ExistingDescription" xml:space="preserve"><value>קובץ הפעלה זה לא יורם בהרשאות או ייבחר. התקנה או תיקון משתמשים במנגנון המאומת ב-Program Files ומסירים רק קבצי VIIPER ישנים מוכרים:</value></data>
+  <data name="ViiperPrompt.ExistingHeading" xml:space="preserve"><value>זוהה VIIPER מתחרה</value></data>
+  <data name="ViiperPrompt.Heading" xml:space="preserve"><value>VIIPER דורש תשומת לב</value></data>
+  <data name="ViiperPrompt.InstallPortable" xml:space="preserve"><value>השאר את DS4Windows נייד</value></data>
+  <data name="ViiperPrompt.InstallStandard" xml:space="preserve"><value>התקנה רגילה</value></data>
+  <data name="ViiperPrompt.NotNow" xml:space="preserve"><value>לא עכשיו</value></data>
+  <data name="ViiperPrompt.PortableWarning" xml:space="preserve"><value>"השאר את DS4Windows נייד" משאיר אפליקציה זו בדיוק במקומה, בעוד שמתקין את מנגנון ה-VIIPER המורם בהרשאות ב-Program Files המוגן. התקנה רגילה גם היא מעבירה רק קבצי DS4Windows השייכים לחבילה אל Program Files. פרופילים, הגדרות וקבצים לא מוכרים נשמרים תמיד.</value></data>
+  <data name="ViiperPrompt.RequirementsHeading" xml:space="preserve"><value>מה ש-DS4Windows צריך</value></data>
+  <data name="ViiperPrompt.RequirementsText" xml:space="preserve"><value>• שרת/מסייע VIIPER&#x0a;• דרייבר ה-USB/IP של Windows בשם usbip-win2</value></data>
+  <data name="ViiperPrompt.Summary" xml:space="preserve"><value>פרופיל זה משתמש בפלט בקר וירטואלי של VIIPER.</value></data>
+  <data name="ViiperPrompt.SuppressPrompt" xml:space="preserve"><value>אל תציג הודעת הגדרה זו שוב</value></data>
+  <data name="ViiperPrompt.SuppressPromptTip" xml:space="preserve"><value>תוכל להפעיל מחדש הודעות הגדרה מתוך Settings ← VIIPER Virtual Controller Support.</value></data>
+  <data name="ViiperPrompt.WinTitle" xml:space="preserve"><value>הגדרת בקר וירטואלי VIIPER</value></data>
+  <data name="VirtualControllerSettings" xml:space="preserve"><value>הגדרות בקר וירטואלי</value></data>
+  <data name="WakeupFromSuspend" xml:space="preserve"><value>התעוררות ממצב השהיה</value></data>
+  <data name="Welcome.BluetoothSettings" xml:space="preserve"><value>הגדרות בלוטות'</value></data>
+  <data name="Welcome.Step1HelpText" xml:space="preserve"><value>אם חלון זה מופיע שוב לאחר ההתקנה, ייתכן שתצטרך להפעיל מחדש את המחשב.</value></data>
+  <data name="Welcome.Step1Text" xml:space="preserve"><value>שלב 1: התקן דרייבר ViGEmBus</value></data>
+  <data name="Welcome.Step2HelpText" xml:space="preserve"><value>אם השתמשת בבקר 360 במחשב זה בעבר, תוכל לדלג על שלב זה.</value></data>
+  <data name="Welcome.Step2Text" xml:space="preserve"><value>שלב 2: אם אתה ב-Windows 7, התקן דרייבר 360</value></data>
+  <data name="Welcome.Step3BluetoothHelpText" xml:space="preserve"><value>לאחר תחילת ההבהוב, עבור להגדרות הבלוטות' והתחבר ל-"Wireless Controller". אם תתבקש, הזן קוד צימוד 0000. לאחר הצימוד, אתה מוכן. תיהנה!</value></data>
+  <data name="Welcome.Step3HelpText" xml:space="preserve"><value>שלב 3: חיבור בקר DualShock 4. | להתקנה חוטית/USB: | פשוט חבר כבל micro-USB למחשב ולבקר ה-DualShock 4. |  | להתקנת בלוטות' (אופציונלי): החזק את כפתור PS ו-Share למשך 3 שניות. פס התאורה יתחיל להבהב פעמיים.</value></data>
+  <data name="Welcome.Step4HelpText" xml:space="preserve"><value>השתמש ב-HidHide כדי להגדיר ולהסתיר בקרי קלט מתוכנות אחרות הפועלות במערכת שלך. משחקים מסוימים דורשים שרק בקר אחד יהיה נוכח, אחרת קלט כפול יגרום לבעיות במשחק.</value></data>
+  <data name="Welcome.Step4Text" xml:space="preserve"><value>(אופציונלי) שלב 4: התקן דרייבר HidHide</value></data>
+  <data name="Welcome.Step5HelpText" xml:space="preserve"><value>השתמש בדרייבר FakerInput כדי לחשוף מקלדת וירטואלית, עכבר יחסי ועכבר מוחלט ברמת המערכת. זה מאפשר שימוש באירועי מקלדת ועכבר וירטואליים במצבים מסוימים שבהם SendInput נכשל. מצבים כאלה כוללים תהליכים ומשחקים עם הרשאות מוגברות, בקשות UAC, ומערכות אנטי-צ'יט שחוסמות אירועי SendInput. השימוש ב-FakerInput נחוץ כדי לאפשר ל-DS4Windows לעבוד עם משחקים מסוימים בעלי הגנת אנטי-צ'יט כמו Valorant.</value></data>
+  <data name="Welcome.Step5Text" xml:space="preserve"><value>(אופציונלי) שלב 5: התקן דרייבר FakerInput</value></data>
+  <data name="Welcome.WinTitle" xml:space="preserve"><value>ברוך הבא ל-DS4Windows</value></data>
+  <data name="White" xml:space="preserve"><value>לבן</value></data>
+  <data name="Width" xml:space="preserve"><value>רוחב</value></data>
+  <data name="WindowTitleRule" xml:space="preserve"><value>כלל כותרת חלון</value></data>
+  <data name="XAxisOffset" xml:space="preserve"><value>היסט ציר X</value></data>
+  <data name="XCenter" xml:space="preserve"><value>מרכז X</value></data>
+  <data name="YAxisOffset" xml:space="preserve"><value>היסט ציר Y</value></data>
+  <data name="YCenter" xml:space="preserve"><value>מרכז Y</value></data>
+  <data name="Yaw" xml:space="preserve"><value>Yaw</value></data>
+  <data name="Yes" xml:space="preserve"><value>כן</value></data>
 </root>

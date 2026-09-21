@@ -9,7 +9,7 @@
         lex:ResxLocalizationProvider.DefaultDictionary="Strings"
         mc:Ignorable="d"
         ResizeMode="NoResize"
-        Title="StickCalibration" Height="140" Width="300"
+        Title="{lex:Loc StickCalib.WinTitle}" Height="140" Width="300"
         Style="{DynamicResource WindowStyle}">
     <Grid>
         <Grid.ColumnDefinitions>
@@ -23,11 +23,9 @@
         </Grid.RowDefinitions>
 
         <TextBlock Grid.ColumnSpan="3"
-                   Padding="5" TextWrapping="Wrap">
-            Please move your stick to the sides and release it a few times, then after you are done press Save.
-        </TextBlock>
+                   Padding="5" TextWrapping="Wrap" Text="{lex:Loc StickCalib.Instructions}" />
 
-        <Button Grid.Row="1" Grid.Column="1" Content="Cancel" Click="CloseButton_OnClick" Margin="0 0 3 3" />
-        <Button Grid.Row="1" Grid.Column="2" Content="Save" Click="SaveButton_OnClick" Margin="0 0 3 3"/>
+        <Button Grid.Row="1" Grid.Column="1" Content="{lex:Loc Cancel}" Click="CloseButton_OnClick" Margin="0 0 3 3" />
+        <Button Grid.Row="1" Grid.Column="2" Content="{lex:Loc Save}" Click="SaveButton_OnClick" Margin="0 0 3 3"/>
     </Grid>
 </Window>

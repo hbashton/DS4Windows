@@ -13,7 +13,7 @@
         Title="{lex:Loc UpdaterWin.WinTitle}" Height="450" Width="800"
         Style="{DynamicResource WindowStyle}" Closed="Window_Closed">
     <DockPanel Margin="8,0">
-        <TextBlock x:Name="captionTextBlock" Text="{Binding IntroText}" DockPanel.Dock="Top" Margin="0,4" />
+        <TextBlock x:Name="captionTextBlock" Text="{Binding IntroText}" DockPanel.Dock="Top" Margin="0,4" FlowDirection="LeftToRight" />
         <StackPanel Orientation="Horizontal" DockPanel.Dock="Bottom" HorizontalAlignment="Right" Margin="0,0,0,8">
             <Button x:Name="skipVersionBtn" Content="{lex:Loc SkipVersion}" MinWidth="80" Click="SkipVersionBtn_Click" />
             <Button x:Name="yesBtn" Content="{lex:Loc Yes}" MinWidth="60" Click="YesBtn_Click" Margin="10,0,0,0" />

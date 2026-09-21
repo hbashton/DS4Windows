@@ -65,39 +65,39 @@ namespace DS4WinWPF.DS4Forms
             {
                 new FullPullModeChoice
                 {
-                    Name = "Off",
+                    Name = Properties.Resources.TLModeOff,
                     Mode = TwoStageTriggerMode.Disabled,
-                    Description = "Only the regular trigger action runs.",
+                    Description = Properties.Resources.TLModeOffDesc,
                 },
                 new FullPullModeChoice
                 {
-                    Name = "Add at full pull",
+                    Name = Properties.Resources.TLModeAddAtFullPull,
                     Mode = TwoStageTriggerMode.Normal,
-                    Description = "Keep the regular trigger action active and also run the full-pull action at the end of travel.",
+                    Description = Properties.Resources.TLModeAddAtFullPullDesc,
                 },
                 new FullPullModeChoice
                 {
-                    Name = "Replace at full pull",
+                    Name = Properties.Resources.TLModeReplaceAtFullPull,
                     Mode = TwoStageTriggerMode.ExclusiveButtons,
-                    Description = "Release the regular trigger action and replace it with the full-pull action at the end of travel.",
+                    Description = Properties.Resources.TLModeReplaceAtFullPullDesc,
                 },
                 new FullPullModeChoice
                 {
-                    Name = "Hair trigger",
+                    Name = Properties.Resources.TLModeHairTrigger,
                     Mode = TwoStageTriggerMode.HairTrigger,
-                    Description = "Run both actions at full pull, then release both as soon as the trigger backs away from the end stop.",
+                    Description = Properties.Resources.TLModeHairTriggerDesc,
                 },
                 new FullPullModeChoice
                 {
-                    Name = "Hip fire",
+                    Name = Properties.Resources.TLModeHipFire,
                     Mode = TwoStageTriggerMode.HipFire,
-                    Description = "Wait for the chosen delay, then run the regular or full-pull action based on how far the trigger was pressed.",
+                    Description = Properties.Resources.TLModeHipFireDesc,
                 },
                 new FullPullModeChoice
                 {
-                    Name = "Hip fire (exclusive)",
+                    Name = Properties.Resources.TLModeHipFireExclusive,
                     Mode = TwoStageTriggerMode.HipFireExclusiveButtons,
-                    Description = "Wait for the chosen delay and run only one action: regular pull or full pull.",
+                    Description = Properties.Resources.TLModeHipFireExclusiveDesc,
                 },
             };
 
@@ -183,7 +183,7 @@ namespace DS4WinWPF.DS4Forms
                 IsEnabled = available;
                 if (!available)
                 {
-                    labStatusText.Text = "Select a controller or profile to open Trigger Lab.";
+                    labStatusText.Text = Properties.Resources.TLSelectToOpen;
                     return;
                 }
 
@@ -231,13 +231,13 @@ namespace DS4WinWPF.DS4Forms
             };
             heading.Children.Add(triggerGraphic);
             StackPanel title = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-            title.Children.Add(new TextBlock { Text = ui.IsLeft ? "Left Trigger" : "Right Trigger", FontSize = 17, FontWeight = FontWeights.SemiBold });
-            title.Children.Add(new TextBlock { Text = $"Shape the {(ui.IsLeft ? "L2" : "R2")} trigger feel", Foreground = FindBrush("MutedForegroundColor", Brushes.Gray) });
+            title.Children.Add(new TextBlock { Text = ui.IsLeft ? Properties.Resources.TLLeftTrigger : Properties.Resources.TLRightTrigger, FontSize = 17, FontWeight = FontWeights.SemiBold });
+            title.Children.Add(new TextBlock { Text = string.Format(Properties.Resources.TLShapeTriggerFeelFormat, ui.IsLeft ? "L2" : "R2"), Foreground = FindBrush("MutedForegroundColor", Brushes.Gray) });
             Grid.SetColumn(title, 1); heading.Children.Add(title);
             StackPanel active = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
             ui.ActiveLabel = new TextBlock
             {
-                Text = "Active",
+                Text = Properties.Resources.TLActiveLabel,
                 Margin = new Thickness(0, 0, 8, 0),
                 VerticalAlignment = VerticalAlignment.Center,
             };
@@ -255,9 +255,9 @@ namespace DS4WinWPF.DS4Forms
             profileRow.Children.Add(ui.Profile);
             StackPanel profileActions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(8, 0, 0, 0) };
             Grid.SetColumn(profileActions, 1);
-            profileActions.Children.Add(MakeIconButton("\uE74E", "Save new trigger profile", (_, _) => SaveCustomProfile(ui)));
-            ui.RenameProfile = MakeIconButton("\uE70F", "Rename trigger profile", (_, _) => RenameCustomProfile(ui));
-            ui.DeleteProfile = MakeIconButton("\uE74D", "Delete trigger profile", (_, _) => DeleteCustomProfile(ui));
+            profileActions.Children.Add(MakeIconButton("\uE74E", Properties.Resources.TLSaveProfileTip, (_, _) => SaveCustomProfile(ui)));
+            ui.RenameProfile = MakeIconButton("\uE70F", Properties.Resources.TLRenameProfileTip, (_, _) => RenameCustomProfile(ui));
+            ui.DeleteProfile = MakeIconButton("\uE74D", Properties.Resources.TLDeleteProfileTip, (_, _) => DeleteCustomProfile(ui));
             profileActions.Children.Add(ui.RenameProfile);
             profileActions.Children.Add(ui.DeleteProfile);
             profileRow.Children.Add(profileActions);
@@ -272,24 +272,24 @@ namespace DS4WinWPF.DS4Forms
 
             Grid modes = new Grid();
             for (int i = 0; i < 3; i++) modes.ColumnDefinitions.Add(new ColumnDefinition());
-            ui.Feedback = MakeModeButton("Feedback", ui, TriggerLabMode.Feedback, 0);
-            ui.Weapon = MakeModeButton("Weapon", ui, TriggerLabMode.Weapon, 1);
-            ui.Vibration = MakeModeButton("Vibration", ui, TriggerLabMode.Vibration, 2);
+            ui.Feedback = MakeModeButton(Properties.Resources.TLModeFeedback, ui, TriggerLabMode.Feedback, 0);
+            ui.Weapon = MakeModeButton(Properties.Resources.TLModeWeapon, ui, TriggerLabMode.Weapon, 1);
+            ui.Vibration = MakeModeButton(Properties.Resources.TLModeVibration, ui, TriggerLabMode.Vibration, 2);
             modes.Children.Add(ui.Feedback); modes.Children.Add(ui.Weapon); modes.Children.Add(ui.Vibration);
             root.Children.Add(modes);
 
-            root.Children.Add(MakeMeter("Start", ui, out ui.Start, out ui.StartValue));
-            root.Children.Add(MakeMeter("Wall", ui, out ui.Wall, out ui.WallValue));
-            root.Children.Add(MakeMeter("Force", ui, out ui.Force, out ui.ForceValue));
+            root.Children.Add(MakeMeter(Properties.Resources.TLMeterStart, "Start", ui, out ui.Start, out ui.StartValue));
+            root.Children.Add(MakeMeter(Properties.Resources.TLMeterWall, "Wall", ui, out ui.Wall, out ui.WallValue));
+            root.Children.Add(MakeMeter(Properties.Resources.TLMeterForce, "Force", ui, out ui.Force, out ui.ForceValue));
 
             root.Children.Add(BuildFullPullSection(ui));
             root.Children.Add(BuildGameRumbleVibrationSection(ui));
 
             Grid actions = new Grid { Margin = new Thickness(0, 14, 0, 0) };
             actions.ColumnDefinitions.Add(new ColumnDefinition()); actions.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(8) }); actions.ColumnDefinitions.Add(new ColumnDefinition());
-            Button preview = new Button { Content = "\u25B6  Preview", MinHeight = 38, Style = FindResource("BridgeSecondaryButtonStyle") as Style };
+            Button preview = new Button { Content = "\u25B6  " + Properties.Resources.TLPreview, MinHeight = 38, Style = FindResource("BridgeSecondaryButtonStyle") as Style };
             preview.Click += (_, _) => Preview(ui);
-            Button reset = new Button { Content = $"\u21BB  Reset {(ui.IsLeft ? "L2" : "R2")}", MinHeight = 38, Style = FindResource("BridgeSecondaryButtonStyle") as Style };
+            Button reset = new Button { Content = "\u21BB  " + string.Format(Properties.Resources.TLResetFormat, ui.IsLeft ? "L2" : "R2"), MinHeight = 38, Style = FindResource("BridgeSecondaryButtonStyle") as Style };
             reset.Click += (_, _) => ResetSide(ui); Grid.SetColumn(reset, 2);
             actions.Children.Add(preview); actions.Children.Add(reset); root.Children.Add(actions);
             return root;
@@ -307,13 +307,15 @@ namespace DS4WinWPF.DS4Forms
             StackPanel copy = new StackPanel();
             copy.Children.Add(new TextBlock
             {
-                Text = "Game rumble vibration",
+                Text = Properties.Resources.TLGameRumbleTitle,
                 FontSize = 15,
                 FontWeight = FontWeights.SemiBold,
             });
             copy.Children.Add(new TextBlock
             {
-                Text = $"Stream the game's {(ui.IsLeft ? "heavy / left" : "light / right")} HID rumble motor to {(ui.IsLeft ? "L2" : "R2")} as a low-latency vibration effect.",
+                Text = string.Format(Properties.Resources.TLGameRumbleDescFormat,
+                    ui.IsLeft ? Properties.Resources.TLHeavyLeft : Properties.Resources.TLLightRight,
+                    ui.IsLeft ? "L2" : "R2"),
                 Margin = new Thickness(0, 4, 14, 0),
                 Foreground = FindBrush("MutedForegroundColor", Brushes.Gray),
                 TextWrapping = TextWrapping.Wrap,
@@ -324,7 +326,7 @@ namespace DS4WinWPF.DS4Forms
             {
                 Style = FindResource("LabToggle") as Style,
                 VerticalAlignment = VerticalAlignment.Center,
-                ToolTip = $"Independently enable game-rumble vibration for {(ui.IsLeft ? "L2" : "R2")}. This does not link the other trigger.",
+                ToolTip = string.Format(Properties.Resources.TLGameRumbleTipFormat, ui.IsLeft ? "L2" : "R2"),
             };
             ui.GameRumbleVibration.Click += (_, _) =>
                 GameRumbleVibrationChanged(ui);
@@ -361,7 +363,7 @@ namespace DS4WinWPF.DS4Forms
             });
             heading.Children.Add(new TextBlock
             {
-                Text = "Full-pull action",
+                Text = Properties.Resources.TLFullPullActionTitle,
                 FontSize = 15,
                 FontWeight = FontWeights.SemiBold,
                 VerticalAlignment = VerticalAlignment.Center,
@@ -375,7 +377,7 @@ namespace DS4WinWPF.DS4Forms
                 Padding = new Thickness(7, 3, 7, 3),
                 Child = new TextBlock
                 {
-                    Text = "END OF TRAVEL",
+                    Text = Properties.Resources.TLEndOfTravelBadge,
                     FontSize = 9,
                     FontWeight = FontWeights.Bold,
                     Foreground = FindBrush("MutedForegroundColor", Brushes.Gray),
@@ -386,7 +388,7 @@ namespace DS4WinWPF.DS4Forms
             content.Children.Add(heading);
             content.Children.Add(new TextBlock
             {
-                Text = $"When {(ui.IsLeft ? "L2" : "R2")} is pressed completely, run the action below using the selected behavior.",
+                Text = string.Format(Properties.Resources.TLFullPullDescFormat, ui.IsLeft ? "L2" : "R2"),
                 Margin = new Thickness(0, 4, 0, 10),
                 Foreground = FindBrush("MutedForegroundColor", Brushes.Gray),
                 TextWrapping = TextWrapping.Wrap,
@@ -401,14 +403,14 @@ namespace DS4WinWPF.DS4Forms
             StackPanel actionText = new StackPanel();
             actionText.Children.Add(new TextBlock
             {
-                Text = "Assigned action",
+                Text = Properties.Resources.TLAssignedActionLabel,
                 FontSize = 10,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = FindBrush("MutedForegroundColor", Brushes.Gray),
             });
             ui.FullPullActionName = new TextBlock
             {
-                Text = "Unassigned",
+                Text = Properties.Resources.Unassigned,
                 Margin = new Thickness(0, 2, 10, 0),
                 FontWeight = FontWeights.SemiBold,
                 TextTrimming = TextTrimming.CharacterEllipsis,
@@ -417,7 +419,7 @@ namespace DS4WinWPF.DS4Forms
             actionContent.Children.Add(actionText);
             TextBlock changeLabel = new TextBlock
             {
-                Text = "Change  ›",
+                Text = Properties.Resources.TLChangeLabel,
                 Foreground = FindBrush("AccentColor", Brushes.DodgerBlue),
                 FontWeight = FontWeights.SemiBold,
                 VerticalAlignment = VerticalAlignment.Center,
@@ -449,7 +451,7 @@ namespace DS4WinWPF.DS4Forms
             modeRow.ColumnDefinitions.Add(new ColumnDefinition());
             modeRow.Children.Add(new TextBlock
             {
-                Text = "Behavior",
+                Text = Properties.Resources.TLBehaviorLabel,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = FindBrush("MutedForegroundColor", Brushes.Gray),
                 VerticalAlignment = VerticalAlignment.Center,
@@ -490,7 +492,7 @@ namespace DS4WinWPF.DS4Forms
             });
             ui.HipFireDelayRow.Children.Add(new TextBlock
             {
-                Text = "Delay",
+                Text = Properties.Resources.TLDelayLabel,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = FindBrush("MutedForegroundColor", Brushes.Gray),
                 VerticalAlignment = VerticalAlignment.Center,
@@ -550,7 +552,7 @@ namespace DS4WinWPF.DS4Forms
             return button;
         }
 
-        private Grid MakeMeter(string label, SideUi ui, out Slider slider, out TextBlock value)
+        private Grid MakeMeter(string label, string property, SideUi ui, out Slider slider, out TextBlock value)
         {
             Grid grid = new Grid { Margin = new Thickness(0, 15, 0, 0) };
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(46) });
@@ -561,7 +563,6 @@ namespace DS4WinWPF.DS4Forms
             Grid.SetColumn(slider, 1); grid.Children.Add(slider);
             value = new TextBlock { HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, FontWeight = FontWeights.SemiBold };
             Grid.SetColumn(value, 2); grid.Children.Add(value);
-            string property = label;
             slider.ValueChanged += (_, e) => MeterChanged(ui, property, (int)e.NewValue);
             return grid;
         }
@@ -581,7 +582,7 @@ namespace DS4WinWPF.DS4Forms
             {
                 Id = profile.Id,
                 Name = profile.Name,
-                Description = "Saved custom effect.",
+                Description = Properties.Resources.TLSavedCustomEffect,
                 IsCustom = true,
             }));
             ui.Profile.ItemsSource = profiles;
@@ -626,7 +627,7 @@ namespace DS4WinWPF.DS4Forms
             ui.HipFireDelay.IsEnabled = available;
             if (!available)
             {
-                ui.FullPullActionName.Text = "Select a controller or profile";
+                ui.FullPullActionName.Text = Properties.Resources.TLSelectControllerOrProfile;
                 ui.FullPullModeDescription.Text = string.Empty;
                 ui.HipFireDelayRow.Visibility = Visibility.Collapsed;
                 return;
@@ -916,7 +917,7 @@ namespace DS4WinWPF.DS4Forms
                 .FirstOrDefault(profile => profile.Id == profileId);
             if (custom == null)
             {
-                custom = new TriggerLabCustomProfile { Id = "custom", Name = "Custom" };
+                custom = new TriggerLabCustomProfile { Id = "custom", Name = Properties.Resources.TLCustom };
                 settings.CustomProfiles.Insert(0, custom);
             }
             custom.Mode = effect.Mode; custom.StartPercent = effect.StartPercent; custom.WallPercent = effect.WallPercent; custom.ForcePercent = effect.ForcePercent;
@@ -925,7 +926,7 @@ namespace DS4WinWPF.DS4Forms
 
         private void SaveCustomProfile(SideUi ui)
         {
-            string name = PromptName("Save trigger profile", $"Custom Trigger {CurrentSettings.CustomProfiles.Count + 1}");
+            string name = PromptName(Properties.Resources.TLSaveProfileDialogTitle, string.Format(Properties.Resources.TLDefaultCustomTriggerNameFormat, CurrentSettings.CustomProfiles.Count + 1));
             if (string.IsNullOrWhiteSpace(name)) return;
             Commit(settings =>
             {
@@ -941,7 +942,7 @@ namespace DS4WinWPF.DS4Forms
         {
             TriggerLabCustomProfile profile = CurrentSettings.CustomProfiles.FirstOrDefault(item => item.Id == CurrentEffect(ui).ProfileId);
             if (profile == null) return;
-            string name = PromptName("Rename trigger profile", profile.Name);
+            string name = PromptName(Properties.Resources.TLRenameProfileTip, profile.Name);
             if (string.IsNullOrWhiteSpace(name)) return;
             Commit(settings => profile.Name = name);
         }
@@ -950,7 +951,7 @@ namespace DS4WinWPF.DS4Forms
         {
             TriggerLabCustomProfile profile = CurrentSettings.CustomProfiles.FirstOrDefault(item => item.Id == CurrentEffect(ui).ProfileId);
             if (profile == null) return;
-            if (MessageBox.Show($"Delete {profile.Name}?", "Trigger Lab", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+            if (MessageBox.Show(string.Format(Properties.Resources.TLDeleteConfirmFormat, profile.Name), Properties.Resources.TLDialogTitle, MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
             Commit(settings =>
             {
                 settings.CustomProfiles.Remove(profile);
@@ -969,8 +970,8 @@ namespace DS4WinWPF.DS4Forms
             TextBox text = new TextBox { Text = initial, MaxLength = 48, MinHeight = 36, VerticalContentAlignment = VerticalAlignment.Center };
             grid.Children.Add(text);
             StackPanel buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 14, 0, 0) };
-            Button cancel = new Button { Content = "Cancel", Width = 86, Height = 34, IsCancel = true };
-            Button save = new Button { Content = "Save", Width = 86, Height = 34, Margin = new Thickness(8, 0, 0, 0), IsDefault = true, Style = FindResource("BridgePrimaryButtonStyle") as Style };
+            Button cancel = new Button { Content = Properties.Resources.Cancel, Width = 86, Height = 34, IsCancel = true };
+            Button save = new Button { Content = Properties.Resources.Save, Width = 86, Height = 34, Margin = new Thickness(8, 0, 0, 0), IsDefault = true, Style = FindResource("BridgePrimaryButtonStyle") as Style };
             save.Click += (_, _) => dialog.DialogResult = true;
             buttons.Children.Add(cancel); buttons.Children.Add(save); Grid.SetRow(buttons, 1); grid.Children.Add(buttons);
             dialog.Content = grid; text.SelectAll(); text.Focus();

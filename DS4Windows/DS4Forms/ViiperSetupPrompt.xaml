@@ -1,7 +1,10 @@
 <Window x:Class="DS4WinWPF.DS4Forms.ViiperSetupPrompt"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="VIIPER virtual controller setup"
+        xmlns:lex="http://wpflocalizeextension.codeplex.com"
+        lex:ResxLocalizationProvider.DefaultAssembly="DS4Windows"
+        lex:ResxLocalizationProvider.DefaultDictionary="Strings"
+        Title="{lex:Loc ViiperPrompt.WinTitle}"
         Width="620"
         SizeToContent="Height"
         MaxHeight="720"
@@ -29,7 +32,7 @@
                     Padding="18,12"
                     PreviewMouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
                 <Grid>
-                    <TextBlock Text="VIIPER virtual controller setup"
+                    <TextBlock Text="{lex:Loc ViiperPrompt.WinTitle}"
                                FontSize="14"
                                FontWeight="SemiBold"
                                VerticalAlignment="Center" />
@@ -43,7 +46,7 @@
                             FontSize="18"
                             Style="{StaticResource BridgeSecondaryButtonStyle}"
                             Click="CloseButton_Click"
-                            ToolTip="Close" />
+                            ToolTip="{lex:Loc ViiperPrompt.Close}" />
                 </Grid>
             </Border>
 
@@ -72,11 +75,11 @@
                         </Border>
                         <StackPanel Grid.Column="1">
                             <TextBlock x:Name="headingText"
-                                       Text="VIIPER needs attention"
+                                       Text="{lex:Loc ViiperPrompt.Heading}"
                                        Style="{StaticResource BridgeSectionTitleStyle}"
                                        FontSize="20" />
                             <TextBlock x:Name="summaryText"
-                                       Text="This profile uses a VIIPER virtual controller output."
+                                       Text="{lex:Loc ViiperPrompt.Summary}"
                                        Foreground="{DynamicResource MutedForegroundColor}"
                                        TextWrapping="Wrap" />
                         </StackPanel>
@@ -87,17 +90,17 @@
                             Margin="0,0,0,16">
                         <StackPanel>
                             <TextBlock x:Name="requirementsHeadingText"
-                                       Text="What DS4Windows needs"
+                                       Text="{lex:Loc ViiperPrompt.RequirementsHeading}"
                                        FontWeight="SemiBold"
                                        Margin="0,0,0,7" />
                             <TextBlock x:Name="requirementsText"
-                                       Text="• VIIPER helper/server&#x0a;• usbip-win2 Windows USB/IP driver"
+                                       Text="{lex:Loc ViiperPrompt.RequirementsText}"
                                        TextWrapping="Wrap"
                                        LineHeight="22" />
                             <Border Height="1"
                                     Background="{DynamicResource BorderColor}"
                                     Margin="0,12,0,10" />
-                            <TextBlock Text="Current status"
+                            <TextBlock Text="{lex:Loc ViiperPrompt.CurrentStatus}"
                                        Foreground="{DynamicResource MutedForegroundColor}"
                                        FontSize="12" />
                             <TextBlock x:Name="statusText"
@@ -116,10 +119,10 @@
                             Visibility="Collapsed">
                         <StackPanel>
                             <TextBlock x:Name="existingViiperHeadingText"
-                                       Text="Competing VIIPER detected"
+                                       Text="{lex:Loc ViiperPrompt.ExistingHeading}"
                                        FontWeight="SemiBold" />
                             <TextBlock x:Name="existingViiperDescriptionText"
-                                       Text="This executable will not be elevated or selected. Install or Repair uses the verified Program Files backend and removes only recognized legacy VIIPER files:"
+                                       Text="{lex:Loc ViiperPrompt.ExistingDescription}"
                                        Foreground="{DynamicResource MutedForegroundColor}"
                                        TextWrapping="Wrap"
                                        Margin="0,4,0,7" />
@@ -131,8 +134,8 @@
                     </Border>
 
                     <CheckBox x:Name="suppressPromptCheck"
-                              Content="Don't show this setup prompt again"
-                              ToolTip="You can turn setup prompts back on from Settings → VIIPER Virtual Controller Support."
+                              Content="{lex:Loc ViiperPrompt.SuppressPrompt}"
+                              ToolTip="{lex:Loc ViiperPrompt.SuppressPromptTip}"
                               Style="{StaticResource BridgeDescribedCheckBoxStyle}"
                               Margin="0,0,0,20" />
 
@@ -143,7 +146,7 @@
                             CornerRadius="6"
                             Padding="12"
                             Margin="0,0,0,16">
-                        <TextBlock Text="Keep DS4Windows portable leaves this app exactly where it is, while installing the elevated VIIPER backend in protected Program Files. Standard also moves only package-owned DS4Windows files into Program Files. Profiles, settings, and unrecognized files are always preserved."
+                        <TextBlock Text="{lex:Loc ViiperPrompt.PortableWarning}"
                                    Foreground="{DynamicResource MutedForegroundColor}"
                                    TextWrapping="Wrap" />
                     </Border>
@@ -154,20 +157,20 @@
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <Button x:Name="notNowButton"
-                                Content="Not now"
+                                Content="{lex:Loc ViiperPrompt.NotNow}"
                                 MinWidth="94"
                                 Style="{StaticResource BridgeSecondaryButtonStyle}"
                                 HorizontalAlignment="Left"
                                 Click="NotNowButton_Click" />
                         <StackPanel Grid.Column="1" Orientation="Horizontal">
                             <Button x:Name="installPortableButton"
-                                    Content="Keep DS4Windows portable"
+                                    Content="{lex:Loc ViiperPrompt.InstallPortable}"
                                     MinWidth="132"
                                     Margin="0,0,10,0"
                                     Style="{StaticResource BridgeSecondaryButtonStyle}"
                                     Click="InstallPortableButton_Click" />
                             <Button x:Name="installButton"
-                                    Content="Install standard"
+                                    Content="{lex:Loc ViiperPrompt.InstallStandard}"
                                     MinWidth="164"
                                     Style="{StaticResource BridgePrimaryButtonStyle}"
                                     Click="InstallButton_Click" />

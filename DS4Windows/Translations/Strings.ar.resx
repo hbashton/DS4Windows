@@ -442,4 +442,531 @@ Gryo معين كفأرة</value>
   <data name="RealWorldCalibration" xml:space="preserve">
     <value>المعايرة في العالم الحقيقي</value>
   </data>
+
+  <data name="About.ContributorsLink" xml:space="preserve"><value>المساهمون</value></data>
+  <data name="About.Description" xml:space="preserve"><value>الوصف</value></data>
+  <data name="About.FakerInputDesc" xml:space="preserve"><value>استخدم برنامج تشغيل FakerInput لتوفير لوحة مفاتيح وماوس نسبي وماوس مطلق افتراضيين على مستوى النظام. يسمح هذا باستخدام أحداث لوحة المفاتيح والماوس الافتراضية في بعض الحالات التي يفشل فيها SendInput. مثل هذه الحالات تشمل العمليات والألعاب ذات الصلاحيات المرتفعة، ورسائل UAC، وأنظمة مكافحة الغش التي تحظر أحداث SendInput. استخدام FakerInput ضروري لتشغيل DS4Windows مع بعض الألعاب التي تحتوي على حماية ضد الغش مثل Valorant.</value></data>
+  <data name="About.HeaderLabel" xml:space="preserve"><value>DS4Windows - إصدار hbashton (الإصدار </value></data>
+  <data name="About.HidHideDesc" xml:space="preserve"><value>استخدم HidHide لإعداد وإخفاء أي أيادي تحكم من التطبيقات الأخرى التي تعمل على نظامك. بعض الألعاب تتطلب وجود يد تحكم واحدة فقط وإلا سيسبب الإدخال المزدوج مشاكل في اللعبة. بقلم nefarius.</value></data>
+  <data name="About.HotkeysText" xml:space="preserve"><value>استخدم HidHide لمنع الإدخال المزدوج: يخفي يد التحكم الفعلية عن الألعاب بينما يستمر DS4Windows باستخدامها، مما يمنع تكرار الإدخال
+النقر على الجانب الأيسر من لوحة اللمس: لمسة يسرى
+النقر على الجانب الأيمن من لوحة اللمس: لمسة يمنى
+النقر على لوحة اللمس بإصبعين: لمس متعدد
+النقر على الجزء العلوي من لوحة اللمس: لمسة علوية
+PS + Options أو الضغط المطول على PS لمدة 10 ثوانٍ: قطع اتصال يد التحكم (فقط عبر البلوتوث)
+لمس لوحة اللمس + PS: إيقاف حركة لوحة اللمس (النقر لا يزال يعمل)
+النقر على أسفل يمين لوحة اللمس: نقر بزر الماوس الأيمن (يُفضل استخدامه عندما يُستخدم الجانب الأيمن كزر ماوس)
+تحريك إصبعين لأعلى/لأسفل على لوحة اللمس*: تمرير لأعلى/لأسفل
+النقر مع الاستمرار على لوحة اللمس*: سحب بزر الماوس الأيسر
+تمرير إصبعين يسارًا أو يمينًا على لوحة اللمس: التنقل بين ملفات التعريف
+مُعدِّل Shift: اضغط مع الاستمرار على فعل لاستخدام مجموعة أخرى من عناصر التحكم
+عند تعيين لوحة المفاتيح والماوس:
+Toggle: سيبقى المفتاح في حالة "مضغوط" حتى يُضغط مرة أخرى
+Macro: تعيين عدة مفاتيح لإدخال واحد
+Scan Code: يتم تفسير المفاتيح بشكل مختلف. قد يكون ضروريًا لبعض الألعاب
+*إذا كان مفعّلاً</value></data>
+  <data name="About.ProjectUrl" xml:space="preserve"><value>رابط المشروع:</value></data>
+  <data name="About.SourceLink" xml:space="preserve"><value>المصدر</value></data>
+  <data name="About.TabCredits" xml:space="preserve"><value>المساهمون</value></data>
+  <data name="About.TabExtras" xml:space="preserve"><value>إضافات</value></data>
+  <data name="About.TabHotkeys" xml:space="preserve"><value>الاختصارات</value></data>
+  <data name="About.TabLicense" xml:space="preserve"><value>الترخيص</value></data>
+  <data name="About.Translators" xml:space="preserve"><value>المترجمون:</value></data>
+  <data name="AbsoluteMouse" xml:space="preserve"><value>ماوس مطلق</value></data>
+  <data name="AbsoluteMouseOptions" xml:space="preserve"><value>خيارات الماوس المطلق</value></data>
+  <data name="Accept" xml:space="preserve"><value>قبول</value></data>
+  <data name="Active" xml:space="preserve"><value>نشط</value></data>
+  <data name="Add" xml:space="preserve"><value>إضافة</value></data>
+  <data name="AddWindowTitleRule" xml:space="preserve"><value>إضافة قاعدة عنوان النافذة</value></data>
+  <data name="AdvancedSupport" xml:space="preserve"><value>دعم متقدم</value></data>
+  <data name="Analog" xml:space="preserve"><value>تناظري</value></data>
+  <data name="AntiDeadZone" xml:space="preserve"><value>منطقة ميتة عكسية</value></data>
+  <data name="AntiDeadzoneTooltip" xml:space="preserve"><value>تعمل المنطقة الميتة العكسية كإزاحة تُستخدم مع محور لتحديد أدنى قيمة إخراج تُنتج بعد خروج المحور من منطقته الميتة المحددة. الغرض الرئيسي منها هو المساعدة في تعيين محور إلى قيمة المنطقة الميتة المحددة المستخدمة لمحور في لعبة فيديو. على سبيل المثال، المنطقة الميتة النموذجية المحددة لـ XInput LS في لعبة فيديو تكون حوالي 8000 (25%). بدون تحديد منطقة ميتة عكسية، سيحتاج المحور إلى التحرك متجاوزًا المنطقة الميتة المحددة في DS4Windows بالإضافة إلى المنطقة الميتة المحددة للمحور في اللعبة.</value></data>
+  <data name="AntiRadius" xml:space="preserve"><value>نصف القطر العكسي</value></data>
+  <data name="AntiSnapback" xml:space="preserve"><value>منع الارتداد</value></data>
+  <data name="AntiSnapbackTiming" xml:space="preserve"><value>توقيت منع الارتداد</value></data>
+  <data name="AppTheme" xml:space="preserve"><value>سمة التطبيق</value></data>
+  <data name="Appdata" xml:space="preserve"><value>Appdata</value></data>
+  <data name="AudioHaptics.Aggressive" xml:space="preserve"><value>عدواني</value></data>
+  <data name="AudioHaptics.AutoFollowGamesDesc" xml:space="preserve"><value>التبديل إلى صوت اللعبة النشطة باستخدام سجلات ألعاب ويندوز وبيانات المشغلات المثبتة.</value></data>
+  <data name="AudioHaptics.AutoFollowGamesTip" xml:space="preserve"><value>يتبع الألعاب التي يتعرف عليها Windows أو Steam أو Epic أو GOG. يبقى التطبيق المحدد كخيار احتياطي.</value></data>
+  <data name="AudioHaptics.AutoFollowGamesTitle" xml:space="preserve"><value>متابعة الألعاب تلقائيًا</value></data>
+  <data name="AudioHaptics.BassFocusLabel" xml:space="preserve"><value>تركيز الباس</value></data>
+  <data name="AudioHaptics.BassFocusTip" xml:space="preserve"><value>اختر أي نطاق تردد منخفض يتحول إلى اهتزاز.</value></data>
+  <data name="AudioHaptics.Dynamic" xml:space="preserve"><value>ديناميكي</value></data>
+  <data name="AudioHaptics.Enabled" xml:space="preserve"><value>مفعّل</value></data>
+  <data name="AudioHaptics.FadeLabel" xml:space="preserve"><value>التلاشي</value></data>
+  <data name="AudioHaptics.FadeTip" xml:space="preserve"><value>تحكم في سرعة تلاشي الاهتزاز اللمسي بعد انخفاض الصوت.</value></data>
+  <data name="AudioHaptics.FastFade" xml:space="preserve"><value>تلاشي سريع</value></data>
+  <data name="AudioHaptics.FastRamp" xml:space="preserve"><value>تصاعد سريع</value></data>
+  <data name="AudioHaptics.HeadsetOnlyDesc" xml:space="preserve"><value>يرسل التطبيق الملتقَط فقط عبر منفذ AUX الخاص بيد التحكم.</value></data>
+  <data name="AudioHaptics.HeadsetOnlyTip" xml:space="preserve"><value>يوجّه صوت التطبيق الملتقَط إلى سماعات الرأس المتصلة بيد التحكم ويكتم مكبر صوت يد التحكم.</value></data>
+  <data name="AudioHaptics.HeadsetOnlyTitle" xml:space="preserve"><value>سماعة الرأس فقط</value></data>
+  <data name="AudioHaptics.High" xml:space="preserve"><value>عالٍ</value></data>
+  <data name="AudioHaptics.InstantRamp" xml:space="preserve"><value>تصاعد فوري</value></data>
+  <data name="AudioHaptics.LongFade" xml:space="preserve"><value>تلاشي طويل</value></data>
+  <data name="AudioHaptics.Low" xml:space="preserve"><value>منخفض</value></data>
+  <data name="AudioHaptics.Medium" xml:space="preserve"><value>متوسط</value></data>
+  <data name="AudioHaptics.MediumFade" xml:space="preserve"><value>تلاشي متوسط</value></data>
+  <data name="AudioHaptics.MediumRamp" xml:space="preserve"><value>تصاعد متوسط</value></data>
+  <data name="AudioHaptics.MixMode" xml:space="preserve"><value>مزج</value></data>
+  <data name="AudioHaptics.MixModeTip" xml:space="preserve"><value>إضافة استجابة لمسية مستمدة من الصوت إلى الاهتزاز اللمسي والاهتزاز العادي للعبة.</value></data>
+  <data name="AudioHaptics.ModeLabel" xml:space="preserve"><value>الوضع</value></data>
+  <data name="AudioHaptics.PlayThroughControllerDesc" xml:space="preserve"><value>يبث أيضًا هذا التطبيق المحدد إلى مكبر صوت يد التحكم وسماعة AUX.</value></data>
+  <data name="AudioHaptics.PlayThroughControllerTip" xml:space="preserve"><value>يتجاوز "مصدر صوت يد التحكم" في قسم Advanced أثناء تفعيله. اختيار مصدر آخر من هناك يلغي هذا التجاوز.</value></data>
+  <data name="AudioHaptics.PlayThroughControllerTitle" xml:space="preserve"><value>تشغيل التطبيق عبر يد التحكم</value></data>
+  <data name="AudioHaptics.RampLabel" xml:space="preserve"><value>التصاعد</value></data>
+  <data name="AudioHaptics.RampTip" xml:space="preserve"><value>تحكم في سرعة تصاعد الاهتزاز اللمسي مع الصوت.</value></data>
+  <data name="AudioHaptics.RefreshSourcesTip" xml:space="preserve"><value>تحديث جلسات الصوت الجارية</value></data>
+  <data name="AudioHaptics.ReplaceMode" xml:space="preserve"><value>استبدال</value></data>
+  <data name="AudioHaptics.ReplaceModeTip" xml:space="preserve"><value>استخدم فقط الاستجابة اللمسية المستمدة من الصوت.</value></data>
+  <data name="AudioHaptics.ResponseLabel" xml:space="preserve"><value>الاستجابة</value></data>
+  <data name="AudioHaptics.ResponseSubtitle" xml:space="preserve"><value>تركيز التردد والشدة</value></data>
+  <data name="AudioHaptics.ResponseTip" xml:space="preserve"><value>تحكم في شدة استجابة الاهتزاز اللمسي، خصوصًا عند الذُرى.</value></data>
+  <data name="AudioHaptics.ResponseTitle" xml:space="preserve"><value>الاستجابة</value></data>
+  <data name="AudioHaptics.SlowFade" xml:space="preserve"><value>تلاشي بطيء</value></data>
+  <data name="AudioHaptics.SlowRamp" xml:space="preserve"><value>تصاعد بطيء</value></data>
+  <data name="AudioHaptics.SourceLabel" xml:space="preserve"><value>المصدر</value></data>
+  <data name="AudioHaptics.SourceScopeHelp" xml:space="preserve"><value>يستخدم صوت النظام فقط مخرج Windows الافتراضي، وليس كل مخرجات Sonar. اختر تطبيقًا لمتابعة صوته على أي مخرج.</value></data>
+  <data name="AudioHaptics.StatusDisabled" xml:space="preserve"><value>Audio Haptics معطّل.</value></data>
+  <data name="AudioHaptics.Subtitle" xml:space="preserve"><value>استجابة لمسية ليد التحكم مستمدة من الصوت</value></data>
+  <data name="AudioHaptics.Subtle" xml:space="preserve"><value>خفيف</value></data>
+  <data name="AudioHaptics.SystemAudio" xml:space="preserve"><value>صوت النظام</value></data>
+  <data name="AudioHaptics.Title" xml:space="preserve"><value>Audio Haptics</value></data>
+  <data name="AutoProfiles.DisplaySwitchVia" xml:space="preserve"><value>عرض تبديل الملف التعريفي عبر</value></data>
+  <data name="AutoProfiles.LogAndNotification" xml:space="preserve"><value>سجل + إشعار</value></data>
+  <data name="AutomaticallyRecalibrateStick" xml:space="preserve"><value>إعادة معايرة العصا تلقائيًا</value></data>
+  <data name="Axial" xml:space="preserve"><value>محوري</value></data>
+  <data name="AxisConfig" xml:space="preserve"><value>إعدادات المحور</value></data>
+  <data name="BindingWin.AbsMouse" xml:space="preserve"><value>ماوس مطلق</value></data>
+  <data name="BindingWin.AbsMouseDown" xml:space="preserve"><value>ماوس مطلق لأسفل</value></data>
+  <data name="BindingWin.AbsMouseLeft" xml:space="preserve"><value>ماوس مطلق لليسار</value></data>
+  <data name="BindingWin.AbsMouseRight" xml:space="preserve"><value>ماوس مطلق لليمين</value></data>
+  <data name="BindingWin.AbsMouseUp" xml:space="preserve"><value>ماوس مطلق لأعلى</value></data>
+  <data name="BindingWin.ChangeLight" xml:space="preserve"><value>تغيير الإضاءة</value></data>
+  <data name="BindingWin.ChangeMouseSensitivity" xml:space="preserve"><value>تغيير حساسية الماوس</value></data>
+  <data name="BindingWin.KeyAndRelMouse" xml:space="preserve"><value>لوحة مفاتيح وماوس نسبي</value></data>
+  <data name="BindingWin.KeyboardAndMouse" xml:space="preserve"><value>لوحة المفاتيح والماوس</value></data>
+  <data name="BindingWin.MacroOn" xml:space="preserve"><value>الماكرو مفعّل، اختر مفتاحًا لتعطيله، أو أغلق هذه النافذة للحفظ</value></data>
+  <data name="BindingWin.RecordAMacro" xml:space="preserve"><value>تسجيل ماكرو</value></data>
+  <data name="BindingWin.SelectShiftTrigger" xml:space="preserve"><value>اختر مُشغّل Shift</value></data>
+  <data name="Black" xml:space="preserve"><value>أسود</value></data>
+  <data name="Buttons" xml:space="preserve"><value>الأزرار</value></data>
+  <data name="CRC32Fail" xml:space="preserve"><value>فشل فحص سلامة البيانات للجهاز اللاسلكي. جارٍ إغلاق الجهاز.</value></data>
+  <data name="CancelCurrentMacro" xml:space="preserve"><value>إلغاء الماكرو الحالي</value></data>
+  <data name="CancelCurrentMacroTooltip" xml:space="preserve"><value>يحدد ما إذا كان تشغيل هذا الماكرو يجب أن يوقف ماكرو آخر قيد التشغيل حاليًا</value></data>
+  <data name="ChangeOnNewDeviceConn" xml:space="preserve"><value>تسري التغييرات عند اتصال جهاز جديد</value></data>
+  <data name="CheckEvery" xml:space="preserve"><value>التحقق كل</value></data>
+  <data name="ColorAndLength" xml:space="preserve"><value>اللون والمدة</value></data>
+  <data name="Colored" xml:space="preserve"><value>ملوّن</value></data>
+  <data name="Confirm" xml:space="preserve"><value>تأكيد</value></data>
+  <data name="ControllerRegOptWin.EnableHomeLED" xml:space="preserve"><value>تفعيل مؤشر LED الرئيسي</value></data>
+  <data name="ControllerRegOptWin.JoinedGyroProvider" xml:space="preserve"><value>مزوّد الجايرو المدمج</value></data>
+  <data name="ControllerRegOptWin.LinkMode" xml:space="preserve"><value>وضع الربط</value></data>
+  <data name="ControllerRegOptWin.MuteLEDMode" xml:space="preserve"><value>وضع كتم مؤشر LED</value></data>
+  <data name="ControllerRegOptWin.PlayerLEDMode" xml:space="preserve"><value>وضع مؤشر LED للاعب</value></data>
+  <data name="ControllerRegOptWin.WinTitle" xml:space="preserve"><value>خيارات نوع يد التحكم</value></data>
+  <data name="ControllerSupportDS3" xml:space="preserve"><value>دعم يد تحكم DS3</value></data>
+  <data name="ControllerSupportDS4" xml:space="preserve"><value>دعم يد تحكم DS4</value></data>
+  <data name="ControllerSupportDualSense" xml:space="preserve"><value>دعم يد تحكم DualSense</value></data>
+  <data name="ControllerSupportJoyCon" xml:space="preserve"><value>دعم يد تحكم JoyCon</value></data>
+  <data name="ControllerSupportMoonlight" xml:space="preserve"><value>دعم يد التحكم الافتراضية</value></data>
+  <data name="ControllerSupportSwitchPro" xml:space="preserve"><value>دعم يد تحكم Switch Pro</value></data>
+  <data name="Controls" xml:space="preserve"><value>عناصر التحكم</value></data>
+  <data name="Copycat" xml:space="preserve"><value>Copycat</value></data>
+  <data name="CopycatTip" xml:space="preserve"><value>تغيير بعض الإعدادات المستخدمة ليد تحكم DS4 غير الأصلية. قد يصلح دعم الاهتزاز والشريط الضوئي لبعض نسخ DS4 من جهات أخرى</value></data>
+  <data name="CreateLightbarMacro" xml:space="preserve"><value>إنشاء ماكرو للشريط الضوئي</value></data>
+  <data name="Cubic" xml:space="preserve"><value>تكعيبي</value></data>
+  <data name="Current" xml:space="preserve"><value>الحالي</value></data>
+  <data name="Custom" xml:space="preserve"><value>مخصص</value></data>
+  <data name="DS4BTPollRate" xml:space="preserve"><value>معدل استطلاع DS4 عبر البلوتوث</value></data>
+  <data name="DS4LightbarPassthruDisabled" xml:space="preserve"><value>هذه الميزة معطّلة حاليًا في التطبيق بسبب مشاكل في برنامج التشغيل. نأمل حل المشكلة في تحديث مستقبلي.</value></data>
+  <data name="DS4OutputTriggersDefault" xml:space="preserve"><value>افتراضي (تناظري + أزرار)</value></data>
+  <data name="Dark" xml:space="preserve"><value>داكن</value></data>
+  <data name="Days" xml:space="preserve"><value>أيام</value></data>
+  <data name="DeadZone" xml:space="preserve"><value>المنطقة الميتة</value></data>
+  <data name="DeadZone X" xml:space="preserve"><value>المنطقة الميتة X</value></data>
+  <data name="DeadZone Y" xml:space="preserve"><value>المنطقة الميتة Y</value></data>
+  <data name="DeadZoneType" xml:space="preserve"><value>نوع المنطقة الميتة</value></data>
+  <data name="Default" xml:space="preserve"><value>افتراضي</value></data>
+  <data name="DeltaAcceleration" xml:space="preserve"><value>تسارع دلتا</value></data>
+  <data name="DetectedControllers" xml:space="preserve"><value>أيادي التحكم المكتشفة</value></data>
+  <data name="DeviceOptions" xml:space="preserve"><value>خيارات الجهاز</value></data>
+  <data name="DeviceType" xml:space="preserve"><value>نوع الجهاز</value></data>
+  <data name="DirectionalSwipe" xml:space="preserve"><value>تمرير اتجاهي</value></data>
+  <data name="DisableVirtualController" xml:space="preserve"><value>تعطيل يد التحكم الافتراضية</value></data>
+  <data name="DisableVirtualControllerTip" xml:space="preserve"><value>عدم إنشاء/ربط أيادي تحكم افتراضية لأيادي التحكم المتصلة باستخدام هذا الملف التعريفي (يسري عند حفظ الملف التعريفي)</value></data>
+  <data name="DisconnectFromBtWhenStopping" xml:space="preserve"><value>قطع اتصال البلوتوث عند الإيقاف</value></data>
+  <data name="DualSRumbleForceGenericRescale" xml:space="preserve"><value>فرض استخدام كلا مستويي القوة (العام والخاص بـ DualSense)</value></data>
+  <data name="DualSRumbleForceGenericRescale_Tip" xml:space="preserve"><value>يُنصح بتركه معطّلاً. |  | - معطّل: سيُعاد تدريج الاهتزاز بشكل أصلي بواسطة يد التحكم وفقًا لمستوى القوة المحدد (جودة أفضل) |  | - مفعّل: يعمل كل من إعادة تدريج الاهتزاز العام في DS4Windows والتحكم الأصلي في DualSense معًا</value></data>
+  <data name="DualSRumbleModeAccurate" xml:space="preserve"><value>دقيق</value></data>
+  <data name="DualSRumbleModeDisabled" xml:space="preserve"><value>معطّل</value></data>
+  <data name="DualSRumbleModeLegacy" xml:space="preserve"><value>قديم</value></data>
+  <data name="DualSRumbleModeNPowerLevelTxt" xml:space="preserve"><value>وضع الاهتزاز ومستوى القوة:</value></data>
+  <data name="DualSRumbleModePassthru" xml:space="preserve"><value>تمرير مباشر</value></data>
+  <data name="DualSRumbleModes_Tip" xml:space="preserve"><value>الوضع الدقيق (يُنصح به): | - يُحاكي بشكل أفضل إحساس اهتزاز DualShock 4/Xbox 360 | - ينفّذ تأثيرات الاهتزاز المقصودة من اللعبة بدقة أكبر | - الاهتزاز أكثر عمقًا. ضمن نفس مستوى القوة هناك فرق أكبر بين أدنى وأقصى تفعيل للاهتزاز داخل اللعبة، | يتراوح من منخفض جدًا حتى أقصى قوة للمستوى المحدد |  | الوضع القديم: | - أقوى بشكل عام، لكنه يفتقر للعمق | - له إحساس "أكثر حدة" | - سيكون أدنى وأقصى تفعيل داخل اللعبة أقل بقليل وأعلى بقليل على التوالي من قوة المستوى المختار |  | معطّل: | - يعطّل الاهتزاز بالكامل</value></data>
+  <data name="DualSRumblePowerLevel_Tip" xml:space="preserve"><value>مُعدِّل مستوى قوة الاهتزاز الأصلي لـ DualSense. |  | - في الوضع الدقيق، سيكون [ الحد الأدنى // الأقصى ] للاهتزاز [ 1% /// مستوى القوة المختار ] |     - مثال (62%): [ الأدنى = 1% /// الأقصى = 62% ] |  | - في الوضع القديم، سيكون [الأدنى /// الأقصى] للاهتزاز تقريبًا [ مستوى القوة - 12% /// مستوى القوة + 12% ] |     - مثال (62%): [ الأدنى = 50% /// الأقصى = 74% ]</value></data>
+  <data name="DualSRumbleSpecificSettings" xml:space="preserve"><value>إعدادات الاهتزاز الخاصة بـ DualSense</value></data>
+  <data name="Dynamic" xml:space="preserve"><value>ديناميكي</value></data>
+  <data name="EaseoutCubic" xml:space="preserve"><value>Easeout تكعيبي</value></data>
+  <data name="EaseoutQuad" xml:space="preserve"><value>Easeout تربيعي</value></data>
+  <data name="EasingDuration" xml:space="preserve"><value>مدة التنعيم</value></data>
+  <data name="EmulatedController" xml:space="preserve"><value>يد التحكم المحاكاة</value></data>
+  <data name="EnableInterpretingOscMonitoring" xml:space="preserve"><value>تفسير رسائل المراقبة</value></data>
+  <data name="EnableOscSender" xml:space="preserve"><value>تفعيل خدمة المراقبة</value></data>
+  <data name="EnableOscServer" xml:space="preserve"><value>تفعيل خادم التحكم</value></data>
+  <data name="EnableTouchpadToggle" xml:space="preserve"><value>تفعيل تبديل لوحة اللمس</value></data>
+  <data name="EnableVerboseLog" xml:space="preserve"><value>تفعيل السجل المفصّل</value></data>
+  <data name="EnableVerboseLogTip" xml:space="preserve"><value>عرض رسائل سجل إضافية عند اتصال يد تحكم</value></data>
+  <data name="Enabled" xml:space="preserve"><value>مفعّل</value></data>
+  <data name="EnhancedPrecision" xml:space="preserve"><value>دقة معززة</value></data>
+  <data name="ExclusiveAccess" xml:space="preserve"><value>وصول حصري</value></data>
+  <data name="ExportSpecialActions" xml:space="preserve"><value>تصدير الأفعال</value></data>
+  <data name="Extra" xml:space="preserve"><value>إضافي</value></data>
+  <data name="FailedToRetrieveLatestVersion" xml:space="preserve"><value>فشل جلب أحدث إصدار</value></data>
+  <data name="FirstLaunch.DS3EnableCkbLabel" xml:space="preserve"><value>دعم جهاز DS3</value></data>
+  <data name="FirstLaunch.DS3EnableText" xml:space="preserve"><value>دعم أيادي تحكم DualShock 3 (PS3). يتطلب استخدام برنامج تشغيل DsHidMini من مشروع ViGEm (nefarius).</value></data>
+  <data name="FirstLaunch.DS4EnableCkbLabel" xml:space="preserve"><value>دعم جهاز DS4</value></data>
+  <data name="FirstLaunch.DS4EnableText" xml:space="preserve"><value>دعم أيادي تحكم DualShock 4 المعروفة</value></data>
+  <data name="FirstLaunch.DSEnableCkbLabel" xml:space="preserve"><value>دعم جهاز DualSense</value></data>
+  <data name="FirstLaunch.DSEnableText" xml:space="preserve"><value>دعم أيادي تحكم DualSense (PS5). الطراز الأساسي وDS Edge</value></data>
+  <data name="FirstLaunch.DeviceIntroText" xml:space="preserve"><value>نظرًا لأن برامج تعيين أخرى تفعّل دعم أنواع أجهزة متعددة افتراضيًا (Steam Input)، فإن DS4Windows يفعّل افتراضيًا فقط دعم القراءة من أيادي تحكم DS4. يمكنك هنا تحديد دعم برنامج التعيين لأنواع الأجهزة المدعومة الأخرى. كن حذرًا عند استخدام DS4Windows مع برامج تعيين أخرى محتملة تعمل في نفس الوقت.</value></data>
+  <data name="FirstLaunch.DeviceSupport" xml:space="preserve"><value>دعم الأجهزة</value></data>
+  <data name="FirstLaunch.Header" xml:space="preserve"><value>تفعيل دعم برنامج تعيين الأجهزة</value></data>
+  <data name="FirstLaunch.JoyConEnableCkbLabel" xml:space="preserve"><value>دعم جهاز JoyCon</value></data>
+  <data name="FirstLaunch.JoyConEnableText" xml:space="preserve"><value>دعم أيادي تحكم JoyCon (Nintendo Switch)</value></data>
+  <data name="FirstLaunch.SwitchProEnableCkbLabel" xml:space="preserve"><value>دعم جهاز Switch Pro</value></data>
+  <data name="FirstLaunch.SwitchProEnableText" xml:space="preserve"><value>دعم أيادي تحكم Switch Pro (Nintendo Switch)</value></data>
+  <data name="FirstLaunch.WinTitle" xml:space="preserve"><value>التشغيل الأول</value></data>
+  <data name="FlashLightbarAtHighLatency" xml:space="preserve"><value>وميض الشريط الضوئي عند زمن استجابة مرتفع</value></data>
+  <data name="FlashRate" xml:space="preserve"><value>معدل الوميض</value></data>
+  <data name="FlickStick" xml:space="preserve"><value>Flick Stick</value></data>
+  <data name="FullBtnPull" xml:space="preserve"><value>ضغط الزر الكامل</value></data>
+  <data name="FutureNetNotInstalled" xml:space="preserve"><value>لم يتم اكتشاف .NET 5 Runtime على نظامك. يرجى تنزيل وتثبيت .NET 5 Runtime لضمان التوافق مع إصدارات DS4Windows المستقبلية. سيتم توجيهك إلى صفحة تنزيل .NET 5 Runtime عند إغلاق هذه النافذة.</value></data>
+  <data name="Fuzz" xml:space="preserve"><value>Fuzz</value></data>
+  <data name="GyroControlsAccel" xml:space="preserve"><value>عناصر التحكم (تسارع)</value></data>
+  <data name="GyroTriggerJitterCompensationTooltip" xml:space="preserve"><value>إضافة تقييد إضافي عند الطرف المنخفض من المنحنى لمراعاة اهتزاز الجهاز</value></data>
+  <data name="Heavy" xml:space="preserve"><value>قوي</value></data>
+  <data name="Height" xml:space="preserve"><value>الارتفاع</value></data>
+  <data name="HidGuardianAccess" xml:space="preserve"><value>وصول HidGuardian</value></data>
+  <data name="HidHide" xml:space="preserve"><value>HidHide</value></data>
+  <data name="HidHideAccess" xml:space="preserve"><value>وصول HidHide</value></data>
+  <data name="HidHideConfigClient" xml:space="preserve"><value>عميل إعداد HidHide</value></data>
+  <data name="HideDS4Controller" xml:space="preserve"><value>استخدم HidHide لمنع الإدخال المزدوج</value></data>
+  <data name="HipFireDelay" xml:space="preserve"><value>تأخير إطلاق النار السريع</value></data>
+  <data name="HoldFor" xml:space="preserve"><value>اضغط مع الاستمرار لمدة</value></data>
+  <data name="HotkeysAbout" xml:space="preserve"><value>الاختصارات/حول</value></data>
+  <data name="Hours" xml:space="preserve"><value>ساعات</value></data>
+  <data name="ID" xml:space="preserve"><value>المعرّف</value></data>
+  <data name="IconChoice" xml:space="preserve"><value>اختيار الأيقونة</value></data>
+  <data name="IdleDisconnect" xml:space="preserve"><value>قطع الاتصال عند عدم النشاط</value></data>
+  <data name="Intro" xml:space="preserve"><value>مقدمة</value></data>
+  <data name="InverseMotors" xml:space="preserve"><value>عكس المحركات</value></data>
+  <data name="LangPackControl.UseLangPack" xml:space="preserve"><value>استخدام حزمة اللغة</value></data>
+  <data name="LaunchProgramWithProfile" xml:space="preserve"><value>تشغيل برنامج مع الملف التعريفي</value></data>
+  <data name="Light" xml:space="preserve"><value>خفيف</value></data>
+  <data name="Lightbar" xml:space="preserve"><value>الشريط الضوئي</value></data>
+  <data name="LightbarMode" xml:space="preserve"><value>وضع الشريط الضوئي</value></data>
+  <data name="Linear" xml:space="preserve"><value>خطي</value></data>
+  <data name="LinkProfileId" xml:space="preserve"><value>ربط الملف التعريفي/المعرّف</value></data>
+  <data name="Macro" xml:space="preserve"><value>ماكرو</value></data>
+  <data name="MainWin.AbsDisplayMonitor" xml:space="preserve"><value>شاشة العرض المطلقة</value></data>
+  <data name="MainWin.EnableServer" xml:space="preserve"><value>تفعيل الخادم</value></data>
+  <data name="MainWin.OneEuroBeta" xml:space="preserve"><value>1€ Beta</value></data>
+  <data name="MainWin.OneEuroMinCutoff" xml:space="preserve"><value>1€ MinCutoff</value></data>
+  <data name="MappingLive.LeftStick" xml:space="preserve"><value>العصا اليسرى</value></data>
+  <data name="MappingLive.NoControllerHint" xml:space="preserve"><value>وصّل يد تحكم، ثم أعد فتح هذا المحرر.</value></data>
+  <data name="MappingLive.PressedLabel" xml:space="preserve"><value>مضغوط</value></data>
+  <data name="MappingLive.RightStick" xml:space="preserve"><value>العصا اليمنى</value></data>
+  <data name="MappingLive.Subtitle" xml:space="preserve"><value>يد التحكم الفعلية · قبل إعادة التعيين</value></data>
+  <data name="MappingLive.Title" xml:space="preserve"><value>الإدخال المباشر</value></data>
+  <data name="MappingLive.Waiting" xml:space="preserve"><value>في الانتظار</value></data>
+  <data name="MaxOutput" xml:space="preserve"><value>أقصى إخراج</value></data>
+  <data name="MaxTravel" xml:space="preserve"><value>أقصى مسافة حركة</value></data>
+  <data name="MaxZone" xml:space="preserve"><value>المنطقة القصوى</value></data>
+  <data name="MinFactor" xml:space="preserve"><value>الحد الأدنى للمعامل</value></data>
+  <data name="MinTravel" xml:space="preserve"><value>أدنى مسافة حركة</value></data>
+  <data name="MinimizeToTaskbar" xml:space="preserve"><value>التصغير إلى شريط المهام</value></data>
+  <data name="MinimizeToTaskbarTip" xml:space="preserve"><value>التصغير إلى شريط المهام بدلاً من علبة النظام</value></data>
+  <data name="Mode" xml:space="preserve"><value>الوضع</value></data>
+  <data name="Mouse" xml:space="preserve"><value>الماوس</value></data>
+  <data name="MouseAcceleration" xml:space="preserve"><value>تسارع الماوس</value></data>
+  <data name="MouseJoystick" xml:space="preserve"><value>عصا التحكم كماوس</value></data>
+  <data name="MouseOffset" xml:space="preserve"><value>إزاحة الماوس</value></data>
+  <data name="MouseSensitivity" xml:space="preserve"><value>حساسية الماوس</value></data>
+  <data name="MouseVerticalScale" xml:space="preserve"><value>المقياس الرأسي للماوس</value></data>
+  <data name="Multiplier" xml:space="preserve"><value>المضاعِف</value></data>
+  <data name="Net8NotInstalledWinNotice" xml:space="preserve"><value>سيتطلب DS4Windows الإصدار 3.3 تثبيت .NET 8 Desktop Runtime على نظامك   | [https://dotnet.microsoft.com/en-us/download/dotnet/thank-you/runtime-desktop-8.0.0-windows-{0}-installer](https://dotnet.microsoft.com/en-us/download/dotnet/thank-you/runtime-desktop-8.0.0-windows-{0}-installer)   |  | يرجى الضغط على موافق لتأكيد قراءة الرسالة. اضغط إلغاء ليتم تذكيرك مجددًا عند تشغيل التطبيق القادم.</value></data>
+  <data name="Net8NoticeWin.WinTitle" xml:space="preserve"><value>لم يتم العثور على .NET 8</value></data>
+  <data name="No" xml:space="preserve"><value>لا</value></data>
+  <data name="Normal" xml:space="preserve"><value>عادي</value></data>
+  <data name="Notification" xml:space="preserve"><value>إشعار</value></data>
+  <data name="OK" xml:space="preserve"><value>موافق</value></data>
+  <data name="OscServerHeading" xml:space="preserve"><value>التحكم والمراقبة الخارجية عبر OSC</value></data>
+  <data name="Other" xml:space="preserve"><value>أخرى</value></data>
+  <data name="OutContNotice" xml:space="preserve"><value>اختر نوع يد التحكم الافتراضية للإخراج (يسري عند حفظ الملف التعريفي)</value></data>
+  <data name="OuterBind" xml:space="preserve"><value>الربط الخارجي</value></data>
+  <data name="OuterBtn" xml:space="preserve"><value>الزر الخارجي</value></data>
+  <data name="OuterBtnDead" xml:space="preserve"><value>منطقة ميتة للزر الخارجي</value></data>
+  <data name="OutputCurve" xml:space="preserve"><value>منحنى الإخراج</value></data>
+  <data name="OutputMode" xml:space="preserve"><value>وضع الإخراج</value></data>
+  <data name="OutputSlotMan.InputNum" xml:space="preserve"><value>رقم الإدخال #</value></data>
+  <data name="OutputSlotMan.XInputNum" xml:space="preserve"><value>رقم XInput #</value></data>
+  <data name="OutputSlots" xml:space="preserve"><value>فتحات الإخراج</value></data>
+  <data name="Overview.ActiveProfileHint" xml:space="preserve"><value>تُحفظ الإعدادات أدناه في هذا الملف التعريفي</value></data>
+  <data name="Overview.ActiveProfileLabel" xml:space="preserve"><value>الملف التعريفي النشط</value></data>
+  <data name="Overview.AudioHapticsOverrideNotice" xml:space="preserve"><value>Audio Haptics يزوّد هذا البث حاليًا. أوقف "تشغيل هذا التطبيق عبر يد التحكم" لاختيار مصدر آخر.</value></data>
+  <data name="Overview.AudioSourceLabel" xml:space="preserve"><value>مصدر الصوت</value></data>
+  <data name="Overview.AudioSourceTip" xml:space="preserve"><value>يلتقط الافتراضي مزيج نقطة النهاية العادية. اختر تطبيقًا لبث صوت ذلك التطبيق فقط.</value></data>
+  <data name="Overview.Balanced" xml:space="preserve"><value>متوازن</value></data>
+  <data name="Overview.BassBodyLabel" xml:space="preserve"><value>الباس / الكثافة</value></data>
+  <data name="Overview.BassBodyTip" xml:space="preserve"><value>يضيف كثافة حول 200 هرتز مع تصفية الباس العميق غير القابل للاستخدام.</value></data>
+  <data name="Overview.BatteryLabel" xml:space="preserve"><value>البطارية</value></data>
+  <data name="Overview.ConnectionLabel" xml:space="preserve"><value>الاتصال</value></data>
+  <data name="Overview.ControllerDetailsBtn" xml:space="preserve"><value>تفاصيل يد التحكم</value></data>
+  <data name="Overview.ControllerSpeakerLabel" xml:space="preserve"><value>مكبر صوت يد التحكم</value></data>
+  <data name="Overview.ControllerStatusLabel" xml:space="preserve"><value>حالة يد التحكم</value></data>
+  <data name="Overview.DisconnectBtn" xml:space="preserve"><value>قطع الاتصال</value></data>
+  <data name="Overview.DynamicRangeLabel" xml:space="preserve"><value>المدى الديناميكي</value></data>
+  <data name="Overview.DynamicRangeTip" xml:space="preserve"><value>يرفع التفاصيل الهادئة ويحدّ بأمان من التأثيرات الصاخبة دون تأخير استباقي.</value></data>
+  <data name="Overview.EditActiveProfileBtn" xml:space="preserve"><value>تعديل الملف التعريفي النشط</value></data>
+  <data name="Overview.EmulatedControllerDesc" xml:space="preserve"><value>يد التحكم الافتراضية المعروضة للألعاب.</value></data>
+  <data name="Overview.EmulatedControllerNote" xml:space="preserve"><value>يؤدي تغيير هذا الإعداد إلى حفظ الملف التعريفي، ثم إجراء إعادة تحميل واحدة متحكم بها للإخراج.</value></data>
+  <data name="Overview.EmulatedControllerTitle" xml:space="preserve"><value>يد التحكم المحاكاة</value></data>
+  <data name="Overview.EmulatedDeviceHint" xml:space="preserve"><value>يُطبَّق من خلال الملف التعريفي النشط</value></data>
+  <data name="Overview.EmulatedDeviceLabel" xml:space="preserve"><value>الجهاز المحاكى</value></data>
+  <data name="Overview.HeadsetAuxLabel" xml:space="preserve"><value>سماعة الرأس / AUX</value></data>
+  <data name="Overview.HeadsetAuxTip" xml:space="preserve"><value>يتحكم في منفذ سماعة رأس يد التحكم بشكل مستقل عن مكبر الصوت المدمج فيها.</value></data>
+  <data name="Overview.HeadsetOnlyTip" xml:space="preserve"><value>يكتم مكبر الصوت المدمج مع استمرار البث عبر سماعة رأس متصلة بمنفذ AUX الخاص بيد التحكم.</value></data>
+  <data name="Overview.HeadsetOnlyToggle" xml:space="preserve"><value>سماعة الرأس فقط (كتم مكبر صوت يد التحكم)</value></data>
+  <data name="Overview.LightbarControlsBtn" xml:space="preserve"><value>تحكم بالشريط الضوئي</value></data>
+  <data name="Overview.LightbarControlsTip" xml:space="preserve"><value>استخدم إعدادات الشريط الضوئي في الملف التعريفي أو اختر لونًا مخصصًا مؤقتًا</value></data>
+  <data name="Overview.MicrophoneLevelLabel" xml:space="preserve"><value>مستوى الميكروفون</value></data>
+  <data name="Overview.MicrophoneTitle" xml:space="preserve"><value>الميكروفون</value></data>
+  <data name="Overview.NoControllerHint" xml:space="preserve"><value>وصّل يد تحكم، ثم اخترها من بطاقات الأجهزة في الزاوية العلوية اليسرى.</value></data>
+  <data name="Overview.NoControllerSelected" xml:space="preserve"><value>لم يتم اختيار يد تحكم</value></data>
+  <data name="Overview.NoiseSuppressionLabel" xml:space="preserve"><value>إلغاء ضوضاء</value></data>
+  <data name="Overview.NvidiaAI" xml:space="preserve"><value>NVIDIA AI</value></data>
+  <data name="Overview.Off" xml:space="preserve"><value>معطّل</value></data>
+  <data name="Overview.OpenSoundSettingsBtn" xml:space="preserve"><value>فتح إعدادات الصوت في Windows</value></data>
+  <data name="Overview.OpenSoundSettingsTip" xml:space="preserve"><value>اختر وجهة صوت لعبتك ومحادثتك الصوتية.</value></data>
+  <data name="Overview.OutputLevelsTitle" xml:space="preserve"><value>مستويات الإخراج</value></data>
+  <data name="Overview.ProfileLabel" xml:space="preserve"><value>الملف التعريفي  </value></data>
+  <data name="Overview.QuickActionsDesc" xml:space="preserve"><value>انتقل إلى المحرر الكامل أو أدر يد التحكم الفعلية المحددة.</value></data>
+  <data name="Overview.QuickActionsTitle" xml:space="preserve"><value>إجراءات سريعة</value></data>
+  <data name="Overview.QuickProfileControlsDesc" xml:space="preserve"><value>يُحفظ كل تغيير في الملف التعريفي النشط ليد التحكم المحددة ويُطبَّق تلقائيًا.</value></data>
+  <data name="Overview.QuickProfileControlsTitle" xml:space="preserve"><value>عناصر تحكم سريعة للملف التعريفي</value></data>
+  <data name="Overview.RefreshAudioSourcesTip" xml:space="preserve"><value>تحديث مصادر الصوت الجارية</value></data>
+  <data name="Overview.ReportIntervalLabel" xml:space="preserve"><value>الفاصل الزمني ومعدل تقرير الإدخال الملاحَظ</value></data>
+  <data name="Overview.ReportIntervalTip" xml:space="preserve"><value>الفاصل الزمني والمعدل الملاحَظ لتسليم الإدخال. تستخدم أيادي التحكم المدمجة معدل تقريرها المركّب. هذا ليس زمن إتمام النواة (kernel) ولا زمن استجابة اللعبة الشامل.</value></data>
+  <data name="Overview.SelectedControllerLabel" xml:space="preserve"><value>يد التحكم المحددة</value></data>
+  <data name="Overview.SpeakerProcessingTitle" xml:space="preserve"><value>معالجة مكبر الصوت</value></data>
+  <data name="Overview.StreamAudioTip" xml:space="preserve"><value>يبث الصوت المحدد إلى يد التحكم. يستخدم مكبر الصوت المدمج فيها ما لم يقم "سماعة الرأس فقط" بتوجيهه حصريًا إلى منفذ AUX.</value></data>
+  <data name="Overview.StreamAudioToggle" xml:space="preserve"><value>بث الصوت إلى يد التحكم</value></data>
+  <data name="Overview.Strong" xml:space="preserve"><value>قوي</value></data>
+  <data name="Overview.UsbHeadsetNote" xml:space="preserve"><value>يعمل بشكل مستقل عن يد التحكم الافتراضية. صوت سماعة الرأس عبر البلوتوث غير مدعوم بعد.</value></data>
+  <data name="Overview.UsbHeadsetStep1" xml:space="preserve"><value>وصّل Switch 2 Pro الخاص بك عبر USB وصل سماعات الرأس أو سماعة الرأس. اختر Headphones (Switch 2 Pro Controller) في إعدادات اللعبة أو صوت Windows. اضبط مستوى الصوت من هناك.</value></data>
+  <data name="Overview.UsbHeadsetStep2" xml:space="preserve"><value>للمحادثة الصوتية، اختر Microphone (Switch 2 Pro Controller) واستخدم سماعة رأس بها ميكروفون.</value></data>
+  <data name="Overview.UsbHeadsetTitle" xml:space="preserve"><value>استخدام سماعة رأس عبر USB</value></data>
+  <data name="Passthru" xml:space="preserve"><value>تمرير مباشر</value></data>
+  <data name="Permanent" xml:space="preserve"><value>دائم</value></data>
+  <data name="Pitch" xml:space="preserve"><value>Pitch</value></data>
+  <data name="Plug" xml:space="preserve"><value>توصيل</value></data>
+  <data name="Port" xml:space="preserve"><value>منفذ</value></data>
+  <data name="PresetOptWin.OutputController" xml:space="preserve"><value>يد التحكم للإخراج</value></data>
+  <data name="PresetOptWin.PresetMenu" xml:space="preserve"><value>قائمة الإعدادات المسبقة</value></data>
+  <data name="ProcessPriority" xml:space="preserve"><value>أولوية العملية</value></data>
+  <data name="ProfileEditor.VirtualDS4TrigOutput" xml:space="preserve"><value>وضع إخراج زناد DS4</value></data>
+  <data name="ProfileSwitchNotification" xml:space="preserve"><value>عرض إشعار تبديل الملف التعريفي</value></data>
+  <data name="Program" xml:space="preserve"><value>البرنامج</value></data>
+  <data name="ProgramFolder" xml:space="preserve"><value>مجلد البرنامج</value></data>
+  <data name="Quadratic" xml:space="preserve"><value>تربيعي</value></data>
+  <data name="Radial" xml:space="preserve"><value>شعاعي</value></data>
+  <data name="ReadingsControl.BatteryZero" xml:space="preserve"><value>البطارية: 0%</value></data>
+  <data name="ReadingsControl.InputDelayNA" xml:space="preserve"><value>تأخير الإدخال: غير متاح</value></data>
+  <data name="ReadingsControl.SixAxisXText" xml:space="preserve"><value>SixAxis: محور X مقلوب لتسهيل القراءة</value></data>
+  <data name="RealTimeNoAdmin" xml:space="preserve"><value>يتطلب اختيار أولوية الوقت الفعلي تشغيل التطبيق في وضع المسؤول.</value></data>
+  <data name="RecordBox.AddRumble" xml:space="preserve"><value>إضافة اهتزاز</value></data>
+  <data name="RecordBox.ChangeLightbarColor" xml:space="preserve"><value>تغيير لون الشريط الضوئي</value></data>
+  <data name="RecordBox.DoubleClickWaitEdit" xml:space="preserve"><value>انقر مرتين على انتظار لتعديل الوقت</value></data>
+  <data name="RecordBox.FifthMB" xml:space="preserve"><value>زر الماوس الخامس</value></data>
+  <data name="RecordBox.FourthMB" xml:space="preserve"><value>زر الماوس الرابع</value></data>
+  <data name="RecordBox.InsertWait" xml:space="preserve"><value>إدراج انتظار</value></data>
+  <data name="RecordBox.LoadPreset" xml:space="preserve"><value>تحميل إعداد مسبق</value></data>
+  <data name="RecordBox.MacroOrder" xml:space="preserve"><value>ترتيب الماكرو</value></data>
+  <data name="RecordBox.PlayOnce" xml:space="preserve"><value>تشغيل مرة واحدة</value></data>
+  <data name="RecordBox.RecordDelays" xml:space="preserve"><value>تسجيل فترات الانتظار</value></data>
+  <data name="RecordBox.RepeatWhileHeld" xml:space="preserve"><value>تكرار أثناء الضغط المستمر</value></data>
+  <data name="RecordBox.SavePreset" xml:space="preserve"><value>حفظ إعداد مسبق</value></data>
+  <data name="RecordBox.UseActionToRecord" xml:space="preserve"><value>استخدم لوحة المفاتيح/الماوس + يد التحكم 1 للتسجيل</value></data>
+  <data name="RecordBoxWin.WinTitle" xml:space="preserve"><value>تعديل الماكرو</value></data>
+  <data name="Regular" xml:space="preserve"><value>عادي</value></data>
+  <data name="RenameProfile" xml:space="preserve"><value>إعادة تسمية</value></data>
+  <data name="RenameProfileWin.TypeNewProfileName" xml:space="preserve"><value>يرجى كتابة الاسم الجديد لملف XML الخاص بالملف التعريفي المحدد.</value></data>
+  <data name="RenameProfileWin.WinTitle" xml:space="preserve"><value>إعادة تسمية الملف التعريفي</value></data>
+  <data name="Requested" xml:space="preserve"><value>مطلوب</value></data>
+  <data name="RevertToDefaultProfileOnUnknown" xml:space="preserve"><value>العودة إلى الملف التعريفي الافتراضي عند عدم المعرفة</value></data>
+  <data name="Roll" xml:space="preserve"><value>Roll</value></data>
+  <data name="Rotation" xml:space="preserve"><value>الدوران</value></data>
+  <data name="RunAs" xml:space="preserve"><value>تشغيل كـ</value></data>
+  <data name="SASteeringWheelFuzzTooltip" xml:space="preserve"><value>يحدد Fuzz الحد الأدنى لعدد وحدات الجهاز، ضمن المنطقة النشطة، التي يجب أن يدور بها Accel قبل تسجيل الإخراج كمتغيّر في المُعيِّن. تُعبَّر القيمة بوحدات Accel الخام.</value></data>
+  <data name="SaveWhere.AppDataDescText" xml:space="preserve"><value>لمن يفضلون التثبيت العادي. تُحفظ الإعدادات في %appdata%\DS4Windows</value></data>
+  <data name="SaveWhere.DontDelete" xml:space="preserve"><value>لا تحذف الإعدادات الأخرى بعد</value></data>
+  <data name="SaveWhere.MultipleSaves" xml:space="preserve"><value>تم اكتشاف مواقع حفظ متعددة</value></data>
+  <data name="SaveWhere.PickWhere" xml:space="preserve"><value>اختر مكان حفظ الملفات التعريفية والإعدادات</value></data>
+  <data name="SaveWhere.ProgramFolderDescText" xml:space="preserve"><value>لمن يفضلون برنامجًا محمولاً. | ملاحظة: هذا الخيار لا يعمل إذا كان في مجلد مسؤول بدون UAC</value></data>
+  <data name="SaveWhere.WinTitle" xml:space="preserve"><value>اختر مكان الحفظ</value></data>
+  <data name="ScanCode" xml:space="preserve"><value>Scan Code</value></data>
+  <data name="SelectedProfile" xml:space="preserve"><value>الملف التعريفي المحدد</value></data>
+  <data name="SendGameFeedbackToPhysicalController" xml:space="preserve"><value>إرسال استجابة اللعبة إلى يد التحكم الفعلية</value></data>
+  <data name="SendGameFeedbackToPhysicalControllerTip" xml:space="preserve"><value>يُنصح به. يرسل الاهتزاز، واستجابة DualSense اللمسية المحوَّلة، وتأثيرات الزناد التكيفي المتوافقة، وإضاءة يد التحكم من الألعاب إلى يد التحكم الفعلية المتصلة. أوقف هذا فقط عندما لا تستطيع يد التحكم استقبال الإخراج؛ تعطيله يزيل تأثيرات استجابة اللعبة هذه. أعد توصيل يد التحكم بعد تغيير هذا الإعداد.</value></data>
+  <data name="Sensitivity" xml:space="preserve"><value>الحساسية</value></data>
+  <data name="SharedAccess" xml:space="preserve"><value>وصول مشترك</value></data>
+  <data name="ShiftModifier" xml:space="preserve"><value>مُعدِّل Shift</value></data>
+  <data name="ShowAutoProfileDebugMessages" xml:space="preserve"><value>عرض رسائل تصحيح الملفات التعريفية التلقائية</value></data>
+  <data name="SixAxisAccel" xml:space="preserve"><value>Six Axis (تسارع)</value></data>
+  <data name="SkipVersion" xml:space="preserve"><value>تخطي الإصدار</value></data>
+  <data name="SnapToCenter" xml:space="preserve"><value>الانجذاب للمركز</value></data>
+  <data name="SolidColor" xml:space="preserve"><value>لون ثابت</value></data>
+  <data name="SpecialActionEdit.CalibrateGyro" xml:space="preserve"><value>معايرة الجايرو</value></data>
+  <data name="SpecialActionEdit.CheckBattery" xml:space="preserve"><value>فحص مستوى البطارية</value></data>
+  <data name="SpecialActionEdit.DisconnectBT" xml:space="preserve"><value>قطع الاتصال عن البلوتوث</value></data>
+  <data name="SpecialActionEdit.DoubleTapTrigger" xml:space="preserve"><value>نقر مزدوج على الزناد</value></data>
+  <data name="SpecialActionEdit.HoldFor" xml:space="preserve"><value>اضغط مع الاستمرار لمدة</value></data>
+  <data name="SpecialActionEdit.HoldTrigger" xml:space="preserve"><value>اضغط مع الاستمرار على الزناد</value></data>
+  <data name="SpecialActionEdit.KeepKeyState" xml:space="preserve"><value>الحفاظ على حالة المفتاح</value></data>
+  <data name="SpecialActionEdit.LaunchProgram" xml:space="preserve"><value>تشغيل برنامج</value></data>
+  <data name="SpecialActionEdit.LoadProfile" xml:space="preserve"><value>تحميل ملف تعريفي</value></data>
+  <data name="SpecialActionEdit.MacroRecorded" xml:space="preserve"><value>تم تسجيل الماكرو</value></data>
+  <data name="SpecialActionEdit.MultiAction" xml:space="preserve"><value>زر متعدد الأفعال</value></data>
+  <data name="SpecialActionEdit.PressKey" xml:space="preserve"><value>ضغط/تبديل مفتاح</value></data>
+  <data name="SpecialActionEdit.PressingUnloadTrigger" xml:space="preserve"><value>عند ضغط زناد الإلغاء</value></data>
+  <data name="SpecialActionEdit.RecordMacro" xml:space="preserve"><value>تسجيل ماكرو</value></data>
+  <data name="SpecialActionEdit.ReleasingUnloadTrigger" xml:space="preserve"><value>عند تحرير زناد الإلغاء</value></data>
+  <data name="SpecialActionEdit.RepeatWhileHeld" xml:space="preserve"><value>تكرار أثناء الضغط المستمر</value></data>
+  <data name="SpecialActionEdit.RunTriggerRelease" xml:space="preserve"><value>تشغيل عند تحرير الزناد</value></data>
+  <data name="SpecialActionEdit.SelectAction" xml:space="preserve"><value>-اختر فعلاً-</value></data>
+  <data name="SpecialActionEdit.SelectKey" xml:space="preserve"><value>اختر مفتاحًا</value></data>
+  <data name="SpecialActionEdit.SelectMacro" xml:space="preserve"><value>اختر ماكرو</value></data>
+  <data name="SpecialActionEdit.SetUnloadTrigger" xml:space="preserve"><value>تعيين زناد الإلغاء</value></data>
+  <data name="SpecialActionEdit.SixAxisWheelCalib" xml:space="preserve"><value>معايرة عجلة القيادة بالجايرو السداسي</value></data>
+  <data name="SpecialActionEdit.SyncRun" xml:space="preserve"><value>تشغيل متزامن</value></data>
+  <data name="SpecialActionEdit.TapTrigger" xml:space="preserve"><value>نقر الزناد</value></data>
+  <data name="SpecialActionEdit.UnloadTriggerRelease" xml:space="preserve"><value>إلغاء عند تحرير الزناد</value></data>
+  <data name="SpecialActionEdit.UntoggleKeyBy" xml:space="preserve"><value>إلغاء تبديل المفتاح بواسطة</value></data>
+  <data name="SpecialActionEdit.ViaLightbar" xml:space="preserve"><value>عبر الشريط الضوئي</value></data>
+  <data name="SpecialActionEdit.ViaNotification" xml:space="preserve"><value>عبر الإشعار</value></data>
+  <data name="SquareStick" xml:space="preserve"><value>عصا مربعة</value></data>
+  <data name="StickCalib.Instructions" xml:space="preserve"><value>يرجى تحريك العصا إلى الجوانب وتحريرها عدة مرات، ثم بعد الانتهاء اضغط على حفظ.</value></data>
+  <data name="StickCalib.WinTitle" xml:space="preserve"><value>معايرة العصا</value></data>
+  <data name="StickCalibration" xml:space="preserve"><value>معايرة العصا</value></data>
+  <data name="StickFuzzTooltip" xml:space="preserve"><value>يحدد Fuzz الحد الأدنى لعدد الوحدات التي تتحرك بها العصا التناظرية، ضمن المنطقة النشطة، قبل تسجيل الإخراج كمتغيّر في المُعيِّن. قد يكون هذا الإعداد مفيدًا للعصي المهترئة التي لا يمكنها الحفاظ على وضع ثابت. تُعبَّر القيمة بوحدات العصا الخام.</value></data>
+  <data name="StickInputCurveTooltip" xml:space="preserve"><value>إعداد قديم متروك. محاولة تطبيق منحنى بناءً على إحداثيات الإدخال الخام قبل تطبيق أي معلومات للمنطقة الميتة. غير مستقر</value></data>
+  <data name="StickMaxOutputForceTooltip" xml:space="preserve"><value>فرض إعداد أقصى إخراج دائمًا. مفيد لأقصى إخراج 100% وحصر القيمة في قيمة إخراج دائرية</value></data>
+  <data name="StickMaxOutputTooltip" xml:space="preserve"><value>في بعض الحالات، قد يكون من المفيد تحديد القيمة القصوى التي تُخرَج من العصا التناظرية. يسمح أقصى إخراج بتقييد القيمة النهائية لإخراج العصا التناظرية.</value></data>
+  <data name="StickOuterBindDeadTooltip" xml:space="preserve"><value>الحد الذي عنده يُطلَق الفعل</value></data>
+  <data name="StickOuterBindInvertTooltip" xml:space="preserve"><value>يجعل الربط الخارجي يُطلَق قبل بلوغ الحد. يتحرر الفعل بمجرد تجاوز الحد</value></data>
+  <data name="StickOuterBindTooltip" xml:space="preserve"><value>الفعل الذي يُنفَّذ عندما تتجاوز حركة العصا حدًا معينًا. مفيد لتعيين مفاتيح لأفعال المشي أو الركض. الانعكاس يجعل الفعل يُطلَق حتى بلوغ الحد</value></data>
+  <data name="StickRotationTooltip" xml:space="preserve"><value>+ = باتجاه عقارب الساعة. - = عكس عقارب الساعة. |  | يهدف إعداد الدوران إلى المساعدة في تصحيح اتجاه العصا التناظرية إذا كان إبهامك منزاحًا قليلاً عند تحريك العصا. على سبيل المثال، قد ينزاح إبهامك قليلاً عن المركز عند تحريك العصا بالكامل نحو الشمال. تنزاح إبهامي قليلاً نحو اليمين عند تحريك العصا بالكامل نحو الشمال بسبب طريقة إمساك يدي لـ DS4. تُشير القيمة المستخدمة إلى عدد الدرجات المستخدمة لتعديل قيمة إخراج المحور النهائية. تتراوح القيم المسموحة من -180 إلى 180. الافتراضي هو 0.</value></data>
+  <data name="SwipeEditor.ClearAll" xml:space="preserve"><value>إلغاء تحديد الكل</value></data>
+  <data name="SwipeEditor.Instructions" xml:space="preserve"><value>حدد الملفات التعريفية التي يُسمح لتمرير لوحة اللمس بإصبعين بالتبديل بينها. إذا لم يُحدَّد شيء، يتنقل التمرير بين جميع الملفات التعريفية (السلوك الافتراضي).</value></data>
+  <data name="SwipeEditor.SelectAll" xml:space="preserve"><value>تحديد الكل</value></data>
+  <data name="SwipeEditor.WinTitle" xml:space="preserve"><value>إعداد ملفات تعريف التمرير</value></data>
+  <data name="SwipeTouchpadToSwitchProfiles" xml:space="preserve"><value>تمرير لوحة اللمس لتبديل الملفات التعريفية</value></data>
+  <data name="Switch2Calib.CancelBtn" xml:space="preserve"><value>إ_لغاء الالتقاط</value></data>
+  <data name="Switch2Calib.CloseBtn" xml:space="preserve"><value>إ_غلاق</value></data>
+  <data name="Switch2Calib.ClosingWarning" xml:space="preserve"><value>يؤدي الإغلاق إلى إلغاء الالتقاط والتفعيل المباشر. قد يكتمل حفظ يجري الكتابة على القرص بالفعل؛ الإغلاق لا يتراجع عن تلك الكتابة.</value></data>
+  <data name="Switch2Calib.Heading" xml:space="preserve"><value>عايِر عصيّك</value></data>
+  <data name="Switch2Calib.PhysicalStickLabel" xml:space="preserve"><value>العصا الفعلية</value></data>
+  <data name="Switch2Calib.ResetBtn" xml:space="preserve"><value>إ_عادة تعيين معايرة هذا الكمبيوتر لهذه العصا…</value></data>
+  <data name="Switch2Calib.SaveBtn" xml:space="preserve"><value>_حفظ المعايرة</value></data>
+  <data name="Switch2Calib.StartBtn" xml:space="preserve"><value>_بدء المعايرة</value></data>
+  <data name="Switch2Calib.StorageNote" xml:space="preserve"><value>تُحفظ المعايرة على هذا الكمبيوتر لهذه العصا الفعلية، وليس في ملف تعريفي أو ذاكرة يد التحكم. قد تكون سجلات USB والبلوتوث منفصلة. يُطلَق إدخال يد التحكم المعيَّن أثناء تفعيل المعايرة.</value></data>
+  <data name="Switch2Calib.WinTitle" xml:space="preserve"><value>معايرة عصا Switch 2</value></data>
+  <data name="Task" xml:space="preserve"><value>مهمة</value></data>
+  <data name="Test" xml:space="preserve"><value>اختبار</value></data>
+  <data name="TestHeavy" xml:space="preserve"><value>اختبار قوي</value></data>
+  <data name="TestLight" xml:space="preserve"><value>اختبار خفيف</value></data>
+  <data name="Toggle" xml:space="preserve"><value>تبديل</value></data>
+  <data name="TouchButton.ActivationMode" xml:space="preserve"><value>وضع تفعيل الزر</value></data>
+  <data name="Touchpad" xml:space="preserve"><value>لوحة اللمس</value></data>
+  <data name="TouchpadJitterCompTooltip" xml:space="preserve"><value>يقيّد الطرف المنخفض من حركة لوحة اللمس. يقلل من حركة مؤشر الماوس العرضية عند الإبقاء على موضع شبه ثابت على لوحة اللمس</value></data>
+  <data name="TouchpadMinThresholdTooltip" xml:space="preserve"><value>أدنى مسافة حركة إخراج محسوبة قبل إرسال حدث ماوس إلى النظام</value></data>
+  <data name="TouchpadRotationTooltip" xml:space="preserve"><value>يعدّل تمرير لوحة اللمس بزاوية دوران معينة. مفيد عندما لا يكون التمرير العادي للوحة اللمس خطًا مستقيمًا. تتراوح القيم المسموحة من -180 إلى 180. الافتراضي هو 0.</value></data>
+  <data name="TouchpadSlideTooltip" xml:space="preserve"><value>الحساسية المستخدمة لتفعيل فعل تمرير عجلة الماوس متعدد اللمس</value></data>
+  <data name="TouchpadTapTooltip" xml:space="preserve"><value>تفعيل نقرة زر الماوس الأيسر بنقرة على لوحة اللمس. أقصى فاصل زمني محدد هو (القيمة × 2) مللي ثانية.</value></data>
+  <data name="TouchpadTrackballEnableTooltip" xml:space="preserve"><value>يضيف زخمًا لتمرير لوحة اللمس بمجرد رفع الإصبع. يضيف مسافة إضافية لحركة مؤشر الماوس أكبر مما هو ممكن ضمن المساحة المحدودة للوحة اللمس</value></data>
+  <data name="TouchpadTrackballFrictionTooltip" xml:space="preserve"><value>إضافة احتكاك للكرة التتبعية الافتراضية. تقليل الاحتكاك يزيد زمن حركة مؤشر الماوس النهائي</value></data>
+  <data name="TriggerEffect" xml:space="preserve"><value>تأثير الزناد</value></data>
+  <data name="TriggerLab.BehaviorNote" xml:space="preserve"><value>تأثيرات المختبر النشطة تتجاوز إخراج الزناد التكيفي الوارد من اللعبة.</value></data>
+  <data name="TriggerLab.EffectDesign" xml:space="preserve"><value>تصميم التأثير</value></data>
+  <data name="TriggerLab.Enabled" xml:space="preserve"><value>مفعّل</value></data>
+  <data name="TriggerLab.Linked" xml:space="preserve"><value>مرتبط</value></data>
+  <data name="TriggerLab.LinkedTip" xml:space="preserve"><value>استخدم تصميم تأثير مشترك واحد لـ L2 وR2. تتطابق الإعدادات المسبقة والأوضاع والمنزلقات بين الجانبين؛ يبقى مفتاح "نشط" لكل زناد مستقلاً.</value></data>
+  <data name="TriggerLab.OverrideBadge" xml:space="preserve"><value>تجاوز المختبر</value></data>
+  <data name="TriggerLab.Split" xml:space="preserve"><value>منفصل</value></data>
+  <data name="TriggerLab.SplitTip" xml:space="preserve"><value>اضبط تصاميم تأثير منفصلة لـ L2 وR2. العودة إلى "منفصل" تستعيد إعداداتك المستقلة الأخيرة، بما في ذلك أي زناد كان نشطًا.</value></data>
+  <data name="TurnOffDS4WindowsTemporarily" xml:space="preserve"><value>إيقاف DS4Windows مؤقتًا</value></data>
+  <data name="TwoStageMode" xml:space="preserve"><value>وضع المرحلتين</value></data>
+  <data name="UDPServer" xml:space="preserve"><value>خادم UDP</value></data>
+  <data name="Unbound" xml:space="preserve"><value>غير مُعيَّن</value></data>
+  <data name="UnloadTrigger" xml:space="preserve"><value>زناد الإلغاء</value></data>
+  <data name="Unplug" xml:space="preserve"><value>فصل</value></data>
+  <data name="UpdaterWin.WinTitle" xml:space="preserve"><value>نافذة التحديث</value></data>
+  <data name="UpgradeNetCaption" xml:space="preserve"><value>يرجى تحديث .NET Runtime</value></data>
+  <data name="UseController" xml:space="preserve"><value>استخدام يد التحكم</value></data>
+  <data name="UseCustomSteamFolder" xml:space="preserve"><value>استخدام مجلد Steam مخصص</value></data>
+  <data name="UseDs3PitchRollSim" xml:space="preserve"><value>[تجريبي] استخدام محاكاة جايرو DS3</value></data>
+  <data name="UseSmoothing" xml:space="preserve"><value>استخدام التنعيم</value></data>
+  <data name="Utils" xml:space="preserve"><value>أدوات</value></data>
+  <data name="VerticalScale" xml:space="preserve"><value>المقياس الرأسي</value></data>
+  <data name="ViGEm117MinNeeded" xml:space="preserve"><value>يعمل فقط مع ViGEmBus 1.17.333.0 وأحدث</value></data>
+  <data name="ViGEmPluginFailure" xml:space="preserve"><value>فشل تشغيل إضافة جهاز ViGEm. رمز الخطأ {0}. غالبًا مشكلة داخلية في ViGEmBus. جارٍ إغلاق الاتصال. إذا استمرت المشكلة، يرجى إغلاق DS4Windows ثم إعادة تشغيل Windows.</value></data>
+  <data name="ViiperProgress.DetailText" xml:space="preserve"><value>أبقِ هذه النافذة مفتوحة. سينتهي الإعداد تلقائيًا.</value></data>
+  <data name="ViiperProgress.Heading" xml:space="preserve"><value>جارٍ إعداد VIIPER</value></data>
+  <data name="ViiperProgress.PreparingPackage" xml:space="preserve"><value>جارٍ تحضير الحزمة الموثقة...</value></data>
+  <data name="ViiperProgress.StepInstallViiper" xml:space="preserve"><value>• تثبيت VIIPER 0.1.5-rc4.6</value></data>
+  <data name="ViiperProgress.StepVerifyFiles" xml:space="preserve"><value>• التحقق من الملفات المعبأة</value></data>
+  <data name="ViiperProgress.StepVerifyStartup" xml:space="preserve"><value>• التحقق من بدء التشغيل وواجهة API</value></data>
+  <data name="ViiperProgress.StepVerifyUsbip" xml:space="preserve"><value>• التحقق من USB-IP 0.9.7.7</value></data>
+  <data name="ViiperProgress.Summary" xml:space="preserve"><value>DS4Windows يتحقق من البنية الخلفية الكاملة ليد التحكم.</value></data>
+  <data name="ViiperProgress.WinTitle" xml:space="preserve"><value>إعداد VIIPER</value></data>
+  <data name="ViiperPrompt.Close" xml:space="preserve"><value>إغلاق</value></data>
+  <data name="ViiperPrompt.CurrentStatus" xml:space="preserve"><value>الحالة الحالية</value></data>
+  <data name="ViiperPrompt.ExistingDescription" xml:space="preserve"><value>لن يتم رفع صلاحيات هذا الملف التنفيذي أو اختياره. يستخدم التثبيت أو الإصلاح البنية الخلفية الموثقة في Program Files ويزيل فقط ملفات VIIPER القديمة المعروفة:</value></data>
+  <data name="ViiperPrompt.ExistingHeading" xml:space="preserve"><value>تم اكتشاف VIIPER منافس</value></data>
+  <data name="ViiperPrompt.Heading" xml:space="preserve"><value>VIIPER يحتاج إلى انتباه</value></data>
+  <data name="ViiperPrompt.InstallPortable" xml:space="preserve"><value>إبقاء DS4Windows محمولاً</value></data>
+  <data name="ViiperPrompt.InstallStandard" xml:space="preserve"><value>تثبيت عادي</value></data>
+  <data name="ViiperPrompt.NotNow" xml:space="preserve"><value>ليس الآن</value></data>
+  <data name="ViiperPrompt.PortableWarning" xml:space="preserve"><value>يترك "إبقاء DS4Windows محمولاً" هذا التطبيق تمامًا في مكانه، بينما يثبّت بنية VIIPER الخلفية المرفوعة الصلاحيات في Program Files المحمية. التثبيت العادي أيضًا ينقل فقط ملفات DS4Windows المملوكة للحزمة إلى Program Files. الملفات التعريفية والإعدادات والملفات غير المعروفة محفوظة دائمًا.</value></data>
+  <data name="ViiperPrompt.RequirementsHeading" xml:space="preserve"><value>ما يحتاجه DS4Windows</value></data>
+  <data name="ViiperPrompt.RequirementsText" xml:space="preserve"><value>• خادم/مساعد VIIPER&#x0a;• برنامج تشغيل USB/IP الخاص بويندوز usbip-win2</value></data>
+  <data name="ViiperPrompt.Summary" xml:space="preserve"><value>يستخدم هذا الملف التعريفي إخراج يد تحكم VIIPER الافتراضية.</value></data>
+  <data name="ViiperPrompt.SuppressPrompt" xml:space="preserve"><value>عدم إظهار رسالة الإعداد هذه مجددًا</value></data>
+  <data name="ViiperPrompt.SuppressPromptTip" xml:space="preserve"><value>يمكنك إعادة تفعيل رسائل الإعداد من Settings ← VIIPER Virtual Controller Support.</value></data>
+  <data name="ViiperPrompt.WinTitle" xml:space="preserve"><value>إعداد يد تحكم VIIPER الافتراضية</value></data>
+  <data name="VirtualControllerSettings" xml:space="preserve"><value>إعدادات يد التحكم الافتراضية</value></data>
+  <data name="WakeupFromSuspend" xml:space="preserve"><value>الاستيقاظ من وضع التعليق</value></data>
+  <data name="Welcome.BluetoothSettings" xml:space="preserve"><value>إعدادات البلوتوث</value></data>
+  <data name="Welcome.Step1HelpText" xml:space="preserve"><value>إذا ظهرت هذه النافذة مجددًا بعد التثبيت، فقد تحتاج لإعادة تشغيل جهازك.</value></data>
+  <data name="Welcome.Step1Text" xml:space="preserve"><value>الخطوة 1: تثبيت برنامج تشغيل ViGEmBus</value></data>
+  <data name="Welcome.Step2HelpText" xml:space="preserve"><value>إذا كنت قد استخدمت يد تحكم 360 على هذا الجهاز من قبل، يمكنك تخطي هذه الخطوة.</value></data>
+  <data name="Welcome.Step2Text" xml:space="preserve"><value>الخطوة 2: إذا كنت على Windows 7، ثبّت برنامج تشغيل 360</value></data>
+  <data name="Welcome.Step3BluetoothHelpText" xml:space="preserve"><value>بعد بدء الوميض، اذهب إلى إعدادات البلوتوث واتصل بـ "Wireless Controller". إذا طُلب منك، أدخل رمز الإقران 0000. بعد الإقران، أنت جاهز. استمتع!</value></data>
+  <data name="Welcome.Step3HelpText" xml:space="preserve"><value>الخطوة 3: توصيل يد تحكم DualShock 4. | للإعداد السلكي/USB: | ببساطة وصّل كابل micro-USB بجهازك وبيد تحكم DualShock 4. |  | للإعداد عبر البلوتوث (اختياري): اضغط مع الاستمرار على زر PS وShare لمدة 3 ثوانٍ. سيبدأ الشريط الضوئي بالوميض المزدوج.</value></data>
+  <data name="Welcome.Step4HelpText" xml:space="preserve"><value>استخدم HidHide لإعداد وإخفاء أي أيادي تحكم من التطبيقات الأخرى التي تعمل على نظامك. بعض الألعاب تتطلب وجود يد تحكم واحدة فقط وإلا سيسبب الإدخال المزدوج مشاكل في اللعبة.</value></data>
+  <data name="Welcome.Step4Text" xml:space="preserve"><value>(اختياري) الخطوة 4: تثبيت برنامج تشغيل HidHide</value></data>
+  <data name="Welcome.Step5HelpText" xml:space="preserve"><value>استخدم برنامج تشغيل FakerInput لتوفير لوحة مفاتيح وماوس نسبي وماوس مطلق افتراضيين على مستوى النظام. يسمح هذا باستخدام أحداث لوحة المفاتيح والماوس الافتراضية في بعض الحالات التي يفشل فيها SendInput. مثل هذه الحالات تشمل العمليات والألعاب ذات الصلاحيات المرتفعة، ورسائل UAC، وأنظمة مكافحة الغش التي تحظر أحداث SendInput. استخدام FakerInput ضروري لتشغيل DS4Windows مع بعض الألعاب التي تحتوي على حماية ضد الغش مثل Valorant.</value></data>
+  <data name="Welcome.Step5Text" xml:space="preserve"><value>(اختياري) الخطوة 5: تثبيت برنامج تشغيل FakerInput</value></data>
+  <data name="Welcome.WinTitle" xml:space="preserve"><value>مرحبًا بك في DS4Windows</value></data>
+  <data name="White" xml:space="preserve"><value>أبيض</value></data>
+  <data name="Width" xml:space="preserve"><value>العرض</value></data>
+  <data name="WindowTitleRule" xml:space="preserve"><value>قاعدة عنوان النافذة</value></data>
+  <data name="XAxisOffset" xml:space="preserve"><value>إزاحة المحور X</value></data>
+  <data name="XCenter" xml:space="preserve"><value>مركز X</value></data>
+  <data name="YAxisOffset" xml:space="preserve"><value>إزاحة المحور Y</value></data>
+  <data name="YCenter" xml:space="preserve"><value>مركز Y</value></data>
+  <data name="Yaw" xml:space="preserve"><value>Yaw</value></data>
+  <data name="Yes" xml:space="preserve"><value>نعم</value></data>
 </root>

@@ -3,6 +3,9 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:lex="http://wpflocalizeextension.codeplex.com"
+             lex:ResxLocalizationProvider.DefaultAssembly="DS4Windows"
+             lex:ResxLocalizationProvider.DefaultDictionary="Strings"
              mc:Ignorable="d" d:DesignHeight="700" d:DesignWidth="960"
              HorizontalAlignment="Left" VerticalAlignment="Stretch"
              Width="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType={x:Type Window}}, Converter={StaticResource ShellViewportWidth}, ConverterParameter=318}">
@@ -49,17 +52,17 @@
             <Grid Margin="0,0,0,16">
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right">
                     <Border x:Name="overrideBadge" Margin="0,0,14,0" Padding="9,4" CornerRadius="4" Background="#4DFFB020" Visibility="Collapsed">
-                        <TextBlock Text="LAB OVERRIDE" Foreground="#FFFFB020" FontSize="10" FontWeight="Bold" />
+                        <TextBlock Text="{lex:Loc TriggerLab.OverrideBadge}" Foreground="#FFFFB020" FontSize="10" FontWeight="Bold" />
                     </Border>
-                    <TextBlock Text="Effect design" Foreground="{DynamicResource MutedForegroundColor}"
+                    <TextBlock Text="{lex:Loc TriggerLab.EffectDesign}" Foreground="{DynamicResource MutedForegroundColor}"
                                FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,8,0" />
-                    <Button x:Name="linkedButton" Content="Linked" MinWidth="76" Height="36" Margin="0,0,6,0"
+                    <Button x:Name="linkedButton" Content="{lex:Loc TriggerLab.Linked}" MinWidth="76" Height="36" Margin="0,0,6,0"
                             Click="LinkedButton_Click" ToolTipService.ShowDuration="15000"
-                            ToolTip="Use one shared effect design for L2 and R2. Presets, modes, and sliders mirror between both sides; each trigger's Active switch remains independent." />
-                    <Button x:Name="splitButton" Content="Split" MinWidth="76" Height="36" Margin="0,0,14,0"
+                            ToolTip="{lex:Loc TriggerLab.LinkedTip}" />
+                    <Button x:Name="splitButton" Content="{lex:Loc TriggerLab.Split}" MinWidth="76" Height="36" Margin="0,0,14,0"
                             Click="SplitButton_Click" ToolTipService.ShowDuration="15000"
-                            ToolTip="Configure separate effect designs for L2 and R2. Returning to Split restores your last independent settings, including which trigger was active." />
-                    <TextBlock Text="Enabled" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,9,0" />
+                            ToolTip="{lex:Loc TriggerLab.SplitTip}" />
+                    <TextBlock Text="{lex:Loc TriggerLab.Enabled}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,9,0" />
                     <CheckBox x:Name="labEnabledToggle" Style="{StaticResource LabToggle}" Click="LabEnabledToggle_Click" />
                 </StackPanel>
             </Grid>
@@ -75,7 +78,7 @@
                     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                     <TextBlock Text="&#xE946;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource AccentColor}" VerticalAlignment="Center" />
                     <TextBlock x:Name="labStatusText" Grid.Column="1" Margin="10,0" TextWrapping="Wrap" VerticalAlignment="Center" />
-                    <TextBlock x:Name="labBehaviorText" Grid.Column="2" Text="Active lab effects override incoming game adaptive-trigger output." Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                    <TextBlock x:Name="labBehaviorText" Grid.Column="2" Text="{lex:Loc TriggerLab.BehaviorNote}" Foreground="{DynamicResource MutedForegroundColor}" TextWrapping="Wrap" VerticalAlignment="Center" />
                 </Grid>
             </Border>
         </Grid>

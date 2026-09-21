@@ -277,8 +277,8 @@ namespace DS4WinWPF.DS4Forms
         {
             if (settings == null)
             {
-                statusText.Text = "Select a controller";
-                sourceStatusText.Text = "No source";
+                statusText.Text = Properties.Resources.AHStatusSelectController;
+                sourceStatusText.Text = Properties.Resources.AHStatusNoSource;
                 statusDot.Fill = FindBrush("MutedForegroundColor", Brushes.Gray);
                 return;
             }
@@ -286,7 +286,7 @@ namespace DS4WinWPF.DS4Forms
             sourceStatusText.Text = SourceDisplayName(settings);
             if (!settings.Enabled)
             {
-                statusText.Text = "Off";
+                statusText.Text = Properties.Resources.AHStatusOff;
                 statusDot.Fill = FindBrush("MutedForegroundColor", Brushes.Gray);
                 return;
             }
@@ -296,7 +296,7 @@ namespace DS4WinWPF.DS4Forms
                 Program.rootHub?.DS4Controllers[deviceIndex] != null;
             if (!liveController)
             {
-                statusText.Text = "Saved to profile";
+                statusText.Text = Properties.Resources.AHStatusSavedToProfile;
                 statusDot.Fill = FindBrush("AccentColor", Brushes.DodgerBlue);
                 return;
             }
@@ -304,7 +304,7 @@ namespace DS4WinWPF.DS4Forms
             AudioHapticsRuntimeStatus runtime =
                 Program.rootHub.GetAudioHapticsStatus(deviceIndex);
             statusText.Text = runtime.Active &&
-                !settings.AutomaticGameDetection ? "Active" : runtime.Message;
+                !settings.AutomaticGameDetection ? Properties.Resources.AHStatusActive : runtime.Message;
             statusDot.Fill = runtime.Active
                 ? FindBrush("SuccessColor", Brushes.LimeGreen)
                 : FindBrush("AccentColor", Brushes.DodgerBlue);
@@ -312,13 +312,13 @@ namespace DS4WinWPF.DS4Forms
 
         private static string SourceDisplayName(AudioHapticsProfileSettings settings) => settings.Source switch
         {
-            AudioHapticsSourceKind.ControllerAudio => "Controller audio",
+            AudioHapticsSourceKind.ControllerAudio => Properties.Resources.AHSourceControllerAudio,
             AudioHapticsSourceKind.AppSession when
-                settings.AutomaticGameDetection => "Automatic game detection",
+                settings.AutomaticGameDetection => Properties.Resources.AHSourceAutoGameDetection,
             AudioHapticsSourceKind.AppSession => string.IsNullOrWhiteSpace(settings.DisplayName)
-                ? (string.IsNullOrWhiteSpace(settings.ExecutableName) ? "Selected app" : settings.ExecutableName)
+                ? (string.IsNullOrWhiteSpace(settings.ExecutableName) ? Properties.Resources.AHSourceSelectedApp : settings.ExecutableName)
                 : settings.DisplayName,
-            _ => "System audio · default output",
+            _ => Properties.Resources.AHSourceSystemAudioDefault,
         };
 
         private Brush FindBrush(string key, Brush fallback) => TryFindResource(key) as Brush ?? fallback;

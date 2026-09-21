@@ -3164,6 +3164,10 @@ namespace DS4Windows.InputDevices
                     ControllerStatePayloadLength];
             private readonly DualSenseRealtimeHapticsSharedRing
                 realtimeHaptics;
+            internal Action BeforeRealtimeHapticsAvailabilityProbeTestHook = null;
+            private readonly DualSenseRearHapticsUnderrunGate rearHapticsUnderrunGate =
+                new(Stopwatch.Frequency);
+            private long rearHapticsDeferralDeadlineQpc;
             private readonly bool useMeasuredTransportAudioTransport;
             private readonly bool useCompactCombinedHapticsTransport;
             private readonly bool useNativeAudioTransport;
@@ -3868,6 +3872,11 @@ namespace DS4Windows.InputDevices
                 int startupReportsRemaining, long nowQpc)
             {
                 if (!CanQueuedSpeakerConsumeControllerStateLocked()) return false;
+                // A briefly unavailable rear block has not claimed the front
+                // carrier. Eligible immutable native commands can still use
+                // their own lane; local latest-state piggyback stays ordered.
+                if (nativeCommands.Count != 0 && rearHapticsDeferralDeadlineQpc > nowQpc)
+                    return false;
                 return nativeCommands.Count == 0 || primeRequired ||
                     startupReportsRemaining > 0 || !mediaScheduler.IsStarted ||
                     mediaScheduler.NextDeadlineQpc <= nowQpc;
@@ -3887,6 +3896,12 @@ namespace DS4Windows.InputDevices
 
             private long SelectV5PresentationWakeDeadlineLocked(long nowQpc, long mediaDeadline)
             {
+                // While rear data is briefly deferred, native HID credit may
+                // return without an IPC/data notification. Retain the normal
+                // 1 ms Busy retry instead of sleeping the full rear deadline.
+                if (rearHapticsDeferralDeadlineQpc > nowQpc && nativeCommands.Count != 0 &&
+                    !nativeCommandCreditAvailable && PendingStateReportsAhead <= 0)
+                    return Math.Min(mediaDeadline, nowQpc + Math.Max(1, Stopwatch.Frequency / 1000));
                 // An overdue media slot wins even if a control deadline is
                 // older. Selecting that older deadline would repeatedly return
                 // to the loop whose due-media priority then rejects the control,
@@ -3911,6 +3926,11 @@ namespace DS4Windows.InputDevices
                 WaitHandle[] mediaWaits = timerWait != null ?
                     new WaitHandle[] { timerWait, stopRequested, reservoirChanged } :
                     new WaitHandle[] { stopRequested, reservoirChanged };
+                WaitHandle[] rearWaits = timerWait != null ?
+                    new WaitHandle[] { timerWait, stopRequested, reservoirChanged,
+                        realtimeHaptics.DataAvailableSignal } :
+                    new WaitHandle[] { stopRequested, reservoirChanged,
+                        realtimeHaptics.DataAvailableSignal };
                 // Compact/paired fallbacks retain the rational clock. The V5
                 // source opts into the native transport's separately observed 10/20 ms
                 // host lattice below; other native sources keep their existing
@@ -3930,6 +3950,8 @@ namespace DS4Windows.InputDevices
                         ApplyPendingLifecycleResets(
                             ref appliedLifecycleResetRevision,
                             ref appliedWriterClockResetRevision);
+                        if (rearHapticsDeferralDeadlineQpc != 0)
+                            UpdateRearHapticsDeferral(Stopwatch.GetTimestamp());
                         // Completion polling is physical I/O and must remain
                         // outside stateLock. The write rechecks credit
                         // atomically; a busy native lane never blocks media.
@@ -4173,10 +4195,12 @@ namespace DS4Windows.InputDevices
                                         if (HasPendingControllerState)
                                         {
                                             // Yield only when queued media can
-                                            // present. A partial prime cannot
-                                            // return the fairness credit, so a
-                                            // Busy control must retry on its own.
-                                            if (CanQueuedSpeakerConsumeControllerStateLocked())
+                                            // present. Neither a partial prime
+                                            // nor a rear-data deferral can
+                                            // return fairness credit. A Busy
+                                            // control must retry on its own.
+                                            if (rearHapticsDeferralDeadlineQpc <= Stopwatch.GetTimestamp() &&
+                                                CanQueuedSpeakerConsumeControllerStateLocked())
                                             {
                                                 if (nativeCommands.Count != 0)
                                                     nativeStateReportsAhead = Math.Max(nativeStateReportsAhead, 1);
@@ -4287,6 +4311,20 @@ namespace DS4Windows.InputDevices
                                 reservoirChanged.WaitOne(1);
                             }
 
+                            continue;
+                        }
+
+                        if (rearHapticsDeferralDeadlineQpc != 0)
+                        {
+                            long wakeDeadline;
+                            lock (stateLock)
+                                wakeDeadline = SelectV5PresentationWakeDeadlineLocked(
+                                    Stopwatch.GetTimestamp(), rearHapticsDeferralDeadlineQpc);
+                            // No packet, native claim, sequence or media-clock
+                            // tick has been consumed. Data/control/lifecycle
+                            // notifications all return through full readiness
+                            // validation, without renewing this deadline.
+                            WaitForNativeDeadline(timer, wakeDeadline, rearWaits);
                             continue;
                         }
 
@@ -4440,6 +4478,23 @@ namespace DS4Windows.InputDevices
                         {
                             break;
                         }
+
+                        // A test may admit independent source/control work at
+                        // this actual due-media boundary, before any queue or
+                        // native-command claim. Never invoke it under a lock.
+                        BeforeRealtimeHapticsAvailabilityProbeTestHook?.Invoke();
+
+                        bool mayDeferRear;
+                        lock (stateLock)
+                        {
+                            mayDeferRear = useV5PresentationCadence && useNativeAudioTransport &&
+                                !UsePairedAudioReports && !nativeTransportStartupBurstPresentation &&
+                                !primeRequired && lifecycleResetRevision == appliedLifecycleResetRevision &&
+                                reservoir.TryPeek(out QueuedReport rearHead) &&
+                                IsSpeakerAudioReport(rearHead.Report);
+                        }
+                        if (mayDeferRear && UpdateRearHapticsDeferral(Stopwatch.GetTimestamp()) != 0)
+                            continue;
 
                         // Legacy lossless paths wait for an oldest-slot credit.
                         // MeasuredTransport and the paired hybrid instead probe the
@@ -5298,6 +5353,15 @@ namespace DS4Windows.InputDevices
                 acknowledgementAvailable.Set();
             }
 
+            private long UpdateRearHapticsDeferral(long nowQpc)
+            {
+                bool ready = realtimeHaptics.TryPrepareCurrentGeneration(nowQpc,
+                    out bool empty, out long committedSequence, out long committedEnqueuedQpc);
+                rearHapticsDeferralDeadlineQpc = rearHapticsUnderrunGate.Update(
+                    nowQpc, ready, empty, committedSequence, committedEnqueuedQpc);
+                return rearHapticsDeferralDeadlineQpc;
+            }
+
             private void ApplyPendingLifecycleResets(
                 ref long appliedLifecycleRevision,
                 ref long appliedWriterRevision)
@@ -5320,6 +5384,8 @@ namespace DS4Windows.InputDevices
                     // flight without racing the physical compositor.
                     realtimeHaptics.AcceptGeneration(hapticsGeneration,
                         silenceFutureReports: true);
+                    rearHapticsUnderrunGate.Reset();
+                    rearHapticsDeferralDeadlineQpc = 0;
                     physicalStateTransitionFilter.Reset();
                     appliedLifecycleRevision = requestedLifecycleRevision;
                 }

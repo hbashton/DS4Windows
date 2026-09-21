@@ -1022,12 +1022,16 @@ namespace DS4Windows
 
         internal void BindPhysicalController(int deviceIndex)
         {
+            DualSenseDevice converterTarget = ResolvePhysicalControllerTarget(deviceIndex);
+            if (connected && !CanReuseHapticsConverterForTarget(converterTarget))
+                throw new InvalidOperationException("The VIIPER haptics converter requires a new virtual device for this physical controller.");
             int previousDeviceIndex = Volatile.Read(ref lastInputDeviceIndex);
             if (previousDeviceIndex != deviceIndex)
             {
                 ReleaseTriggerLabRumbleOverrides(previousDeviceIndex);
             }
             PublishPhysicalControllerBinding(deviceIndex);
+            ApproveHapticsConverterTarget(converterTarget);
             if (connected)
             {
                 RebindSwitch2RuntimeStatusBridge();
@@ -1865,11 +1869,25 @@ namespace DS4Windows
             string legacyDeviceName,
             bool supportsMicrophoneInterfaceEvents)
         {
+            int physicalIndex = Volatile.Read(ref lastInputDeviceIndex);
+            DualSenseDevice target = ResolvePhysicalControllerTarget(physicalIndex);
+            bool requestSony = WantsSonyBluetoothHaptics(target);
             ViiperDeviceStream stream = OpenRawInputV5StreamWithFallback(
-                name => client.CreateDeviceAndOpenStream(name),
+                name => client.CreateDeviceAndOpenStream(name,
+                    deviceSpecific: requestSony ? new ViiperHapticsConverter.CreateOptions() : null,
+                    requestSonyBluetoothHaptics: requestSony),
                 rawInputDeviceName, eventDeviceName, legacyDeviceName,
                 supportsMicrophoneInterfaceEvents,
                 out bool rawInputStatus, out bool microphoneEvents);
+            if (!ReferenceEquals(target, ResolvePhysicalControllerTarget(physicalIndex)) ||
+                requestSony && !WantsSonyBluetoothHaptics(target))
+            {
+                stream.Dispose();
+                throw new IOException("The physical haptics target changed while VIIPER was creating its stream.");
+            }
+            requestedSonyBluetoothHaptics = requestSony;
+            Volatile.Write(ref activeHapticsConverter, stream.HapticsConverter);
+            ApproveHapticsConverterTarget(target);
             activeStreamSupportsRawInputStatus = rawInputStatus;
             activeStreamSupportsMicrophoneInterfaceEvents = microphoneEvents;
             return stream;
@@ -6616,6 +6634,15 @@ namespace DS4Windows
                 return;
             }
 
+            // A report-thread rebind cannot approve a new recipient for an
+            // immutable Sony DSP stream. Retain the complete compact/native
+            // control prefix, whose existing ownership rules are independent
+            // of DSP, but never expose a Sony-filtered carrier to Nintendo's
+            // raw64 interpreter. Media-only callbacks are not native commands.
+            feedbackLength = GetHapticsCompatibleFeedbackLength(device,
+                feedbackLength, freshNativeOutput);
+            if (feedbackLength == 0) return;
+
             // A compatibility sidecar exists only to carry PlayStation audio.
             // If an older VIIPER backend had to expose its neutral HID
             // interface too, do not let applications overwrite the primary
@@ -10482,13 +10509,14 @@ namespace DS4Windows
         }
 
         public ViiperDeviceStream CreateDeviceAndOpenStream(string deviceName,
-            ushort? idProduct = null, object deviceSpecific = null)
+            ushort? idProduct = null, object deviceSpecific = null,
+            bool requestSonyBluetoothHaptics = false)
         {
             string payload = SerializeDeviceCreateRequest(deviceName,
                 idProduct, deviceSpecific);
             return CreateDeviceAndOpenStream(busId =>
                 SendRequest<ViiperDeviceResponse>($"bus/{busId}/add",
-                    payload));
+                    payload), requestSonyBluetoothHaptics);
         }
 
         internal ViiperDeviceStream CreateAuthorizedXboxOneDeviceAndOpenStream(
@@ -10635,14 +10663,16 @@ namespace DS4Windows
         }
 
         private ViiperDeviceStream CreateDeviceAndOpenStream(
-            Func<uint, ViiperDeviceResponse> createDevice)
+            Func<uint, ViiperDeviceResponse> createDevice,
+            bool requestSonyBluetoothHaptics = false)
         {
             return ViiperUsbipPortManager.WithNativePortMutationLock(() =>
-                CreateDeviceAndOpenStreamCore(createDevice));
+                CreateDeviceAndOpenStreamCore(createDevice, requestSonyBluetoothHaptics));
         }
 
         private ViiperDeviceStream CreateDeviceAndOpenStreamCore(
-            Func<uint, ViiperDeviceResponse> createDevice)
+            Func<uint, ViiperDeviceResponse> createDevice,
+            bool requestSonyBluetoothHaptics)
         {
             ArgumentNullException.ThrowIfNull(createDevice);
             ViiperUsbipPortManager.DetachStaleLocalViiperPorts();
@@ -10654,6 +10684,8 @@ namespace DS4Windows
             try
             {
                 device = createDevice(bus.BusId);
+                string hapticsConverter = ViiperHapticsConverter.ParseSelection(
+                    device.DeviceSpecific, requestSonyBluetoothHaptics);
                 usbipPort = device.UsbipPort;
                 if (!ViiperUsbipPortManager.IsTrustedCreateResponse(
                     usbipPort, device.UsbipOwnerSerial))
@@ -10666,7 +10698,8 @@ namespace DS4Windows
                     bus.BusId, device.DevId, usbipPort);
                 ViiperUsbipPortManager.RegisterActivePort(usbipPort,
                     $"{bus.BusId}-{device.DevId}");
-                return OpenStream(bus.BusId, device.DevId, usbipPort);
+                return OpenStream(bus.BusId, device.DevId, usbipPort,
+                    hapticsConverter: hapticsConverter);
             }
             catch
             {
@@ -10830,7 +10863,8 @@ namespace DS4Windows
 
         private ViiperDeviceStream OpenStream(uint busId, string devId,
             int usbipPort,
-            ViiperVirtualDeviceLifetime deviceLifetime = null)
+            ViiperVirtualDeviceLifetime deviceLifetime = null,
+            string hapticsConverter = ViiperHapticsConverter.Legacy)
         {
             XboxOneAuthorizedRegistrationV1 registration =
                 deviceLifetime?.XboxOneRegistration;
@@ -10852,7 +10886,7 @@ namespace DS4Windows
                 stream.Write(request, 0, request.Length);
                 deviceLifetime ??= new ViiperVirtualDeviceLifetime(busId,
                     devId, usbipPort, RemoveDevice);
-                result = new ViiperDeviceStream(tcp, stream, deviceLifetime);
+                result = new ViiperDeviceStream(tcp, stream, deviceLifetime, hapticsConverter);
                 if (registration != null)
                 {
                     result.EnableXboxOneBroker();
@@ -11100,6 +11134,9 @@ namespace DS4Windows
 
         private sealed class ViiperDeviceResponse
         {
+            [JsonPropertyName("deviceSpecific")]
+            public JsonElement DeviceSpecific { get; set; }
+
             [JsonPropertyName("devId")]
             public string DevId { get; set; }
 
@@ -12227,14 +12264,17 @@ namespace DS4Windows
         private static readonly uint[] FramedCrcTable = BuildFramedCrcTable();
 
         public ViiperDeviceStream(TcpClient tcp, Stream stream,
-            ViiperVirtualDeviceLifetime deviceLifetime)
-            : this(stream, tcp, deviceLifetime)
+            ViiperVirtualDeviceLifetime deviceLifetime,
+            string hapticsConverter = ViiperHapticsConverter.Legacy)
+            : this(stream, tcp, deviceLifetime, hapticsConverter)
         {
         }
 
         internal ViiperDeviceStream(Stream stream, IDisposable transport,
-            ViiperVirtualDeviceLifetime deviceLifetime)
+            ViiperVirtualDeviceLifetime deviceLifetime,
+            string hapticsConverter = ViiperHapticsConverter.Legacy)
         {
+            HapticsConverter = hapticsConverter;
             this.stream = stream ?? throw new ArgumentNullException(nameof(stream));
             this.transport = transport ?? throw new ArgumentNullException(nameof(transport));
             this.deviceLifetime = deviceLifetime ??
@@ -12242,6 +12282,8 @@ namespace DS4Windows
         }
 
         public uint BusId => deviceLifetime.BusId;
+
+        internal string HapticsConverter { get; }
 
         public string DevId => deviceLifetime.DevId;
 

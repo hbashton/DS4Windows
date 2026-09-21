@@ -10,8 +10,8 @@ namespace DS4WindowsTests;
 public class DualSenseNativeMediaFallbackTests
 {
     // These tests use an unopened HID object and no physical/output workers.
-    // The BT case holds the existing template-admission flag, deterministically
-    // modelling a concurrent control update without timing or hardware I/O.
+    // The BT case is retiring its transport, deterministically modelling
+    // unavailable media without timing, a recovery worker or hardware I/O.
     [DataTestMethod]
     [DataRow(ConnectionType.USB, false)]
     [DataRow(ConnectionType.USB, true)]
@@ -92,7 +92,9 @@ public class DualSenseNativeMediaFallbackTests
                 SetField(typeof(DualSenseDevice), device,
                     "bluetoothSpeakerClockLeaseExpiryTimestamp", long.MaxValue);
                 SetField(typeof(DualSenseDevice), device,
-                    "bluetoothCombinedTemplateUpdateClaimed", 1);
+                    "bluetoothOutputTransportStopping", 1);
+                // A busy control-template buffer is no longer an unavailable
+                // media transport: PCM has independent lossless admission.
             }
 
             var hub = (ControlService)RuntimeHelpers.GetUninitializedObject(typeof(ControlService));

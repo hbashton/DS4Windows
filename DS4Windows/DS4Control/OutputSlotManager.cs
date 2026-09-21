@@ -177,7 +177,7 @@ namespace DS4Windows
         }
 
         public OutSlotDevice DeferredPlugin(OutputDevice outputDevice, int inIdx, string inDisplayString,
-            OutputDevice[] outdevs, OutContType contType)
+            OutputDevice[] outdevs, OutContType contType, OutSlotDevice preferredSlot = null)
         {
             contType = contType.Normalize();
             ControlService.StartupDiag($"OutputSlotManager.DeferredPlugin enter inIdx={inIdx} contType={contType} outputNull={outputDevice == null}");
@@ -186,7 +186,12 @@ namespace DS4Windows
             //queuedTasks++;
             //Action tempAction = new Action(() =>
             {
-                int slot = FindEmptySlot();
+                int slot = preferredSlot == null ? FindEmptySlot() :
+                    (uint)preferredSlot.Index < outputSlots.Length &&
+                    ReferenceEquals(outputSlots[preferredSlot.Index], preferredSlot) &&
+                    preferredSlot.CurrentInputBound == OutSlotDevice.InputBound.Unbound &&
+                    preferredSlot.CurrentAttachedStatus == OutSlotDevice.AttachedStatus.UnAttached ?
+                        preferredSlot.Index : -1;
                 ControlService.StartupDiag($"OutputSlotManager.DeferredPlugin emptySlot={slot + 1} inIdx={inIdx} contType={contType}");
                 if (slot != -1)
                 {
@@ -428,6 +433,11 @@ namespace DS4Windows
                 boundOutputs[inputIndex] != null)
                 return false;
 
+            if (output is ViiperOutDevice viiper && viiper.NegotiatesHapticsConverter)
+            {
+                if (!viiper.CanReuseForPhysicalController(inputIndex)) return false;
+                viiper.BindPhysicalController(inputIndex);
+            }
             candidate.InputIndex = inputIndex;
             candidate.InputDisplayString = inputDisplayString ?? string.Empty;
             boundOutputs[inputIndex] = output;
@@ -435,6 +445,27 @@ namespace DS4Windows
             // This setter publishes an event. All binding fields and the exact
             // produced object must be visible even if an observer throws.
             candidate.CurrentInputBound = OutSlotDevice.InputBound.Bound;
+            return true;
+        }
+
+        // The caller's compatibility hint may be stale. Retire only an exact,
+        // still-unbound registration, under the same lock as binding. Keep its
+        // manager ownership intact if device teardown fails.
+        internal bool TryRetireIncompatibleHapticsOutput(OutSlotDevice candidate,
+            OutputDevice expected, int inputIndex)
+        {
+            if (candidate == null || expected is not ViiperOutDevice viiper) return false;
+            using WriteLocker locker = new WriteLocker(queueLocker);
+            if (!IsExactAttachedSlotNoLock(candidate, expected) ||
+                candidate.CurrentInputBound != OutSlotDevice.InputBound.Unbound ||
+                viiper.CanReuseForPhysicalController(inputIndex)) return false;
+            expected.RemoveFeedbacks();
+            expected.Disconnect();
+            outputDevices[candidate.Index] = null;
+            deviceDict.Remove(candidate.Index);
+            revDeviceDict.Remove(expected);
+            candidate.DetachDevice();
+            SlotUnassigned?.Invoke(this, candidate.Index, candidate);
             return true;
         }
 

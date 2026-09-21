@@ -2442,6 +2442,15 @@ namespace DS4Windows
                 if (ViiperOutDevice.IsViiperType(contType))
                 {
                     activeOutDevType[index] = contType;
+                    OutSlotDevice converterReplacementSlot = null;
+                    if (slotDevice?.OutputDevice is ViiperOutDevice existingViiper &&
+                        !existingViiper.CanReuseForPhysicalController(index))
+                    {
+                        if (outputslotMan.TryRetireIncompatibleHapticsOutput(
+                            slotDevice, existingViiper, index))
+                            converterReplacementSlot = slotDevice;
+                        slotDevice = null;
+                    }
                     if (slotDevice != null)
                     {
                         if (outputslotMan.TryBindExistingUnboundOutput(slotDevice,
@@ -2455,13 +2464,14 @@ namespace DS4Windows
                     }
                     if (slotDevice == null)
                     {
-                        slotDevice = outputslotMan.FindOpenSlot();
+                        slotDevice = converterReplacementSlot ?? outputslotMan.FindOpenSlot();
                         if (slotDevice != null)
                         {
                             OutputDevice tempViiper = EstablishOutDevice(index, contType);
                             produced = tempViiper;
                             slotDevice = outputslotMan.DeferredPlugin(tempViiper, index,
-                                $"{device.DisplayName} [{device.MacAddress}]", outputDevices, contType);
+                                $"{device.DisplayName} [{device.MacAddress}]", outputDevices, contType,
+                                preferredSlot: converterReplacementSlot);
                             success = slotDevice != null;
                         }
                         else
@@ -3985,7 +3995,8 @@ namespace DS4Windows
                 ViiperOutDevice existing =
                     playStationFeatureOutputDevices[index];
                 if (existing?.IsRuntimeConnected == true &&
-                    existing.OutputType == desiredSidecar)
+                    existing.OutputType == desiredSidecar &&
+                    existing.CanReuseForPhysicalController(index))
                 {
                     existing.BindPhysicalController(index);
                     return existing;
@@ -4006,8 +4017,8 @@ namespace DS4Windows
                 {
                     StartupDiag(
                         $"Persistent PlayStation audio owner connect begin index={index} type={desiredSidecar}");
-                    sidecar.Connect();
                     sidecar.BindPhysicalController(index);
+                    sidecar.Connect();
                     playStationFeatureOutputDevices[index] = sidecar;
                     StartupDiag(
                         $"Persistent PlayStation audio owner ready index={index} type={desiredSidecar} port={sidecar.DirectSpeakerUsbipPort}");

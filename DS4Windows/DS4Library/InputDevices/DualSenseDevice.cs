@@ -755,6 +755,9 @@ namespace DS4Windows.InputDevices
             new byte[BluetoothCombinedOutputReportLength];
         private readonly byte[] bluetoothCombinedTemplateUpdateReport =
             new byte[BluetoothCombinedOutputReportLength];
+        private readonly object bluetoothRealtimeHapticsPublicationLock = new object();
+        private readonly byte[] bluetoothRealtimeHapticsPublicationReport =
+            new byte[BluetoothCombinedOutputReportLength];
         private int bluetoothCombinedControlCommitClaimed;
         private int bluetoothCombinedTemplateUpdateClaimed;
         private readonly byte[] bluetoothCombinedGameStateWorkingReport =
@@ -2554,8 +2557,15 @@ namespace DS4Windows.InputDevices
 
         private bool RefreshBluetoothAudioPacerTemplateFromCache(
             in DualSensePhysicalOutputSnapshot outputState,
-            bool realtimeHaptics = false, bool waitForCapacity = false)
+            bool realtimeHaptics = false, bool waitForCapacity = false,
+            byte[] realtimeSamples = null, int realtimeSamplesOffset = 0)
         {
+            if (realtimeHaptics)
+            {
+                return PublishBluetoothRealtimeHaptics(realtimeSamples,
+                    realtimeSamplesOffset);
+            }
+
             if (Interlocked.CompareExchange(
                     ref bluetoothCombinedTemplateUpdateClaimed, 1, 0) != 0)
             {
@@ -2565,49 +2575,6 @@ namespace DS4Windows.InputDevices
             try
             {
                 byte[] template = bluetoothCombinedTemplateUpdateReport;
-                if (realtimeHaptics)
-                {
-                    long realtimeHapticsExpiryQpc;
-                    lock (bluetoothCombinedTransportWriteLock)
-                    {
-                        lock (bluetoothCombinedSpeakerReportLock)
-                        {
-                            if (!bluetoothCombinedSpeakerReportAvailable)
-                            {
-                                return false;
-                            }
-
-                            Array.Copy(latestBluetoothCombinedSpeakerReport,
-                                template, template.Length);
-                            realtimeHapticsExpiryQpc =
-                                PersistentBluetoothHapticsExpiryQpc;
-                        }
-
-                        ApplyBluetoothSpeakerVolumeAndRoutingCore(template,
-                            outputState.SpeakerVolume,
-                            outputState.HeadsetOnlyAudio,
-                            outputState.HeadphoneVolume);
-                        ApplyBluetoothMicrophoneStreamingRequest(template,
-                            outputState);
-                    }
-
-                    // The realtime rear-channel ring can wait for media
-                    // capacity. It carries no controller-state transition, so
-                    // publish it after releasing the state admission monitor.
-                    bool realtimeUpdated =
-                        TryUpdateBluetoothAudioPacerTemplate(template,
-                            realtimeHapticsExpiryQpc,
-                            out bool realtimePacerOwnsTransport,
-                            realtimeHaptics: true);
-                    if (realtimePacerOwnsTransport && realtimeUpdated)
-                    {
-                        return true;
-                    }
-
-                    RequestUnifiedBluetoothOutputTransportRecovery();
-                    return false;
-                }
-
                 long deadline = waitForCapacity ?
                     Stopwatch.GetTimestamp() + Stopwatch.Frequency *
                         BluetoothControlTemplateQueueWaitMilliseconds / 1000 :
@@ -2743,7 +2710,8 @@ namespace DS4Windows.InputDevices
         private bool TryPublishCachedBluetoothCombinedState(
             bool includeNativeHaptics, string activeStatus,
             string idleReportDescription, out bool deferredToSpeakerClock,
-            bool realtimeHaptics = false)
+            bool realtimeHaptics = false, byte[] realtimeSamples = null,
+            int realtimeSamplesOffset = 0)
         {
             DualSensePhysicalOutputSnapshot outputState =
                 physicalOutputStateMailbox.ReadLatest();
@@ -2755,7 +2723,9 @@ namespace DS4Windows.InputDevices
             {
                 deferredToSpeakerClock = true;
                 bool refreshed = RefreshBluetoothAudioPacerTemplateFromCache(
-                    outputState, realtimeHaptics);
+                    outputState, realtimeHaptics,
+                    realtimeSamples: realtimeSamples,
+                    realtimeSamplesOffset: realtimeSamplesOffset);
                 LastBluetoothHapticsWriteStatus = refreshed ? activeStatus :
                     $"Could not publish {idleReportDescription} to the active Bluetooth speaker clock.";
                 return refreshed;
@@ -2767,6 +2737,71 @@ namespace DS4Windows.InputDevices
                 waitForCompletion: false,
                 allowDuringStopping: false,
                 outputState: outputState);
+        }
+
+        private bool PublishBluetoothRealtimeHaptics(byte[] samples, int offset)
+        {
+            if (samples == null || offset < 0 ||
+                offset > samples.Length - BluetoothCombinedHapticsDataLength)
+            {
+                return false;
+            }
+
+            long outputGeneration = Volatile.Read(ref physicalOutputGeneration);
+            DualSenseBluetoothAudioPacer publicationOwner;
+            lock (bluetoothAudioPacerLock)
+            {
+                publicationOwner = bluetoothAudioPacer;
+            }
+            bool updated = false;
+            bool ownsTransport;
+            // A completed media block cannot contend with coalescible control
+            // scratch, nor reread a latest cache that another producer can
+            // overwrite. Serialize exact incoming rear-channel blocks only.
+            // The pacer consumes only these 64 bytes from this API carrier;
+            // controller state, speaker routing and HID strobes stay untouched.
+            lock (bluetoothRealtimeHapticsPublicationLock)
+            {
+                if (Volatile.Read(ref bluetoothOutputTransportStopping) != 0 ||
+                    outputGeneration != Volatile.Read(ref physicalOutputGeneration))
+                {
+                    return false;
+                }
+
+                if (TryClaimBluetoothAudioPacer(out DualSenseBluetoothAudioPacer pacer,
+                        out ownsTransport))
+                {
+                    try
+                    {
+                        // A waiting old producer cannot adopt a replacement
+                        // helper. A lifecycle check that retains this healthy
+                        // owner, however, is not itself a reason to lose PCM.
+                        if (!ReferenceEquals(publicationOwner, pacer)) return false;
+                        Array.Copy(samples, offset,
+                            bluetoothRealtimeHapticsPublicationReport,
+                            BluetoothCombinedHapticsDataOffset,
+                            BluetoothCombinedHapticsDataLength);
+                        // Ring backpressure must not retain the transport
+                        // admission, controller-state or cache locks. The
+                        // existing claim and ring stop still own cancellation.
+                        updated = pacer.UpdateRealtimeHapticsTemplate(
+                            bluetoothRealtimeHapticsPublicationReport,
+                            PersistentBluetoothHapticsExpiryQpc);
+                    }
+                    finally
+                    {
+                        ReleaseBluetoothAudioPacerClaim();
+                    }
+                }
+                else if (pacer != null)
+                {
+                    bluetoothAudioPacerLastError = pacer.LastError;
+                }
+            }
+
+            if (ownsTransport && updated) return true;
+            RequestUnifiedBluetoothOutputTransportRecovery();
+            return false;
         }
 
         private bool IsBluetoothSpeakerClockActive()
@@ -6182,7 +6217,8 @@ namespace DS4Windows.InputDevices
                     "Converted Bluetooth haptics to the next combined speaker-clocked report.",
                 idleReportDescription: "converted haptics",
                 out bool deferredToSpeakerClock,
-                realtimeHaptics: true);
+                realtimeHaptics: true, realtimeSamples: samples,
+                realtimeSamplesOffset: offset);
             if (written && !deferredToSpeakerClock)
             {
                 MarkBluetoothCombinedHapticsSubmitted(hapticsGeneration);
@@ -6293,7 +6329,8 @@ namespace DS4Windows.InputDevices
                     "Cached native Bluetooth haptics for the next speaker-clocked frame.",
                 idleReportDescription: "combined haptics/audio",
                 out bool deferredToSpeakerClock,
-                realtimeHaptics: true);
+                realtimeHaptics: true, realtimeSamples: report,
+                realtimeSamplesOffset: offset + BluetoothCombinedHapticsDataOffset);
             if (written && !deferredToSpeakerClock)
             {
                 MarkBluetoothCombinedHapticsSubmitted(hapticsGeneration);

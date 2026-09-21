@@ -382,7 +382,16 @@ namespace DS4Windows.DS4Control
         /// <param name="type"></param>
         public override void PerformMouseButtonEventAlt(uint mouseButton, int type)
         {
-            MouseButton temp = (MouseButton)mouseButton;
+            // The backend mapping uses the same event value for X down/up;
+            // type identifies the actual button, as in SendInput's MouseData.
+            // Never treat that event value (currently zero) as a button mask.
+            MouseButton temp;
+            switch (type)
+            {
+                case 1: temp = MouseButton.XButton1; break;
+                case 2: temp = MouseButton.XButton2; break;
+                default: return;
+            }
             eventLock.EnterWriteLock();
 
             //mouseReport.ResetMousePos();

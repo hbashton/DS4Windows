@@ -623,18 +623,22 @@ namespace DS4Windows
         {
             lock (outputKbmHandlerLock)
             {
-                if (Global.outputKBMHandler != null)
+                Mapping.ReplaceMouseOutput(() =>
                 {
-                    Global.outputKBMHandler.Disconnect();
-                    Global.outputKBMHandler = null;
-                }
+                    if (Global.outputKBMHandler != null)
+                    {
+                        Global.outputKBMHandler.Disconnect();
+                        Global.outputKBMHandler = null;
+                    }
 
-                if (Global.outputKBMMapping != null)
-                {
-                    Global.outputKBMMapping = null;
-                }
+                    if (Global.outputKBMMapping != null)
+                    {
+                        Global.outputKBMMapping = null;
+                    }
 
-                InitOutputKBMHandler();
+                    InitOutputKBMHandler();
+                    return true;
+                });
             }
         }
 
@@ -696,22 +700,25 @@ namespace DS4Windows
                 VirtualKBMBase oldHandler = Global.outputKBMHandler;
                 VirtualKBMMapping oldMapping = Global.outputKBMMapping;
 
-                try
+                return Mapping.ReplaceMouseOutput(() =>
                 {
-                    InitOutputKBMHandler(identifier);
-                    if (Global.outputKBMHandler?.GetIdentifier() == identifier)
+                    try
                     {
-                        RefreshLoadedActionAliases();
-                        oldHandler?.Disconnect();
-                        return true;
+                        InitOutputKBMHandler(identifier);
+                        if (Global.outputKBMHandler?.GetIdentifier() == identifier)
+                        {
+                            RefreshLoadedActionAliases();
+                            oldHandler?.Disconnect();
+                            return true;
+                        }
                     }
-                }
-                catch { }
+                    catch { }
 
-                Global.outputKBMHandler?.Disconnect();
-                Global.outputKBMHandler = oldHandler;
-                Global.outputKBMMapping = oldMapping;
-                return false;
+                    Global.outputKBMHandler?.Disconnect();
+                    Global.outputKBMHandler = oldHandler;
+                    Global.outputKBMMapping = oldMapping;
+                    return false;
+                });
             }
         }
 
@@ -3430,6 +3437,10 @@ namespace DS4Windows
                 // Disconnect from KBM system when stopping ControlService
                 StartupDiag($"ControlService.Stop outputKBM Disconnect begin handler={outputKBMHandler?.GetFullDisplayName()}");
                 LogDebug($"Closing connection to output handler {outputKBMHandler.GetDisplayName()}");
+                // Include empty/legacy slots and deliberately retained macro
+                // buttons, not just controllers with a typed retirement path.
+                for (int index = 0; index < Global.MAX_DS4_CONTROLLER_COUNT; index++)
+                    Mapping.CommitNeutral(index);
                 outputKBMHandler.Disconnect();
                 StartupDiag("ControlService.Stop outputKBM Disconnect end");
                 inServiceTask = false;
@@ -4944,7 +4955,7 @@ namespace DS4Windows
 
         private static void CommitNeutralMapping(int index)
         {
-            Task.Run(() => Mapping.Commit(index)).Wait();
+            Task.Run(() => Mapping.CommitNeutral(index)).Wait();
         }
 
         private bool ClearExactControllerSlot(DS4Device device, int index)

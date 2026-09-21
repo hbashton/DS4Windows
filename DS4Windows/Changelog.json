@@ -1,9 +1,29 @@
 {
-  "latest_version": "5.0.8.0",
-  "latest_version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 8},
-  "updated_at": "2026-09-14T20:45:00+0000",
+  "latest_version": "5.0.9.0",
+  "latest_version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 9},
+  "updated_at": "2026-09-21T00:48:00+0000",
   "changelog": {
     "versions": [
+    {
+      "version_str": "5.0.9.0",
+      "version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 9},
+      "base_header": "Release Candidate 4.6.3 — Concurrent Mouse Clicks",
+      "release_date": "2026-09-21T00:48:00+0000",
+      "locales": [
+        {
+          "code": "en",
+          "header": "Release Candidate 4.6.3 — Concurrent Mouse Clicks",
+          "log_text": [
+            "* **Independent mouse toggles** - unrelated toggled actions no longer block mouse-button presses or releases",
+            "* **Shared mouse-button ownership** - ending a mouse macro no longer releases a click still held by another binding or macro",
+            "* **FakerInput side buttons** - correctly translate X1 and X2 mouse events"
+          ],
+          "editor": "hbashton",
+          "editors_note": ["Unsigned release candidate. Ordinary R2-to-left-click combined with movement or keyboard input already passes baseline regression tests. The reporter's machine and game have not been validated; this is not a universal game-compatibility fix. VIIPER and the DS4Updater 2.0.7 requirement are unchanged."],
+          "updated_at": "2026-09-21T00:48:00+0000"
+        }
+      ]
+    },
     {
       "version_str": "5.0.8.0",
       "version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 8},

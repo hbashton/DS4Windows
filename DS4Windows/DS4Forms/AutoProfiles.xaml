@@ -70,7 +70,7 @@
                         <UniformGrid Columns="3" Height="34" Margin="0,0,0,10">
                             <Button x:Name="removeAutoBtn" Content="{lex:Loc Remove}" Margin="0,0,6,0"
                                     IsEnabled="{Binding Exists}" Click="RemoveAutoBtn_Click" />
-                            <Button x:Name="duplicateAutoBtn" Content="Duplicate" Margin="0,0,6,0" Click="DuplicateAutoBtn_Click" />
+                            <Button x:Name="duplicateAutoBtn" Content="{lex:Loc Duplicate}" Margin="0,0,6,0" Click="DuplicateAutoBtn_Click" />
                             <Button x:Name="saveAutoBtn" Content="{lex:Loc Save}" Click="SaveAutoBtn_Click" />
                         </UniformGrid>
                         <Grid x:Name="autoProfilesGrid" Margin="0,8">
@@ -91,7 +91,7 @@
 
                             <StackPanel Orientation="Horizontal" Margin="{StaticResource spaceMargin}">
                                 <Label Content="{lex:Loc Controller1Text}" Padding="0" VerticalAlignment="Center" />
-                                <CheckBox Content="All" Margin="10,0,0,0" VerticalAlignment="Center"
+                                <CheckBox Content="{lex:Loc All}" Margin="10,0,0,0" VerticalAlignment="Center"
                                           IsChecked="{Binding ApplyToAllControllers}" />
                             </StackPanel>
                             <ComboBox x:Name="cont1AutoProf" Grid.Column="1" Margin="{StaticResource spaceMargin}"
@@ -269,7 +269,7 @@
                                 <ColumnDefinition/>
                                 <ColumnDefinition/>
                             </Grid.ColumnDefinitions>
-                            <Label Content="Device" Padding="0" VerticalAlignment="Center" />
+                            <Label Content="{lex:Loc AutoProfiles.DeviceLabel}" Padding="0" VerticalAlignment="Center" />
                             <ComboBox Grid.Column="1" ItemsSource="{Binding DataContext.DeviceOptionList, ElementName=outerEditControlsPanel}"
                                       DisplayMemberPath="DisplayName" SelectedValuePath="ChoiceValue"
                                       SelectedValue="{Binding DeviceOption}" />
@@ -280,7 +280,7 @@
                         <Grid>
                             <TextBox x:Name="mainTxtBox" Text="{Binding Title, UpdateSourceTrigger=PropertyChanged}" Margin="{StaticResource spaceMargin}" ToolTip="{lex:Loc AutoProfTitleTip}" />
 
-                            <TextBlock Margin="5,2" MinWidth="50" Text="Window title..." Foreground="{DynamicResource ForegroundColor}" Opacity="0.7" IsHitTestVisible="False">
+                            <TextBlock Margin="5,2" MinWidth="50" Text="{lex:Loc AutoProfiles.WindowTitlePlaceholder}" Foreground="{DynamicResource ForegroundColor}" Opacity="0.7" IsHitTestVisible="False">
                                 <TextBlock.Style>
                                     <Style TargetType="TextBlock">
                                         <Style.Triggers>
@@ -336,11 +336,11 @@
                              BorderThickness="0" Background="Transparent"
                              Padding="2,8" VerticalContentAlignment="Center"
                              TextChanged="AutoProfilesSearchTextBox_TextChanged"
-                             ToolTip="Search by profile, window title, executable, or path" />
+                             ToolTip="{lex:Loc AutoProfiles.SearchTooltip}" />
                     <Button x:Name="clearAutoProfilesSearchBtn" Grid.Column="2" Content="&#xE711;"
                             FontFamily="Segoe Fluent Icons" FontSize="11"
                             Background="Transparent" BorderThickness="0"
-                            Visibility="Collapsed" ToolTip="Clear search"
+                            Visibility="Collapsed" ToolTip="{lex:Loc MainWin.ClearSearchTip}"
                             Click="ClearAutoProfilesSearchBtn_Click" />
                 </Grid>
             </Border>
@@ -399,7 +399,7 @@
                                     <TextBlock Text="{lex:Loc Path}" Style="{StaticResource AutoProfileMetaLabelStyle}" />
                                     <TextBlock Grid.Column="1" Text="{Binding Path}" ToolTip="{Binding Path}"
                                                Style="{StaticResource AutoProfileMetaValueStyle}" />
-                                    <TextBlock Grid.Row="1" Text="DEVICE" Style="{StaticResource AutoProfileMetaLabelStyle}" />
+                                    <TextBlock Grid.Row="1" Text="{lex:Loc AutoProfiles.DeviceLabelCaps}" Style="{StaticResource AutoProfileMetaLabelStyle}" />
                                     <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding DeviceOption}"
                                                Style="{StaticResource AutoProfileMetaValueStyle}" />
                                     <TextBlock Grid.Row="2" Text="{lex:Loc WindowTitle}"

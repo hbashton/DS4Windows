@@ -16,6 +16,9 @@
 
             <converters:ShellViewportWidthConverter x:Key="ShellViewportWidth" />
 
+            <!-- Live-updatable layout direction, set from code (App.xaml.cs -> SetUICulture) based on the selected language -->
+            <FlowDirection x:Key="AppFlowDirection">LeftToRight</FlowDirection>
+
             <Style TargetType="{x:Type Button}" x:Key="NoBGHoverBtn">
                 <Setter Property="Background" Value="Transparent" />
                 <Setter Property="Template">

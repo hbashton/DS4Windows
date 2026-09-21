@@ -15,7 +15,7 @@
              Foreground="{DynamicResource ForegroundColor}">
     <DockPanel>
         <DockPanel DockPanel.Dock="Top" Margin="4,8,4,8">
-            <Label Content="Name:" DockPanel.Dock="Left" />
+            <Label Content="{lex:Loc SpecialActionEdit.NameLabel}" DockPanel.Dock="Left" />
             <TextBox x:Name="actionNameTxt" Text="{Binding ActionName,FallbackValue=Name,ValidatesOnNotifyDataErrors=True}"
                      Margin="8,0,0,0" DockPanel.Dock="Right" VerticalContentAlignment="Center" />
         </DockPanel>
@@ -26,7 +26,7 @@
                               VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <StackPanel x:Name="triggerPanel" Margin="0,0,8,0">
                         <TextBlock Text="{lex:Loc Trigger}" FontWeight="SemiBold" FontSize="16" Margin="0,0,0,4" />
-                        <TextBlock Text="Check the buttons that start this action. Multiple buttons must be held together."
+                        <TextBlock Text="{lex:Loc SpecialActionEdit.TriggerHint}"
                                    TextWrapping="Wrap" Margin="0,0,0,8" />
                     </StackPanel>
                 </ScrollViewer>
@@ -34,7 +34,7 @@
                               VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <StackPanel x:Name="unloadTriggerPanel" Margin="0,0,8,0">
                         <TextBlock Text="{lex:Loc UnloadTrigger}" FontWeight="SemiBold" FontSize="16" Margin="0,0,0,4" />
-                        <TextBlock Text="Check the buttons that end this action or return to the previous profile."
+                        <TextBlock Text="{lex:Loc SpecialActionEdit.UnloadTriggerHint}"
                                    TextWrapping="Wrap" Margin="0,0,0,8" />
                     </StackPanel>
                 </ScrollViewer>
@@ -61,7 +61,7 @@
                         <TabItem x:Name="blankActTab" Header="">
 
                         </TabItem>
-                        <TabItem x:Name="macroActTab" Header="Macro">
+                        <TabItem x:Name="macroActTab" Header="{lex:Loc Macro}">
                             <StackPanel Margin="{StaticResource spaceMargin}">
                                 <Button x:Name="recordMacroBtn" Content="{lex:Loc SpecialActionEdit.RecordMacro}"
                                         Tag="{Binding MacroElements,Mode=OneWay,ValidatesOnNotifyDataErrors=True}" Margin="{StaticResource spaceMargin}"
@@ -74,12 +74,12 @@
                                 <TextBlock Text="{Binding Macrostring,FallbackValue={lex:Loc SpecialActionEdit.MacroRecorded}}" Margin="{StaticResource spaceMargin}" />
                             </StackPanel>
                         </TabItem>
-                        <TabItem x:Name="launchProgActTab" Header="Launch Program">
+                        <TabItem x:Name="launchProgActTab" Header="{lex:Loc SpecialActionEdit.LaunchProgramTab}">
                             <StackPanel Margin="{StaticResource spaceMargin}">
                                 <StackPanel Orientation="Horizontal" Margin="{StaticResource spaceMargin}">
                                     <Label Content="{lex:Loc SpecialActionEdit.HoldFor}" ContentStringFormat="{}{0} "></Label>
                                     <xctk:DecimalUpDown Value="{Binding Delay}" Width="60" Minimum="0" Maximum="60" FormatString= "F2" Increment="0.5" />
-                                    <Label Content="secs" />
+                                    <Label Content="{lex:Loc SpecialActionEdit.SecsLabel}" />
                                 </StackPanel>
                                 <Grid Margin="{StaticResource spaceMargin}">
                                     <Grid.ColumnDefinitions>
@@ -94,12 +94,12 @@
                                             Click="LaunchProgBrowseBtn_Click" />
                                 </Grid>
                                 <StackPanel Margin="{StaticResource spaceMargin}">
-                                    <Label Content="Arguments"/>
+                                    <Label Content="{lex:Loc SpecialActionEdit.ArgumentsLabel}"/>
                                     <TextBox Text="{Binding Arguments}" />
                                 </StackPanel>
                             </StackPanel>
                         </TabItem>
-                        <TabItem x:Name="loadProfileTab" Header="Load Profile">
+                        <TabItem x:Name="loadProfileTab" Header="{lex:Loc SpecialActionEdit.LoadProfileTab}">
                             <StackPanel Margin="{StaticResource spaceMargin}">
                                 <ComboBox SelectedIndex="{Binding ProfileIndex,FallbackValue=0}"
                                           Margin="{StaticResource spaceMargin}">
@@ -126,7 +126,7 @@
                                 <CheckBox Content="{lex:Loc SpecialActionEdit.UnloadTriggerRelease}" Margin="{StaticResource spaceMargin}" IsChecked="{Binding AutoUntrigger}" />
                             </StackPanel>
                         </TabItem>
-                        <TabItem x:Name="pressKetActTab" Header="Press Key">
+                        <TabItem x:Name="pressKetActTab" Header="{lex:Loc SpecialActionEdit.PressKeyTab}">
                             <StackPanel Margin="{StaticResource spaceMargin}">
                                 <Button x:Name="pressKeySelectBtn" Content="{Binding DescribeText,FallbackValue={lex:Loc SpecialActionEdit.SelectKey}}"
                                         Margin="{StaticResource spaceMargin}" Click="PressKeySelectBtn_Click" />
@@ -144,19 +144,19 @@
                                 </StackPanel>
                             </StackPanel>
                         </TabItem>
-                        <TabItem x:Name="disconnectBTTab" Header="DisBT">
+                        <TabItem x:Name="disconnectBTTab" Header="{lex:Loc SpecialActionEdit.DisBTTab}">
                             <StackPanel Orientation="Horizontal" Margin="{StaticResource spaceMargin}">
                                 <Label Content="{lex:Loc SpecialActionEdit.HoldFor}" ContentStringFormat="{}{0} "></Label>
                                 <xctk:DecimalUpDown Value="{Binding HoldInterval}" Width="60" Minimum="0" Maximum="60" FormatString= "F2" Increment="0.5" />
-                                <Label Content="secs" />
+                                <Label Content="{lex:Loc SpecialActionEdit.SecsLabel}" />
                             </StackPanel>
                         </TabItem>
-                        <TabItem x:Name="checkBatteryTab" Header="Check Battery">
+                        <TabItem x:Name="checkBatteryTab" Header="{lex:Loc SpecialActionEdit.CheckBatteryTab}">
                             <StackPanel Margin="{StaticResource spaceMargin}">
                                 <StackPanel Orientation="Horizontal" Margin="0,8,0,8">
                                     <Label Content="{lex:Loc SpecialActionEdit.HoldFor}" ContentStringFormat="{}{0} "></Label>
                                     <xctk:DecimalUpDown Value="{Binding HoldInterval}" Width="60" Minimum="0" Maximum="60" FormatString= "F2" Increment="0.5"/>
-                                    <Label Content="secs" />
+                                    <Label Content="{lex:Loc SpecialActionEdit.SecsLabel}" />
                                 </StackPanel>
                                 <CheckBox Content="{lex:Loc SpecialActionEdit.ViaNotification}" IsChecked="{Binding Notification}" Margin="{StaticResource spaceMargin}" />
                                 <CheckBox Content="{lex:Loc SpecialActionEdit.ViaLightbar}" IsChecked="{Binding Lightbar}" Margin="{StaticResource spaceMargin}" />
@@ -189,7 +189,7 @@
                                 </StackPanel>
                             </StackPanel>
                         </TabItem>
-                        <TabItem x:Name="multiActTab" Header="MultiAct">
+                        <TabItem x:Name="multiActTab" Header="{lex:Loc SpecialActionEdit.MultiActTab}">
                             <StackPanel Margin="{StaticResource spaceMargin}">
                                 <Label Content="{lex:Loc SpecialActionEdit.TapTrigger}" Margin="{StaticResource spaceMargin}" />
                                 <Button x:Name="multiTapTrigBtn" Content="{Binding TapMacroText,FallbackValue={lex:Loc SpecialActionEdit.SelectMacro}}"
@@ -202,18 +202,18 @@
                                         Margin="{StaticResource spaceMargin}" Click="MultiDoubleTapTrigBtn_Click" />
                             </StackPanel>
                         </TabItem>
-                        <TabItem x:Name="sixaxisWheelCalibrateTab" Header="Sixaxis Wheel">
+                        <TabItem x:Name="sixaxisWheelCalibrateTab" Header="{lex:Loc SpecialActionEdit.SixaxisWheelTab}">
                             <StackPanel Orientation="Horizontal" Margin="{StaticResource spaceMargin}">
                                 <Label Content="{lex:Loc HoldFor}" ContentStringFormat="{}{0} "></Label>
                                 <xctk:DecimalUpDown Value="{Binding HoldInterval}" Width="60" Minimum="0" Maximum="60" FormatString= "F2" Increment="0.5" />
-                                <Label Content="secs" />
+                                <Label Content="{lex:Loc SpecialActionEdit.SecsLabel}" />
                             </StackPanel>
                         </TabItem>
                         <TabItem x:Name="gyroCalibrateTab" Header="{lex:Loc SpecialActionEdit.CalibrateGyro}">
                             <StackPanel Orientation="Horizontal" Margin="{StaticResource spaceMargin}">
                                 <Label Content="{lex:Loc HoldFor}" ContentStringFormat="{}{0} "></Label>
                                 <xctk:DecimalUpDown Value="{Binding HoldInterval}" Width="60" Minimum="0" Maximum="60" FormatString= "F2" Increment="0.5" />
-                                <Label Content="secs" />
+                                <Label Content="{lex:Loc SpecialActionEdit.SecsLabel}" />
                             </StackPanel>
                         </TabItem>
                     </TabControl>

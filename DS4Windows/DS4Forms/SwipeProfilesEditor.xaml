@@ -4,23 +4,26 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:DS4WinWPF.DS4Forms"
+        xmlns:lex="http://wpflocalizeextension.codeplex.com"
+        lex:ResxLocalizationProvider.DefaultAssembly="DS4Windows"
+        lex:ResxLocalizationProvider.DefaultDictionary="Strings"
         mc:Ignorable="d"
-        Title="Config Swipe Profiles" Height="460" Width="380"
+        Title="{lex:Loc SwipeEditor.WinTitle}" Height="460" Width="380"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
         Style="{DynamicResource WindowStyle}">
     <DockPanel Margin="10">
         <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,8"
-                   Text="Tick the profiles the two-finger touchpad swipe is allowed to switch between. If nothing is ticked, the swipe cycles through every profile (default behaviour)." />
+                   Text="{lex:Loc SwipeEditor.Instructions}" />
 
         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,6">
-            <Button x:Name="selectAllBtn" Content="Select All" Padding="8,2" Click="SelectAllBtn_Click" />
-            <Button x:Name="clearAllBtn" Content="Clear All" Margin="8,0,0,0" Padding="8,2" Click="ClearAllBtn_Click" />
+            <Button x:Name="selectAllBtn" Content="{lex:Loc SwipeEditor.SelectAll}" Padding="8,2" Click="SelectAllBtn_Click" />
+            <Button x:Name="clearAllBtn" Content="{lex:Loc SwipeEditor.ClearAll}" Margin="8,0,0,0" Padding="8,2" Click="ClearAllBtn_Click" />
         </StackPanel>
 
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
-            <Button x:Name="okBtn" Content="OK" Width="80" IsDefault="True" Click="OkBtn_Click" />
-            <Button x:Name="cancelBtn" Content="Cancel" Width="80" Margin="8,0,0,0" IsCancel="True" Click="CancelBtn_Click" />
+            <Button x:Name="okBtn" Content="{lex:Loc OK}" Width="80" IsDefault="True" Click="OkBtn_Click" />
+            <Button x:Name="cancelBtn" Content="{lex:Loc Cancel}" Width="80" Margin="8,0,0,0" IsCancel="True" Click="CancelBtn_Click" />
         </StackPanel>
 
         <Border BorderBrush="Gray" BorderThickness="1">

@@ -82,7 +82,7 @@ public partial class MappingLiveInputControl : UserControl
     {
         projection.Update(raw, type);
         if (!projection.Valid) { RenderStatus(MappingLiveInputStatus.Waiting); return; }
-        liveStatus.Text = "Live";
+        liveStatus.Text = Properties.Resources.MLLive;
         RenderStick(leftStickPlot, leftStickDot, leftStickValue, projection.LeftX, projection.LeftY, projection.LeftPresent);
         RenderStick(rightStickPlot, rightStickDot, rightStickValue, projection.RightX, projection.RightY, projection.RightPresent);
         leftTriggerName.Text = projection.LeftTriggerName;
@@ -91,7 +91,7 @@ public partial class MappingLiveInputControl : UserControl
         rightTriggerMeter.Value = projection.RightTrigger;
         leftTriggerValue.Text = $"{projection.LeftTrigger:0}%";
         rightTriggerValue.Text = $"{projection.RightTrigger:0}%";
-        pressedButtons.Text = projection.PressedButtons.Length == 0 ? "No buttons pressed" : projection.PressedButtons;
+        pressedButtons.Text = projection.PressedButtons.Length == 0 ? Properties.Resources.MLNoButtonsPressed : projection.PressedButtons;
         pressedButtons.ToolTip = pressedButtons.Text;
     }
 
@@ -110,21 +110,22 @@ public partial class MappingLiveInputControl : UserControl
     {
         liveStatus.Text = status switch
         {
-            MappingLiveInputStatus.Disconnected => "Disconnected",
-            MappingLiveInputStatus.Replaced => "Controller changed",
-            MappingLiveInputStatus.Stale => "No recent input",
-            _ => "Waiting"
+            MappingLiveInputStatus.Disconnected => Properties.Resources.Disconnected,
+            MappingLiveInputStatus.Replaced => Properties.Resources.MLControllerChanged,
+            MappingLiveInputStatus.Stale => Properties.Resources.MLNoRecentInput,
+            _ => Properties.Resources.MLWaiting
         };
         pressedButtons.Text = status switch
         {
-            MappingLiveInputStatus.Replaced => "Reopen the editor to preview the new controller.",
-            MappingLiveInputStatus.Disconnected => "Controller disconnected. Reconnect and reopen the editor.",
-            MappingLiveInputStatus.Stale => "Waiting for fresh controller input…",
-            _ => snapshot.HasBoundDevice ? "Waiting for controller input…" :
-                "Open this profile from a connected controller."
+            MappingLiveInputStatus.Replaced => Properties.Resources.MLReopenForNewController,
+            MappingLiveInputStatus.Disconnected => Properties.Resources.MLControllerDisconnectedReopen,
+            MappingLiveInputStatus.Stale => Properties.Resources.MLWaitingForFreshInput,
+            _ => snapshot.HasBoundDevice ? Properties.Resources.MLWaitingForInput :
+                Properties.Resources.MLOpenFromConnectedController
         };
         pressedButtons.ToolTip = pressedButtons.Text;
-        leftStickValue.Text = rightStickValue.Text = "X —\nY —";
+        leftStickValue.Text = rightStickValue.Text =
+            DS4WinWPF.Translations.Strings.ResourceManager.GetString("MappingLive.AxisPlaceholder", DS4WinWPF.Translations.Strings.Culture);
         leftTriggerValue.Text = rightTriggerValue.Text = "—";
         leftTriggerMeter.Value = rightTriggerMeter.Value = 0;
         leftStickPlot.Opacity = rightStickPlot.Opacity = 0.35;

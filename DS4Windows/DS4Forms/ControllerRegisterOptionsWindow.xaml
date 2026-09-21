@@ -22,9 +22,9 @@
                 <CheckBox Content="{lex:Loc ControllerSupportSwitchPro}" IsChecked="{Binding SwitchProDeviceOpts.Enabled}" />
                 <CheckBox Content="{lex:Loc ControllerSupportJoyCon}" IsChecked="{Binding JoyConDeviceOpts.Enabled}" />
                 <CheckBox Content="{lex:Loc ControllerSupportDS3}" IsChecked="{Binding DS3DeviceOpts.Enabled}" />
-                <CheckBox Content="Accept Moonlight / Sunshine virtual controllers"
+                <CheckBox Content="{lex:Loc ControllerRegOptWin.AcceptMoonlight}"
                           IsChecked="{Binding UseMoonlight}"
-                          ToolTip="Accept every supported virtual controller created while Sunshine is running. DS4Windows' own VIIPER outputs are always excluded." />
+                          ToolTip="{lex:Loc ControllerRegOptWin.AcceptMoonlightTip}" />
                 <TextBlock>
                     <Hyperlink NavigateUri="https://github.com/schmaldeo/DS4Windows/blob/moonlight/doc/moonlight_support.md"
                                RequestNavigate="Hyperlink_RequestNavigate">
@@ -55,13 +55,13 @@
             <TabItem Header="Blank" Visibility="Collapsed">
             </TabItem>
 
-            <TabItem x:Name="ds4OptsTabItem" Header="DS4" Visibility="Collapsed">
+            <TabItem x:Name="ds4OptsTabItem" Header="{lex:Loc ControllerRegOptWin.DS4Tab}" Visibility="Collapsed">
                 <StackPanel Visibility="{Binding Visible, Converter={StaticResource BooleanToVisibilityConverter}}" Margin="4">
                     <CheckBox Content="{lex:Loc Copycat}" IsChecked="{Binding Options.IsCopyCat, FallbackValue='False'}" ToolTip="{lex:Loc CopycatTip}" />
                 </StackPanel>
             </TabItem>
             
-            <TabItem x:Name="dualSenseOptsTabItem" Header="DualSense" Visibility="Collapsed">
+            <TabItem x:Name="dualSenseOptsTabItem" Header="{lex:Loc DualSense}" Visibility="Collapsed">
                 <StackPanel Visibility="{Binding Visible, Converter={StaticResource BooleanToVisibilityConverter}}" Margin="4">
                     <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                         <Label Content="{lex:Loc ControllerRegOptWin.PlayerLEDMode}" ContentStringFormat="{}{0}:" />
@@ -75,7 +75,7 @@
                 </StackPanel>
             </TabItem>
 
-            <TabItem x:Name="switchProOptsTabItem" Header="Switch Pro" Visibility="Collapsed">
+            <TabItem x:Name="switchProOptsTabItem" Header="{lex:Loc ControllerRegOptWin.SwitchProTab}" Visibility="Collapsed">
                 <StackPanel Visibility="{Binding Visible, Converter={StaticResource BooleanToVisibilityConverter}}" Margin="4">
                     <TextBlock Foreground="#FFDE4343" FontWeight="Bold">
                         <Run Text="*  -  " />
@@ -89,7 +89,7 @@
                 </StackPanel>
             </TabItem>
 
-            <TabItem x:Name="joyConOptsTabItem" Header="JoyCon" Visibility="Collapsed">
+            <TabItem x:Name="joyConOptsTabItem" Header="{lex:Loc ControllerRegOptWin.JoyConTab}" Visibility="Collapsed">
                 <StackPanel Visibility="{Binding Visible, Converter={StaticResource BooleanToVisibilityConverter}}" Margin="4">
                     <TextBlock Foreground="#FFDE4343" FontWeight="Bold">
                         <Run Text="*  -  " />

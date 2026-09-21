@@ -1,0 +1,3761 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    Microsoft ResX Schema
+
+    Version 2.0
+
+    The primary goals of this format is to allow a simple XML format
+    that is mostly human readable. The generation and parsing of the
+    various data types are done through the TypeConverter classes
+    associated with the data types.
+
+    Example:
+
+    ... ado.net/XML headers & schema ...
+    <resheader name="resmimetype">text/microsoft-resx</resheader>
+    <resheader name="version">2.0</resheader>
+    <resheader name="reader">System.Resources.ResXResourceReader, System.Windows.Forms, ...</resheader>
+    <resheader name="writer">System.Resources.ResXResourceWriter, System.Windows.Forms, ...</resheader>
+    <data name="Name1"><value>this is my long string</value><comment>this is a comment</comment></data>
+    <data name="Color1" type="System.Drawing.Color, System.Drawing">Blue</data>
+    <data name="Bitmap1" mimetype="application/x-microsoft.net.object.binary.base64">
+        <value>[base64 mime encoded serialized .NET Framework object]</value>
+    </data>
+    <data name="Icon1" type="System.Drawing.Icon, System.Drawing" mimetype="application/x-microsoft.net.object.bytearray.base64">
+        <value>[base64 mime encoded string representing a byte array form of the .NET Framework object]</value>
+        <comment>This is a comment</comment>
+    </data>
+
+    There are any number of "resheader" rows that contain simple
+    name/value pairs.
+
+    Each data row contains a name, and value. The row also contains a
+    type or mimetype. Type corresponds to a .NET class that support
+    text/value conversion through the TypeConverter architecture.
+    Classes that don't support this are serialized and stored with the
+    mimetype set.
+
+    The mimetype is used for serialized objects, and tells the
+    ResXResourceReader how to depersist the object. This is currently not
+    extensible. For a given mimetype the value must be set accordingly:
+
+    Note - application/x-microsoft.net.object.binary.base64 is the format
+    that the ResXResourceWriter will generate, however the reader can
+    read any of the formats listed below.
+
+    mimetype: application/x-microsoft.net.object.binary.base64
+    value   : The object must be serialized with
+            : System.Runtime.Serialization.Formatters.Binary.BinaryFormatter
+            : and then encoded with base64 encoding.
+
+    mimetype: application/x-microsoft.net.object.soap.base64
+    value   : The object must be serialized with
+            : System.Runtime.Serialization.Formatters.Soap.SoapFormatter
+            : and then encoded with base64 encoding.
+
+    mimetype: application/x-microsoft.net.object.bytearray.base64
+    value   : The object must be serialized into a byte array
+            : using a System.ComponentModel.TypeConverter
+            : and then encoded with base64 encoding.
+    -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="Accel" xml:space="preserve">
+    <value>شتاب‌سنج</value>
+  </data>
+  <data name="Action" xml:space="preserve">
+    <value>عملیات</value>
+  </data>
+  <data name="AddDirectory" xml:space="preserve">
+    <value>افزودن پوشه</value>
+  </data>
+  <data name="AddPrograms" xml:space="preserve">
+    <value>افزودن برنامه‌ها</value>
+  </data>
+  <data name="AddStartMenuPrograms" xml:space="preserve">
+    <value>افزودن از منوی استارت</value>
+  </data>
+  <data name="AddSteamGames" xml:space="preserve">
+    <value>افزودن بازی‌های استیم</value>
+  </data>
+  <data name="All" xml:space="preserve">
+    <value>همه</value>
+  </data>
+  <data name="AutoProfiles" xml:space="preserve">
+    <value>پروفایل‌های خودکار</value>
+  </data>
+  <data name="Battery" xml:space="preserve">
+    <value>باتری</value>
+  </data>
+  <data name="Browse" xml:space="preserve">
+    <value>مرور</value>
+  </data>
+  <data name="BrowseOtherPrograms" xml:space="preserve">
+    <value>مرور سایر برنامه‌ها</value>
+  </data>
+  <data name="Cancel" xml:space="preserve">
+    <value>انصراف</value>
+  </data>
+  <data name="CheckUpdateNow" xml:space="preserve">
+    <value>بررسی به‌روزرسانی</value>
+  </data>
+  <data name="CheckUpdateStartup" xml:space="preserve">
+    <value>بررسی به‌روزرسانی هنگام اجرای DS4Windows</value>
+  </data>
+  <data name="Clear" xml:space="preserve">
+    <value>پاک کردن</value>
+  </data>
+  <data name="CloseMinimizes" xml:space="preserve">
+    <value>کوچک کردن برنامه هنگام بستن</value>
+  </data>
+  <data name="Color" xml:space="preserve">
+    <value>رنگ</value>
+  </data>
+  <data name="Controller1Text" xml:space="preserve">
+    <value>کنترلر ۱</value>
+  </data>
+  <data name="Controller2Text" xml:space="preserve">
+    <value>کنترلر ۲</value>
+  </data>
+  <data name="Controller3Text" xml:space="preserve">
+    <value>کنترلر ۳</value>
+  </data>
+  <data name="Controller4Text" xml:space="preserve">
+    <value>کنترلر ۴</value>
+  </data>
+  <data name="Controllers" xml:space="preserve">
+    <value>کنترلرها</value>
+  </data>
+  <data name="ControlPanel" xml:space="preserve">
+    <value>کنترل پنل</value>
+  </data>
+  <data name="Delete" xml:space="preserve">
+    <value>حذف</value>
+  </data>
+  <data name="DriverSetup" xml:space="preserve">
+    <value>نصب درایور کنترلر</value>
+  </data>
+  <data name="Duplicate" xml:space="preserve">
+    <value>تکثیر</value>
+  </data>
+  <data name="Edit" xml:space="preserve">
+    <value>ویرایش</value>
+  </data>
+  <data name="EditAction" xml:space="preserve">
+    <value>ویرایش عملیات</value>
+  </data>
+  <data name="Export" xml:space="preserve">
+    <value>صادر کردن</value>
+  </data>
+  <data name="Full" xml:space="preserve">
+    <value>کامل</value>
+  </data>
+  <data name="Gyro" xml:space="preserve">
+    <value>ژیروسکوپ</value>
+  </data>
+  <data name="HideUnchecked" xml:space="preserve">
+    <value>پنهان کردن موارد انتخاب‌نشده</value>
+  </data>
+  <data name="Import" xml:space="preserve">
+    <value>وارد کردن</value>
+  </data>
+  <data name="LeftStick" xml:space="preserve">
+    <value>استیک چپ</value>
+  </data>
+  <data name="Log" xml:space="preserve">
+    <value>گزارش</value>
+  </data>
+  <data name="Name" xml:space="preserve">
+    <value>نام</value>
+  </data>
+  <data name="New" xml:space="preserve">
+    <value>جدید</value>
+  </data>
+  <data name="NewAction" xml:space="preserve">
+    <value>عملیات جدید</value>
+  </data>
+  <data name="NewProfile" xml:space="preserve">
+    <value>پروفایل جدید</value>
+  </data>
+  <data name="None" xml:space="preserve">
+    <value>هیچ‌کدام</value>
+  </data>
+  <data name="Path" xml:space="preserve">
+    <value>مسیر</value>
+  </data>
+  <data name="Profile" xml:space="preserve">
+    <value>پروفایل</value>
+  </data>
+  <data name="ProfileFolder" xml:space="preserve">
+    <value>پوشه‌ی پروفایل‌ها</value>
+  </data>
+  <data name="QuickCharge" xml:space="preserve">
+    <value>شارژ سریع</value>
+  </data>
+  <data name="RecordText" xml:space="preserve">
+    <value>ضبط</value>
+  </data>
+  <data name="Remove" xml:space="preserve">
+    <value>حذف</value>
+  </data>
+  <data name="RemoveAction" xml:space="preserve">
+    <value>حذف عملیات</value>
+  </data>
+  <data name="RightStick" xml:space="preserve">
+    <value>استیک راست</value>
+  </data>
+  <data name="Rumble" xml:space="preserve">
+    <value>ویبره</value>
+  </data>
+  <data name="RunAtStartup" xml:space="preserve">
+    <value>اجرا هنگام روشن شدن سیستم</value>
+  </data>
+  <data name="Save" xml:space="preserve">
+    <value>ذخیره</value>
+  </data>
+  <data name="SaveProfile" xml:space="preserve">
+    <value>ذخیره‌ی پروفایل</value>
+  </data>
+  <data name="Settings" xml:space="preserve">
+    <value>تنظیمات</value>
+  </data>
+  <data name="ShowNotifications" xml:space="preserve">
+    <value>نمایش اعلان‌ها</value>
+  </data>
+  <data name="StartMinimized" xml:space="preserve">
+    <value>شروع به‌صورت کوچک‌شده</value>
+  </data>
+  <data name="StartText" xml:space="preserve">
+    <value>شروع</value>
+  </data>
+  <data name="Status" xml:space="preserve">
+    <value>وضعیت</value>
+  </data>
+  <data name="StopText" xml:space="preserve">
+    <value>توقف</value>
+  </data>
+  <data name="TouchScroll" xml:space="preserve">
+    <value>پیمایش لمسی</value>
+  </data>
+  <data name="TouchSlide" xml:space="preserve">
+    <value>کشیدن لمسی</value>
+  </data>
+  <data name="TouchTap" xml:space="preserve">
+    <value>ضربه‌ی لمسی</value>
+  </data>
+  <data name="Trigger" xml:space="preserve">
+    <value>ماشه</value>
+  </data>
+  <data name="WarningsOnly" xml:space="preserve">
+    <value>فقط هشدارها</value>
+  </data>
+  <data name="RumbleMaxSecs" xml:space="preserve">
+    <value>حداکثر ثانیه‌ی ویبره</value>
+  </data>
+  <data name="RumbleMaxSecsTip" xml:space="preserve">
+    <value>توقف خودکار ویبره پس از این تعداد ثانیه (۰ = غیرفعال بودن توقف خودکار)</value>
+  </data>
+  <data name="WindowTitle" xml:space="preserve">
+    <value>عنوان پنجره</value>
+  </data>
+  <data name="MoveUp" xml:space="preserve">
+    <value>جابه‌جایی به بالا</value>
+  </data>
+  <data name="MoveDown" xml:space="preserve">
+    <value>جابه‌جایی به پایین</value>
+  </data>
+  <data name="GamepadTest" xml:space="preserve">
+    <value>تست کنترلر</value>
+  </data>
+  <data name="EnableOutputDataToDS4" xml:space="preserve">
+    <value>فعال‌سازی ارسال داده به DS4</value>
+  </data>
+  <data name="EnableOutputDataToDS4Tip" xml:space="preserve">
+    <value>ارسال دوره‌ای اطلاعات نوار نور و ویبره به کنترلر DS4.
+اگر کنترلر از دریافت این داده‌ها پشتیبانی نمی‌کند، تیک آن را بردارید.
+این تغییرات هنگام اتصال کنترلر اعمال می‌شوند.</value>
+    <comment>To enter a line break into a string resource value in VisualStudio resource editor press Shift+Enter.</comment>
+  </data>
+  <data name="Apply" xml:space="preserve">
+    <value>اعمال</value>
+  </data>
+  <data name="HidNinja" xml:space="preserve">
+    <value>HidNinja</value>
+  </data>
+  <data name="CustomExeName" xml:space="preserve">
+    <value>نام سفارشی فایل اجرایی</value>
+  </data>
+  <data name="CustomExeNameInfo" xml:space="preserve">
+    <value>برخی بازی‌ها در صورت شناسایی DS4Windows.exe / InputMapper.exe در حال اجرا، کنترلر را مسدود می‌کنند.
+راه‌حل این است که نام فایل را به چیز دیگری تغییر دهید تا این مسدودسازی دور زده شود.
+مشخص کردن یک نام جدید در اینجا به به‌روزرسان اجازه می‌دهد نام فایل را بشناسد.</value>
+  </data>
+  <data name="XInputChecker" xml:space="preserve">
+    <value>XInputChecker</value>
+  </data>
+  <data name="Controller5Text" xml:space="preserve">
+    <value>کنترلر ۵</value>
+  </data>
+  <data name="Controller6Text" xml:space="preserve">
+    <value>کنترلر ۶</value>
+  </data>
+  <data name="Controller7Text" xml:space="preserve">
+    <value>کنترلر ۷</value>
+  </data>
+  <data name="Controller8Text" xml:space="preserve">
+    <value>کنترلر ۸</value>
+  </data>
+  <data name="GamepadGyroCameraDescription" xml:space="preserve">
+    <value>خروجی کنترلر را به‌صورت کنترلر استاندارد XInput یا DS4 تنظیم می‌کند.
+ژیروسکوپ به‌عنوان یک جویستیک شبیه‌ماوس تنظیم می‌شود.</value>
+  </data>
+  <data name="GamepadGyroCameraName" xml:space="preserve">
+    <value>کنترلر با ماوس</value>
+  </data>
+  <data name="GamepadPresetDescription" xml:space="preserve">
+    <value>تنظیم کنترلر به‌صورت یک کنترلر استاندارد</value>
+  </data>
+  <data name="GamepadPresetName" xml:space="preserve">
+    <value>کنترلر</value>
+  </data>
+  <data name="KBMGyroMouseDescription" xml:space="preserve">
+    <value>خروجی کنترلر را به کنترل پیش‌فرض صفحه‌کلید و ماوس (KB+M) تنظیم می‌کند.
+برای بازی‌های اول‌شخصی که از کنترلر پشتیبانی نمی‌کنند مفید است.
+ژیروسکوپ به‌عنوان ماوس پیش‌فرض تنظیم شده است.</value>
+  </data>
+  <data name="KBMGyroMouseName" xml:space="preserve">
+    <value>کنترل KB+M همراه با ماوس ژیروسکوپ</value>
+  </data>
+  <data name="KBMPresetDescription" xml:space="preserve">
+    <value>خروجی کنترلر را به کنترل پیش‌فرض صفحه‌کلید و ماوس (KB+M) تنظیم می‌کند.
+برای بازی‌های اول‌شخصی که از کنترلر پشتیبانی نمی‌کنند مفید است.</value>
+  </data>
+  <data name="KBMPresetName" xml:space="preserve">
+    <value>کنترل KB+M</value>
+  </data>
+  <data name="MixedGyroMousePresetDescription" xml:space="preserve">
+    <value>دکمه‌ها و محورهای کنترل را به‌صورت استاندارد تنظیم می‌کند.
+ژیروسکوپ را به‌عنوان ماوس پیش‌فرض تنظیم می‌کند.</value>
+  </data>
+  <data name="MixedGyroMousePresetName" xml:space="preserve">
+    <value>کنترلر با ماوس ژیروسکوپ</value>
+  </data>
+  <data name="MixedPresetDescription" xml:space="preserve">
+    <value>تنظیم خروجی کنترلر به‌صورت ترکیبی از ماوس (استیک راست) + XInput</value>
+  </data>
+  <data name="MixedPresetName" xml:space="preserve">
+    <value>کنترلر با دوربین دقیق</value>
+  </data>
+  <data name="Description" xml:space="preserve">
+    <value>توضیحات</value>
+  </data>
+  <data name="PresetIntroText" xml:space="preserve">
+    <value>می‌خواهید یک پیش‌تنظیم انتخاب کنید؟ انتخاب «خیر» باعث می‌شود ویرایشگر پروفایل با یک پروفایل خالی برای کنترلر باز شود.</value>
+  </data>
+  <data name="Presets" xml:space="preserve">
+    <value>پیش‌تنظیم‌ها</value>
+  </data>
+  <data name="Changelog" xml:space="preserve">
+    <value>تغییرات</value>
+  </data>
+  <data name="Close" xml:space="preserve">
+    <value>بستن</value>
+  </data>
+  <data name="Profiles" xml:space="preserve">
+    <value>پروفایل‌ها</value>
+  </data>
+  <data name="NoControllersConnected" xml:space="preserve">
+    <value>هیچ کنترلری متصل نیست (حداکثر {0})</value>
+  </data>
+  <data name="FlickThreshold" xml:space="preserve">
+    <value>آستانه‌ی فلیک</value>
+  </data>
+  <data name="FlickTime" xml:space="preserve">
+    <value>زمان فلیک</value>
+  </data>
+  <data name="MinAngleThreshold" xml:space="preserve">
+    <value>حداقل آستانه‌ی زاویه</value>
+  </data>
+  <data name="RealWorldCalibration" xml:space="preserve">
+    <value>کالیبراسیون دنیای واقعی</value>
+  </data>
+  <data name="RecordBox.FourthMB" xml:space="preserve">
+    <value>دکمه‌ی چهارم ماوس</value>
+  </data>
+  <data name="SpecialActionEdit.SelectKey" xml:space="preserve">
+    <value>انتخاب یک کلید</value>
+  </data>
+  <data name="TwoStageMode" xml:space="preserve">
+    <value>حالت دو مرحله‌ای</value>
+  </data>
+  <data name="SquareStick" xml:space="preserve">
+    <value>استیک مربعی</value>
+  </data>
+  <data name="IconChoice" xml:space="preserve">
+    <value>انتخاب آیکون</value>
+  </data>
+  <data name="StickFuzzTooltip" xml:space="preserve">
+    <value>تلورانس حداقل تعداد واحدهایی است که استیک آنالوگ باید در ناحیه‌ی فعال جابه‌جا شود تا خروجی در مپر به‌عنوان تغییریافته ثبت شود. این تنظیم برای استیک‌های فرسوده که نمی‌توانند موقعیت ثابتی داشته باشند مفید است. مقدار بر حسب واحد خام استیک بیان می‌شود.</value>
+  </data>
+  <data name="Dynamic" xml:space="preserve">
+    <value>پویا</value>
+  </data>
+  <data name="WakeupFromSuspend" xml:space="preserve">
+    <value>بیدار شدن از حالت تعلیق</value>
+  </data>
+  <data name="TouchpadMinThresholdTooltip" xml:space="preserve">
+    <value>حداقل مسافت محاسبه‌شده‌ی خروجی، پیش از ارسال رویداد ماوس به سیستم</value>
+  </data>
+  <data name="SASteeringWheelFuzzTooltip" xml:space="preserve">
+    <value>تلورانس حداقل تعداد واحدهای دستگاهی است که شتاب‌سنج باید در ناحیه‌ی فعال بچرخد تا خروجی در مپر به‌عنوان تغییریافته ثبت شود. مقدار بر حسب واحد خام شتاب‌سنج بیان می‌شود.</value>
+  </data>
+  <data name="RecordBox.FifthMB" xml:space="preserve">
+    <value>دکمه‌ی پنجم ماوس</value>
+  </data>
+  <data name="Utils" xml:space="preserve">
+    <value>ابزارها</value>
+  </data>
+  <data name="CheckEvery" xml:space="preserve">
+    <value>بررسی هر</value>
+  </data>
+  <data name="AbsoluteMouse" xml:space="preserve">
+    <value>ماوس مطلق</value>
+  </data>
+  <data name="DS4BTPollRate" xml:space="preserve">
+    <value>نرخ پولینگ بلوتوث DS4</value>
+  </data>
+  <data name="SpecialActionEdit.UntoggleKeyBy" xml:space="preserve">
+    <value>غیرفعال‌کردن کلید توسط</value>
+  </data>
+  <data name="SpecialActionEdit.DoubleTapTrigger" xml:space="preserve">
+    <value>ماشه‌ی دو ضربه‌ای</value>
+  </data>
+  <data name="DeadZone Y" xml:space="preserve">
+    <value>ناحیه‌ی مرده Y</value>
+  </data>
+  <data name="DualSRumbleModeLegacy" xml:space="preserve">
+    <value>قدیمی (Legacy)</value>
+  </data>
+  <data name="Light" xml:space="preserve">
+    <value>روشن</value>
+  </data>
+  <data name="TestLight" xml:space="preserve">
+    <value>آزمایش سبک</value>
+  </data>
+  <data name="ShowAutoProfileDebugMessages" xml:space="preserve">
+    <value>نمایش پیام‌های دیباگ پروفایل خودکار</value>
+  </data>
+  <data name="RecordBox.PlayOnce" xml:space="preserve">
+    <value>یک‌بار پخش</value>
+  </data>
+  <data name="RecordBoxWin.WinTitle" xml:space="preserve">
+    <value>ویرایش ماکرو</value>
+  </data>
+  <data name="RecordBox.RepeatWhileHeld" xml:space="preserve">
+    <value>تکرار هنگام نگه‌داشتن</value>
+  </data>
+  <data name="SaveWhere.MultipleSaves" xml:space="preserve">
+    <value>چند محل ذخیره‌سازی شناسایی شد</value>
+  </data>
+  <data name="SpecialActionEdit.DisconnectBT" xml:space="preserve">
+    <value>قطع اتصال بلوتوث</value>
+  </data>
+  <data name="SpecialActionEdit.SelectMacro" xml:space="preserve">
+    <value>انتخاب یک ماکرو</value>
+  </data>
+  <data name="SnapToCenter" xml:space="preserve">
+    <value>چسبیدن به مرکز</value>
+  </data>
+  <data name="ProcessPriority" xml:space="preserve">
+    <value>اولویت فرایند</value>
+  </data>
+  <data name="UDPServer" xml:space="preserve">
+    <value>سرور UDP</value>
+  </data>
+  <data name="Default" xml:space="preserve">
+    <value>پیش‌فرض</value>
+  </data>
+  <data name="DeltaAcceleration" xml:space="preserve">
+    <value>شتاب دلتا</value>
+  </data>
+  <data name="ReadingsControl.SixAxisXText" xml:space="preserve">
+    <value>SixAxis: محور X برعکس شده تا خواندن آن راحت‌تر باشد</value>
+  </data>
+  <data name="ReadingsControl.BatteryZero" xml:space="preserve">
+    <value>باتری: ۰٪</value>
+  </data>
+  <data name="SpecialActionEdit.MacroRecorded" xml:space="preserve">
+    <value>ماکرو ضبط شد</value>
+  </data>
+  <data name="Net8NotInstalledWinNotice" xml:space="preserve">
+    <value>نسخه‌ی ۳٫۳ برنامه‌ی DS4Windows نیازمند نصب .NET 8 Desktop Runtime روی سیستم شماست  
+[https://dotnet.microsoft.com/en-us/download/dotnet/thank-you/runtime-desktop-8.0.0-windows-{0}-installer](https://dotnet.microsoft.com/en-us/download/dotnet/thank-you/runtime-desktop-8.0.0-windows-{0}-installer)  
+
+لطفاً برای تأیید مطالعه‌ی این پیام، روی OK کلیک کنید. برای یادآوری مجدد در اجرای بعدی برنامه، روی Cancel کلیک کنید.</value>
+    <comment>Can use Markdown syntax</comment>
+  </data>
+  <data name="SpecialActionEdit.RecordMacro" xml:space="preserve">
+    <value>ضبط یک ماکرو</value>
+  </data>
+  <data name="SpecialActionEdit.KeepKeyState" xml:space="preserve">
+    <value>حفظ وضعیت کلید</value>
+  </data>
+  <data name="RenameProfile" xml:space="preserve">
+    <value>تغییر نام</value>
+  </data>
+  <data name="SpecialActionEdit.HoldTrigger" xml:space="preserve">
+    <value>نگه‌داشتن ماشه</value>
+  </data>
+  <data name="Task" xml:space="preserve">
+    <value>وظیفه</value>
+  </data>
+  <data name="Current" xml:space="preserve">
+    <value>فعلی</value>
+  </data>
+  <data name="MainWin.AbsDisplayMonitor" xml:space="preserve">
+    <value>مانیتور نمایش مطلق</value>
+  </data>
+  <data name="FlashLightbarAtHighLatency" xml:space="preserve">
+    <value>چشمک‌زدن نوار نور در تأخیر بالا</value>
+  </data>
+  <data name="DisableVirtualController" xml:space="preserve">
+    <value>غیرفعال کردن کنترلر مجازی</value>
+  </data>
+  <data name="ScanCode" xml:space="preserve">
+    <value>کد اسکن</value>
+  </data>
+  <data name="StickMaxOutputTooltip" xml:space="preserve">
+    <value>در برخی موقعیت‌ها، محدود کردن حداکثر مقدار خروجی استیک آنالوگ مفید است. «حداکثر خروجی» مقدار نهایی خروجی استیک را محدود می‌کند.</value>
+  </data>
+  <data name="BindingWin.AbsMouseRight" xml:space="preserve">
+    <value>ماوس مطلق راست</value>
+  </data>
+  <data name="BindingWin.ChangeLight" xml:space="preserve">
+    <value>تغییر نور</value>
+  </data>
+  <data name="Buttons" xml:space="preserve">
+    <value>دکمه‌ها</value>
+  </data>
+  <data name="SelectedProfile" xml:space="preserve">
+    <value>پروفایل انتخاب‌شده</value>
+  </data>
+  <data name="SpecialActionEdit.ViaNotification" xml:space="preserve">
+    <value>از طریق اعلان</value>
+  </data>
+  <data name="SpecialActionEdit.SyncRun" xml:space="preserve">
+    <value>اجرای همگام‌شده</value>
+  </data>
+  <data name="XAxisOffset" xml:space="preserve">
+    <value>آفست محور X</value>
+  </data>
+  <data name="LightbarMode" xml:space="preserve">
+    <value>حالت نوار نور</value>
+  </data>
+  <data name="EaseoutQuad" xml:space="preserve">
+    <value>درجه‌دوم (Easeout Quad)</value>
+  </data>
+  <data name="RecordBox.LoadPreset" xml:space="preserve">
+    <value>بارگذاری پیش‌تنظیم</value>
+  </data>
+  <data name="FirstLaunch.DS4EnableText" xml:space="preserve">
+    <value>پشتیبانی از کنترلرهای شناخته‌شده‌ی DualShock 4</value>
+  </data>
+  <data name="ProfileEditor.VirtualDS4TrigOutput" xml:space="preserve">
+    <value>حالت خروجی ماشه‌ی DS4</value>
+  </data>
+  <data name="TouchpadTrackballFrictionTooltip" xml:space="preserve">
+    <value>به Trackball مجازی اصطکاک اضافه می‌کند. کاهش اصطکاک زمان حرکت نهایی نشانگر ماوس را افزایش می‌دهد</value>
+  </data>
+  <data name="Linear" xml:space="preserve">
+    <value>خطی</value>
+  </data>
+  <data name="FirstLaunch.DeviceIntroText" xml:space="preserve">
+    <value>از آنجا که سایر مپرها (مثل Steam Input) به‌طور پیش‌فرض از چند نوع دستگاه پشتیبانی می‌کنند، DS4Windows به‌طور پیش‌فرض فقط خواندن از کنترلرهای DS4 را فعال می‌کند. می‌توانید پشتیبانی مپر از سایر انواع دستگاه را اینجا مشخص کنید. هنگام استفاده‌ی هم‌زمان از DS4Windows با مپرهای دیگر احتیاط کنید.</value>
+  </data>
+  <data name="SaveWhere.PickWhere" xml:space="preserve">
+    <value>محل ذخیره‌ی پروفایل‌ها و تنظیمات را انتخاب کنید</value>
+  </data>
+  <data name="ControllerSupportJoyCon" xml:space="preserve">
+    <value>پشتیبانی از کنترلر JoyCon</value>
+  </data>
+  <data name="MainWin.OneEuroMinCutoff" xml:space="preserve">
+    <value>حداقل قطع فیلتر 1€</value>
+  </data>
+  <data name="VerticalScale" xml:space="preserve">
+    <value>مقیاس عمودی</value>
+  </data>
+  <data name="SkipVersion" xml:space="preserve">
+    <value>رد کردن این نسخه</value>
+  </data>
+  <data name="SpecialActionEdit.SetUnloadTrigger" xml:space="preserve">
+    <value>تنظیم ماشه‌ی لغو بارگذاری</value>
+  </data>
+  <data name="RecordBox.AddRumble" xml:space="preserve">
+    <value>افزودن ویبره</value>
+  </data>
+  <data name="EmulatedController" xml:space="preserve">
+    <value>کنترلر شبیه‌سازی‌شده</value>
+  </data>
+  <data name="FailedToRetrieveLatestVersion" xml:space="preserve">
+    <value>دریافت آخرین نسخه ناموفق بود</value>
+  </data>
+  <data name="DualSRumbleForceGenericRescale" xml:space="preserve">
+    <value>استفاده‌ی اجباری از هر دو سطح شدت درصدی (عمومی و مخصوص DualSense)</value>
+  </data>
+  <data name="SpecialActionEdit.RepeatWhileHeld" xml:space="preserve">
+    <value>تکرار هنگام نگه‌داشتن</value>
+  </data>
+  <data name="FirstLaunch.DeviceSupport" xml:space="preserve">
+    <value>پشتیبانی دستگاه</value>
+  </data>
+  <data name="EnableVerboseLog" xml:space="preserve">
+    <value>فعال‌سازی گزارش کامل</value>
+  </data>
+  <data name="Permanent" xml:space="preserve">
+    <value>دائمی</value>
+  </data>
+  <data name="CancelCurrentMacro" xml:space="preserve">
+    <value>لغو ماکروی جاری</value>
+  </data>
+  <data name="StickOuterBindDeadTooltip" xml:space="preserve">
+    <value>آستانه‌ای که با رسیدن استیک به آن، عملیات اجرا می‌شود</value>
+  </data>
+  <data name="DualSRumbleForceGenericRescale_Tip" xml:space="preserve">
+    <value>توصیه می‌شود غیرفعال بماند.
+
+- غیرفعال: مقیاس ویبره به‌صورت بومی توسط خودِ کنترلر و بر اساس سطح توان تعیین‌شده تنظیم می‌شود (کیفیت بهتر)
+
+- فعال: هم مقیاس‌بندی عمومی ویبره‌ی DS4Windows و هم کنترل بومی DualSense به‌طور هم‌زمان فعال خواهند بود</value>
+  </data>
+  <data name="SpecialActionEdit.LoadProfile" xml:space="preserve">
+    <value>بارگذاری یک پروفایل</value>
+  </data>
+  <data name="ControllerSupportDS4" xml:space="preserve">
+    <value>پشتیبانی از کنترلر DS4</value>
+  </data>
+  <data name="FirstLaunch.WinTitle" xml:space="preserve">
+    <value>اولین اجرا</value>
+  </data>
+  <data name="UpdaterWin.WinTitle" xml:space="preserve">
+    <value>پنجره‌ی به‌روزرسانی</value>
+  </data>
+  <data name="Mode" xml:space="preserve">
+    <value>حالت</value>
+  </data>
+  <data name="AdvancedSupport" xml:space="preserve">
+    <value>پشتیبانی پیشرفته</value>
+  </data>
+  <data name="MaxOutput" xml:space="preserve">
+    <value>حداکثر خروجی</value>
+  </data>
+  <data name="ControllerSupportDualSense" xml:space="preserve">
+    <value>پشتیبانی از کنترلر DualSense</value>
+  </data>
+  <data name="AntiDeadzoneTooltip" xml:space="preserve">
+    <value>Anti-deadzone به‌عنوان یک آفست برای یک محور عمل می‌کند و حداقل مقدار خروجی تولیدشده پس از خروج محور از ناحیه‌ی مرده‌ی تعیین‌شده را مشخص می‌کند. هدف اصلی آن کمک به تطبیق محور با مقدار ناحیه‌ی مرده‌ی تعیین‌شده در یک بازی است. برای مثال، ناحیه‌ی مرده‌ی معمول برای XInput LS در بازی‌ها حدود ۸۰۰۰ (۲۵٪) است. بدون تعیین anti-deadzone، محور باید هم از ناحیه‌ی مرده‌ی تعیین‌شده در DS4Windows و هم از ناحیه‌ی مرده‌ی تعیین‌شده‌ی بازی عبور کند.</value>
+  </data>
+  <data name="ChangeOnNewDeviceConn" xml:space="preserve">
+    <value>تغییرات با اتصال دستگاه جدید اعمال می‌شوند</value>
+  </data>
+  <data name="Radial" xml:space="preserve">
+    <value>شعاعی</value>
+  </data>
+  <data name="OutputCurve" xml:space="preserve">
+    <value>منحنی خروجی</value>
+  </data>
+  <data name="Touchpad" xml:space="preserve">
+    <value>تاچ‌پد</value>
+  </data>
+  <data name="AppTheme" xml:space="preserve">
+    <value>پوسته‌ی برنامه</value>
+  </data>
+  <data name="TouchpadRotationTooltip" xml:space="preserve">
+    <value>حرکت روی تاچ‌پد را بر اساس یک زاویه‌ی چرخش مشخص تنظیم می‌کند. زمانی مفید است که حرکت معمول روی تاچ‌پد یک خط مستقیم نباشد. بازه‌ی مقدار از ۱۸۰- تا ۱۸۰ است. پیش‌فرض ۰ است.</value>
+  </data>
+  <data name="EnableVerboseLogTip" xml:space="preserve">
+    <value>نمایش پیام‌های گزارش اضافی هنگام اتصال کنترلر</value>
+  </data>
+  <data name="DeviceOptions" xml:space="preserve">
+    <value>گزینه‌های دستگاه</value>
+  </data>
+  <data name="Fuzz" xml:space="preserve">
+    <value>تلورانس</value>
+  </data>
+  <data name="SpecialActionEdit.PressingUnloadTrigger" xml:space="preserve">
+    <value>فشردن ماشه‌ی لغو بارگذاری</value>
+  </data>
+  <data name="FirstLaunch.Header" xml:space="preserve">
+    <value>پشتیبانی مپر برای دستگاه‌های فعال‌شده</value>
+  </data>
+  <data name="Plug" xml:space="preserve">
+    <value>اتصال</value>
+  </data>
+  <data name="CRC32Fail" xml:space="preserve">
+    <value>بررسی صحت داده برای دستگاه بی‌سیم ناموفق بود. دستگاه بسته می‌شود.</value>
+  </data>
+  <data name="EnableTouchpadToggle" xml:space="preserve">
+    <value>فعال‌سازی سوییچ تاچ‌پد</value>
+  </data>
+  <data name="Passthru" xml:space="preserve">
+    <value>عبوری (Passthru)</value>
+  </data>
+  <data name="Toggle" xml:space="preserve">
+    <value>تغییر وضعیت</value>
+  </data>
+  <data name="Yaw" xml:space="preserve">
+    <value>چرخش حول محور عمودی (Yaw)</value>
+  </data>
+  <data name="Macro" xml:space="preserve">
+    <value>ماکرو</value>
+  </data>
+  <data name="DeadZoneType" xml:space="preserve">
+    <value>نوع ناحیه‌ی مرده</value>
+  </data>
+  <data name="ID" xml:space="preserve">
+    <value>شناسه</value>
+  </data>
+  <data name="RenameProfileWin.TypeNewProfileName" xml:space="preserve">
+    <value>لطفاً نام جدید فایل XML پروفایل انتخاب‌شده را وارد کنید.</value>
+  </data>
+  <data name="Unbound" xml:space="preserve">
+    <value>تخصیص‌نیافته</value>
+  </data>
+  <data name="UseSmoothing" xml:space="preserve">
+    <value>استفاده از هموارسازی</value>
+  </data>
+  <data name="HoldFor" xml:space="preserve">
+    <value>نگه‌داشتن به مدت</value>
+  </data>
+  <data name="Intro" xml:space="preserve">
+    <value>مقدمه</value>
+  </data>
+  <data name="SixAxisAccel" xml:space="preserve">
+    <value>شش‌محوره (شتاب‌سنج)</value>
+  </data>
+  <data name="Multiplier" xml:space="preserve">
+    <value>ضریب</value>
+  </data>
+  <data name="BindingWin.ChangeMouseSensitivity" xml:space="preserve">
+    <value>تغییر حساسیت ماوس</value>
+  </data>
+  <data name="Width" xml:space="preserve">
+    <value>عرض</value>
+  </data>
+  <data name="LaunchProgramWithProfile" xml:space="preserve">
+    <value>اجرای برنامه همراه با پروفایل</value>
+  </data>
+  <data name="StickOuterBindTooltip" xml:space="preserve">
+    <value>عملیاتی که با عبور حرکت استیک از یک آستانه اجرا می‌شود. برای تطبیق کلیدهای عملیات راه رفتن یا دویدن مفید است. حالت معکوس باعث می‌شود عملیات تا رسیدن به آستانه اجرا شود</value>
+  </data>
+  <data name="FirstLaunch.DS4EnableCkbLabel" xml:space="preserve">
+    <value>پشتیبانی از دستگاه DS4</value>
+  </data>
+  <data name="ExportSpecialActions" xml:space="preserve">
+    <value>صادر کردن عملیات‌ها</value>
+  </data>
+  <data name="StickCalibration" xml:space="preserve">
+    <value>کالیبراسیون استیک</value>
+  </data>
+  <data name="Roll" xml:space="preserve">
+    <value>غلت (Roll)</value>
+  </data>
+  <data name="ControllerSupportMoonlight" xml:space="preserve">
+    <value>پشتیبانی از کنترلر مجازی</value>
+  </data>
+  <data name="Extra" xml:space="preserve">
+    <value>اضافی</value>
+  </data>
+  <data name="BindingWin.SelectShiftTrigger" xml:space="preserve">
+    <value>انتخاب ماشه‌ی Shift</value>
+  </data>
+  <data name="BindingWin.KeyAndRelMouse" xml:space="preserve">
+    <value>صفحه‌کلید و ماوس نسبی</value>
+  </data>
+  <data name="Requested" xml:space="preserve">
+    <value>درخواست‌شده</value>
+  </data>
+  <data name="IdleDisconnect" xml:space="preserve">
+    <value>قطع اتصال هنگام بی‌کاری</value>
+  </data>
+  <data name="OutputMode" xml:space="preserve">
+    <value>حالت خروجی</value>
+  </data>
+  <data name="CopycatTip" xml:space="preserve">
+    <value>برخی فلگ‌های استفاده‌شده برای کنترلرهای DS4 غیر سونی را تغییر می‌دهد. ممکن است پشتیبانی از ویبره و نوار نور را برای برخی کنترلرهای تقلبی DS4 برطرف کند</value>
+  </data>
+  <data name="OutputSlotMan.XInputNum" xml:space="preserve">
+    <value>شماره‌ی XInput</value>
+  </data>
+  <data name="ViGEmPluginFailure" xml:space="preserve">
+    <value>پلاگین دستگاه ViGEm با خطا مواجه شد. کد خطا: {0}. احتمالاً یک مشکل داخلی در ViGEmBus است. اتصال بسته می‌شود. اگر مشکل ادامه داشت، لطفاً DS4Windows را ببندید و ویندوز را ری‌استارت کنید.</value>
+  </data>
+  <data name="CancelCurrentMacroTooltip" xml:space="preserve">
+    <value>مشخص می‌کند آیا اجرای این ماکرو باید ماکروی در حال اجرا را متوقف کند یا نه</value>
+  </data>
+  <data name="UseCustomSteamFolder" xml:space="preserve">
+    <value>استفاده از پوشه‌ی سفارشی Steam</value>
+  </data>
+  <data name="DualSRumblePowerLevel_Tip" xml:space="preserve">
+    <value>تنظیم‌کننده‌ی بومی سطح توانِ ویبره‌ی DualSense.
+
+- در حالت دقیق، [حداقل // حداکثر] ویبره برابر خواهد بود با [۱٪ /// سطح توان انتخاب‌شده]
+    - مثال (۶۲٪): [حداقل = ۱٪ /// حداکثر = ۶۲٪]
+
+- در حالت قدیمی (Legacy)، [حداقل /// حداکثر] ویبره تقریباً برابر خواهد بود با [سطح توان − ۱۲٪ /// سطح توان + ۱۲٪]
+    - مثال (۶۲٪): [حداقل = ۵۰٪ /// حداکثر = ۷۴٪]</value>
+  </data>
+  <data name="White" xml:space="preserve">
+    <value>سفید</value>
+  </data>
+  <data name="LinkProfileId" xml:space="preserve">
+    <value>پیوند پروفایل/شناسه</value>
+  </data>
+  <data name="BindingWin.AbsMouseUp" xml:space="preserve">
+    <value>ماوس مطلق بالا</value>
+  </data>
+  <data name="DeviceType" xml:space="preserve">
+    <value>نوع دستگاه</value>
+  </data>
+  <data name="SpecialActionEdit.ReleasingUnloadTrigger" xml:space="preserve">
+    <value>رهاکردن ماشه‌ی لغو بارگذاری</value>
+  </data>
+  <data name="YAxisOffset" xml:space="preserve">
+    <value>آفست محور Y</value>
+  </data>
+  <data name="HipFireDelay" xml:space="preserve">
+    <value>تأخیر شلیک بدون نشانه‌روی (Hip Fire)</value>
+  </data>
+  <data name="OutputSlots" xml:space="preserve">
+    <value>اسلات‌های خروجی</value>
+  </data>
+  <data name="Normal" xml:space="preserve">
+    <value>عادی</value>
+  </data>
+  <data name="Hours" xml:space="preserve">
+    <value>ساعت</value>
+  </data>
+  <data name="BindingWin.MacroOn" xml:space="preserve">
+    <value>ماکرو فعال است؛ یک کلید برای غیرفعال‌سازی انتخاب کنید، یا برای ذخیره این پنجره را ببندید</value>
+  </data>
+  <data name="SpecialActionEdit.LaunchProgram" xml:space="preserve">
+    <value>اجرای یک برنامه</value>
+  </data>
+  <data name="OuterBtn" xml:space="preserve">
+    <value>دکمه‌ی بیرونی</value>
+  </data>
+  <data name="SpecialActionEdit.SelectAction" xml:space="preserve">
+    <value>-انتخاب یک عملیات-</value>
+  </data>
+  <data name="BindingWin.AbsMouseLeft" xml:space="preserve">
+    <value>ماوس مطلق چپ</value>
+  </data>
+  <data name="ViGEm117MinNeeded" xml:space="preserve">
+    <value>فقط با ViGEmBus نسخه‌ی ۱٫۱۷٫۳۳۳٫۰ و جدیدتر کار می‌کند</value>
+  </data>
+  <data name="SpecialActionEdit.SixAxisWheelCalib" xml:space="preserve">
+    <value>کالیبراسیون فرمان شش‌محوره</value>
+  </data>
+  <data name="OuterBtnDead" xml:space="preserve">
+    <value>ناحیه‌ی مرده‌ی دکمه‌ی بیرونی</value>
+  </data>
+  <data name="MainWin.OneEuroBeta" xml:space="preserve">
+    <value>بتا فیلتر 1€</value>
+  </data>
+  <data name="Heavy" xml:space="preserve">
+    <value>سنگین</value>
+  </data>
+  <data name="AntiRadius" xml:space="preserve">
+    <value>ضد شعاع (Anti Radius)</value>
+  </data>
+  <data name="InverseMotors" xml:space="preserve">
+    <value>معکوس‌کردن موتورها</value>
+  </data>
+  <data name="LangPackControl.UseLangPack" xml:space="preserve">
+    <value>استفاده از بسته‌ی زبان</value>
+  </data>
+  <data name="DS4LightbarPassthruDisabled" xml:space="preserve">
+    <value>این قابلیت به‌دلیل مشکلات درایور، فعلاً در برنامه غیرفعال است. امیدواریم در به‌روزرسانی‌های بعدی رفع شود.</value>
+  </data>
+  <data name="Quadratic" xml:space="preserve">
+    <value>درجه‌دوم</value>
+  </data>
+  <data name="ColorAndLength" xml:space="preserve">
+    <value>رنگ و طول</value>
+  </data>
+  <data name="EnableOscServer" xml:space="preserve">
+    <value>فعال‌سازی سرور کنترل</value>
+  </data>
+  <data name="Pitch" xml:space="preserve">
+    <value>چرخش حول محور عرضی (Pitch)</value>
+  </data>
+  <data name="HotkeysAbout" xml:space="preserve">
+    <value>کلیدهای میانبر/درباره‌ی برنامه</value>
+  </data>
+  <data name="VirtualControllerSettings" xml:space="preserve">
+    <value>تنظیمات کنترلر مجازی</value>
+  </data>
+  <data name="Unplug" xml:space="preserve">
+    <value>قطع اتصال</value>
+  </data>
+  <data name="Appdata" xml:space="preserve">
+    <value>Appdata</value>
+  </data>
+  <data name="TouchpadJitterCompTooltip" xml:space="preserve">
+    <value>حرکت‌های خیلی کوچک روی تاچ‌پد را محدود می‌کند. حرکت ناخواسته‌ی نشانگر ماوس هنگام نگه‌داشتن انگشت تقریباً ثابت روی تاچ‌پد را کاهش می‌دهد</value>
+  </data>
+  <data name="RenameProfileWin.WinTitle" xml:space="preserve">
+    <value>تغییر نام پروفایل</value>
+  </data>
+  <data name="MaxTravel" xml:space="preserve">
+    <value>حداکثر مسافت حرکت</value>
+  </data>
+  <data name="Colored" xml:space="preserve">
+    <value>رنگی</value>
+  </data>
+  <data name="Port" xml:space="preserve">
+    <value>درگاه</value>
+  </data>
+  <data name="FirstLaunch.SwitchProEnableCkbLabel" xml:space="preserve">
+    <value>پشتیبانی از دستگاه Switch Pro</value>
+  </data>
+  <data name="MainWin.EnableServer" xml:space="preserve">
+    <value>فعال‌سازی سرور</value>
+  </data>
+  <data name="OscServerHeading" xml:space="preserve">
+    <value>کنترل و مانیتورینگ OSC خارجی</value>
+  </data>
+  <data name="Other" xml:space="preserve">
+    <value>سایر</value>
+  </data>
+  <data name="SharedAccess" xml:space="preserve">
+    <value>دسترسی مشترک</value>
+  </data>
+  <data name="RecordBox.MacroOrder" xml:space="preserve">
+    <value>ترتیب ماکرو</value>
+  </data>
+  <data name="MinimizeToTaskbarTip" xml:space="preserve">
+    <value>کوچک کردن به نوار وظیفه به‌جای سینی سیستم (System Tray)</value>
+  </data>
+  <data name="YCenter" xml:space="preserve">
+    <value>مرکز Y</value>
+  </data>
+  <data name="DisableVirtualControllerTip" xml:space="preserve">
+    <value>برای کنترلرهای متصلی که از این پروفایل استفاده می‌کنند، کنترلر مجازی ساخته/متصل نشود (با ذخیره‌ی پروفایل اعمال می‌شود)</value>
+  </data>
+  <data name="AbsoluteMouseOptions" xml:space="preserve">
+    <value>گزینه‌های ماوس مطلق</value>
+  </data>
+  <data name="AutoProfiles.LogAndNotification" xml:space="preserve">
+    <value>گزارش + اعلان</value>
+  </data>
+  <data name="FirstLaunch.DSEnableCkbLabel" xml:space="preserve">
+    <value>پشتیبانی از دستگاه DualSense</value>
+  </data>
+  <data name="EnableOscSender" xml:space="preserve">
+    <value>فعال‌سازی سرویس مانیتورینگ</value>
+  </data>
+  <data name="DeadZone" xml:space="preserve">
+    <value>ناحیه‌ی مرده</value>
+  </data>
+  <data name="ControllerRegOptWin.LinkMode" xml:space="preserve">
+    <value>حالت اتصال (Link Mode)</value>
+  </data>
+  <data name="TouchpadSlideTooltip" xml:space="preserve">
+    <value>حساسیت مورد استفاده برای فعال‌سازی عملکرد اسکرول چرخ ماوس با چند لمس</value>
+  </data>
+  <data name="Black" xml:space="preserve">
+    <value>مشکی</value>
+  </data>
+  <data name="TestHeavy" xml:space="preserve">
+    <value>آزمایش سنگین</value>
+  </data>
+  <data name="ProfileSwitchNotification" xml:space="preserve">
+    <value>نمایش اعلان تعویض پروفایل</value>
+  </data>
+  <data name="PresetOptWin.PresetMenu" xml:space="preserve">
+    <value>منوی پیش‌تنظیم</value>
+  </data>
+  <data name="Accept" xml:space="preserve">
+    <value>پذیرفتن</value>
+  </data>
+  <data name="MouseOffset" xml:space="preserve">
+    <value>جابجایی ماوس</value>
+  </data>
+  <data name="Enabled" xml:space="preserve">
+    <value>فعال</value>
+  </data>
+  <data name="Add" xml:space="preserve">
+    <value>افزودن</value>
+  </data>
+  <data name="MouseSensitivity" xml:space="preserve">
+    <value>حساسیت ماوس</value>
+  </data>
+  <data name="DisconnectFromBtWhenStopping" xml:space="preserve">
+    <value>قطع بلوتوث هنگام توقف</value>
+  </data>
+  <data name="Mouse" xml:space="preserve">
+    <value>ماوس</value>
+  </data>
+  <data name="ControllerRegOptWin.MuteLEDMode" xml:space="preserve">
+    <value>حالت LED بی‌صدا (Mute)</value>
+  </data>
+  <data name="UseController" xml:space="preserve">
+    <value>استفاده از کنترلر</value>
+  </data>
+  <data name="HidHideConfigClient" xml:space="preserve">
+    <value>کلاینت تنظیمات HidHide</value>
+  </data>
+  <data name="SwipeTouchpadToSwitchProfiles" xml:space="preserve">
+    <value>کشیدن روی تاچ‌پد برای تعویض پروفایل</value>
+  </data>
+  <data name="Sensitivity" xml:space="preserve">
+    <value>حساسیت</value>
+  </data>
+  <data name="FirstLaunch.DSEnableText" xml:space="preserve">
+    <value>پشتیبانی از کنترلرهای DualSense (PS5). مدل پایه و DS Edge</value>
+  </data>
+  <data name="SaveWhere.WinTitle" xml:space="preserve">
+    <value>محل ذخیره‌سازی</value>
+  </data>
+  <data name="FirstLaunch.DS3EnableCkbLabel" xml:space="preserve">
+    <value>پشتیبانی از دستگاه DS3</value>
+  </data>
+  <data name="RevertToDefaultProfileOnUnknown" xml:space="preserve">
+    <value>بازگشت به پروفایل پیش‌فرض در صورت ناشناخته بودن</value>
+  </data>
+  <data name="OK" xml:space="preserve">
+    <value>تأیید</value>
+  </data>
+  <data name="Copycat" xml:space="preserve">
+    <value>شبیه‌ساز (Copycat)</value>
+  </data>
+  <data name="DS4OutputTriggersDefault" xml:space="preserve">
+    <value>پیش‌فرض (آنالوگ + دکمه‌ها)</value>
+  </data>
+  <data name="Notification" xml:space="preserve">
+    <value>اعلان</value>
+  </data>
+  <data name="RecordBox.InsertWait" xml:space="preserve">
+    <value>درج توقف</value>
+  </data>
+  <data name="Confirm" xml:space="preserve">
+    <value>تأیید</value>
+  </data>
+  <data name="AntiSnapbackTiming" xml:space="preserve">
+    <value>زمان‌بندی ضد بازگشت ناگهانی (Anti Snapback)</value>
+  </data>
+  <data name="OuterBind" xml:space="preserve">
+    <value>اتصال بیرونی (Outer Bind)</value>
+  </data>
+  <data name="SaveWhere.AppDataDescText" xml:space="preserve">
+    <value>برای کسانی که نصب معمولی را ترجیح می‌دهند. تنظیمات در %appdata%\DS4Windows ذخیره می‌شود</value>
+  </data>
+  <data name="RecordBox.SavePreset" xml:space="preserve">
+    <value>ذخیره‌ی پیش‌تنظیم</value>
+  </data>
+  <data name="DetectedControllers" xml:space="preserve">
+    <value>کنترلرهای شناسایی‌شده</value>
+  </data>
+  <data name="Analog" xml:space="preserve">
+    <value>آنالوگ</value>
+  </data>
+  <data name="Custom" xml:space="preserve">
+    <value>سفارشی</value>
+  </data>
+  <data name="BindingWin.AbsMouseDown" xml:space="preserve">
+    <value>ماوس مطلق پایین</value>
+  </data>
+  <data name="ExclusiveAccess" xml:space="preserve">
+    <value>دسترسی انحصاری</value>
+  </data>
+  <data name="SpecialActionEdit.CheckBattery" xml:space="preserve">
+    <value>بررسی عمر باتری</value>
+  </data>
+  <data name="EnhancedPrecision" xml:space="preserve">
+    <value>دقت افزایش‌یافته</value>
+  </data>
+  <data name="Days" xml:space="preserve">
+    <value>روز</value>
+  </data>
+  <data name="FullBtnPull" xml:space="preserve">
+    <value>کشش کامل دکمه</value>
+  </data>
+  <data name="FirstLaunch.SwitchProEnableText" xml:space="preserve">
+    <value>پشتیبانی از کنترلرهای Switch Pro (نینتندو سوییچ)</value>
+  </data>
+  <data name="AutoProfiles.DisplaySwitchVia" xml:space="preserve">
+    <value>نمایش تعویض پروفایل از طریق</value>
+  </data>
+  <data name="HidGuardianAccess" xml:space="preserve">
+    <value>دسترسی HidGuardian</value>
+  </data>
+  <data name="TurnOffDS4WindowsTemporarily" xml:space="preserve">
+    <value>خاموش کردن موقت DS4Windows</value>
+  </data>
+  <data name="FutureNetNotInstalled" xml:space="preserve">
+    <value>.NET 5 Runtime روی سیستم شما یافت نشد. لطفاً برای سازگاری با نسخه‌های آینده‌ی DS4Windows، آن را دانلود و نصب کنید. با بستن این پنجره به صفحه‌ی دانلود .NET 5 Runtime هدایت می‌شوید.</value>
+  </data>
+  <data name="XCenter" xml:space="preserve">
+    <value>مرکز X</value>
+  </data>
+  <data name="FirstLaunch.JoyConEnableText" xml:space="preserve">
+    <value>پشتیبانی از کنترلرهای JoyCon (نینتندو سوییچ)</value>
+  </data>
+  <data name="RealTimeNoAdmin" xml:space="preserve">
+    <value>انتخاب اولویت بلادرنگ (Real-time) نیازمند اجرای برنامه در حالت مدیر (Admin) است.</value>
+  </data>
+  <data name="MouseVerticalScale" xml:space="preserve">
+    <value>مقیاس عمودی ماوس</value>
+  </data>
+  <data name="AntiSnapback" xml:space="preserve">
+    <value>ضد بازگشت ناگهانی (Anti Snapback)</value>
+  </data>
+  <data name="FlickStick" xml:space="preserve">
+    <value>استیک فلیک (Flick Stick)</value>
+  </data>
+  <data name="SpecialActionEdit.ViaLightbar" xml:space="preserve">
+    <value>از طریق نوار نور</value>
+  </data>
+  <data name="SpecialActionEdit.TapTrigger" xml:space="preserve">
+    <value>ماشه‌ی ضربه‌ای</value>
+  </data>
+  <data name="ProgramFolder" xml:space="preserve">
+    <value>پوشه‌ی برنامه</value>
+  </data>
+  <data name="Dark" xml:space="preserve">
+    <value>تیره</value>
+  </data>
+  <data name="Rotation" xml:space="preserve">
+    <value>چرخش</value>
+  </data>
+  <data name="UpgradeNetCaption" xml:space="preserve">
+    <value>لطفاً .NET Runtime را به‌روزرسانی کنید</value>
+  </data>
+  <data name="BindingWin.RecordAMacro" xml:space="preserve">
+    <value>ضبط یک ماکرو</value>
+  </data>
+  <data name="SpecialActionEdit.MultiAction" xml:space="preserve">
+    <value>دکمه‌ی چند-عملیاتی</value>
+  </data>
+  <data name="DirectionalSwipe" xml:space="preserve">
+    <value>حرکت جهت‌دار (Swipe)</value>
+  </data>
+  <data name="EasingDuration" xml:space="preserve">
+    <value>مدت‌زمان نرم‌شدن (Easing)</value>
+  </data>
+  <data name="UnloadTrigger" xml:space="preserve">
+    <value>ماشه‌ی لغو بارگذاری</value>
+  </data>
+  <data name="TouchpadTapTooltip" xml:space="preserve">
+    <value>با یک ضربه‌ی لمسی روی تاچ‌پد، کلیک چپ ماوس فعال می‌شود. حداکثر بازه‌ی زمانی برابر با (مقدار × ۲) میلی‌ثانیه است.</value>
+  </data>
+  <data name="Controls" xml:space="preserve">
+    <value>کنترل‌ها</value>
+  </data>
+  <data name="MouseJoystick" xml:space="preserve">
+    <value>جویستیک ماوس</value>
+  </data>
+  <data name="SpecialActionEdit.UnloadTriggerRelease" xml:space="preserve">
+    <value>لغو بارگذاری با رهاشدن ماشه</value>
+  </data>
+  <data name="EaseoutCubic" xml:space="preserve">
+    <value>مکعبی (Easeout Cubic)</value>
+  </data>
+  <data name="Net8NoticeWin.WinTitle" xml:space="preserve">
+    <value>.NET 8 یافت نشد</value>
+  </data>
+  <data name="UseDs3PitchRollSim" xml:space="preserve">
+    <value>[آزمایشی] استفاده از شبیه‌سازی ژیروسکوپ کنترلر DS3</value>
+  </data>
+  <data name="DualSRumbleModeDisabled" xml:space="preserve">
+    <value>غیرفعال</value>
+  </data>
+  <data name="ControllerRegOptWin.PlayerLEDMode" xml:space="preserve">
+    <value>حالت LED بازیکن</value>
+  </data>
+  <data name="DualSRumbleModes_Tip" xml:space="preserve">
+    <value>حالت دقیق (توصیه‌شده):
+- حس ویبره‌ی DualShock 4 / ایکس‌باکس ۳۶۰ را بهتر شبیه‌سازی می‌کند
+- افکت‌های ویبره‌ی مدنظر بازی را دقیق‌تر اجرا می‌کند
+- ویبره عمق بیشتری دارد. در یک سطح توان یکسان، اختلاف بین حداقل و حداکثر فعال‌سازی ویبره در بازی بیشتر است
+و از خیلی کم تا حداکثر شدتِ سطح توانِ تعیین‌شده متغیر است
+
+حالت قدیمی (Legacy):
+- به‌طور کلی قوی‌تر، اما بدون عمق
+- حسی «تیزتر» دارد
+- حداقل و حداکثر فعال‌سازی در بازی، به‌ترتیب، کمی پایین‌تر و کمی بالاتر از شدتِ سطح توانِ انتخاب‌شده خواهد بود
+
+غیرفعال:
+- ویبره را کاملاً غیرفعال می‌کند</value>
+  </data>
+  <data name="TriggerEffect" xml:space="preserve">
+    <value>افکت ماشه</value>
+  </data>
+  <data name="DeadZone X" xml:space="preserve">
+    <value>ناحیه‌ی مرده X</value>
+  </data>
+  <data name="Height" xml:space="preserve">
+    <value>ارتفاع</value>
+  </data>
+  <data name="SpecialActionEdit.RunTriggerRelease" xml:space="preserve">
+    <value>اجرا هنگام رهاشدن ماشه</value>
+  </data>
+  <data name="DualSRumbleSpecificSettings" xml:space="preserve">
+    <value>تنظیمات اختصاصی ویبره‌ی DualSense</value>
+  </data>
+  <data name="StickRotationTooltip" xml:space="preserve">
+    <value>+ = ساعت‌گرد. - = پادساعت‌گرد.
+
+تنظیم چرخش برای اصلاح جهت‌گیری استیک آنالوگ در صورتی است که هنگام حرکت‌دادن استیک، انگشت شست کمی جابه‌جا می‌شود. برای مثال، هنگامی که استیک کاملاً به سمت شمال حرکت می‌کند، ممکن است شست کمی از مرکز جابه‌جا شده باشد. مقدار استفاده‌شده، تعداد درجه‌هایی است که برای تنظیم مقدار نهایی خروجی محور به کار می‌رود. بازه‌ی مقدار از ۱۸۰- تا ۱۸۰ است. پیش‌فرض ۰ است.</value>
+  </data>
+  <data name="ReadingsControl.InputDelayNA" xml:space="preserve">
+    <value>تأخیر ورودی: نامشخص</value>
+  </data>
+  <data name="MaxZone" xml:space="preserve">
+    <value>حداکثر ناحیه</value>
+  </data>
+  <data name="ControllerRegOptWin.WinTitle" xml:space="preserve">
+    <value>گزینه‌های نوع کنترلر</value>
+  </data>
+  <data name="RecordBox.DoubleClickWaitEdit" xml:space="preserve">
+    <value>برای ویرایش زمان، روی یک «توقف» دوبار کلیک کنید</value>
+  </data>
+  <data name="PresetOptWin.OutputController" xml:space="preserve">
+    <value>کنترلر خروجی</value>
+  </data>
+  <data name="SpecialActionEdit.HoldFor" xml:space="preserve">
+    <value>نگه‌داشتن به مدت</value>
+  </data>
+  <data name="No" xml:space="preserve">
+    <value>خیر</value>
+  </data>
+  <data name="ShiftModifier" xml:space="preserve">
+    <value>تغییردهنده‌ی Shift</value>
+  </data>
+  <data name="SolidColor" xml:space="preserve">
+    <value>رنگ ثابت</value>
+  </data>
+  <data name="Regular" xml:space="preserve">
+    <value>عادی</value>
+  </data>
+  <data name="OutputSlotMan.InputNum" xml:space="preserve">
+    <value>شماره‌ی ورودی</value>
+  </data>
+  <data name="MinimizeToTaskbar" xml:space="preserve">
+    <value>کوچک کردن به نوار وظیفه</value>
+  </data>
+  <data name="GyroTriggerJitterCompensationTooltip" xml:space="preserve">
+    <value>برای جبران لرزش دستگاه، محدودیت بیشتری در ابتدای منحنی اعمال می‌کند</value>
+  </data>
+  <data name="StickOuterBindInvertTooltip" xml:space="preserve">
+    <value>باعث می‌شود «اتصال بیرونی» پیش از رسیدن به آستانه اجرا شود. با عبور از آستانه، عملیات رها می‌شود</value>
+  </data>
+  <data name="GyroControlsAccel" xml:space="preserve">
+    <value>کنترل‌ها (شتاب‌سنج)</value>
+  </data>
+  <data name="RunAs" xml:space="preserve">
+    <value>اجرا به‌عنوان</value>
+  </data>
+  <data name="Program" xml:space="preserve">
+    <value>برنامه</value>
+  </data>
+  <data name="MinTravel" xml:space="preserve">
+    <value>حداقل مسافت حرکت</value>
+  </data>
+  <data name="DualSRumbleModeNPowerLevelTxt" xml:space="preserve">
+    <value>حالت ویبره و سطح شدت:</value>
+  </data>
+  <data name="CreateLightbarMacro" xml:space="preserve">
+    <value>ساخت ماکروی نوار نور</value>
+  </data>
+  <data name="RecordBox.UseActionToRecord" xml:space="preserve">
+    <value>برای ضبط از صفحه‌کلید/ماوس + کنترلر ۱ استفاده کنید</value>
+  </data>
+  <data name="Yes" xml:space="preserve">
+    <value>بله</value>
+  </data>
+  <data name="TouchpadTrackballEnableTooltip" xml:space="preserve">
+    <value>پس از برداشتن انگشت، به حرکت روی تاچ‌پد اینرسی (مومنتوم) اضافه می‌کند. باعث می‌شود نشانگر ماوس فراتر از فضای محدود تاچ‌پد هم حرکت کند</value>
+  </data>
+  <data name="Axial" xml:space="preserve">
+    <value>محوری (Axial)</value>
+  </data>
+  <data name="AntiDeadZone" xml:space="preserve">
+    <value>ناحیه‌ی ضد-مرده (Anti-dead Zone)</value>
+  </data>
+  <data name="DualSRumbleModeAccurate" xml:space="preserve">
+    <value>دقیق</value>
+  </data>
+  <data name="Cubic" xml:space="preserve">
+    <value>مکعبی</value>
+  </data>
+  <data name="MinFactor" xml:space="preserve">
+    <value>حداقل ضریب</value>
+  </data>
+  <data name="MouseAcceleration" xml:space="preserve">
+    <value>شتاب ماوس</value>
+  </data>
+  <data name="EnableInterpretingOscMonitoring" xml:space="preserve">
+    <value>تفسیر پیام‌های مانیتورینگ</value>
+  </data>
+  <data name="BindingWin.AbsMouse" xml:space="preserve">
+    <value>ماوس مطلق</value>
+  </data>
+  <data name="ControllerSupportDS3" xml:space="preserve">
+    <value>پشتیبانی از کنترلر DS3</value>
+  </data>
+  <data name="HidHideAccess" xml:space="preserve">
+    <value>دسترسی HidHide</value>
+  </data>
+  <data name="OutContNotice" xml:space="preserve">
+    <value>نوع کنترلر مجازی خروجی را انتخاب کنید (با ذخیره‌ی پروفایل اعمال می‌شود)</value>
+  </data>
+  <data name="DualSRumbleModePassthru" xml:space="preserve">
+    <value>عبوری (Passthru)</value>
+  </data>
+  <data name="FlashRate" xml:space="preserve">
+    <value>نرخ چشمک‌زدن</value>
+  </data>
+  <data name="BindingWin.KeyboardAndMouse" xml:space="preserve">
+    <value>صفحه‌کلید و ماوس</value>
+  </data>
+  <data name="RecordBox.ChangeLightbarColor" xml:space="preserve">
+    <value>تغییر رنگ نوار نور</value>
+  </data>
+  <data name="RecordBox.RecordDelays" xml:space="preserve">
+    <value>ضبط تأخیرها</value>
+  </data>
+  <data name="SpecialActionEdit.PressKey" xml:space="preserve">
+    <value>فشردن/تغییر وضعیت کلید</value>
+  </data>
+  <data name="SpecialActionEdit.CalibrateGyro" xml:space="preserve">
+    <value>کالیبراسیون ژیروسکوپ</value>
+  </data>
+  <data name="HideDS4Controller" xml:space="preserve">
+    <value>پنهان کردن کنترلر DS4</value>
+  </data>
+  <data name="StickInputCurveTooltip" xml:space="preserve">
+    <value>تنظیم قدیمی و منسوخ. تلاش برای اعمال یک منحنی بر اساس مختصات خام ورودی، پیش از اعمال اطلاعات ناحیه‌ی مرده. رفتار نامنظمی دارد</value>
+  </data>
+  <data name="HidHide" xml:space="preserve">
+    <value>HidHide</value>
+  </data>
+  <data name="FirstLaunch.DS3EnableText" xml:space="preserve">
+    <value>پشتیبانی از کنترلرهای DualShock 3 (PS3). نیازمند استفاده از درایور DsHidMini از پروژه‌ی ViGEm (nefarius) است.</value>
+  </data>
+  <data name="AutomaticallyRecalibrateStick" xml:space="preserve">
+    <value>کالیبراسیون خودکار مجدد استیک</value>
+  </data>
+  <data name="Test" xml:space="preserve">
+    <value>آزمایش</value>
+  </data>
+  <data name="AxisConfig" xml:space="preserve">
+    <value>تنظیمات محور (Axis)</value>
+  </data>
+  <data name="ControllerSupportSwitchPro" xml:space="preserve">
+    <value>پشتیبانی از کنترلر Switch Pro</value>
+  </data>
+  <data name="FirstLaunch.JoyConEnableCkbLabel" xml:space="preserve">
+    <value>پشتیبانی از دستگاه JoyCon</value>
+  </data>
+  <data name="StickMaxOutputForceTooltip" xml:space="preserve">
+    <value>همیشه تنظیم حداکثر خروجی را اعمال کن. برای «حداکثر خروجی» برابر با ۱۰۰٪ و محدودکردن مقدار به یک خروجی دایره‌ای مفید است</value>
+  </data>
+  <data name="Active" xml:space="preserve">
+    <value>فعال</value>
+  </data>
+  <data name="SaveWhere.ProgramFolderDescText" xml:space="preserve">
+    <value>برای کسانی که برنامه‌ی پرتابل را ترجیح می‌دهند.
+نکته: اگر برنامه در پوشه‌ای با نیاز به دسترسی ادمین و بدون UAC باشد، این گزینه کار نمی‌کند</value>
+  </data>
+  <data name="ControllerRegOptWin.EnableHomeLED" xml:space="preserve">
+    <value>فعال‌سازی LED دکمه‌ی Home</value>
+  </data>
+  <data name="Lightbar" xml:space="preserve">
+    <value>نوار نور</value>
+  </data>
+  <data name="ControllerRegOptWin.JoinedGyroProvider" xml:space="preserve">
+    <value>ارائه‌دهنده‌ی ژیروسکوپ ترکیبی</value>
+  </data>
+  <data name="SaveWhere.DontDelete" xml:space="preserve">
+    <value>تنظیمات دیگر را هنوز حذف نکن</value>
+  </data>
+  <data name="Welcome.Step3BluetoothHelpText" xml:space="preserve">
+    <value>پس از شروع چشمک‌زدن، به تنظیمات بلوتوث بروید و به «Wireless Controller» متصل شوید. اگر خواسته شد، کد جفت‌سازی ۰۰۰۰ را وارد کنید. بعد از جفت‌سازی، آماده‌اید. لذت ببرید!</value>
+  </data>
+  <data name="Welcome.Step4HelpText" xml:space="preserve">
+    <value>از HidHide برای تنظیم و پنهان‌کردن کنترلرهای ورودی از سایر برنامه‌های در حال اجرا استفاده کنید. برخی بازی‌ها نیاز دارند فقط یک کنترلر وجود داشته باشد، وگرنه ورودی دوگانه در بازی مشکل ایجاد می‌کند.</value>
+  </data>
+  <data name="Welcome.Step3HelpText" xml:space="preserve">
+    <value>مرحله‌ی ۳: اتصال کنترلر DualShock 4.
+برای اتصال سیمی/USB:
+کافی است یک کابل micro-USB را به سیستم و DualShock 4 وصل کنید.
+
+برای اتصال بلوتوث (اختیاری): دکمه‌ی PS و Share را به مدت ۳ ثانیه نگه دارید. نوار نور شروع به چشمک‌زدن دوتایی می‌کند.</value>
+    <comment>To enter a line break into a string resource value in VisualStudio resource editor press Shift+Enter.</comment>
+  </data>
+  <data name="Welcome.Step2HelpText" xml:space="preserve">
+    <value>اگر قبلاً از یک کنترلر ۳۶۰ روی این سیستم استفاده کرده‌اید، می‌توانید این مرحله را رد کنید.</value>
+  </data>
+  <data name="Welcome.Step4Text" xml:space="preserve">
+    <value>(اختیاری) مرحله‌ی ۴: نصب درایور HidHide</value>
+  </data>
+  <data name="Welcome.Step1HelpText" xml:space="preserve">
+    <value>اگر بعد از نصب این پنجره دوباره ظاهر شد، ممکن است لازم باشد سیستم را ری‌استارت کنید.</value>
+  </data>
+  <data name="Welcome.Step1Text" xml:space="preserve">
+    <value>مرحله‌ی ۱: نصب درایور ViGEmBus</value>
+  </data>
+  <data name="Welcome.BluetoothSettings" xml:space="preserve">
+    <value>تنظیمات بلوتوث</value>
+  </data>
+  <data name="Welcome.WinTitle" xml:space="preserve">
+    <value>به DS4Windows خوش آمدید</value>
+  </data>
+  <data name="Welcome.Step5Text" xml:space="preserve">
+    <value>(اختیاری) مرحله‌ی ۵: نصب درایور FakerInput</value>
+  </data>
+  <data name="Welcome.Step2Text" xml:space="preserve">
+    <value>مرحله‌ی ۲: در ویندوز ۷، درایور ۳۶۰ را نصب کنید</value>
+  </data>
+  <data name="Welcome.Step5HelpText" xml:space="preserve">
+    <value>از درایور FakerInput برای فراهم‌کردن صفحه‌کلید مجازی، ماوس نسبی و ماوس مطلق در سطح سیستم استفاده کنید. این کار باعث می‌شود رویدادهای مجازی صفحه‌کلید و ماوس در مواقعی که SendInput کار نمی‌کند نیز قابل استفاده باشند؛ مثل پردازش‌ها و بازی‌های دارای دسترسی بالا، پیام‌های UAC و سیستم‌های ضدتقلبی که رویدادهای SendInput را مسدود می‌کنند. استفاده از FakerInput برای کارکرد DS4Windows با برخی بازی‌های دارای محافظت ضدتقلب مانند Valorant ضروری است.</value>
+  </data>
+  <data name="AutoProfPathTip" xml:space="preserve">
+    <value>مسیر پردازش. ^ABC = تطبیق در ابتدای رشته (^) | ABC$ = تطبیق در انتهای رشته ($) | *ABC = شامل شدن رشته (*)</value>
+  </data>
+  <data name="AutoProfTitleTip" xml:space="preserve">
+    <value>عنوان پنجره. ^ABC = تطبیق در ابتدای رشته (^) | ABC$ = تطبیق در انتهای رشته ($) | *ABC = شامل شدن رشته (*)</value>
+  </data>
+  <data name="Finished" xml:space="preserve">
+    <value>پایان</value>
+  </data>
+  <data name="PresetOptWin.WinTitle" xml:space="preserve">
+    <value>انتخاب پیش‌تنظیم</value>
+  </data>
+  <data name="ViGEmBusNotInstalled" xml:space="preserve">
+    <value>ViGEmBus نصب نیست</value>
+  </data>
+  <data name="ViGEmBusUnsupportedVersion" xml:space="preserve">
+    <value>نسخه‌ی پشتیبانی‌نشده‌ی ViGEmBus پیدا شد ({0}). لطفاً حداقل نسخه‌ی ۱٫۱۷٫۳۳۳٫۰ از ViGEmBus را نصب کنید.</value>
+  </data>
+  <data name="ViGEmBusConnectFailed" xml:space="preserve">
+    <value>اتصال به ViGEmBus برقرار نشد. لطفاً وضعیت دستگاه System را در Device Manager، و نصب‌بودن Visual C++ 2017 Redistributable را بررسی کنید.</value>
+  </data>
+  <data name="AddWindowTitleRule" xml:space="preserve">
+    <value>افزودن قانون عنوان پنجره</value>
+  </data>
+  <data name="WindowTitleRule" xml:space="preserve">
+    <value>قانون عنوان پنجره</value>
+  </data>
+  <data name="SendGameFeedbackToPhysicalController" xml:space="preserve">
+    <value>ارسال فیدبک بازی به کنترلر فیزیکی</value>
+  </data>
+  <data name="SendGameFeedbackToPhysicalControllerTip" xml:space="preserve">
+    <value>پیشنهاد می‌شه روشن بمونه. ویبره، هپتیک‌های تبدیل‌شده‌ی DualSense، افکت‌های سازگار adaptive trigger و نور کنترلر رو از بازی به کنترلر فیزیکیِ وصل‌شده می‌فرسته. فقط وقتی خاموشش کن که کنترلر نتونه خروجی بگیره؛ غیرفعال کردنش این افکت‌های فیدبک بازی رو حذف می‌کنه. بعد از تغییر این تنظیم، کنترلر رو دوباره وصل کن.</value>
+  </data>
+  <data name="About.HeaderLabel" xml:space="preserve">
+    <value>DS4Windows - نسخه‌ی hbashton (نسخه‌ی </value>
+  </data>
+  <data name="About.TabHotkeys" xml:space="preserve">
+    <value>میانبرها</value>
+  </data>
+  <data name="About.HotkeysText" xml:space="preserve">
+    <value>از HidHide برای جلوگیری از ورودی دوگانه استفاده کن: کنترلر فیزیکی رو از دید بازی‌ها پنهان می‌کنه در حالی که DS4Windows همچنان ازش استفاده می‌کنه، و از ورودی تکراری جلوگیری می‌کنه
+کلیک روی سمت چپ تاچ‌پد: لمس چپ
+کلیک روی سمت راست تاچ‌پد: لمس راست
+کلیک تاچ‌پد با ۲ انگشت: چندلمسی
+کلیک روی بخش بالایی تاچ‌پد: لمس بالا
+PS + Options یا نگه‌داشتن PS به مدت ۱۰ ثانیه: قطع اتصال کنترلر (فقط روی بلوتوث)
+لمس تاچ‌پد + PS: خاموش کردن حرکت تاچ‌پد (کلیک هنوز کار می‌کنه)
+کلیک پایین‌سمت‌راست پد: کلیک راست (بهتره وقتی سمت راست به‌عنوان دکمه‌ی ماوس استفاده می‌شه)
+دو انگشت بالا/پایین روی تاچ‌پد*: اسکرول بالا/پایین
+لمس و نگه‌داشتن تاچ‌پد*: درگ با کلیک چپ ماوس
+سوایپ دوانگشتی چپ یا راست روی تاچ‌پد: چرخش بین پروفایل‌ها
+تغییردهنده‌ی Shift: نگه‌داشتن یه اکشن برای استفاده از یه سری کنترل دیگه
+هنگام مپ کردن کیبورد و ماوس:
+Toggle: کلید توی حالت «فشرده» می‌مونه تا دوباره فشرده بشه
+Macro: چند کلید رو به یه ورودی اختصاص بده
+Scan Code: کلیدها جور دیگه‌ای تفسیر می‌شن. ممکنه برای بعضی بازی‌ها لازم باشه
+*اگه فعال باشه</value>
+  </data>
+  <data name="About.TabLicense" xml:space="preserve">
+    <value>مجوز</value>
+  </data>
+  <data name="About.TabCredits" xml:space="preserve">
+    <value>دست‌اندرکاران</value>
+  </data>
+  <data name="About.SourceLink" xml:space="preserve">
+    <value>کد منبع</value>
+  </data>
+  <data name="About.ContributorsLink" xml:space="preserve">
+    <value>مشارکت‌کنندگان</value>
+  </data>
+  <data name="About.Translators" xml:space="preserve">
+    <value>مترجم‌ها:</value>
+  </data>
+  <data name="About.TabExtras" xml:space="preserve">
+    <value>امکانات جانبی</value>
+  </data>
+  <data name="About.ProjectUrl" xml:space="preserve">
+    <value>آدرس پروژه:</value>
+  </data>
+  <data name="About.Description" xml:space="preserve">
+    <value>توضیحات</value>
+  </data>
+  <data name="About.HidHideDesc" xml:space="preserve">
+    <value>از HidHide برای پنهان کردن و تنظیم هر کنترلر ورودی از سایر برنامه‌های در حال اجرا روی سیستمت استفاده کن. بعضی بازی‌ها نیاز دارن فقط یه کنترلر وجود داشته باشه وگرنه ورودی دوگانه توی بازی مشکل ایجاد می‌کنه. نوشته‌ی nefarius.</value>
+  </data>
+  <data name="About.FakerInputDesc" xml:space="preserve">
+    <value>از درایور FakerInput برای فراهم کردن صفحه‌کلید مجازی، ماوس نسبی و ماوس مطلق در سطح سیستم استفاده کن. این کار باعث می‌شه رویدادهای مجازی کیبورد و ماوس حتی وقتی SendInput کار نمی‌کنه هم قابل استفاده باشن؛ مثل پردازش‌ها و بازی‌های دارای دسترسی بالا، پیام‌های UAC و سیستم‌های ضدتقلب که رویدادهای SendInput رو مسدود می‌کنن. استفاده از FakerInput برای کار کردن DS4Windows با بعضی بازی‌های دارای محافظت ضدتقلب مثل Valorant لازمه.</value>
+  </data>
+  <data name="Overview.NoControllerSelected" xml:space="preserve">
+    <value>هیچ کنترلری انتخاب نشده</value>
+  </data>
+  <data name="Overview.NoControllerHint" xml:space="preserve">
+    <value>یه کنترلر وصل کن، بعد از کارت‌های دستگاه بالا-سمت‌چپ انتخابش کن.</value>
+  </data>
+  <data name="Overview.SelectedControllerLabel" xml:space="preserve">
+    <value>کنترلر انتخاب‌شده</value>
+  </data>
+  <data name="Overview.ProfileLabel" xml:space="preserve">
+    <value>پروفایل  </value>
+  </data>
+  <data name="Overview.BatteryLabel" xml:space="preserve">
+    <value>باتری</value>
+  </data>
+  <data name="Overview.ConnectionLabel" xml:space="preserve">
+    <value>اتصال</value>
+  </data>
+  <data name="Overview.ReportIntervalLabel" xml:space="preserve">
+    <value>فاصله و نرخ گزارش ورودی مشاهده‌شده</value>
+  </data>
+  <data name="Overview.ReportIntervalTip" xml:space="preserve">
+    <value>فاصله و نرخ تحویل ورودی مشاهده‌شده. کنترلرهای ترکیبی از ریتم گزارش ترکیبی خودشون استفاده می‌کنن. این زمان تکمیل کرنل یا تأخیر سرتاسری بازی نیست.</value>
+  </data>
+  <data name="Overview.ActiveProfileLabel" xml:space="preserve">
+    <value>پروفایل فعال</value>
+  </data>
+  <data name="Overview.ActiveProfileHint" xml:space="preserve">
+    <value>تنظیمات زیر روی این پروفایل ذخیره می‌شن</value>
+  </data>
+  <data name="Overview.EmulatedDeviceLabel" xml:space="preserve">
+    <value>دستگاه شبیه‌سازی‌شده</value>
+  </data>
+  <data name="Overview.EmulatedDeviceHint" xml:space="preserve">
+    <value>از طریق پروفایل فعال اعمال می‌شه</value>
+  </data>
+  <data name="Overview.ControllerStatusLabel" xml:space="preserve">
+    <value>وضعیت کنترلر</value>
+  </data>
+  <data name="Overview.QuickProfileControlsTitle" xml:space="preserve">
+    <value>کنترل‌های سریع پروفایل</value>
+  </data>
+  <data name="Overview.QuickProfileControlsDesc" xml:space="preserve">
+    <value>هر تغییری روی پروفایل فعال کنترلر انتخاب‌شده ذخیره و خودکار اعمال می‌شه.</value>
+  </data>
+  <data name="Overview.EmulatedControllerTitle" xml:space="preserve">
+    <value>کنترلر شبیه‌سازی‌شده</value>
+  </data>
+  <data name="Overview.EmulatedControllerDesc" xml:space="preserve">
+    <value>کنترلر مجازی که به بازی‌ها نشون داده می‌شه.</value>
+  </data>
+  <data name="Overview.EmulatedControllerNote" xml:space="preserve">
+    <value>تغییر این تنظیم پروفایل رو ذخیره می‌کنه، بعد یه بار خروجی رو به‌صورت کنترل‌شده ری‌لود می‌کنه.</value>
+  </data>
+  <data name="Overview.StreamAudioToggle" xml:space="preserve">
+    <value>پخش صدا روی کنترلر</value>
+  </data>
+  <data name="Overview.StreamAudioTip" xml:space="preserve">
+    <value>صدای انتخاب‌شده رو به کنترلر استریم می‌کنه. از اسپیکر داخلیش استفاده می‌کنه مگه اینکه «فقط هدست» صدا رو منحصراً به پورت AUX بفرسته.</value>
+  </data>
+  <data name="Overview.HeadsetOnlyToggle" xml:space="preserve">
+    <value>فقط هدست (بی‌صدا کردن اسپیکر کنترلر)</value>
+  </data>
+  <data name="Overview.HeadsetOnlyTip" xml:space="preserve">
+    <value>اسپیکر داخلی رو بی‌صدا می‌کنه در حالی که استریم از طریق هدستی که به پورت AUX کنترلر وصله ادامه پیدا می‌کنه.</value>
+  </data>
+  <data name="Overview.AudioSourceLabel" xml:space="preserve">
+    <value>منبع صدا</value>
+  </data>
+  <data name="Overview.AudioSourceTip" xml:space="preserve">
+    <value>پیش‌فرض میکس معمولی خروجی رو می‌گیره. یه برنامه انتخاب کن تا فقط صدای همون استریم بشه.</value>
+  </data>
+  <data name="Overview.RefreshAudioSourcesTip" xml:space="preserve">
+    <value>بازخوانی منابع صوتی در حال اجرا</value>
+  </data>
+  <data name="Overview.AudioHapticsOverrideNotice" xml:space="preserve">
+    <value>Audio Haptics داره این استریم رو تأمین می‌کنه. برای انتخاب منبع دیگه، «پخش این برنامه از طریق کنترلر» رو خاموش کن.</value>
+  </data>
+  <data name="Overview.UsbHeadsetTitle" xml:space="preserve">
+    <value>استفاده از هدست روی USB</value>
+  </data>
+  <data name="Overview.UsbHeadsetStep1" xml:space="preserve">
+    <value>Switch 2 Pro خودت رو با USB وصل کن و هدفون یا هدست بزن. توی تنظیمات بازی یا صدای ویندوز، Headphones (Switch 2 Pro Controller) رو انتخاب کن. صدا رو از همون‌جا تنظیم کن.</value>
+  </data>
+  <data name="Overview.UsbHeadsetStep2" xml:space="preserve">
+    <value>برای چت صوتی، Microphone (Switch 2 Pro Controller) رو انتخاب کن و از هدستی با میکروفون استفاده کن.</value>
+  </data>
+  <data name="Overview.UsbHeadsetNote" xml:space="preserve">
+    <value>مستقل از کنترلر مجازیت کار می‌کنه. صدای هدست بلوتوث هنوز پشتیبانی نمی‌شه.</value>
+  </data>
+  <data name="Overview.OpenSoundSettingsBtn" xml:space="preserve">
+    <value>باز کردن تنظیمات صدای ویندوز</value>
+  </data>
+  <data name="Overview.OpenSoundSettingsTip" xml:space="preserve">
+    <value>انتخاب کن صدای بازی و چت صوتیت کجا بره.</value>
+  </data>
+  <data name="Overview.OutputLevelsTitle" xml:space="preserve">
+    <value>سطح‌های خروجی</value>
+  </data>
+  <data name="Overview.ControllerSpeakerLabel" xml:space="preserve">
+    <value>اسپیکر کنترلر</value>
+  </data>
+  <data name="Overview.HeadsetAuxLabel" xml:space="preserve">
+    <value>هدست / AUX</value>
+  </data>
+  <data name="Overview.HeadsetAuxTip" xml:space="preserve">
+    <value>جک هدست کنترلر رو مستقل از اسپیکر داخلیش کنترل می‌کنه.</value>
+  </data>
+  <data name="Overview.SpeakerProcessingTitle" xml:space="preserve">
+    <value>پردازش اسپیکر</value>
+  </data>
+  <data name="Overview.DynamicRangeLabel" xml:space="preserve">
+    <value>محدوده‌ی دینامیک</value>
+  </data>
+  <data name="Overview.DynamicRangeTip" xml:space="preserve">
+    <value>جزئیات کم‌صدا رو بالا می‌بره و افکت‌های بلند رو بدون تأخیر پیش‌بینی، امن مهار می‌کنه.</value>
+  </data>
+  <data name="Overview.Off" xml:space="preserve">
+    <value>خاموش</value>
+  </data>
+  <data name="Overview.Balanced" xml:space="preserve">
+    <value>متعادل</value>
+  </data>
+  <data name="Overview.Strong" xml:space="preserve">
+    <value>قوی</value>
+  </data>
+  <data name="Overview.BassBodyLabel" xml:space="preserve">
+    <value>بیس / بدنه</value>
+  </data>
+  <data name="Overview.BassBodyTip" xml:space="preserve">
+    <value>حدود ۲۰۰ هرتز بدنه اضافه می‌کنه و در همون حال ساب‌بیس غیرقابل‌استفاده رو فیلتر می‌کنه.</value>
+  </data>
+  <data name="Overview.MicrophoneTitle" xml:space="preserve">
+    <value>میکروفون</value>
+  </data>
+  <data name="Overview.MicrophoneLevelLabel" xml:space="preserve">
+    <value>سطح میکروفون</value>
+  </data>
+  <data name="Overview.NoiseSuppressionLabel" xml:space="preserve">
+    <value>حذف نویز</value>
+  </data>
+  <data name="Overview.NvidiaAI" xml:space="preserve">
+    <value>NVIDIA AI</value>
+  </data>
+  <data name="Overview.QuickActionsTitle" xml:space="preserve">
+    <value>اکشن‌های سریع</value>
+  </data>
+  <data name="Overview.QuickActionsDesc" xml:space="preserve">
+    <value>برو توی ادیتور کامل یا کنترلر فیزیکی انتخاب‌شده رو مدیریت کن.</value>
+  </data>
+  <data name="Overview.EditActiveProfileBtn" xml:space="preserve">
+    <value>ویرایش پروفایل فعال</value>
+  </data>
+  <data name="Overview.ControllerDetailsBtn" xml:space="preserve">
+    <value>جزئیات کنترلر</value>
+  </data>
+  <data name="Overview.LightbarControlsBtn" xml:space="preserve">
+    <value>کنترل‌های نوار نور</value>
+  </data>
+  <data name="Overview.LightbarControlsTip" xml:space="preserve">
+    <value>از کنترل‌های نوار نور پروفایل استفاده کن یا یه رنگ سفارشی موقت انتخاب کن</value>
+  </data>
+  <data name="Overview.DisconnectBtn" xml:space="preserve">
+    <value>قطع اتصال</value>
+  </data>
+  <data name="AudioHaptics.Enabled" xml:space="preserve">
+    <value>فعال</value>
+  </data>
+  <data name="AudioHaptics.Title" xml:space="preserve">
+    <value>Audio Haptics</value>
+  </data>
+  <data name="AudioHaptics.Subtitle" xml:space="preserve">
+    <value>فیدبک کنترلر بر پایه‌ی صدا</value>
+  </data>
+  <data name="AudioHaptics.Low" xml:space="preserve">
+    <value>کم</value>
+  </data>
+  <data name="AudioHaptics.Medium" xml:space="preserve">
+    <value>متوسط</value>
+  </data>
+  <data name="AudioHaptics.High" xml:space="preserve">
+    <value>زیاد</value>
+  </data>
+  <data name="AudioHaptics.SourceLabel" xml:space="preserve">
+    <value>منبع</value>
+  </data>
+  <data name="AudioHaptics.RefreshSourcesTip" xml:space="preserve">
+    <value>بازخوانی نشست‌های صوتی در حال اجرا</value>
+  </data>
+  <data name="AudioHaptics.SourceScopeHelp" xml:space="preserve">
+    <value>صدای سیستم فقط از خروجی پیش‌فرض ویندوز استفاده می‌کنه، نه هر خروجی Sonar. یه برنامه انتخاب کن تا صداش روی هر خروجی‌ای دنبال بشه.</value>
+  </data>
+  <data name="AudioHaptics.AutoFollowGamesTitle" xml:space="preserve">
+    <value>دنبال کردن خودکار بازی‌ها</value>
+  </data>
+  <data name="AudioHaptics.AutoFollowGamesDesc" xml:space="preserve">
+    <value>با استفاده از رکوردهای بازی ویندوز و منیفست‌های لانچرهای نصب‌شده، به صدای بازی فعال سوییچ می‌کنه.</value>
+  </data>
+  <data name="AudioHaptics.AutoFollowGamesTip" xml:space="preserve">
+    <value>بازی‌های شناسایی‌شده توسط ویندوز، استیم، Epic یا GOG رو دنبال می‌کنه. برنامه‌ی انتخاب‌شده به‌عنوان جایگزین باقی می‌مونه.</value>
+  </data>
+  <data name="AudioHaptics.PlayThroughControllerTitle" xml:space="preserve">
+    <value>پخش برنامه از طریق کنترلر</value>
+  </data>
+  <data name="AudioHaptics.PlayThroughControllerDesc" xml:space="preserve">
+    <value>این برنامه‌ی انتخاب‌شده رو هم به اسپیکر کنترلر و هدست AUX استریم می‌کنه.</value>
+  </data>
+  <data name="AudioHaptics.PlayThroughControllerTip" xml:space="preserve">
+    <value>وقتی فعاله، جایگزین «منبع صدای کنترلر» توی بخش Advanced می‌شه. انتخاب منبع دیگه از اونجا این override رو آزاد می‌کنه.</value>
+  </data>
+  <data name="AudioHaptics.HeadsetOnlyTitle" xml:space="preserve">
+    <value>فقط هدست</value>
+  </data>
+  <data name="AudioHaptics.HeadsetOnlyDesc" xml:space="preserve">
+    <value>برنامه‌ی گرفته‌شده رو فقط از طریق پورت AUX کنترلر می‌فرسته.</value>
+  </data>
+  <data name="AudioHaptics.HeadsetOnlyTip" xml:space="preserve">
+    <value>صدای برنامه‌ی گرفته‌شده رو به هدفونِ وصل‌شده به کنترلر می‌فرسته و اسپیکر کنترلر رو بی‌صدا می‌کنه.</value>
+  </data>
+  <data name="AudioHaptics.ModeLabel" xml:space="preserve">
+    <value>حالت</value>
+  </data>
+  <data name="AudioHaptics.MixMode" xml:space="preserve">
+    <value>ترکیب</value>
+  </data>
+  <data name="AudioHaptics.MixModeTip" xml:space="preserve">
+    <value>فیدبک بر پایه‌ی صدا رو به هپتیک و ویبره‌ی بازی اضافه می‌کنه.</value>
+  </data>
+  <data name="AudioHaptics.ReplaceMode" xml:space="preserve">
+    <value>جایگزینی</value>
+  </data>
+  <data name="AudioHaptics.ReplaceModeTip" xml:space="preserve">
+    <value>فقط از فیدبک بر پایه‌ی صدا استفاده کن.</value>
+  </data>
+  <data name="AudioHaptics.ResponseTitle" xml:space="preserve">
+    <value>پاسخ</value>
+  </data>
+  <data name="AudioHaptics.ResponseSubtitle" xml:space="preserve">
+    <value>تمرکز فرکانسی و شدت</value>
+  </data>
+  <data name="AudioHaptics.BassFocusLabel" xml:space="preserve">
+    <value>تمرکز بیس</value>
+  </data>
+  <data name="AudioHaptics.BassFocusTip" xml:space="preserve">
+    <value>انتخاب کن کدوم بازه‌ی فرکانس پایین تبدیل به ویبره بشه.</value>
+  </data>
+  <data name="AudioHaptics.ResponseLabel" xml:space="preserve">
+    <value>پاسخ</value>
+  </data>
+  <data name="AudioHaptics.ResponseTip" xml:space="preserve">
+    <value>کنترل کن هپتیک چقدر شدید واکنش نشون بده، مخصوصاً به قله‌ها.</value>
+  </data>
+  <data name="AudioHaptics.Subtle" xml:space="preserve">
+    <value>ملایم</value>
+  </data>
+  <data name="AudioHaptics.Dynamic" xml:space="preserve">
+    <value>دینامیک</value>
+  </data>
+  <data name="AudioHaptics.Aggressive" xml:space="preserve">
+    <value>تهاجمی</value>
+  </data>
+  <data name="AudioHaptics.RampLabel" xml:space="preserve">
+    <value>شیب افزایش</value>
+  </data>
+  <data name="AudioHaptics.RampTip" xml:space="preserve">
+    <value>کنترل کن هپتیک با صدا چقدر سریع بالا بیاد.</value>
+  </data>
+  <data name="AudioHaptics.SlowRamp" xml:space="preserve">
+    <value>شیب کند</value>
+  </data>
+  <data name="AudioHaptics.MediumRamp" xml:space="preserve">
+    <value>شیب متوسط</value>
+  </data>
+  <data name="AudioHaptics.FastRamp" xml:space="preserve">
+    <value>شیب سریع</value>
+  </data>
+  <data name="AudioHaptics.InstantRamp" xml:space="preserve">
+    <value>شیب آنی</value>
+  </data>
+  <data name="AudioHaptics.FadeLabel" xml:space="preserve">
+    <value>محو شدن</value>
+  </data>
+  <data name="AudioHaptics.FadeTip" xml:space="preserve">
+    <value>کنترل کن هپتیک بعد از افت صدا چقدر سریع محو بشه.</value>
+  </data>
+  <data name="AudioHaptics.FastFade" xml:space="preserve">
+    <value>محو سریع</value>
+  </data>
+  <data name="AudioHaptics.MediumFade" xml:space="preserve">
+    <value>محو متوسط</value>
+  </data>
+  <data name="AudioHaptics.SlowFade" xml:space="preserve">
+    <value>محو کند</value>
+  </data>
+  <data name="AudioHaptics.LongFade" xml:space="preserve">
+    <value>محو طولانی</value>
+  </data>
+  <data name="AudioHaptics.StatusDisabled" xml:space="preserve">
+    <value>Audio Haptics غیرفعاله.</value>
+  </data>
+  <data name="AudioHaptics.SystemAudio" xml:space="preserve">
+    <value>صدای سیستم</value>
+  </data>
+  <data name="MappingLive.Title" xml:space="preserve">
+    <value>ورودی زنده</value>
+  </data>
+  <data name="MappingLive.Subtitle" xml:space="preserve">
+    <value>کنترلر فیزیکی · قبل از ریمپ</value>
+  </data>
+  <data name="MappingLive.Waiting" xml:space="preserve">
+    <value>در انتظار</value>
+  </data>
+  <data name="MappingLive.LeftStick" xml:space="preserve">
+    <value>استیک چپ</value>
+  </data>
+  <data name="MappingLive.RightStick" xml:space="preserve">
+    <value>استیک راست</value>
+  </data>
+  <data name="MappingLive.PressedLabel" xml:space="preserve">
+    <value>فشرده‌شده</value>
+  </data>
+  <data name="MappingLive.NoControllerHint" xml:space="preserve">
+    <value>یه کنترلر وصل کن، بعد این ادیتور رو دوباره باز کن.</value>
+  </data>
+  <data name="TriggerLab.OverrideBadge" xml:space="preserve">
+    <value>بای‌پس لب</value>
+  </data>
+  <data name="TriggerLab.EffectDesign" xml:space="preserve">
+    <value>طراحی افکت</value>
+  </data>
+  <data name="TriggerLab.Linked" xml:space="preserve">
+    <value>لینک‌شده</value>
+  </data>
+  <data name="TriggerLab.LinkedTip" xml:space="preserve">
+    <value>از یه طراحی افکت مشترک برای L2 و R2 استفاده کن. پریست‌ها، حالت‌ها و اسلایدرها بین دو طرف آینه می‌شن؛ سوییچ Active هر تریگر مستقل می‌مونه.</value>
+  </data>
+  <data name="TriggerLab.Split" xml:space="preserve">
+    <value>جدا</value>
+  </data>
+  <data name="TriggerLab.SplitTip" xml:space="preserve">
+    <value>برای L2 و R2 طراحی افکت جداگونه تنظیم کن. برگشتن به Split آخرین تنظیمات مستقلت رو، از جمله اینکه کدوم تریگر فعال بود، برمی‌گردونه.</value>
+  </data>
+  <data name="TriggerLab.Enabled" xml:space="preserve">
+    <value>فعال</value>
+  </data>
+  <data name="TriggerLab.BehaviorNote" xml:space="preserve">
+    <value>افکت‌های فعالِ لب، خروجی adaptive trigger بازی که وارد می‌شه رو override می‌کنن.</value>
+  </data>
+  <data name="ViiperPrompt.WinTitle" xml:space="preserve">
+    <value>راه‌اندازی کنترلر مجازی VIIPER</value>
+  </data>
+  <data name="ViiperPrompt.Close" xml:space="preserve">
+    <value>بستن</value>
+  </data>
+  <data name="ViiperPrompt.Heading" xml:space="preserve">
+    <value>VIIPER نیاز به توجه داره</value>
+  </data>
+  <data name="ViiperPrompt.Summary" xml:space="preserve">
+    <value>این پروفایل از خروجی کنترلر مجازی VIIPER استفاده می‌کنه.</value>
+  </data>
+  <data name="ViiperPrompt.RequirementsHeading" xml:space="preserve">
+    <value>چیزهایی که DS4Windows نیاز داره</value>
+  </data>
+  <data name="ViiperPrompt.RequirementsText" xml:space="preserve">
+    <value>• سرور/هلپر VIIPER
+• درایور USB/IP ویندوز usbip-win2</value>
+  </data>
+  <data name="ViiperPrompt.CurrentStatus" xml:space="preserve">
+    <value>وضعیت فعلی</value>
+  </data>
+  <data name="ViiperPrompt.ExistingHeading" xml:space="preserve">
+    <value>یه VIIPER رقیب شناسایی شد</value>
+  </data>
+  <data name="ViiperPrompt.ExistingDescription" xml:space="preserve">
+    <value>این فایل اجرایی elevate یا انتخاب نمی‌شه. Install یا Repair از بک‌اند تأییدشده‌ی Program Files استفاده می‌کنه و فقط فایل‌های قدیمیِ شناخته‌شده‌ی VIIPER رو حذف می‌کنه:</value>
+  </data>
+  <data name="ViiperPrompt.SuppressPrompt" xml:space="preserve">
+    <value>این پیام راه‌اندازی رو دیگه نشون نده</value>
+  </data>
+  <data name="ViiperPrompt.SuppressPromptTip" xml:space="preserve">
+    <value>می‌تونی بعداً از Settings → VIIPER Virtual Controller Support دوباره پیام‌های راه‌اندازی رو روشن کنی.</value>
+  </data>
+  <data name="ViiperPrompt.PortableWarning" xml:space="preserve">
+    <value>«پرتابل نگه‌داشتن DS4Windows» این برنامه رو دقیقاً همون‌جایی که هست می‌ذاره، در حالی که بک‌اند elevated VIIPER رو توی Program Files محافظت‌شده نصب می‌کنه. Standard هم فقط فایل‌های متعلق به پکیجِ DS4Windows رو به Program Files منتقل می‌کنه. پروفایل‌ها، تنظیمات و فایل‌های ناشناخته همیشه حفظ می‌شن.</value>
+  </data>
+  <data name="ViiperPrompt.NotNow" xml:space="preserve">
+    <value>الان نه</value>
+  </data>
+  <data name="ViiperPrompt.InstallPortable" xml:space="preserve">
+    <value>پرتابل نگه‌داشتن DS4Windows</value>
+  </data>
+  <data name="ViiperPrompt.InstallStandard" xml:space="preserve">
+    <value>نصب استاندارد</value>
+  </data>
+  <data name="ViiperProgress.WinTitle" xml:space="preserve">
+    <value>راه‌اندازی VIIPER</value>
+  </data>
+  <data name="ViiperProgress.Heading" xml:space="preserve">
+    <value>در حال راه‌اندازی VIIPER</value>
+  </data>
+  <data name="ViiperProgress.Summary" xml:space="preserve">
+    <value>DS4Windows داره بک‌اند کامل کنترلر رو تأیید می‌کنه.</value>
+  </data>
+  <data name="ViiperProgress.PreparingPackage" xml:space="preserve">
+    <value>در حال آماده‌سازی پکیج تأییدشده...</value>
+  </data>
+  <data name="ViiperProgress.StepVerifyFiles" xml:space="preserve">
+    <value>• تأیید فایل‌های پکیج‌شده</value>
+  </data>
+  <data name="ViiperProgress.StepInstallViiper" xml:space="preserve">
+    <value>• نصب VIIPER 0.1.5-rc4.6</value>
+  </data>
+  <data name="ViiperProgress.StepVerifyUsbip" xml:space="preserve">
+    <value>• تأیید USB-IP 0.9.7.7</value>
+  </data>
+  <data name="ViiperProgress.StepVerifyStartup" xml:space="preserve">
+    <value>• تأیید استارتاپ و API</value>
+  </data>
+  <data name="ViiperProgress.DetailText" xml:space="preserve">
+    <value>این پنجره رو باز نگه دار. راه‌اندازی خودکار تموم می‌شه.</value>
+  </data>
+  <data name="SwipeEditor.WinTitle" xml:space="preserve">
+    <value>تنظیم پروفایل‌های سوایپ</value>
+  </data>
+  <data name="SwipeEditor.Instructions" xml:space="preserve">
+    <value>پروفایل‌هایی که سوایپ دوانگشتی تاچ‌پد اجازه داره بینشون سوییچ کنه رو تیک بزن. اگه هیچی تیک نخوره، سوایپ بین همه‌ی پروفایل‌ها می‌چرخه (رفتار پیش‌فرض).</value>
+  </data>
+  <data name="SwipeEditor.SelectAll" xml:space="preserve">
+    <value>انتخاب همه</value>
+  </data>
+  <data name="SwipeEditor.ClearAll" xml:space="preserve">
+    <value>پاک کردن همه</value>
+  </data>
+  <data name="Switch2Calib.WinTitle" xml:space="preserve">
+    <value>کالیبراسیون استیک Switch 2</value>
+  </data>
+  <data name="Switch2Calib.Heading" xml:space="preserve">
+    <value>استیک‌هات رو کالیبره کن</value>
+  </data>
+  <data name="Switch2Calib.ClosingWarning" xml:space="preserve">
+    <value>بستن پنجره، capture و فعال‌سازی زنده رو لغو می‌کنه. یه ذخیره‌سازی که از قبل در حال نوشتن روی دیسکه ممکنه هنوز تموم بشه؛ بستن پنجره اون نوشتن رو لغو نمی‌کنه.</value>
+  </data>
+  <data name="Switch2Calib.CloseBtn" xml:space="preserve">
+    <value>_بستن</value>
+  </data>
+  <data name="Switch2Calib.PhysicalStickLabel" xml:space="preserve">
+    <value>استیک فیزیکی</value>
+  </data>
+  <data name="Switch2Calib.StartBtn" xml:space="preserve">
+    <value>_شروع کالیبراسیون</value>
+  </data>
+  <data name="Switch2Calib.SaveBtn" xml:space="preserve">
+    <value>ذخیره‌ی _کالیبراسیون</value>
+  </data>
+  <data name="Switch2Calib.CancelBtn" xml:space="preserve">
+    <value>_لغو capture</value>
+  </data>
+  <data name="Switch2Calib.StorageNote" xml:space="preserve">
+    <value>کالیبراسیون روی همین PC برای این استیک فیزیکی ذخیره می‌شه، نه توی یه پروفایل یا حافظه‌ی کنترلر. رکوردهای USB و بلوتوث ممکنه جدا باشن. ورودی مپ‌شده‌ی کنترلر تا وقتی کالیبراسیون فعاله، آزاد می‌مونه.</value>
+  </data>
+  <data name="Switch2Calib.ResetBtn" xml:space="preserve">
+    <value>_ریست کالیبراسیون PC این استیک…</value>
+  </data>
+  <data name="StickCalib.WinTitle" xml:space="preserve">
+    <value>کالیبراسیون استیک</value>
+  </data>
+  <data name="StickCalib.Instructions" xml:space="preserve">
+    <value>لطفاً استیکت رو چند بار به سمت‌ها حرکت بده و رهاش کن، بعد که تموم شد Save رو بزن.</value>
+  </data>
+  <data name="TouchButton.ActivationMode" xml:space="preserve">
+    <value>حالت فعال‌سازی دکمه</value>
+  </data>
+  <!-- ProfileEditor.xaml localization strings -->
+  <data name="SelectPreset" xml:space="preserve">
+    <value>انتخاب پیش‌تنظیم</value>
+  </data>
+  <data name="KeepThisWindowSizeAfterClosing" xml:space="preserve">
+    <value>اندازه‌ی این پنجره پس از بسته‌شدن حفظ شود</value>
+  </data>
+  <data name="KeepSize" xml:space="preserve">
+    <value>حفظ اندازه</value>
+  </data>
+  <data name="ControllerMap" xml:space="preserve">
+    <value>نقشه‌ی کنترلر</value>
+  </data>
+  <data name="ChooseAControlDirectlyOnTheController" xml:space="preserve">
+    <value>یک کنترل را مستقیماً روی کنترلر انتخاب کنید.</value>
+  </data>
+  <data name="DualShock4" xml:space="preserve">
+    <value>DualShock 4</value>
+  </data>
+  <data name="DualSense" xml:space="preserve">
+    <value>DualSense</value>
+  </data>
+  <data name="DualSenseEdge" xml:space="preserve">
+    <value>DualSense Edge</value>
+  </data>
+  <data name="Switch2Pro" xml:space="preserve">
+    <value>Switch 2 Pro</value>
+  </data>
+  <data name="JoyConPair" xml:space="preserve">
+    <value>جفت Joy-Con</value>
+  </data>
+  <data name="JoyConLUpright" xml:space="preserve">
+    <value>Joy-Con L (عمودی)</value>
+  </data>
+  <data name="JoyConRUpright" xml:space="preserve">
+    <value>Joy-Con R (عمودی)</value>
+  </data>
+  <data name="JoyConLSideways" xml:space="preserve">
+    <value>Joy-Con L (افقی)</value>
+  </data>
+  <data name="JoyConRSideways" xml:space="preserve">
+    <value>Joy-Con R (افقی)</value>
+  </data>
+  <data name="DPad" xml:space="preserve">
+    <value>دکمه‌های جهت‌نما</value>
+  </data>
+  <data name="Inverted" xml:space="preserve">
+    <value>معکوس</value>
+  </data>
+  <data name="InvertedX" xml:space="preserve">
+    <value>معکوس X</value>
+  </data>
+  <data name="InvertedY" xml:space="preserve">
+    <value>معکوس Y</value>
+  </data>
+  <data name="Rotate90Deg" xml:space="preserve">
+    <value>چرخش ۹۰ درجه</value>
+  </data>
+  <data name="RotateNeg90Deg" xml:space="preserve">
+    <value>چرخش ۹۰- درجه</value>
+  </data>
+  <data name="FaceButtons" xml:space="preserve">
+    <value>دکمه‌های روبرو</value>
+  </data>
+  <data name="WASD" xml:space="preserve">
+    <value>WASD</value>
+  </data>
+  <data name="ArrowKeys" xml:space="preserve">
+    <value>کلیدهای جهت‌نما</value>
+  </data>
+  <data name="Cross" xml:space="preserve">
+    <value>Cross</value>
+  </data>
+  <data name="Circle" xml:space="preserve">
+    <value>Circle</value>
+  </data>
+  <data name="Square" xml:space="preserve">
+    <value>Square</value>
+  </data>
+  <data name="Triangle" xml:space="preserve">
+    <value>Triangle</value>
+  </data>
+  <data name="L1" xml:space="preserve">
+    <value>L1</value>
+  </data>
+  <data name="R1" xml:space="preserve">
+    <value>R1</value>
+  </data>
+  <data name="L2" xml:space="preserve">
+    <value>L2</value>
+  </data>
+  <data name="R2" xml:space="preserve">
+    <value>R2</value>
+  </data>
+  <data name="Share" xml:space="preserve">
+    <value>Share</value>
+  </data>
+  <data name="Options" xml:space="preserve">
+    <value>Options</value>
+  </data>
+  <data name="Guide" xml:space="preserve">
+    <value>Guide</value>
+  </data>
+  <data name="Capture" xml:space="preserve">
+    <value>Capture</value>
+  </data>
+  <data name="C" xml:space="preserve">
+    <value>C</value>
+  </data>
+  <data name="Mute" xml:space="preserve">
+    <value>قطع صدا</value>
+  </data>
+  <data name="FunctionLeft" xml:space="preserve">
+    <value>Function چپ</value>
+  </data>
+  <data name="FunctionRight" xml:space="preserve">
+    <value>Function راست</value>
+  </data>
+  <data name="BottomLeftPaddle" xml:space="preserve">
+    <value>پدال پایین‌چپ</value>
+  </data>
+  <data name="BottomRightPaddle" xml:space="preserve">
+    <value>پدال پایین‌راست</value>
+  </data>
+  <data name="LeftTouch" xml:space="preserve">
+    <value>لمس چپ</value>
+  </data>
+  <data name="MultiTouch" xml:space="preserve">
+    <value>لمس چندگانه</value>
+  </data>
+  <data name="RightTouch" xml:space="preserve">
+    <value>لمس راست</value>
+  </data>
+  <data name="TopTouch" xml:space="preserve">
+    <value>لمس بالا</value>
+  </data>
+  <data name="L3" xml:space="preserve">
+    <value>L3</value>
+  </data>
+  <data name="LSU" xml:space="preserve">
+    <value>LSU</value>
+  </data>
+  <data name="LSR" xml:space="preserve">
+    <value>LSR</value>
+  </data>
+  <data name="LSD" xml:space="preserve">
+    <value>LSD</value>
+  </data>
+  <data name="LSL" xml:space="preserve">
+    <value>LSL</value>
+  </data>
+  <data name="R3" xml:space="preserve">
+    <value>R3</value>
+  </data>
+  <data name="RSU" xml:space="preserve">
+    <value>RSU</value>
+  </data>
+  <data name="RSR" xml:space="preserve">
+    <value>RSR</value>
+  </data>
+  <data name="RSD" xml:space="preserve">
+    <value>RSD</value>
+  </data>
+  <data name="RSL" xml:space="preserve">
+    <value>RSL</value>
+  </data>
+  <data name="Up" xml:space="preserve">
+    <value>بالا</value>
+  </data>
+  <data name="Right" xml:space="preserve">
+    <value>راست</value>
+  </data>
+  <data name="Down" xml:space="preserve">
+    <value>پایین</value>
+  </data>
+  <data name="Left" xml:space="preserve">
+    <value>چپ</value>
+  </data>
+  <data name="TipRightClickSupportedControlsForPresets" xml:space="preserve">
+    <value>نکته: روی کنترل‌های پشتیبانی‌شده راست‌کلیک کنید تا پیش‌تنظیم‌ها را ببینید.</value>
+  </data>
+  <data name="ButtonMappings" xml:space="preserve">
+    <value>نگاشت دکمه‌ها</value>
+  </data>
+  <data name="DoubleClickARowToChangeItsAction" xml:space="preserve">
+    <value>برای تغییر عملکرد یک ردیف، روی آن دو بار کلیک کنید.</value>
+  </data>
+  <data name="ShowLivePreview" xml:space="preserve">
+    <value>نمایش پیش‌نمایش زنده</value>
+  </data>
+  <data name="LISTONLY" xml:space="preserve">
+    <value>فقط فهرست</value>
+  </data>
+  <data name="SpecialActions" xml:space="preserve">
+    <value>اکشن‌های ویژه</value>
+  </data>
+  <data name="L2R2" xml:space="preserve">
+    <value>L2/R2</value>
+  </data>
+  <data name="MadeWithTriggerLab" xml:space="preserve">
+    <value>ساخته‌شده با Trigger Lab</value>
+  </data>
+  <data name="TriggerLabProtectedOverrideDesc" xml:space="preserve">
+    <value>این افکت محافظت‌شده‌ی پروفایل، خروجی ماشه‌ی تطبیقی ورودی از بازی را بازنویسی می‌کند. آن را در Trigger Lab ویرایش کنید.</value>
+  </data>
+  <data name="PROTECTED" xml:space="preserve">
+    <value>محافظت‌شده</value>
+  </data>
+  <data name="ControllerReadings" xml:space="preserve">
+    <value>قرائت‌های کنترلر</value>
+  </data>
+  <data name="LS" xml:space="preserve">
+    <value>LS</value>
+  </data>
+  <data name="Force" xml:space="preserve">
+    <value>نیرو</value>
+  </data>
+  <data name="Units" xml:space="preserve">
+    <value>واحد</value>
+  </data>
+  <data name="Ms" xml:space="preserve">
+    <value>میلی‌ثانیه</value>
+  </data>
+  <data name="Invert" xml:space="preserve">
+    <value>معکوس</value>
+  </data>
+  <data name="Sec" xml:space="preserve">
+    <value>ثانیه</value>
+  </data>
+  <data name="ThisButtonIsReservedForCalibrationWhileThe" xml:space="preserve">
+    <value>این دکمه هنگام استفاده‌ی استیک چپ از Flick Stick برای کالیبراسیون رزرو شده است.</value>
+  </data>
+  <data name="SaveTheProfileThenTapTheSelectedButton" xml:space="preserve">
+    <value>پروفایل را ذخیره کنید، سپس در بازی روی دکمه‌ی انتخاب‌شده برای چرخش ۳۶۰ درجه‌ی نگاه با ماوس ضربه بزنید. فقط در حالت Flick Stick فعال است.</value>
+  </data>
+  <data name="IncreaseRealWorldCalibrationIfTheTurnFalls" xml:space="preserve">
+    <value>اگر چرخش کمتر از حد انتظار بود، Real World Calibration را افزایش دهید؛ اگر بیشتر از حد بود، کاهش دهید. برای آزادسازی دکمه، «تخصیص‌نیافته» را انتخاب کنید.</value>
+  </data>
+  <data name="RS" xml:space="preserve">
+    <value>RS</value>
+  </data>
+  <data name="Rotation2" xml:space="preserve">
+    <value>چرخش:</value>
+  </data>
+  <data name="ThisButtonIsReservedForCalibrationWhileThe2" xml:space="preserve">
+    <value>این دکمه هنگام استفاده‌ی استیک راست از Flick Stick برای کالیبراسیون رزرو شده است.</value>
+  </data>
+  <data name="L2R22" xml:space="preserve">
+    <value>L2 و R2</value>
+  </data>
+  <data name="X" xml:space="preserve">
+    <value>X</value>
+  </data>
+  <data name="Z" xml:space="preserve">
+    <value>Z</value>
+  </data>
+  <data name="R" xml:space="preserve">
+    <value>R</value>
+  </data>
+  <data name="G" xml:space="preserve">
+    <value>G</value>
+  </data>
+  <data name="B" xml:space="preserve">
+    <value>B</value>
+  </data>
+  <data name="Empty" xml:space="preserve">
+    <value>خالی</value>
+  </data>
+  <data name="FlashAt" xml:space="preserve">
+    <value>چشمک در</value>
+  </data>
+  <data name="PulseAt" xml:space="preserve">
+    <value>تپش در</value>
+  </data>
+  <data name="WhileCharging" xml:space="preserve">
+    <value>هنگام شارژ:</value>
+  </data>
+  <data name="Pulse" xml:space="preserve">
+    <value>تپش</value>
+  </data>
+  <data name="Rainbow" xml:space="preserve">
+    <value>رنگین‌کمان</value>
+  </data>
+  <data name="ColorByBattery" xml:space="preserve">
+    <value>رنگ بر اساس درصد باتری</value>
+  </data>
+  <data name="SecsCycle" xml:space="preserve">
+    <value>ثانیه/چرخه</value>
+  </data>
+  <data name="JitterCompensation" xml:space="preserve">
+    <value>جبران لرزش</value>
+  </data>
+  <data name="DoubleTap" xml:space="preserve">
+    <value>دوبار ضربه</value>
+  </data>
+  <data name="LowerRightAsRMB" xml:space="preserve">
+    <value>پایین‌راست به‌عنوان کلیک راست ماوس</value>
+  </data>
+  <data name="PassthruClickActionDS4Mode" xml:space="preserve">
+    <value>عملکرد کلیک عبوری (حالت DS4)</value>
+  </data>
+  <data name="StartWithSlideScrollOff" xml:space="preserve">
+    <value>شروع با خاموش‌بودن Slide/Scroll</value>
+  </data>
+  <data name="MinThreshold" xml:space="preserve">
+    <value>حداقل آستانه</value>
+  </data>
+  <data name="Trackball" xml:space="preserve">
+    <value>توپک ردیاب</value>
+  </data>
+  <data name="Friction" xml:space="preserve">
+    <value>اصطکاک:</value>
+  </data>
+  <data name="Y" xml:space="preserve">
+    <value>Y</value>
+  </data>
+  <data name="XY" xml:space="preserve">
+    <value>X+Y</value>
+  </data>
+  <data name="DisableInvert" xml:space="preserve">
+    <value>غیرفعال‌کردن معکوس‌سازی</value>
+  </data>
+  <data name="FingerOnTouchpad" xml:space="preserve">
+    <value>انگشت روی تاچ‌پد</value>
+  </data>
+  <data name="PS" xml:space="preserve">
+    <value>PS</value>
+  </data>
+  <data name="TouchpadClick" xml:space="preserve">
+    <value>کلیک تاچ‌پد</value>
+  </data>
+  <data name="SideL" xml:space="preserve">
+    <value>سمت چپ</value>
+  </data>
+  <data name="SideR" xml:space="preserve">
+    <value>سمت راست</value>
+  </data>
+  <data name="SwipeUp" xml:space="preserve">
+    <value>کشیدن به بالا</value>
+  </data>
+  <data name="SwipeDown" xml:space="preserve">
+    <value>کشیدن به پایین</value>
+  </data>
+  <data name="SwipeLeft" xml:space="preserve">
+    <value>کشیدن به چپ</value>
+  </data>
+  <data name="SwipeRight" xml:space="preserve">
+    <value>کشیدن به راست</value>
+  </data>
+  <data name="OutputStick" xml:space="preserve">
+    <value>استیک خروجی</value>
+  </data>
+  <data name="OutputAxes" xml:space="preserve">
+    <value>محورهای خروجی</value>
+  </data>
+  <data name="HorizontalAndVertical" xml:space="preserve">
+    <value>افقی و عمودی</value>
+  </data>
+  <data name="HorizontalOnly" xml:space="preserve">
+    <value>فقط افقی</value>
+  </data>
+  <data name="VerticalOnly" xml:space="preserve">
+    <value>فقط عمودی</value>
+  </data>
+  <data name="MinimumX" xml:space="preserve">
+    <value>حداقل X</value>
+  </data>
+  <data name="MinimumY" xml:space="preserve">
+    <value>حداقل Y</value>
+  </data>
+  <data name="InvertX" xml:space="preserve">
+    <value>معکوس X</value>
+  </data>
+  <data name="InvertY" xml:space="preserve">
+    <value>معکوس Y</value>
+  </data>
+  <data name="Smoothing" xml:space="preserve">
+    <value>هموارسازی</value>
+  </data>
+  <data name="SmoothingOptions" xml:space="preserve">
+    <value>گزینه‌های هموارسازی</value>
+  </data>
+  <data name="MaxZoneX" xml:space="preserve">
+    <value>حداکثر ناحیه X:</value>
+  </data>
+  <data name="MaxZoneY" xml:space="preserve">
+    <value>حداکثر ناحیه Y:</value>
+  </data>
+  <data name="SnapToCenterOnRelease" xml:space="preserve">
+    <value>بازگشت به مرکز هنگام رهاسازی:</value>
+  </data>
+  <data name="TiltUp" xml:space="preserve">
+    <value>کج‌شدن به بالا</value>
+  </data>
+  <data name="TiltDown" xml:space="preserve">
+    <value>کج‌شدن به پایین</value>
+  </data>
+  <data name="TiltLeft" xml:space="preserve">
+    <value>کج‌شدن به چپ</value>
+  </data>
+  <data name="TiltRight" xml:space="preserve">
+    <value>کج‌شدن به راست</value>
+  </data>
+  <data name="Triggers" xml:space="preserve">
+    <value>ماشه‌ها</value>
+  </data>
+  <data name="TurnBehaviorTurnsGyro" xml:space="preserve">
+    <value>رفتار چرخش - چرخاننده‌ی ژیرو</value>
+  </data>
+  <data name="EvalCond" xml:space="preserve">
+    <value>شرط ارزیابی</value>
+  </data>
+  <data name="And" xml:space="preserve">
+    <value>و</value>
+  </data>
+  <data name="Or" xml:space="preserve">
+    <value>یا</value>
+  </data>
+  <data name="SteeringWheelAxis" xml:space="preserve">
+    <value>محور فرمان</value>
+  </data>
+  <data name="LeftXAxis" xml:space="preserve">
+    <value>محور X چپ</value>
+  </data>
+  <data name="LeftYAxis" xml:space="preserve">
+    <value>محور Y چپ</value>
+  </data>
+  <data name="RightXAxis" xml:space="preserve">
+    <value>محور X راست</value>
+  </data>
+  <data name="RightYAxis" xml:space="preserve">
+    <value>محور Y راست</value>
+  </data>
+  <data name="TriggerLRAxis" xml:space="preserve">
+    <value>محور L+R ماشه</value>
+  </data>
+  <data name="VJoy1XAxis" xml:space="preserve">
+    <value>محور X در VJoy1</value>
+  </data>
+  <data name="VJoy1YAxis" xml:space="preserve">
+    <value>محور Y در VJoy1</value>
+  </data>
+  <data name="VJoy1ZAxis" xml:space="preserve">
+    <value>محور Z در VJoy1</value>
+  </data>
+  <data name="VJoy2XAxis" xml:space="preserve">
+    <value>محور X در VJoy2</value>
+  </data>
+  <data name="VJoy2YAxis" xml:space="preserve">
+    <value>محور Y در VJoy2</value>
+  </data>
+  <data name="VJoy2ZAxis" xml:space="preserve">
+    <value>محور Z در VJoy2</value>
+  </data>
+  <data name="SteeringWheelRange" xml:space="preserve">
+    <value>دامنه‌ی فرمان</value>
+  </data>
+  <data name="Calibrate" xml:space="preserve">
+    <value>کالیبره کردن</value>
+  </data>
+  <data name="GyroCalibration" xml:space="preserve">
+    <value>کالیبراسیون ژیرو</value>
+  </data>
+  <data name="GyroSensitivity" xml:space="preserve">
+    <value>حساسیت ژیرو:</value>
+  </data>
+  <data name="XAxis" xml:space="preserve">
+    <value>محور X</value>
+  </data>
+  <data name="WeightedAverage" xml:space="preserve">
+    <value>میانگین وزنی</value>
+  </data>
+  <data name="SmoothWeight" xml:space="preserve">
+    <value>وزن هموارسازی</value>
+  </data>
+  <data name="XAxis2" xml:space="preserve">
+    <value>محور X</value>
+  </data>
+  <data name="Weight" xml:space="preserve">
+    <value>وزن</value>
+  </data>
+  <data name="DegSec" xml:space="preserve">
+    <value>درجه/ثانیه</value>
+  </data>
+  <data name="DelayTime" xml:space="preserve">
+    <value>زمان تأخیر</value>
+  </data>
+  <data name="TriggerLab" xml:space="preserve">
+    <value>Trigger Lab</value>
+  </data>
+  <data name="NintendoOptions" xml:space="preserve">
+    <value>گزینه‌های نینتندو</value>
+  </data>
+  <data name="TheseSettingsAreSavedWithTheProfileAnd" xml:space="preserve">
+    <value>این تنظیمات با پروفایل ذخیره می‌شوند و برای کنترلرهایی که از آن‌ها پشتیبانی می‌کنند اعمال می‌شوند.</value>
+  </data>
+  <data name="HowDoYouWantToPlay" xml:space="preserve">
+    <value>چطور می‌خواهید بازی کنید؟</value>
+  </data>
+  <data name="PointAtMenusAimByTiltingFeelThe" xml:space="preserve">
+    <value>به منوها اشاره کنید. با کج‌کردن نشانه بگیرید. بازی را حس کنید. با آنچه می‌خواهید انجام دهید شروع کنید؛ تنظیمات دقیق در هر بخش پنهان شده است.</value>
+  </data>
+  <data name="SavedWithThisProfileForAnyControllerFeatures" xml:space="preserve">
+    <value>با این پروفایل برای هر کنترلری ذخیره می‌شود. ویژگی‌هایی که کنترلر شما پشتیبانی نمی‌کند بی‌اثرند. ماوس روی میز و نشانه‌گیری حرکتی ویژگی‌های جداگانه‌ای هستند.</value>
+  </data>
+  <data name="MouseOnADesk" xml:space="preserve">
+    <value>ماوس روی میز</value>
+  </data>
+  <data name="SlideAJoyConToPointOrAimUseItsStickToScroll" xml:space="preserve">
+    <value>برای اشاره یا نشانه‌گیری، Joy-Con را بلغزانید. برای اسکرول از استیک آن استفاده کنید.</value>
+  </data>
+  <data name="SlideAJoyConToMoveTheMouse" xml:space="preserve">
+    <value>برای حرکت‌دادن ماوس، Joy-Con را بلغزانید</value>
+  </data>
+  <data name="MoveAJoyConAcrossASurfaceToControlTheMousePointer" xml:space="preserve">
+    <value>Joy-Con را روی یک سطح حرکت دهید تا نشانگر ماوس را کنترل کنید.</value>
+  </data>
+  <data name="PlaceTheSensorEdgeAgainstADeskOr" xml:space="preserve">
+    <value>لبه‌ی سنسور را روی میز یا زیرماوسی قرار دهید، سپس Joy-Con را بلغزانید. بلند کردن آن اجازه می‌دهد بدون حرکت نشانگر، دوباره جای‌گذاری کنید.</value>
+  </data>
+  <data name="SlideToAimOrPointAtMenusUse" xml:space="preserve">
+    <value>برای نشانه‌گیری یا اشاره به منوها بلغزانید. تا زمانی که سنسور سطح را لمس می‌کند از استیک برای اسکرول استفاده کنید.</value>
+  </data>
+  <data name="AssignMouseClicksInButtonMappingForDifferent" xml:space="preserve">
+    <value>کلیک‌های ماوس را در نگاشت دکمه‌ها تخصیص دهید. برای عملکردهای متفاوت فقط روی میز، از سنسور IR متناظر به‌عنوان Shift Modifier استفاده کنید.</value>
+  </data>
+  <data name="WhichJoyCon" xml:space="preserve">
+    <value>کدام Joy-Con:</value>
+  </data>
+  <data name="Automatic" xml:space="preserve">
+    <value>خودکار</value>
+  </data>
+  <data name="Both" xml:space="preserve">
+    <value>هر دو</value>
+  </data>
+  <data name="StickScroll" xml:space="preserve">
+    <value>اسکرول استیک:</value>
+  </data>
+  <data name="ChooseWhetherTheStickScrollsVerticallyOnlyOr" xml:space="preserve">
+    <value>انتخاب کنید که استیک فقط عمودی اسکرول کند یا در هر چهار جهت.</value>
+  </data>
+  <data name="UpDown" xml:space="preserve">
+    <value>بالا / پایین</value>
+  </data>
+  <data name="FourWay" xml:space="preserve">
+    <value>چهارجهته</value>
+  </data>
+  <data name="LeftSensitivity" xml:space="preserve">
+    <value>حساسیت چپ:</value>
+  </data>
+  <data name="RightSensitivity" xml:space="preserve">
+    <value>حساسیت راست:</value>
+  </data>
+  <data name="SurfaceDetection" xml:space="preserve">
+    <value>تشخیص سطح</value>
+  </data>
+  <data name="TryRelaxedIfYourSurfaceIsNotDetected" xml:space="preserve">
+    <value>اگر سطح شما تشخیص داده نمی‌شود، حالت Relaxed را امتحان کنید. این تنظیمات روی عملکردهای دکمه‌ی مبتنی بر سطح و نشانه‌گیری نیز اثر می‌گذارد.</value>
+  </data>
+  <data name="LeftSurfaceDetection" xml:space="preserve">
+    <value>تشخیص سطح چپ:</value>
+  </data>
+  <data name="Strict" xml:space="preserve">
+    <value>دقیق</value>
+  </data>
+  <data name="Relaxed" xml:space="preserve">
+    <value>ملایم</value>
+  </data>
+  <data name="RightSurfaceDetection" xml:space="preserve">
+    <value>تشخیص سطح راست:</value>
+  </data>
+  <data name="AimByTilting" xml:space="preserve">
+    <value>نشانه‌گیری با کج‌کردن</value>
+  </data>
+  <data name="FineAimWithYourHandsWithOrWithoutAMousePointer" xml:space="preserve">
+    <value>نشانه‌گیری دقیق با دست‌ها، با یا بدون نشانگر ماوس.</value>
+  </data>
+  <data name="ChooseWhatTiltingDoes" xml:space="preserve">
+    <value>انتخاب کنید کج‌کردن چه کاری انجام دهد</value>
+  </data>
+  <data name="MappedTiltButtonsNoMouse" xml:space="preserve">
+    <value>دکمه‌های نگاشته‌شده‌ی کج‌کردن (بدون ماوس)</value>
+  </data>
+  <data name="MousePointer" xml:space="preserve">
+    <value>نشانگر ماوس</value>
+  </data>
+  <data name="VirtualAimingStick" xml:space="preserve">
+    <value>استیک نشانه‌گیری مجازی</value>
+  </data>
+  <data name="QuickTiltActions" xml:space="preserve">
+    <value>اکشن‌های سریع کج‌کردن</value>
+  </data>
+  <data name="GameSOwnMotionControls" xml:space="preserve">
+    <value>کنترل‌های حرکتی خود بازی</value>
+  </data>
+  <data name="WhenToAim" xml:space="preserve">
+    <value>زمان نشانه‌گیری:</value>
+  </data>
+  <data name="AlwaysOn" xml:space="preserve">
+    <value>همیشه روشن</value>
+  </data>
+  <data name="HoldZLL2" xml:space="preserve">
+    <value>نگه‌داشتن ZL / L2</value>
+  </data>
+  <data name="HoldZRR2" xml:space="preserve">
+    <value>نگه‌داشتن ZR / R2</value>
+  </data>
+  <data name="CustomSeeGyroSettings" xml:space="preserve">
+    <value>سفارشی — تنظیمات ژیرو را ببینید</value>
+  </data>
+  <data name="TriggerChoicesFollowLayoutDesc" xml:space="preserve">
+    <value>گزینه‌های ماشه از چیدمان دکمه‌های شما پیروی می‌کنند. ترکیب‌های سفارشی و toggle-to-aim در تنظیمات ژیرو موجودند.</value>
+  </data>
+  <data name="MouseAimingSpeed" xml:space="preserve">
+    <value>سرعت نشانه‌گیری ماوس:</value>
+  </data>
+  <data name="OpenFullGyroSettings" xml:space="preserve">
+    <value>باز کردن تنظیمات کامل ژیرو…</value>
+  </data>
+  <data name="ChooseAimButtonsStickOutputSensitivityAndSmoothing" xml:space="preserve">
+    <value>دکمه‌های نشانه‌گیری، خروجی استیک، حساسیت و هموارسازی را انتخاب کنید.</value>
+  </data>
+  <data name="FineTuneAiming" xml:space="preserve">
+    <value>تنظیم دقیق نشانه‌گیری</value>
+  </data>
+  <data name="ReduceSidewaysGyroDrift" xml:space="preserve">
+    <value>کاهش رانش جانبی ژیرو</value>
+  </data>
+  <data name="HelpReduceSidewaysGyroDriftTurnThisOff" xml:space="preserve">
+    <value>به کاهش رانش جانبی ژیرو کمک می‌کند. اگر وسایل الکترونیکی نزدیک روی نشانه‌گیری اثر می‌گذارند، این را خاموش کنید.</value>
+  </data>
+  <data name="IgnoreTinyGyroMovementsToSteadyAimSet" xml:space="preserve">
+    <value>برای پایدارسازی نشانه‌گیری، حرکات بسیار کوچک ژیرو را نادیده بگیرید. برای حداکثر حساسیت روی ۰ تنظیم کنید.</value>
+  </data>
+  <data name="IgnoreSmallMovements" xml:space="preserve">
+    <value>نادیده‌گرفتن حرکات کوچک:</value>
+  </data>
+  <data name="UseTheStickAlongsideGyroAimingToTurn" xml:space="preserve">
+    <value>برای چرخش بیشتر، استیک را همراه با نشانه‌گیری ژیرو استفاده کنید. برای خاموش‌کردن این ویژگی روی ۰ تنظیم کنید.</value>
+  </data>
+  <data name="StickAssistedAiming" xml:space="preserve">
+    <value>نشانه‌گیری کمکی با استیک:</value>
+  </data>
+  <data name="SmootherMouseMovement" xml:space="preserve">
+    <value>حرکت هموارتر ماوس</value>
+  </data>
+  <data name="SmootherMouseMovementTooltip" xml:space="preserve">
+    <value>حرکت ماوس را بین به‌روزرسانی‌های کنترلر هموارتر می‌کند. این باعث سریع‌ترشدن خود کنترلر نمی‌شود.</value>
+  </data>
+  <data name="SidewaysMotionSensitivityTooltip" xml:space="preserve">
+    <value>حساسیت حرکت جانبی را در شبیه‌سازهای سازگار تنظیم کنید. ۱ سطح معمولی است.</value>
+  </data>
+  <data name="EmulatorTurnSensitivity" xml:space="preserve">
+    <value>حساسیت چرخش شبیه‌ساز:</value>
+  </data>
+  <data name="KeepMotionAimingLevel" xml:space="preserve">
+    <value>حفظ تراز نشانه‌گیری حرکتی</value>
+  </data>
+  <data name="KeepMotionAimingLevelWhenYouTiltTheController" xml:space="preserve">
+    <value>هنگام کج‌کردن کنترلر، تراز نشانه‌گیری حرکتی را حفظ می‌کند.</value>
+  </data>
+  <data name="PauseAimingWithAButton" xml:space="preserve">
+    <value>توقف موقت نشانه‌گیری با یک دکمه</value>
+  </data>
+  <data name="PauseAimingWithButtonTooltip" xml:space="preserve">
+    <value>با یک دکمه نشانه‌گیری حرکتی را موقتاً متوقف کنید تا بتوانید کنترلر را دوباره جای‌گذاری کنید.</value>
+  </data>
+  <data name="HoldToPauseAimingOrPressToToggle" xml:space="preserve">
+    <value>برای توقف موقت نگه دارید یا برای تغییر وضعیت توقف فشار دهید. با توقف استفاده از ژیرو، توقف موقت پاک می‌شود.</value>
+  </data>
+  <data name="AimingSettingsToEdit" xml:space="preserve">
+    <value>تنظیمات نشانه‌گیری برای ویرایش:</value>
+  </data>
+  <data name="HoldToLockButtons" xml:space="preserve">
+    <value>دکمه‌های نگه‌داشتن برای قفل‌کردن:</value>
+  </data>
+  <data name="PressToToggleLockButtons" xml:space="preserve">
+    <value>دکمه‌های فشار برای تغییر وضعیت قفل:</value>
+  </data>
+  <data name="SteadyAimAroundButtonPresses" xml:space="preserve">
+    <value>پایدارسازی نشانه‌گیری هنگام فشردن دکمه</value>
+  </data>
+  <data name="SteadyAimAroundButtonsTooltip" xml:space="preserve">
+    <value>حرکت نشانه‌گیری ناشی از فشردن یا رهاکردن دکمه‌ها را کاهش می‌دهد.</value>
+  </data>
+  <data name="FineTuneAModeYouHaveAlreadyEnabled" xml:space="preserve">
+    <value>یک حالتی که قبلاً در بالا فعال کرده‌اید را تنظیم دقیق کنید. این گزینه‌ها خروجی نشانه‌گیری شما را عوض نمی‌کنند.</value>
+  </data>
+  <data name="ActivationSource" xml:space="preserve">
+    <value>منبع فعال‌سازی:</value>
+  </data>
+  <data name="ButtonsThatSteadyAim" xml:space="preserve">
+    <value>دکمه‌هایی که نشانه‌گیری را پایدار می‌کنند:</value>
+  </data>
+  <data name="AimDeadzone" xml:space="preserve">
+    <value>ناحیه‌ی مرده:</value>
+  </data>
+  <data name="PressPause" xml:space="preserve">
+    <value>توقف با فشار:</value>
+  </data>
+  <data name="ReleasePause" xml:space="preserve">
+    <value>توقف با رهاسازی:</value>
+  </data>
+  <data name="DeadzoneAfterRelease" xml:space="preserve">
+    <value>ناحیه‌ی مرده پس از رهاسازی:</value>
+  </data>
+  <data name="ButtonsThatSlowAim" xml:space="preserve">
+    <value>دکمه‌هایی که نشانه‌گیری را کند می‌کنند:</value>
+  </data>
+  <data name="Dampening" xml:space="preserve">
+    <value>میرایی:</value>
+  </data>
+  <data name="AfterRelease" xml:space="preserve">
+    <value>پس از رهاسازی:</value>
+  </data>
+  <data name="SteadyAimingWhenTouchingADesk" xml:space="preserve">
+    <value>پایدارسازی نشانه‌گیری هنگام لمس میز</value>
+  </data>
+  <data name="ChooseTheLeftOrRightIRSensorIn" xml:space="preserve">
+    <value>برای نشانه‌گیری هنگام لمس سطح، سنسور IR چپ یا راست را در منوی ماشه‌ی ژیرو انتخاب کنید.</value>
+  </data>
+  <data name="PauseAimingAroundButtonPressesIgnoreSmallMovements" xml:space="preserve">
+    <value>نشانه‌گیری را حول فشردن دکمه‌ها متوقف کنید، حرکات کوچک را نادیده بگیرید یا حساسیت را هنگام نگه‌داشتن دکمه کاهش دهید.</value>
+  </data>
+  <data name="LeftOpticalSensor" xml:space="preserve">
+    <value>سنسور نوری چپ</value>
+  </data>
+  <data name="DeadzoneClickStabilizationButtons" xml:space="preserve">
+    <value>دکمه‌های ناحیه‌ی مرده / پایدارسازی کلیک:</value>
+  </data>
+  <data name="DampeningButtons" xml:space="preserve">
+    <value>دکمه‌های میرایی:</value>
+  </data>
+  <data name="RightOpticalSensor" xml:space="preserve">
+    <value>سنسور نوری راست</value>
+  </data>
+  <data name="DualJoyConAiming" xml:space="preserve">
+    <value>نشانه‌گیری دوگانه با Joy-Con</value>
+  </data>
+  <data name="LetYourTwoHandsShareTheAimOrSwitchBetweenThem" xml:space="preserve">
+    <value>بگذارید دو دست شما نشانه‌گیری را به اشتراک بگذارند، یا بین آن‌ها جابه‌جا شوید.</value>
+  </data>
+  <data name="AimWithBothJoyConsDJG" xml:space="preserve">
+    <value>نشانه‌گیری با هر دو Joy-Con (DJG)</value>
+  </data>
+  <data name="LetAJoinedPairShareMotionAimingTurn" xml:space="preserve">
+    <value>بگذارید یک جفت متصل نشانه‌گیری حرکتی را به اشتراک بگذارند. برای استفاده از منبع حرکتی تکی معمولی خاموش کنید.</value>
+  </data>
+  <data name="ChooseWhichHandSuppliesMotionThisDoesNot" xml:space="preserve">
+    <value>انتخاب کنید کدام دست حرکت را تأمین می‌کند. این کار Joy-Conهای شما را جفت نمی‌کند یا نشانه‌گیری ماوس را روشن نمی‌کند.</value>
+  </data>
+  <data name="ForMouseOrStickAimingStartWithAim" xml:space="preserve">
+    <value>برای نشانه‌گیری با ماوس یا استیک، از «نشانه‌گیری با کج‌کردن» ← «زمان نشانه‌گیری: همیشه روشن» شروع کنید. انتخاب یک دکمه در آنجا یک کنترل روشن/خاموش جداگانه اضافه می‌کند؛ دستی را انتخاب نمی‌کند.</value>
+  </data>
+  <data name="SetUpMotionAiming" xml:space="preserve">
+    <value>راه‌اندازی نشانه‌گیری حرکتی…</value>
+  </data>
+  <data name="ChooseHowTheTwoHandsWorkTogether" xml:space="preserve">
+    <value>انتخاب کنید دو دست چگونه با هم کار کنند</value>
+  </data>
+  <data name="LeadHandSideSwitchingAndPauseButtons" xml:space="preserve">
+    <value>دست اصلی، جابه‌جایی سمت و دکمه‌های توقف.</value>
+  </data>
+  <data name="Mode2" xml:space="preserve">
+    <value>حالت:</value>
+  </data>
+  <data name="BothHandsSwitchLeadHand" xml:space="preserve">
+    <value>هر دو دست — جابه‌جایی دست اصلی</value>
+  </data>
+  <data name="OneHandAtATime" xml:space="preserve">
+    <value>یک دست در هر لحظه</value>
+  </data>
+  <data name="BothHandsPauseEachSide" xml:space="preserve">
+    <value>هر دو دست — توقف هر سمت</value>
+  </data>
+  <data name="PreferredAimingHand" xml:space="preserve">
+    <value>دست ترجیحی نشانه‌گیری:</value>
+  </data>
+  <data name="ChooseTheHandThatLeadsYourAimOr" xml:space="preserve">
+    <value>دستی را که نشانه‌گیری شما را هدایت می‌کند انتخاب کنید، یا هنگام توقف هر سمت به‌طور جداگانه هر دو را ترکیب کنید.</value>
+  </data>
+  <data name="CombineBoth" xml:space="preserve">
+    <value>ترکیب هر دو</value>
+  </data>
+  <data name="ButtonBehavior" xml:space="preserve">
+    <value>رفتار دکمه:</value>
+  </data>
+  <data name="WhileHeld" xml:space="preserve">
+    <value>هنگام نگه‌داشتن</value>
+  </data>
+  <data name="PressToToggle" xml:space="preserve">
+    <value>فشار برای تغییر وضعیت</value>
+  </data>
+  <data name="LeftJoyConButtons" xml:space="preserve">
+    <value>دکمه‌های Joy-Con چپ</value>
+  </data>
+  <data name="RightJoyConButtons" xml:space="preserve">
+    <value>دکمه‌های Joy-Con راست</value>
+  </data>
+  <data name="FeelGameFeedback" xml:space="preserve">
+    <value>حس بازخورد بازی</value>
+  </data>
+  <data name="FeelImpactsTexturesAndTriggerEffectsAsHDRumble" xml:space="preserve">
+    <value>ضربه‌ها، بافت‌ها و افکت‌های ماشه را به‌صورت HD Rumble حس کنید.</value>
+  </data>
+  <data name="AdjustOverallRumbleStrength100IsTheNormal" xml:space="preserve">
+    <value>قدرت کلی ویبره را تنظیم کنید. ۱۰۰٪ سطح معمولی است؛ ۰٪ ویبره‌ی بدنه را خاموش می‌کند.</value>
+  </data>
+  <data name="BodyRumbleStrength" xml:space="preserve">
+    <value>قدرت ویبره‌ی بدنه:</value>
+  </data>
+  <data name="IncludeXboxTriggerRumble" xml:space="preserve">
+    <value>شامل ویبره‌ی ماشه‌ی Xbox</value>
+  </data>
+  <data name="FeelXboxTriggerVibrationsOnTheMatchingSide" xml:space="preserve">
+    <value>ویبره‌های ماشه‌ی Xbox را در سمت متناظر کنترلر خود حس کنید. این تنظیم با Advanced مشترک است.</value>
+  </data>
+  <data name="VaryTriggerRumbleFeel" xml:space="preserve">
+    <value>تغییر حس ویبره‌ی ماشه</value>
+  </data>
+  <data name="ChangeTheFeelOfTriggerRumbleAsItsStrengthChanges" xml:space="preserve">
+    <value>با تغییر قدرت ویبره‌ی ماشه، حس آن نیز تغییر می‌کند.</value>
+  </data>
+  <data name="TriggerRumbleStrength" xml:space="preserve">
+    <value>قدرت ویبره‌ی ماشه:</value>
+  </data>
+  <data name="FixedRumbleFeel" xml:space="preserve">
+    <value>حس ثابت ویبره:</value>
+  </data>
+  <data name="IncludeDetailedDualSenseVibrations" xml:space="preserve">
+    <value>شامل ویبره‌های دقیق DualSense</value>
+  </data>
+  <data name="DetailedDualSenseVibrationsTooltip" xml:space="preserve">
+    <value>ویبره‌های دقیق DualSense را به HD Rumble چپ و راست تبدیل می‌کند.</value>
+  </data>
+  <data name="IncludeDualSenseTriggerEffects" xml:space="preserve">
+    <value>شامل افکت‌های ماشه‌ی DualSense</value>
+  </data>
+  <data name="TurnDualSenseTriggerEffectsIntoVibrationsSwitch2" xml:space="preserve">
+    <value>افکت‌های ماشه‌ی DualSense را به ویبره تبدیل می‌کند. ماشه‌های Switch 2 نمی‌توانند مقاومت فیزیکی اضافه کنند.</value>
+  </data>
+  <data name="UseXboxStyleBodyRumble" xml:space="preserve">
+    <value>استفاده از ویبره‌ی بدنه به سبک Xbox</value>
+  </data>
+  <data name="GiveBodyRumbleAConsistentXboxStyleFeel" xml:space="preserve">
+    <value>به‌جای پیروی از جزئیات ویبره‌ی هر بازی، حسی یکدست و به سبک Xbox به ویبره‌ی بدنه بدهید.</value>
+  </data>
+  <data name="BodyRumbleFeel" xml:space="preserve">
+    <value>حس ویبره‌ی بدنه:</value>
+  </data>
+  <data name="DelayRumbleToMatchDelayedGameAudioLeave" xml:space="preserve">
+    <value>ویبره را برای هماهنگی با صدای تأخیردار بازی به تأخیر بیندازید. برای سریع‌ترین پاسخ روی ۰ بگذارید.</value>
+  </data>
+  <data name="GameRumbleDelay" xml:space="preserve">
+    <value>تأخیر ویبره‌ی بازی:</value>
+  </data>
+  <data name="ListenAndChatThroughYourSwitch2ProSHeadphoneJack" xml:space="preserve">
+    <value>از طریق جک هدفون Switch 2 Pro خود بشنوید و چت کنید.</value>
+  </data>
+  <data name="AudioDirectThroughWindowsDesc" xml:space="preserve">
+    <value>صدا مستقیماً از طریق Windows عبور می‌کند. این مستقل از کنترلر مجازی انتخابی شما کار می‌کند؛ نیازی به تغییر وضعیت صدای DS4Windows نیست.</value>
+  </data>
+  <data name="USBOnlyBluetoothHeadsetAudioIsNotSupported" xml:space="preserve">
+    <value>فقط USB. صدای هدست بلوتوث هنوز پشتیبانی نمی‌شود. یک کابل AUX معمولی صدا را خارج می‌کند، اما نمی‌تواند میکروفون هدست را آزمایش کند.</value>
+  </data>
+  <data name="GiveButtonsASecondJob" xml:space="preserve">
+    <value>به دکمه‌ها یک وظیفه‌ی دوم بدهید</value>
+  </data>
+  <data name="HoldOrToggleAButtonToAccessAnotherSetOfActions" xml:space="preserve">
+    <value>برای دسترسی به مجموعه‌ی دیگری از اکشن‌ها، یک دکمه را نگه دارید یا وضعیتش را تغییر دهید.</value>
+  </data>
+  <data name="ExampleKeepAButtonSUsualActionThen" xml:space="preserve">
+    <value>مثال: عملکرد معمول یک دکمه را حفظ کنید، سپس هنگام نگه‌داشتن دکمه‌ی دیگری، وظیفه‌ی دیگری به آن بدهید.</value>
+  </data>
+  <data name="ActionSetToEdit" xml:space="preserve">
+    <value>مجموعه‌ی اکشن برای ویرایش:</value>
+  </data>
+  <data name="PressAButtonToSwitchActions" xml:space="preserve">
+    <value>برای تعویض اکشن‌ها یک دکمه را فشار دهید:</value>
+  </data>
+  <data name="TheShortcutOpensShiftModifierForYouFor" xml:space="preserve">
+    <value>این میان‌بر Shift Modifier را برای شما باز می‌کند. برای اکشن دوم جدید، Switch 2 Mode Shift از قبل انتخاب شده است. ماشه‌های shift موجود حفظ می‌شوند.</value>
+  </data>
+  <data name="EditSecondAction" xml:space="preserve">
+    <value>ویرایش اکشن دوم…</value>
+  </data>
+  <data name="OpenButtonMapping" xml:space="preserve">
+    <value>باز کردن نگاشت دکمه‌ها</value>
+  </data>
+  <data name="ChooseTheActionInTheWindowThenSave" xml:space="preserve">
+    <value>اکشن را در پنجره انتخاب کنید، سپس این پروفایل را ذخیره کنید. یک دکمه‌ی shift برای تعویض اکشن‌ها رزرو می‌شود، بنابراین عملکرد معمول بازی آن ارسال نمی‌شود.</value>
+  </data>
+  <data name="AutomaticSecondActionsOptional" xml:space="preserve">
+    <value>اکشن‌های دوم خودکار (اختیاری)</value>
+  </data>
+  <data name="WhenEnabledBelowAimingStartsInSecondActions" xml:space="preserve">
+    <value>وقتی در پایین فعال شود، نشانه‌گیری در اکشن‌های دوم شروع می‌شود. دکمه‌های نگه‌داشتن یا تغییر وضعیت شما به‌جای آن به اکشن‌های معمول برمی‌گردند. این گزینه‌ها نشانه‌گیری را فعال نمی‌کنند.</value>
+  </data>
+  <data name="AutomaticallyStartInSecondActionsWhile" xml:space="preserve">
+    <value>شروع خودکار در اکشن‌های دوم هنگامی که:</value>
+  </data>
+  <data name="MouseAimingIsActive" xml:space="preserve">
+    <value>نشانه‌گیری با ماوس فعال است</value>
+  </data>
+  <data name="StickAimingIsActive" xml:space="preserve">
+    <value>نشانه‌گیری با استیک فعال است</value>
+  </data>
+  <data name="MotionSteering" xml:space="preserve">
+    <value>فرمان‌گیری حرکتی</value>
+  </data>
+  <data name="PointScrollOrTapWithAStick" xml:space="preserve">
+    <value>با یک استیک اشاره کنید، اسکرول کنید یا ضربه بزنید</value>
+  </data>
+  <data name="FineTuneMouseButtonSticksDesc" xml:space="preserve">
+    <value>استیک‌هایی را که به عملکرد ماوس یا دکمه تخصیص داده‌اید، تنظیم دقیق کنید.</value>
+  </data>
+  <data name="StickScrolling" xml:space="preserve">
+    <value>اسکرول استیک</value>
+  </data>
+  <data name="AssignScrollActionsInButtonMappingFirstTap" xml:space="preserve">
+    <value>ابتدا اکشن‌های اسکرول را در نگاشت دکمه‌ها تخصیص دهید. ضربه یک‌بار اسکرول می‌کند؛ نگه‌داشتن اسکرول را ادامه می‌دهد.</value>
+  </data>
+  <data name="LeftStick2" xml:space="preserve">
+    <value>استیک چپ:</value>
+  </data>
+  <data name="Hold" xml:space="preserve">
+    <value>نگه‌داشتن</value>
+  </data>
+  <data name="RightStick2" xml:space="preserve">
+    <value>استیک راست:</value>
+  </data>
+  <data name="StickButtonActions" xml:space="preserve">
+    <value>اکشن‌های دکمه‌ی استیک</value>
+  </data>
+  <data name="HoldKeepsAnActionPressedTapTriggersIt" xml:space="preserve">
+    <value>نگه‌داشتن، اکشن را فشرده نگه می‌دارد. ضربه، هر بار که استیک را به آن جهت حرکت می‌دهید، یک‌بار آن را فعال می‌کند.</value>
+  </data>
+  <data name="LeftStick3" xml:space="preserve">
+    <value>استیک چپ</value>
+  </data>
+  <data name="RightStick3" xml:space="preserve">
+    <value>استیک راست</value>
+  </data>
+  <data name="StickMouseSpeed" xml:space="preserve">
+    <value>سرعت ماوس استیک</value>
+  </data>
+  <data name="AdjustSpeedForSticksMappedToMouseMovement" xml:space="preserve">
+    <value>سرعت استیک‌های نگاشته‌شده به حرکت ماوس را تنظیم کنید. ۵ سرعت معمولی است؛ ۰ حرکت را متوقف می‌کند.</value>
+  </data>
+  <data name="LayoutBattery" xml:space="preserve">
+    <value>چیدمان و باتری</value>
+  </data>
+  <data name="MatchButtonLabelsDesc" xml:space="preserve">
+    <value>برچسب‌های دکمه‌های خود را تطبیق دهید، یک Joy-Con تکی را به‌صورت افقی نگه دارید، یا در باتری صرفه‌جویی کنید.</value>
+  </data>
+  <data name="XboxNintendoLabelStyleTooltip" xml:space="preserve">
+    <value>Xbox از موقعیت دکمه‌ها پیروی می‌کند. Nintendo از برچسب‌های چاپ‌شده‌ی A، B، X و Y پیروی می‌کند.</value>
+  </data>
+  <data name="FaceButtonLayout" xml:space="preserve">
+    <value>چیدمان دکمه‌های روبرو:</value>
+  </data>
+  <data name="Xbox" xml:space="preserve">
+    <value>Xbox</value>
+  </data>
+  <data name="Nintendo" xml:space="preserve">
+    <value>Nintendo</value>
+  </data>
+  <data name="JoyConHoldingStyle" xml:space="preserve">
+    <value>سبک نگه‌داشتن Joy-Con:</value>
+  </data>
+  <data name="ChooseTheStartingOrientationAChoiceMadeOn" xml:space="preserve">
+    <value>جهت شروع را انتخاب کنید. انتخابی که در تب Controllers انجام شود، برای آن Joy-Con اولویت دارد.</value>
+  </data>
+  <data name="Upright" xml:space="preserve">
+    <value>عمودی</value>
+  </data>
+  <data name="Sideways" xml:space="preserve">
+    <value>افقی</value>
+  </data>
+  <data name="AutomaticBluetoothDisconnect" xml:space="preserve">
+    <value>قطع خودکار بلوتوث</value>
+  </data>
+  <data name="DisconnectAfterInactivityToSaveBatteryOrAfter" xml:space="preserve">
+    <value>برای صرفه‌جویی در باتری پس از عدم‌فعالیت، یا پس از یک زمان مشخص حتی هنگام بازی‌کردن، قطع کنید.</value>
+  </data>
+  <data name="WhenIdle" xml:space="preserve">
+    <value>هنگام بی‌کاری</value>
+  </data>
+  <data name="AfterASetTime" xml:space="preserve">
+    <value>پس از یک زمان مشخص</value>
+  </data>
+  <data name="DisconnectAfter" xml:space="preserve">
+    <value>قطع پس از:</value>
+  </data>
+  <data name="Day" xml:space="preserve">
+    <value>روز</value>
+  </data>
+  <data name="Hour" xml:space="preserve">
+    <value>ساعت</value>
+  </data>
+  <data name="Minute" xml:space="preserve">
+    <value>دقیقه</value>
+  </data>
+  <data name="SetTheDurationToZeroToDisableThe" xml:space="preserve">
+    <value>برای غیرفعال‌کردن تایمر، مدت را روی صفر تنظیم کنید. تا زمانی که اینجا تغییر نکند، پروفایل‌های موجود تنظیم Idle Disconnect خود را حفظ می‌کنند.</value>
+  </data>
+  <data name="VibrateWhenConnected" xml:space="preserve">
+    <value>ویبره هنگام اتصال</value>
+  </data>
+  <data name="PlayAShortVibrationWhenTheControllerIsReady" xml:space="preserve">
+    <value>هنگام آماده‌شدن کنترلر، یک ویبره‌ی کوتاه پخش کنید.</value>
+  </data>
+  <data name="CorrectDriftStickRange" xml:space="preserve">
+    <value>تصحیح رانش و دامنه‌ی استیک</value>
+  </data>
+  <data name="UseGuidedCalibrationIfAStickFeelsOffOrTheAimDrifts" xml:space="preserve">
+    <value>اگر استیک حس نادرستی دارد یا نشانه‌گیری رانش می‌کند، از کالیبراسیون هدایت‌شده استفاده کنید.</value>
+  </data>
+  <data name="StickCalibration2" xml:space="preserve">
+    <value>کالیبراسیون استیک</value>
+  </data>
+  <data name="FollowTheGuidedStepsToCorrectStickCenters" xml:space="preserve">
+    <value>مراحل هدایت‌شده را دنبال کنید تا مرکز و دامنه‌ی استیک تصحیح شود. تنظیمات کارخانه‌ای بدون تغییر باقی می‌مانند.</value>
+  </data>
+  <data name="CalibrateSticks" xml:space="preserve">
+    <value>کالیبره‌کردن استیک‌ها…</value>
+  </data>
+  <data name="PlaceTheControllerOnAStableSurfaceAnd" xml:space="preserve">
+    <value>کنترلر را روی یک سطح پایدار قرار دهید و پس از شروع، حداقل پنج ثانیه بی‌حرکت نگه دارید.</value>
+  </data>
+  <data name="RestartGyroCalibration" xml:space="preserve">
+    <value>شروع مجدد کالیبراسیون ژیرو</value>
+  </data>
+  <data name="GyroCalibrationTooltip" xml:space="preserve">
+    <value>رانش ژیرو را تصحیح کنید. کنترلر را حداقل پنج ثانیه بی‌حرکت نگه دارید.</value>
+  </data>
+  <data name="SlowlyRotateTheControllerInAFigureEight" xml:space="preserve">
+    <value>کنترلر را به‌آرامی به شکل عدد ۸ بچرخانید. ورودی بازی در حین کالیبراسیون متوقف می‌شود.</value>
+  </data>
+  <data name="CalibrateDriftCorrection" xml:space="preserve">
+    <value>کالیبره‌کردن تصحیح رانش</value>
+  </data>
+  <data name="UseThisIfSidewaysDriftCorrectionFeelsInaccurate" xml:space="preserve">
+    <value>اگر تصحیح رانش جانبی نادرست به‌نظر می‌رسد، از این استفاده کنید.</value>
+  </data>
+  <data name="Advanced" xml:space="preserve">
+    <value>پیشرفته</value>
+  </data>
+  <data name="Xbox360" xml:space="preserve">
+    <value>Xbox 360</value>
+  </data>
+  <data name="XboxOneSeries" xml:space="preserve">
+    <value>Xbox One / Series</value>
+  </data>
+  <data name="A" xml:space="preserve">
+    <value>A</value>
+  </data>
+  <data name="NintendoFaceLayout" xml:space="preserve">
+    <value>چیدمان روبروی Nintendo</value>
+  </data>
+  <data name="PlusMinusHomeCaptureLRZLZR" xml:space="preserve">
+    <value>Plus، Minus، Home، Capture، L/R، ZL/ZR</value>
+  </data>
+  <data name="Debouncing" xml:space="preserve">
+    <value>حذف پرش دکمه (Debouncing)</value>
+  </data>
+  <data name="TranslateXboxImpulseTriggerVibration" xml:space="preserve">
+    <value>تبدیل ویبره‌ی impulse-trigger مربوط به Xbox</value>
+  </data>
+  <data name="FeelXboxTriggerVibrationsThroughYourControllerS" xml:space="preserve">
+    <value>ویبره‌های ماشه‌ی Xbox را از طریق ماشه‌ها یا موتورهای ویبره‌ی کنترلر خود حس کنید. مستقل از Trigger Lab عمل می‌کند.</value>
+  </data>
+  <data name="SendImpulseVibrationToAdaptiveTriggers" xml:space="preserve">
+    <value>ارسال ویبره‌ی impulse به ماشه‌های تطبیقی</value>
+  </data>
+  <data name="DualSenseAndEdgeUseAdaptiveTriggersForXbox" xml:space="preserve">
+    <value>DualSense و Edge: از ماشه‌های تطبیقی برای ویبره‌ی impulse مربوط به Xbox استفاده می‌کنند. برای استفاده از ویبره‌ی بدنه، خاموش کنید. به تبدیل impulse در بالا نیاز دارد.</value>
+  </data>
+  <data name="PlayStationControllerFeatures" xml:space="preserve">
+    <value>ویژگی‌های کنترلر PlayStation</value>
+  </data>
+  <data name="DualSenseHaptics" xml:space="preserve">
+    <value>هپتیک‌های DualSense</value>
+  </data>
+  <data name="MutesTheBuiltInSpeakerWhileContinuingThe" xml:space="preserve">
+    <value>بلندگوی داخلی را بی‌صدا می‌کند و همزمان همان جریان را از طریق هدستی که به پورت AUX کنترلر متصل است ادامه می‌دهد.</value>
+  </data>
+  <data name="MuteControllerSpeakerWithMuteButton" xml:space="preserve">
+    <value>بی‌صداکردن بلندگوی کنترلر با دکمه‌ی Mute</value>
+  </data>
+  <data name="WhenMuteButtonMutesInputOutputIsEnabled" xml:space="preserve">
+    <value>وقتی «دکمه‌ی Mute ورودی/خروجی را بی‌صدا می‌کند» فعال باشد، روشن‌شدن LED بی‌صدایی خروجی بلندگوی کنترلر را خاموش می‌کند. این تنظیم هنگام خاموش‌بودن کلید اصلی اثری ندارد.</value>
+  </data>
+  <data name="AudioSource" xml:space="preserve">
+    <value>منبع صدا:</value>
+  </data>
+  <data name="ForGameAudioSelectTheVirtualWirelessController" xml:space="preserve">
+    <value>برای صدای بازی، نقطه‌پایانی مجازی Wireless Controller ایجادشده توسط خروجی VIIPER PlayStation را انتخاب کنید. اولین جفت استریو به بلندگوی فیزیکی کنترلر منعکس می‌شود.</value>
+  </data>
+  <data name="AudioHapticsIsCurrentlySupplyingTheSelectedApp" xml:space="preserve">
+    <value>Audio Haptics در حال حاضر برنامه‌ی انتخاب‌شده را به این کنترلر می‌فرستد. برای رهاکردن آن override، منبع صدای دیگری را اینجا انتخاب کنید.</value>
+  </data>
+  <data name="USBDualSenseSpeaker" xml:space="preserve">
+    <value>بلندگوی DualSense (USB):</value>
+  </data>
+  <data name="OnlyUsedForAPhysicalUSBDualSenseBluetooth" xml:space="preserve">
+    <value>فقط برای DualSense فیزیکی متصل با USB استفاده می‌شود. کنترلرهای بلوتوث صدا را مستقیماً به کنترلر استریم می‌کنند.</value>
+  </data>
+  <data name="SpeakerVolume" xml:space="preserve">
+    <value>بلندی بلندگو:</value>
+  </data>
+  <data name="DynamicRange" xml:space="preserve">
+    <value>دامنه‌ی دینامیک:</value>
+  </data>
+  <data name="BluetoothSpeakerProcessingTooltip" xml:space="preserve">
+    <value>پردازش بلندگوی بلوتوث. Balanced جزئیات آرام‌تر را بالا می‌برد و افکت‌های بلند را مهار می‌کند. Strong دامنه را بیشتر تنگ می‌کند. پردازش پیش از کدگذاری بومی (Opus در DualSense، SBC در DualShock 4) و بدون تأخیر look-ahead اعمال می‌شود.</value>
+  </data>
+  <data name="BassBodyBoost" xml:space="preserve">
+    <value>تقویت بیس/بدنه:</value>
+  </data>
+  <data name="AddsUpTo6DBAround200Hz" xml:space="preserve">
+    <value>تا ۶ dB حول ۲۰۰ هرتز اضافه می‌کند و همزمان ساب‌بیس غیرقابل‌استفاده را فیلتر می‌کند. فقط روی جریان بلندگوی بلوتوث کنترلر اعمال می‌شود.</value>
+  </data>
+  <data name="MuteControllerMicrophoneWithMuteButton" xml:space="preserve">
+    <value>بی‌صداکردن میکروفون کنترلر با دکمه‌ی Mute</value>
+  </data>
+  <data name="WhenMuteButtonMutesInputOutputIsEnabled2" xml:space="preserve">
+    <value>وقتی «دکمه‌ی Mute ورودی/خروجی را بی‌صدا می‌کند» فعال باشد، روشن‌شدن LED بی‌صدایی ورودی میکروفون کنترلر را خاموش می‌کند. این تنظیم هنگام خاموش‌بودن کلید اصلی اثری ندارد.</value>
+  </data>
+  <data name="MicrophoneLevel" xml:space="preserve">
+    <value>سطح میکروفون:</value>
+  </data>
+  <data name="AdjustsThePhysicalMicrophoneLevelAndTheSafely" xml:space="preserve">
+    <value>سطح فیزیکی میکروفون و سیگنال ایمن‌شده‌ی نمایش‌داده‌شده به Windows را تنظیم می‌کند.</value>
+  </data>
+  <data name="NoiseSuppression" xml:space="preserve">
+    <value>حذف نویز:</value>
+  </data>
+  <data name="MicNoiseProcessingTooltip" xml:space="preserve">
+    <value>Balanced پاک‌سازی صوت با RNNoise را اعمال می‌کند. Strong نویز باقیمانده‌ی سطح‌پایین را نیز کاهش می‌دهد. Off فقط gain، فیلتر بالاگذر و محافظت از کلیپینگ را حفظ می‌کند.</value>
+  </data>
+  <data name="AdvancedAudio" xml:space="preserve">
+    <value>صدای پیشرفته</value>
+  </data>
+  <data name="HeadsetAUXVolume" xml:space="preserve">
+    <value>بلندی هدست / AUX:</value>
+  </data>
+  <data name="HeadsetJackVolumeTooltip" xml:space="preserve">
+    <value>جک هدست را مستقل از بلندگوی کنترلر کنترل می‌کند. DualShock 4 کل دامنه‌ی اسلایدر را به بهره‌ی هدست مستندشده‌ی ۰ تا ۸۰ سونی نگاشت می‌کند.</value>
+  </data>
+  <data name="MicRoutingDesc" xml:space="preserve">
+    <value>مسیریابی میکروفون USB/قدیمی، نقطه‌پایانی میکروفون فیزیکی کنترلر Windows را دریافت می‌کند و آن را به یک دستگاه رندر صوتی مجازی مانند VB-CABLE Input می‌فرستد. مسیریابی میکروفون بلوتوث VIIPER به این نقاط پایانی نیاز ندارد.</value>
+  </data>
+  <data name="ControllerMic" xml:space="preserve">
+    <value>میکروفون کنترلر:</value>
+  </data>
+  <data name="VirtualOutput" xml:space="preserve">
+    <value>خروجی مجازی:</value>
+  </data>
+  <data name="DualSenseMuteButton" xml:space="preserve">
+    <value>دکمه‌ی Mute در DualSense</value>
+  </data>
+  <data name="MuteButtonMutesInputOutput" xml:space="preserve">
+    <value>دکمه‌ی Mute ورودی/خروجی را بی‌صدا می‌کند</value>
+  </data>
+  <data name="UsesTheControllerMuteButtonAsAMaster" xml:space="preserve">
+    <value>از دکمه‌ی Mute کنترلر به‌عنوان یک کنترل اصلی برای اهداف بلندگو و میکروفون انتخاب‌شده در بالا استفاده می‌کند. LED بی‌صدایی هنگام بی‌صدابودن آن اهداف روشن و در حالت فعال بودن آن‌ها خاموش است.</value>
+  </data>
+  <data name="EnableMuteButtonLight" xml:space="preserve">
+    <value>فعال‌کردن نور دکمه‌ی Mute</value>
+  </data>
+  <data name="MirrorsThePhysicalDualSenseMuteButtonStateTo" xml:space="preserve">
+    <value>وضعیت فیزیکی دکمه‌ی Mute در DualSense را تا زمانی که این پروفایل فعال است، در LED بی‌صدایی کنترلر منعکس می‌کند. این فقط نور را کنترل می‌کند، نه مسیریابی میکروفون Windows را.</value>
+  </data>
+  <data name="MuteButtonSwitchesProfiles" xml:space="preserve">
+    <value>دکمه‌ی Mute پروفایل‌ها را تعویض می‌کند</value>
+  </data>
+  <data name="SwitchesBetweenTheSelectedProfilesWhenMuteChanges" xml:space="preserve">
+    <value>هنگام تغییر وضعیت Mute، بین پروفایل‌های انتخاب‌شده جابه‌جا می‌شود. فعال‌کردن «دکمه‌ی Mute ورودی/خروجی را بی‌صدا می‌کند» این گزینه را خاموش و خاکستری می‌کند، بدون پاک‌کردن انتخاب‌های پروفایل ذخیره‌شده.</value>
+  </data>
+  <data name="MuteOnProfile" xml:space="preserve">
+    <value>پروفایل هنگام Mute:</value>
+  </data>
+  <data name="OptionalSwitchToThisProfileWhenThePhysical" xml:space="preserve">
+    <value>اختیاری. وقتی دکمه‌ی فیزیکی Mute در DualSense روشن می‌شود، به این پروفایل تعویض کن.</value>
+  </data>
+  <data name="LeaveBlankToAvoidChangingProfilesWhenMuteTurnsOn" xml:space="preserve">
+    <value>برای جلوگیری از تغییر پروفایل هنگام روشن‌شدن Mute، خالی بگذارید.</value>
+  </data>
+  <data name="MuteOffProfile" xml:space="preserve">
+    <value>پروفایل هنگام خاموش‌شدن Mute:</value>
+  </data>
+  <data name="OptionalSwitchToThisProfileWhenThePhysical2" xml:space="preserve">
+    <value>اختیاری. وقتی دکمه‌ی فیزیکی Mute در DualSense خاموش می‌شود، به این پروفایل تعویض کن.</value>
+  </data>
+  <data name="LeaveBlankToAvoidChangingProfilesWhenMuteTurnsOff" xml:space="preserve">
+    <value>برای جلوگیری از تغییر پروفایل هنگام خاموش‌شدن Mute، خالی بگذارید.</value>
+  </data>
+  <data name="ForReadout" xml:space="preserve">
+    <value>برای قرائت</value>
+  </data>
+  <data name="GameBar" xml:space="preserve">
+    <value>Game Bar</value>
+  </data>
+  <data name="EnableGameBarControllerCompatibility" xml:space="preserve">
+    <value>فعال‌کردن سازگاری کنترلر با Game Bar</value>
+  </data>
+  <data name="WhileXboxGameBarIsVisibleTemporarilyRoute" xml:space="preserve">
+    <value>هنگام نمایان‌بودن Xbox Game Bar، ورودی نگاشته‌شده‌ی این پروفایل موقتاً از طریق یک کنترلر سازگار با Xbox مسیریابی می‌شود. پروفایل انتخاب‌شده و خروجی بومی DualSense پیکربندی‌شده باقی می‌مانند.</value>
+  </data>
+  <data name="KeepsThisProfileAndItsNativeOutputActive" xml:space="preserve">
+    <value>این پروفایل و خروجی بومی آن را فعال نگه می‌دارد. فقط ورودی نگاشته‌شده موقتاً از طریق یک همراه سازگار با Xbox ارسال می‌شود در حالی‌که Game Bar باز است؛ صدا، هپتیک، نورپردازی و مسیریابی میکروفون دست‌نخورده باقی می‌مانند.</value>
+  </data>
+  <data name="Mins" xml:space="preserve">
+    <value>دقیقه</value>
+  </data>
+  <data name="Max1Ms" xml:space="preserve">
+    <value>حداکثر (۱ میلی‌ثانیه)</value>
+  </data>
+  <data name="BindingWin.ShowLivePreview" xml:space="preserve">
+    <value>نمایش پیش‌نمایش زنده</value>
+  </data>
+  <data name="BindingWin.LivePreviewTooltip" xml:space="preserve">
+    <value>ببینید هنگام انتخاب عملیات، کنترلر شما چه چیزی ارسال می‌کند.</value>
+  </data>
+  <data name="UpperTouch" xml:space="preserve">
+    <value>لمس بالا</value>
+  </data>
+  <data name="SixaxisUp" xml:space="preserve">
+    <value>Sixaxis بالا</value>
+  </data>
+  <data name="SixaxisDown" xml:space="preserve">
+    <value>Sixaxis پایین</value>
+  </data>
+  <data name="SixaxisLeft" xml:space="preserve">
+    <value>Sixaxis چپ</value>
+  </data>
+  <data name="SixaxisRight" xml:space="preserve">
+    <value>Sixaxis راست</value>
+  </data>
+  <data name="DSEFunctionLeft" xml:space="preserve">
+    <value>عملکرد چپ DSE</value>
+  </data>
+  <data name="DSEFunctionRight" xml:space="preserve">
+    <value>عملکرد راست DSE</value>
+  </data>
+  <data name="DSELeftPaddle" xml:space="preserve">
+    <value>پدال چپ DSE</value>
+  </data>
+  <data name="DSERightPaddle" xml:space="preserve">
+    <value>پدال راست DSE</value>
+  </data>
+  <data name="Switch2JoyConLeftIRSensor" xml:space="preserve">
+    <value>Switch 2 Joy-Con چپ - حسگر IR</value>
+  </data>
+  <data name="Switch2JoyConRightIRSensor" xml:space="preserve">
+    <value>Switch 2 Joy-Con راست - حسگر IR</value>
+  </data>
+  <data name="Switch2ModeShift" xml:space="preserve">
+    <value>Switch 2 تغییر حالت</value>
+  </data>
+  <data name="Switch2JoyConLeftSL" xml:space="preserve">
+    <value>Switch 2 Joy-Con چپ SL</value>
+  </data>
+  <data name="Switch2JoyConLeftSR" xml:space="preserve">
+    <value>Switch 2 Joy-Con چپ SR</value>
+  </data>
+  <data name="Switch2JoyConRightSL" xml:space="preserve">
+    <value>Switch 2 Joy-Con راست SL</value>
+  </data>
+  <data name="Switch2JoyConRightSR" xml:space="preserve">
+    <value>Switch 2 Joy-Con راست SR</value>
+  </data>
+  <data name="Switch2CChat" xml:space="preserve">
+    <value>Switch 2 C / گفتگو</value>
+  </data>
+  <data name="D" xml:space="preserve">
+    <value>D</value>
+  </data>
+  <data name="E" xml:space="preserve">
+    <value>E</value>
+  </data>
+  <data name="F" xml:space="preserve">
+    <value>F</value>
+  </data>
+  <data name="H" xml:space="preserve">
+    <value>H</value>
+  </data>
+  <data name="I" xml:space="preserve">
+    <value>I</value>
+  </data>
+  <data name="J" xml:space="preserve">
+    <value>J</value>
+  </data>
+  <data name="K" xml:space="preserve">
+    <value>K</value>
+  </data>
+  <data name="L" xml:space="preserve">
+    <value>L</value>
+  </data>
+  <data name="M" xml:space="preserve">
+    <value>M</value>
+  </data>
+  <data name="N" xml:space="preserve">
+    <value>N</value>
+  </data>
+  <data name="O" xml:space="preserve">
+    <value>O</value>
+  </data>
+  <data name="P" xml:space="preserve">
+    <value>P</value>
+  </data>
+  <data name="Q" xml:space="preserve">
+    <value>Q</value>
+  </data>
+  <data name="S" xml:space="preserve">
+    <value>S</value>
+  </data>
+  <data name="T" xml:space="preserve">
+    <value>T</value>
+  </data>
+  <data name="U" xml:space="preserve">
+    <value>U</value>
+  </data>
+  <data name="V" xml:space="preserve">
+    <value>V</value>
+  </data>
+  <data name="W" xml:space="preserve">
+    <value>W</value>
+  </data>
+  <data name="F1" xml:space="preserve">
+    <value>F1</value>
+  </data>
+  <data name="F2" xml:space="preserve">
+    <value>F2</value>
+  </data>
+  <data name="F3" xml:space="preserve">
+    <value>F3</value>
+  </data>
+  <data name="F4" xml:space="preserve">
+    <value>F4</value>
+  </data>
+  <data name="F5" xml:space="preserve">
+    <value>F5</value>
+  </data>
+  <data name="F6" xml:space="preserve">
+    <value>F6</value>
+  </data>
+  <data name="F7" xml:space="preserve">
+    <value>F7</value>
+  </data>
+  <data name="F8" xml:space="preserve">
+    <value>F8</value>
+  </data>
+  <data name="F9" xml:space="preserve">
+    <value>F9</value>
+  </data>
+  <data name="F10" xml:space="preserve">
+    <value>F10</value>
+  </data>
+  <data name="F11" xml:space="preserve">
+    <value>F11</value>
+  </data>
+  <data name="F12" xml:space="preserve">
+    <value>F12</value>
+  </data>
+  <data name="Tab" xml:space="preserve">
+    <value>Tab</value>
+  </data>
+  <data name="Esc" xml:space="preserve">
+    <value>Esc</value>
+  </data>
+  <data name="Prt" xml:space="preserve">
+    <value>Prt</value>
+  </data>
+  <data name="Del" xml:space="preserve">
+    <value>Del</value>
+  </data>
+  <data name="RCtrl" xml:space="preserve">
+    <value>RCtrl</value>
+  </data>
+  <data name="Brk" xml:space="preserve">
+    <value>Brk</value>
+  </data>
+  <data name="Ins" xml:space="preserve">
+    <value>Ins</value>
+  </data>
+  <data name="NumLk" xml:space="preserve">
+    <value>NumLk</value>
+  </data>
+  <data name="Home" xml:space="preserve">
+    <value>Home</value>
+  </data>
+  <data name="BkSpace" xml:space="preserve">
+    <value>BkSpace</value>
+  </data>
+  <data name="Space" xml:space="preserve">
+    <value>Space</value>
+  </data>
+  <data name="LAlt" xml:space="preserve">
+    <value>LAlt</value>
+  </data>
+  <data name="End" xml:space="preserve">
+    <value>End</value>
+  </data>
+  <data name="LCtrl" xml:space="preserve">
+    <value>LCtrl</value>
+  </data>
+  <data name="RShift" xml:space="preserve">
+    <value>RShift</value>
+  </data>
+  <data name="PgUp" xml:space="preserve">
+    <value>PgUp</value>
+  </data>
+  <data name="Scl" xml:space="preserve">
+    <value>Scl</value>
+  </data>
+  <data name="LWin" xml:space="preserve">
+    <value>LWin</value>
+  </data>
+  <data name="RAlt" xml:space="preserve">
+    <value>RAlt</value>
+  </data>
+  <data name="Enter" xml:space="preserve">
+    <value>Enter</value>
+  </data>
+  <data name="LShift" xml:space="preserve">
+    <value>LShift</value>
+  </data>
+  <data name="RWin" xml:space="preserve">
+    <value>RWin</value>
+  </data>
+  <data name="PgDown" xml:space="preserve">
+    <value>PgDown</value>
+  </data>
+  <data name="Caps" xml:space="preserve">
+    <value>Caps</value>
+  </data>
+  <data name="BindingWin.RightArrowKey" xml:space="preserve">
+    <value>R →</value>
+  </data>
+  <data name="Overview" xml:space="preserve">
+    <value>نمای کلی</value>
+  </data>
+  <data name="General" xml:space="preserve">
+    <value>عمومی</value>
+  </data>
+  <data name="Refresh" xml:space="preserve">
+    <value>بازخوانی</value>
+  </data>
+  <data name="Ping" xml:space="preserve">
+    <value>پینگ</value>
+  </data>
+  <data name="Time" xml:space="preserve">
+    <value>زمان</value>
+  </data>
+  <data name="Data" xml:space="preserve">
+    <value>داده</value>
+  </data>
+  <data name="MainWin.RightClickDisconnectWirelessTip" xml:space="preserve">
+    <value>برای قطع اتصال بی‌سیم راست‌کلیک کن</value>
+  </data>
+  <data name="MainWin.LinkProfileTip" xml:space="preserve">
+    <value>هر بار که این کنترلر فیزیکی دوباره وصل می‌شه، همین پروفایل استفاده بشه.</value>
+  </data>
+  <data name="MainWin.JoyConHoldLabel" xml:space="preserve">
+    <value>حالت نگه‌داشتن جوی-کان</value>
+  </data>
+  <data name="MainWin.IdentifyLabel" xml:space="preserve">
+    <value>شناسایی</value>
+  </data>
+  <data name="MainWin.PingTip" xml:space="preserve">
+    <value>این کنترلر رو می‌لرزونه تا بتونی تشخیص بدی کدومه.</value>
+  </data>
+  <data name="MainWin.LightbarSectionLabel" xml:space="preserve">
+    <value>نوار نور</value>
+  </data>
+  <data name="MainWin.LightbarColorTip" xml:space="preserve">
+    <value>یه رنگ موقت برای نوار نور انتخاب کن</value>
+  </data>
+  <data name="MainWin.YourProfilesTitle" xml:space="preserve">
+    <value>پروفایل‌های تو</value>
+  </data>
+  <data name="MainWin.YourProfilesDesc" xml:space="preserve">
+    <value>یه پروفایل رو برای عملیات‌ها انتخاب کن، یا روی کارتش دابل‌کلیک کن تا ویرایشش کنی.</value>
+  </data>
+  <data name="MainWin.SearchProfilesTip" xml:space="preserve">
+    <value>جستجوی پروفایل‌ها بر اساس نام</value>
+  </data>
+  <data name="MainWin.ClearSearchTip" xml:space="preserve">
+    <value>پاک کردن جستجو</value>
+  </data>
+  <data name="MainWin.ProfileInitial" xml:space="preserve">
+    <value>P</value>
+  </data>
+  <data name="MainWin.ControllerProfileLabel" xml:space="preserve">
+    <value>پروفایل کنترلر</value>
+  </data>
+  <data name="MainWin.NoProfilesYetTitle" xml:space="preserve">
+    <value>هنوز پروفایلی نیست</value>
+  </data>
+  <data name="MainWin.NoProfilesYetDesc" xml:space="preserve">
+    <value>برای شروع، یه پروفایل بساز یا وارد کن.</value>
+  </data>
+  <data name="MainWin.LoadingProfileEditorTitle" xml:space="preserve">
+    <value>در حال بارگذاری ادیتور پروفایل</value>
+  </data>
+  <data name="MainWin.LoadingProfileEditorDesc" xml:space="preserve">
+    <value>در حال اعمال پروفایل و آماده‌سازی کنترل‌هاش...</value>
+  </data>
+  <data name="MainWin.GeneralSectionDesc" xml:space="preserve">
+    <value>اجرای خودکار، اعلان‌ها، شارژ، ظاهر برنامه و رفتار به‌روزرسانی که اکثر کاربرها استفاده می‌کنن.</value>
+  </data>
+  <data name="MainWin.HideDS4ControllerTip" xml:space="preserve">
+    <value>باعث می‌شه بازی‌ها هم کنترلر فیزیکی و هم خروجی مجازیش رو هم‌زمان نبینن. توی نسخه‌های فعلی ویندوز، استفاده از HidHide توصیه می‌شه.</value>
+  </data>
+  <data name="MainWin.ReclaimSteamInputLabel" xml:space="preserve">
+    <value>پس‌گرفتن خودکار کنترلر از Steam Input</value>
+  </data>
+  <data name="MainWin.ReclaimSteamInputTip" xml:space="preserve">
+    <value>کنترلر فیزیکی رو با HidHide مخفی می‌کنه، بعد فقط مجموعه‌ی HID اون رو با خیال راحت ری‌استارت می‌کنه تا Steam هر handle‌ای که قبلاً باز کرده رو آزاد کنه. کنترلر مجازی همچنان در دسترس بازی‌ها می‌مونه.</value>
+  </data>
+  <data name="MainWin.ConfigSwipeProfilesTip" xml:space="preserve">
+    <value>انتخاب کن سوایپ دوانگشتی بین کدوم پروفایل‌ها اجازه‌ی سوییچ داره</value>
+  </data>
+  <data name="MainWin.RunAtStartupTip" xml:space="preserve">
+    <value>انتخاب کن که DS4Windows موقع ورود به ویندوز باز بشه یا نه. اگه راه‌اندازی هنوز کامل نشده، انتخابت ذخیره می‌شه و پیام زیر مرحله‌ی بعدی رو توضیح می‌ده.</value>
+  </data>
+  <data name="MainWin.DisconnectBTStopTip" xml:space="preserve">
+    <value>با متوقف شدن سرویس DS4Windows، کنترلرهای بلوتوثی قطع بشن.</value>
+  </data>
+  <data name="MainWin.StartMinimizedTip" xml:space="preserve">
+    <value>DS4Windows رو بی‌سروصدا باز کن بدون نشون‌دادن پنجره‌ی اصلی.</value>
+  </data>
+  <data name="MainWin.VerboseStartupLoggingLabel" xml:space="preserve">
+    <value>ثبت گزارش کامل (verbose)</value>
+  </data>
+  <data name="MainWin.VerboseStartupLoggingTip" xml:space="preserve">
+    <value>نشانه‌های عیب‌یابی دقیق رو توی لاگ ثبت می‌کنه. بعد از تست، غیرفعالش کن.</value>
+  </data>
+  <data name="MainWin.CheckUpdateStartupTip" xml:space="preserve">
+    <value>به‌صورت دوره‌ای GitHub رو برای نسخه‌ی جدیدتر DS4Windows بررسی کن.</value>
+  </data>
+  <data name="MainWin.AdvancedSettingsHeader" xml:space="preserve">
+    <value>تنظیمات پیشرفته</value>
+  </data>
+  <data name="MainWin.AdvancedSectionDesc" xml:space="preserve">
+    <value>سرورهای شبکه، بازنویسی‌های سازگاری، ثبت دستگاه، عیب‌یابی و ابزارهای نگه‌داری. تنظیمات پیش‌فرض برای اکثر کاربرها بهترینه.</value>
+  </data>
+  <data name="MainWin.SupportDS4WindowsTitle" xml:space="preserve">
+    <value>حمایت از DS4Windows</value>
+  </data>
+  <data name="MainWin.SupportDS4WindowsDesc" xml:space="preserve">
+    <value>به تأمین هزینه‌ی سخت‌افزار کنترلر، تست و توسعه کمک کن.</value>
+  </data>
+  <data name="ViiperSettings.SectionHeader" xml:space="preserve">
+    <value>پشتیبانی کنترلر مجازی VIIPER</value>
+  </data>
+  <data name="ViiperSettings.StatusUnknown" xml:space="preserve">
+    <value>وضعیت VIIPER نامشخص</value>
+  </data>
+  <data name="ViiperSettings.InstallRepairButton" xml:space="preserve">
+    <value>نصب / تعمیر VIIPER</value>
+  </data>
+  <data name="ViiperSettings.RequiredOutputsNote" xml:space="preserve">
+    <value>برای خروجی‌های VIIPER لازمه: DualSense، DualSense Edge، Switch 2 Pro، DS4، Xbox 360 و Xbox One / Series روی USB/IP.</value>
+  </data>
+  <data name="ViiperSettings.PromptMeLabel" xml:space="preserve">
+    <value>وقتی VIIPER نیاز به راه‌اندازی داره بهم اطلاع بده</value>
+  </data>
+  <data name="ViiperSettings.PromptMeTip" xml:space="preserve">
+    <value>برای غیرفعال‌کردن پیام‌های خودکار راه‌اندازی VIIPER، این گزینه رو خاموش کن. نصب/تعمیر و بازخوانی همچنان از همین‌جا در دسترسن.</value>
+  </data>
+  <data name="Switch2Settings.SectionHeader" xml:space="preserve">
+    <value>کنترلرهای بی‌سیم Switch 2</value>
+  </data>
+  <data name="Switch2Settings.SyncInstructions" xml:space="preserve">
+    <value>دکمه‌ی sync کنترلر رو نگه دار تا چراغ‌هاش چشمک بزنه، بعد از پایین انتخابش کن. کنترلرهایی که قبلاً اضافه کردی، با روشن‌شدن دوباره وصل می‌شن.</value>
+  </data>
+  <data name="Switch2Settings.AutoJoyConPairingLabel" xml:space="preserve">
+    <value>جوی-کان‌ها به‌صورت خودکار جفت می‌شن</value>
+  </data>
+  <data name="Switch2Settings.AutoJoyConPairingTip" xml:space="preserve">
+    <value>جوی-کان‌های چپ و راستِ در دسترس رو توی یه کنترلر یکی می‌کنه. یه جوی-کان تنها، همچنان به‌صورت جداگانه کار می‌کنه.</value>
+  </data>
+  <data name="Switch2Settings.DiscoveryStatusDefault" xml:space="preserve">
+    <value>برای بررسی وضعیت شناسایی بلوتوث، بازخوانی کن.</value>
+  </data>
+  <data name="Switch2Settings.AddControllerButton" xml:space="preserve">
+    <value>افزودن کنترلر</value>
+  </data>
+  <data name="Switch2Settings.JoinJoyConsTitle" xml:space="preserve">
+    <value>یکی‌کردن جوی-کان‌ها</value>
+  </data>
+  <data name="Switch2Settings.JoinJoyConsDesc" xml:space="preserve">
+    <value>هر جوی-کان به‌تنهایی کار می‌کنه. برای یکی‌کردن دوتاش، از همین‌جا انتخابشون کن یا از دکمه‌های Link توی تب Controllers استفاده کن.</value>
+  </data>
+  <data name="Switch2Settings.NoUnmatchedJoyCon2" xml:space="preserve">
+    <value>هنوز هیچ اتصال جوی-کان ۲ جفت‌نشده‌ای دیده نشده.</value>
+  </data>
+  <data name="Switch2Settings.LeftJoyCon2Label" xml:space="preserve">
+    <value>جوی-کان ۲ چپ</value>
+  </data>
+  <data name="Switch2Settings.RightJoyCon2Label" xml:space="preserve">
+    <value>جوی-کان ۲ راست</value>
+  </data>
+  <data name="Switch2Settings.JoinSelectedPairButton" xml:space="preserve">
+    <value>یکی‌کردن جفت جوی-کان ۲ انتخاب‌شده</value>
+  </data>
+  <data name="Switch2Settings.UseSelectedLeftButton" xml:space="preserve">
+    <value>استفاده از چپ انتخاب‌شده به‌صورت جداگانه</value>
+  </data>
+  <data name="Switch2Settings.UseSelectedRightButton" xml:space="preserve">
+    <value>استفاده از راست انتخاب‌شده به‌صورت جداگانه</value>
+  </data>
+  <data name="Switch2Settings.UnmatchedJoyCon2Label" xml:space="preserve">
+    <value>جوی-کان ۲ جفت‌نشده</value>
+  </data>
+  <data name="Switch2Settings.ManualLinkInstructions" xml:space="preserve">
+    <value>روی Link یکی از جوی-کان‌ها کلیک کن، بعد روی Link اون یکی. کنترلر اول پروفایل و پد مجازیش رو حفظ می‌کنه.</value>
+  </data>
+  <data name="DsxSettings.SectionHeader" xml:space="preserve">
+    <value>پشتیبانی از مادهای بازی (DSX)</value>
+  </data>
+  <data name="DsxSettings.EnableLabel" xml:space="preserve">
+    <value>به مادهای بازی اجازه بده ماشه‌ها و چراغ‌ها رو کنترل کنن</value>
+  </data>
+  <data name="DsxSettings.Description" xml:space="preserve">
+    <value>برای مادهای بازی سازگار با DSX روی همین PC و یه DualSense یا DualSense Edge. Trigger Lab روی هر ماشه‌ای که فعالش کنی اولویت داره. این گزینه audio haptics رو استریم نمی‌کنه.</value>
+  </data>
+  <data name="DsxSettings.ConnectionDetailsHeader" xml:space="preserve">
+    <value>جزئیات اتصال</value>
+  </data>
+  <data name="DsxSettings.ConnectionDetailsDesc" xml:space="preserve">
+    <value>توی مادت از همین آدرس و درگاه استفاده کن. اکثر مادها از 127.0.0.1 و درگاه 6969 استفاده می‌کنن. اول DSX یا هر listener دیگه‌ای که از این درگاه استفاده می‌کنه رو ببند.</value>
+  </data>
+  <data name="DsxSettings.ThisPcAddressLabel" xml:space="preserve">
+    <value>آدرس این PC</value>
+  </data>
+  <data name="DsxSettings.ApplyRetryButton" xml:space="preserve">
+    <value>اعمال / تلاش دوباره</value>
+  </data>
+
+  <data name="BridgeShell.AppName" xml:space="preserve"><value>DS4Windows</value></data>
+  <data name="BridgeShell.AppTagline" xml:space="preserve"><value>همراه کنترلر</value></data>
+  <data name="BridgeShell.ConnectControllerPrompt" xml:space="preserve"><value>برای شروع، یک کنترلر وصل کنید</value></data>
+  <data name="BridgeShell.NavigationHeader" xml:space="preserve"><value>ناوبری</value></data>
+  <data name="BridgeShell.ProfileEditorTitle" xml:space="preserve"><value>ویرایشگر پروفایل</value></data>
+  <data name="BridgeShell.ProfileBadgeLetter" xml:space="preserve"><value>P</value></data>
+  <data name="BridgeShell.FocusedWorkspace" xml:space="preserve"><value>فضای کاری متمرکز</value></data>
+  <data name="BridgeShell.EditingProfileHeader" xml:space="preserve"><value>در حال ویرایش پروفایل</value></data>
+  <data name="BridgeShell.ProfileWorkspaceHeader" xml:space="preserve"><value>فضای کاری پروفایل</value></data>
+  <data name="BridgeShell.BackToProfiles" xml:space="preserve"><value>بازگشت به پروفایل‌ها</value></data>
+  <data name="BridgeShell.BackToProfilesTip" xml:space="preserve"><value>لغو ویرایش و بازگشت به فهرست پروفایل‌ها</value></data>
+  <data name="BridgeShell.ButtonMapping" xml:space="preserve"><value>نگاشت دکمه‌ها</value></data>
+  <data name="BridgeShell.ButtonMappingTip" xml:space="preserve"><value>دکمه‌ها، استیک‌ها، ژست‌های لمسی و میانبرها</value></data>
+  <data name="BridgeShell.SpecialActionsTip" xml:space="preserve"><value>ماکروها، اجراها، شیفت‌ها و چندعملیاتی‌ها</value></data>
+  <data name="BridgeShell.ControllerReadingsTip" xml:space="preserve"><value>ورودی‌های زنده و کالیبراسیون</value></data>
+  <data name="BridgeShell.AxisConfigTip" xml:space="preserve"><value>استیک‌ها، تریگرها، ناحیه‌ی مرده و منحنی‌ها</value></data>
+  <data name="BridgeShell.LightbarTip" xml:space="preserve"><value>رنگ، باتری، چشمک‌زدن و شارژ</value></data>
+  <data name="BridgeShell.TouchpadTip" xml:space="preserve"><value>ماوس، ژست‌ها، پاس‌ترو و موقعیت‌دهی</value></data>
+  <data name="BridgeShell.GyroTip" xml:space="preserve"><value>هدف‌گیری حرکتی، فرمان‌دهی و سوایپ‌ها</value></data>
+  <data name="BridgeShell.AudioHapticsTip" xml:space="preserve"><value>تبدیل صدای سیستم یا برنامه به لرزش‌های پیشرفته</value></data>
+  <data name="BridgeShell.TriggerLabTip" xml:space="preserve"><value>ساخت جلوه‌های ماندگار تریگر تطبیقی</value></data>
+  <data name="BridgeShell.NintendoOptionsTip" xml:space="preserve"><value>لرزش HD، حرکت، ماوس نوری و کالیبراسیون</value></data>
+  <data name="BridgeShell.AdvancedTip" xml:space="preserve"><value>خروجی، لرزش، تأخیر و سازگاری</value></data>
+  <data name="BridgeShell.LogTip" xml:space="preserve"><value>رویدادهای سرویس بدون خروج از ویرایشگر</value></data>
+
+  <data name="ReadingsControl.LXInput" xml:space="preserve"><value>LX (I): </value></data>
+  <data name="ReadingsControl.LXOutput" xml:space="preserve"><value>LX (O): </value></data>
+  <data name="ReadingsControl.LYInput" xml:space="preserve"><value>LY (I): </value></data>
+  <data name="ReadingsControl.LYOutput" xml:space="preserve"><value>LY (O): </value></data>
+  <data name="ReadingsControl.RXInput" xml:space="preserve"><value>RX (I): </value></data>
+  <data name="ReadingsControl.RXOutput" xml:space="preserve"><value>RX (O): </value></data>
+  <data name="ReadingsControl.RYInput" xml:space="preserve"><value>RY (I): </value></data>
+  <data name="ReadingsControl.RYOutput" xml:space="preserve"><value>RY (O): </value></data>
+  <data name="ReadingsControl.SixAxisXInput" xml:space="preserve"><value>X (I): </value></data>
+  <data name="ReadingsControl.SixAxisXOutput" xml:space="preserve"><value>X (O): </value></data>
+  <data name="ReadingsControl.SixAxisZInput" xml:space="preserve"><value>Z (I): </value></data>
+  <data name="ReadingsControl.SixAxisZOutput" xml:space="preserve"><value>Z (O): </value></data>
+  <data name="ReadingsControl.InputLabel" xml:space="preserve"><value>I: </value></data>
+  <data name="ReadingsControl.OutputLabel" xml:space="preserve"><value>O: </value></data>
+  <data name="ReadingsControl.TouchXLabel" xml:space="preserve"><value>TX: </value></data>
+  <data name="ReadingsControl.TouchYLabel" xml:space="preserve"><value>TY: </value></data>
+
+  <data name="SpecialActionEdit.NameLabel" xml:space="preserve"><value>نام:</value></data>
+  <data name="SpecialActionEdit.TriggerHint" xml:space="preserve"><value>دکمه‌هایی را که این عملیات را شروع می‌کنند انتخاب کنید. چند دکمه باید همزمان نگه‌داشته شوند.</value></data>
+  <data name="SpecialActionEdit.UnloadTriggerHint" xml:space="preserve"><value>دکمه‌هایی را که این عملیات را پایان می‌دهند یا به پروفایل قبلی برمی‌گردانند انتخاب کنید.</value></data>
+  <data name="SpecialActionEdit.LaunchProgramTab" xml:space="preserve"><value>اجرای برنامه</value></data>
+  <data name="SpecialActionEdit.SecsLabel" xml:space="preserve"><value>ثانیه</value></data>
+  <data name="SpecialActionEdit.ArgumentsLabel" xml:space="preserve"><value>آرگومان‌ها</value></data>
+  <data name="SpecialActionEdit.LoadProfileTab" xml:space="preserve"><value>بارگذاری پروفایل</value></data>
+  <data name="SpecialActionEdit.PressKeyTab" xml:space="preserve"><value>فشردن کلید</value></data>
+  <data name="SpecialActionEdit.DisBTTab" xml:space="preserve"><value>قطع بلوتوث</value></data>
+  <data name="SpecialActionEdit.CheckBatteryTab" xml:space="preserve"><value>بررسی باتری</value></data>
+  <data name="SpecialActionEdit.MultiActTab" xml:space="preserve"><value>چندعملیاتی</value></data>
+  <data name="SpecialActionEdit.SixaxisWheelTab" xml:space="preserve"><value>فرمان Sixaxis</value></data>
+
+  <data name="ControllerRegOptWin.AcceptMoonlight" xml:space="preserve"><value>پذیرش کنترلرهای مجازی Moonlight / Sunshine</value></data>
+  <data name="ControllerRegOptWin.AcceptMoonlightTip" xml:space="preserve"><value>هر کنترلر مجازی پشتیبانی‌شده‌ای که هنگام اجرای Sunshine ساخته می‌شود را بپذیر. خروجی‌های VIIPER خود DS4Windows همیشه مستثنا هستند.</value></data>
+  <data name="ControllerRegOptWin.DS4Tab" xml:space="preserve"><value>DS4</value></data>
+  <data name="ControllerRegOptWin.SwitchProTab" xml:space="preserve"><value>Switch Pro</value></data>
+  <data name="ControllerRegOptWin.JoyConTab" xml:space="preserve"><value>JoyCon</value></data>
+
+  <data name="AutoProfiles.DeviceLabel" xml:space="preserve"><value>دستگاه</value></data>
+  <data name="AutoProfiles.WindowTitlePlaceholder" xml:space="preserve"><value>عنوان پنجره...</value></data>
+  <data name="AutoProfiles.SearchTooltip" xml:space="preserve"><value>جستجو بر اساس پروفایل، عنوان پنجره، فایل اجرایی یا مسیر</value></data>
+  <data name="AutoProfiles.DeviceLabelCaps" xml:space="preserve"><value>دستگاه</value></data>
+
+  <data name="About.FakerInputName" xml:space="preserve"><value>FakerInput</value></data>
+  <data name="About.Crc32Name" xml:space="preserve"><value>CRC32</value></data>
+  <data name="About.HNotifyIconName" xml:space="preserve"><value>H.NotifyIcon</value></data>
+  <data name="About.VJoyInterfaceCSName" xml:space="preserve"><value>vJoyInterfaceCS</value></data>
+
+  <data name="MappingLive.AxisPlaceholder" xml:space="preserve"><value>X &#x2014;&#x0a;Y &#x2014;</value></data>
+
+  <data name="Welcome.ViiperInstallHelpText" xml:space="preserve"><value>بک‌اند کنترلر مجازی مورد نیاز. DS4Windows دسترسی مدیر را درخواست می‌کند و VIIPER به‌همراه usbip-win2 را برای شما نصب می‌کند.</value></data>
+
+  <data name="RecordBox.CycleProgramsMenu" xml:space="preserve"><value>چرخش بین برنامه‌ها</value></data>
+  <data name="RecordBox.FromFileMenu" xml:space="preserve"><value>از فایل...</value></data>
+</root>

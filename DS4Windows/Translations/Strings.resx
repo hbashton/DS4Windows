@@ -1490,4 +1490,2254 @@ Please click OK to confirm that you have read the message. Press Cancel to be re
   <data name="InverseMotors" xml:space="preserve">
     <value>Inverse motors</value>
   </data>
+  <data name="About.HeaderLabel" xml:space="preserve">
+    <value>DS4Windows - hbashton Build (Version </value>
+  </data>
+  <data name="About.TabHotkeys" xml:space="preserve">
+    <value>Hotkeys</value>
+  </data>
+  <data name="About.HotkeysText" xml:space="preserve">
+    <value>Use HidHide to Prevent Double Input: Hides the physical controller from games while DS4Windows continues using it, preventing duplicate inputs
+Click left side of touchpad: Left Touch
+Click right side of touchpad: Right Touch
+Click touchpad with 2 fingers: Multitouch
+Click upper part of touchpad: Upper Touch
+PS + Options or hold PS for 10 secs: Disconnect Controller (Only on Bluetooth)
+Touch Touchpad + PS: Turn off touchpad movement (clicking still works)
+Pad click on lower right: Right click (Best used when right side is used as a mouse button)
+Two fingers up/down on touchpad*: Scroll Up/Down
+Tap then hold touchpad*: Left mouse drag
+2 finger touchpad swipe left or right: Cycle through profiles
+Shift Modifer: Hold an action to use another set of controls
+When mapping keyboard and mouse:
+Toggle: The key will remain in a "held down" state until pressed again
+Macro: Assign multiple keys to one input
+Scan Code: Keys are interpreted differently. May be needed for certain games
+*If enabled</value>
+  </data>
+  <data name="About.TabLicense" xml:space="preserve">
+    <value>License</value>
+  </data>
+  <data name="About.TabCredits" xml:space="preserve">
+    <value>Credits</value>
+  </data>
+  <data name="About.SourceLink" xml:space="preserve">
+    <value>Source</value>
+  </data>
+  <data name="About.ContributorsLink" xml:space="preserve">
+    <value>Contributors</value>
+  </data>
+  <data name="About.Translators" xml:space="preserve">
+    <value>Translators:</value>
+  </data>
+  <data name="About.TabExtras" xml:space="preserve">
+    <value>Extras</value>
+  </data>
+  <data name="About.ProjectUrl" xml:space="preserve">
+    <value>Project URL:</value>
+  </data>
+  <data name="About.Description" xml:space="preserve">
+    <value>Description</value>
+  </data>
+  <data name="About.HidHideDesc" xml:space="preserve">
+    <value>Use HidHide to configure and hide any input controllers from other apps running on your system. Some games require only one controller to be present or double input will cause problems in game. Written by nefarius.</value>
+  </data>
+  <data name="About.FakerInputDesc" xml:space="preserve">
+    <value>Use FakerInput driver to expose system-wide virtual keyboard, relative mouse, and absolute mouse. Allows virtual KB+M events to be usable in some situations when SendInput fails. Such situations are elevated process and games, UAC prompts, and anti-cheat systems that block SendInput events. Use of FakerInput is necessary to allow DS4Windows to work with some games with anti-cheat protection like Valorant.</value>
+  </data>
+  <data name="Overview.NoControllerSelected" xml:space="preserve">
+    <value>No controller selected</value>
+  </data>
+  <data name="Overview.NoControllerHint" xml:space="preserve">
+    <value>Connect a controller, then choose it from the device cards in the upper-left corner.</value>
+  </data>
+  <data name="Overview.SelectedControllerLabel" xml:space="preserve">
+    <value>SELECTED CONTROLLER</value>
+  </data>
+  <data name="Overview.ProfileLabel" xml:space="preserve">
+    <value>Profile  </value>
+  </data>
+  <data name="Overview.BatteryLabel" xml:space="preserve">
+    <value>BATTERY</value>
+  </data>
+  <data name="Overview.ConnectionLabel" xml:space="preserve">
+    <value>CONNECTION</value>
+  </data>
+  <data name="Overview.ReportIntervalLabel" xml:space="preserve">
+    <value>Observed input report interval · rate</value>
+  </data>
+  <data name="Overview.ReportIntervalTip" xml:space="preserve">
+    <value>Observed input delivery interval and rate. Joined controllers use their composite report cadence. This is not kernel completion time or end-to-end game latency.</value>
+  </data>
+  <data name="Overview.ActiveProfileLabel" xml:space="preserve">
+    <value>ACTIVE PROFILE</value>
+  </data>
+  <data name="Overview.ActiveProfileHint" xml:space="preserve">
+    <value>Settings below save to this profile</value>
+  </data>
+  <data name="Overview.EmulatedDeviceLabel" xml:space="preserve">
+    <value>EMULATED DEVICE</value>
+  </data>
+  <data name="Overview.EmulatedDeviceHint" xml:space="preserve">
+    <value>Applied through the active profile</value>
+  </data>
+  <data name="Overview.ControllerStatusLabel" xml:space="preserve">
+    <value>CONTROLLER STATUS</value>
+  </data>
+  <data name="Overview.QuickProfileControlsTitle" xml:space="preserve">
+    <value>Quick profile controls</value>
+  </data>
+  <data name="Overview.QuickProfileControlsDesc" xml:space="preserve">
+    <value>Every change is saved to the selected controller's active profile and applied automatically.</value>
+  </data>
+  <data name="Overview.EmulatedControllerTitle" xml:space="preserve">
+    <value>Emulated controller</value>
+  </data>
+  <data name="Overview.EmulatedControllerDesc" xml:space="preserve">
+    <value>The virtual controller presented to games.</value>
+  </data>
+  <data name="Overview.EmulatedControllerNote" xml:space="preserve">
+    <value>Changing this setting saves the profile, then performs one controlled output reload.</value>
+  </data>
+  <data name="Overview.StreamAudioToggle" xml:space="preserve">
+    <value>Stream audio to controller</value>
+  </data>
+  <data name="Overview.StreamAudioTip" xml:space="preserve">
+    <value>Streams the selected audio to the controller. Uses its built-in speaker unless Headset only routes it exclusively to the AUX port.</value>
+  </data>
+  <data name="Overview.HeadsetOnlyToggle" xml:space="preserve">
+    <value>Headset only (mute controller speaker)</value>
+  </data>
+  <data name="Overview.HeadsetOnlyTip" xml:space="preserve">
+    <value>Mutes the built-in speaker while continuing the stream through a headset connected to the controller's AUX port.</value>
+  </data>
+  <data name="Overview.AudioSourceLabel" xml:space="preserve">
+    <value>Audio source</value>
+  </data>
+  <data name="Overview.AudioSourceTip" xml:space="preserve">
+    <value>Default captures the normal endpoint mix. Choose an app to stream only that app.</value>
+  </data>
+  <data name="Overview.RefreshAudioSourcesTip" xml:space="preserve">
+    <value>Refresh running audio sources</value>
+  </data>
+  <data name="Overview.AudioHapticsOverrideNotice" xml:space="preserve">
+    <value>Audio Haptics is supplying this stream. Turn off Play this app through controller to choose another source.</value>
+  </data>
+  <data name="Overview.UsbHeadsetTitle" xml:space="preserve">
+    <value>Use a headset over USB</value>
+  </data>
+  <data name="Overview.UsbHeadsetStep1" xml:space="preserve">
+    <value>Connect your Switch 2 Pro by USB and plug in headphones or a headset. Choose Headphones (Switch 2 Pro Controller) in your game or Windows Sound settings. Adjust the volume there.</value>
+  </data>
+  <data name="Overview.UsbHeadsetStep2" xml:space="preserve">
+    <value>For voice chat, choose Microphone (Switch 2 Pro Controller) and use a headset with a microphone.</value>
+  </data>
+  <data name="Overview.UsbHeadsetNote" xml:space="preserve">
+    <value>Works independently of your virtual controller. Bluetooth headset audio is not supported yet.</value>
+  </data>
+  <data name="Overview.OpenSoundSettingsBtn" xml:space="preserve">
+    <value>Open Windows Sound settings</value>
+  </data>
+  <data name="Overview.OpenSoundSettingsTip" xml:space="preserve">
+    <value>Choose where your game sound and voice chat go.</value>
+  </data>
+  <data name="Overview.OutputLevelsTitle" xml:space="preserve">
+    <value>Output levels</value>
+  </data>
+  <data name="Overview.ControllerSpeakerLabel" xml:space="preserve">
+    <value>Controller speaker</value>
+  </data>
+  <data name="Overview.HeadsetAuxLabel" xml:space="preserve">
+    <value>Headset / AUX</value>
+  </data>
+  <data name="Overview.HeadsetAuxTip" xml:space="preserve">
+    <value>Controls the controller headset jack independently from its built-in speaker.</value>
+  </data>
+  <data name="Overview.SpeakerProcessingTitle" xml:space="preserve">
+    <value>Speaker processing</value>
+  </data>
+  <data name="Overview.DynamicRangeLabel" xml:space="preserve">
+    <value>Dynamic range</value>
+  </data>
+  <data name="Overview.DynamicRangeTip" xml:space="preserve">
+    <value>Raises quiet detail and safely restrains loud effects without look-ahead latency.</value>
+  </data>
+  <data name="Overview.Off" xml:space="preserve">
+    <value>Off</value>
+  </data>
+  <data name="Overview.Balanced" xml:space="preserve">
+    <value>Balanced</value>
+  </data>
+  <data name="Overview.Strong" xml:space="preserve">
+    <value>Strong</value>
+  </data>
+  <data name="Overview.BassBodyLabel" xml:space="preserve">
+    <value>Bass / body</value>
+  </data>
+  <data name="Overview.BassBodyTip" xml:space="preserve">
+    <value>Adds body around 200 Hz while filtering unusable sub-bass.</value>
+  </data>
+  <data name="Overview.MicrophoneTitle" xml:space="preserve">
+    <value>Microphone</value>
+  </data>
+  <data name="Overview.MicrophoneLevelLabel" xml:space="preserve">
+    <value>Microphone level</value>
+  </data>
+  <data name="Overview.NoiseSuppressionLabel" xml:space="preserve">
+    <value>Noise suppression</value>
+  </data>
+  <data name="Overview.NvidiaAI" xml:space="preserve">
+    <value>NVIDIA AI</value>
+  </data>
+  <data name="Overview.QuickActionsTitle" xml:space="preserve">
+    <value>Quick actions</value>
+  </data>
+  <data name="Overview.QuickActionsDesc" xml:space="preserve">
+    <value>Jump into the full editor or manage the selected physical controller.</value>
+  </data>
+  <data name="Overview.EditActiveProfileBtn" xml:space="preserve">
+    <value>Edit active profile</value>
+  </data>
+  <data name="Overview.ControllerDetailsBtn" xml:space="preserve">
+    <value>Controller details</value>
+  </data>
+  <data name="Overview.LightbarControlsBtn" xml:space="preserve">
+    <value>Lightbar controls</value>
+  </data>
+  <data name="Overview.LightbarControlsTip" xml:space="preserve">
+    <value>Use profile lightbar controls or choose a temporary custom color</value>
+  </data>
+  <data name="Overview.DisconnectBtn" xml:space="preserve">
+    <value>Disconnect</value>
+  </data>
+  <data name="AudioHaptics.Enabled" xml:space="preserve">
+    <value>Enabled</value>
+  </data>
+  <data name="AudioHaptics.Title" xml:space="preserve">
+    <value>Audio Haptics</value>
+  </data>
+  <data name="AudioHaptics.Subtitle" xml:space="preserve">
+    <value>Audio-driven controller feedback</value>
+  </data>
+  <data name="AudioHaptics.Low" xml:space="preserve">
+    <value>Low</value>
+  </data>
+  <data name="AudioHaptics.Medium" xml:space="preserve">
+    <value>Medium</value>
+  </data>
+  <data name="AudioHaptics.High" xml:space="preserve">
+    <value>High</value>
+  </data>
+  <data name="AudioHaptics.SourceLabel" xml:space="preserve">
+    <value>SOURCE</value>
+  </data>
+  <data name="AudioHaptics.RefreshSourcesTip" xml:space="preserve">
+    <value>Refresh running audio sessions</value>
+  </data>
+  <data name="AudioHaptics.SourceScopeHelp" xml:space="preserve">
+    <value>System audio uses only Windows' default output, not every Sonar output. Choose an app to follow its audio on any output.</value>
+  </data>
+  <data name="AudioHaptics.AutoFollowGamesTitle" xml:space="preserve">
+    <value>Automatically follow games</value>
+  </data>
+  <data name="AudioHaptics.AutoFollowGamesDesc" xml:space="preserve">
+    <value>Switch to the active game's audio using Windows game records and installed launcher manifests.</value>
+  </data>
+  <data name="AudioHaptics.AutoFollowGamesTip" xml:space="preserve">
+    <value>Follows games recognized by Windows, Steam, Epic, or GOG. The selected app remains the fallback.</value>
+  </data>
+  <data name="AudioHaptics.PlayThroughControllerTitle" xml:space="preserve">
+    <value>Play app through controller</value>
+  </data>
+  <data name="AudioHaptics.PlayThroughControllerDesc" xml:space="preserve">
+    <value>Also stream this selected app to the controller speaker and AUX headset.</value>
+  </data>
+  <data name="AudioHaptics.PlayThroughControllerTip" xml:space="preserve">
+    <value>Overrides Advanced &gt; Controller audio source while enabled. Choosing another source there releases this override.</value>
+  </data>
+  <data name="AudioHaptics.HeadsetOnlyTitle" xml:space="preserve">
+    <value>Headset only</value>
+  </data>
+  <data name="AudioHaptics.HeadsetOnlyDesc" xml:space="preserve">
+    <value>Send the captured app only through the controller AUX port.</value>
+  </data>
+  <data name="AudioHaptics.HeadsetOnlyTip" xml:space="preserve">
+    <value>Routes captured app audio to headphones connected to the controller and mutes the controller speaker.</value>
+  </data>
+  <data name="AudioHaptics.ModeLabel" xml:space="preserve">
+    <value>MODE</value>
+  </data>
+  <data name="AudioHaptics.MixMode" xml:space="preserve">
+    <value>Mix</value>
+  </data>
+  <data name="AudioHaptics.MixModeTip" xml:space="preserve">
+    <value>Add audio-derived feedback to game haptics and rumble.</value>
+  </data>
+  <data name="AudioHaptics.ReplaceMode" xml:space="preserve">
+    <value>Replace</value>
+  </data>
+  <data name="AudioHaptics.ReplaceModeTip" xml:space="preserve">
+    <value>Use only audio-derived feedback.</value>
+  </data>
+  <data name="AudioHaptics.ResponseTitle" xml:space="preserve">
+    <value>Response</value>
+  </data>
+  <data name="AudioHaptics.ResponseSubtitle" xml:space="preserve">
+    <value>Frequency focus and strength</value>
+  </data>
+  <data name="AudioHaptics.BassFocusLabel" xml:space="preserve">
+    <value>Bass Focus</value>
+  </data>
+  <data name="AudioHaptics.BassFocusTip" xml:space="preserve">
+    <value>Choose which low-frequency region becomes vibration.</value>
+  </data>
+  <data name="AudioHaptics.ResponseLabel" xml:space="preserve">
+    <value>Response</value>
+  </data>
+  <data name="AudioHaptics.ResponseTip" xml:space="preserve">
+    <value>Control how strongly haptics react, especially to peaks.</value>
+  </data>
+  <data name="AudioHaptics.Subtle" xml:space="preserve">
+    <value>Subtle</value>
+  </data>
+  <data name="AudioHaptics.Dynamic" xml:space="preserve">
+    <value>Dynamic</value>
+  </data>
+  <data name="AudioHaptics.Aggressive" xml:space="preserve">
+    <value>Aggressive</value>
+  </data>
+  <data name="AudioHaptics.RampLabel" xml:space="preserve">
+    <value>Ramp</value>
+  </data>
+  <data name="AudioHaptics.RampTip" xml:space="preserve">
+    <value>Control how quickly haptics rise with the sound.</value>
+  </data>
+  <data name="AudioHaptics.SlowRamp" xml:space="preserve">
+    <value>Slow Ramp</value>
+  </data>
+  <data name="AudioHaptics.MediumRamp" xml:space="preserve">
+    <value>Medium Ramp</value>
+  </data>
+  <data name="AudioHaptics.FastRamp" xml:space="preserve">
+    <value>Fast Ramp</value>
+  </data>
+  <data name="AudioHaptics.InstantRamp" xml:space="preserve">
+    <value>Instant Ramp</value>
+  </data>
+  <data name="AudioHaptics.FadeLabel" xml:space="preserve">
+    <value>Fade</value>
+  </data>
+  <data name="AudioHaptics.FadeTip" xml:space="preserve">
+    <value>Control how quickly haptics fade after the sound drops.</value>
+  </data>
+  <data name="AudioHaptics.FastFade" xml:space="preserve">
+    <value>Fast Fade</value>
+  </data>
+  <data name="AudioHaptics.MediumFade" xml:space="preserve">
+    <value>Medium Fade</value>
+  </data>
+  <data name="AudioHaptics.SlowFade" xml:space="preserve">
+    <value>Slow Fade</value>
+  </data>
+  <data name="AudioHaptics.LongFade" xml:space="preserve">
+    <value>Long Fade</value>
+  </data>
+  <data name="AudioHaptics.StatusDisabled" xml:space="preserve">
+    <value>Audio Haptics is disabled.</value>
+  </data>
+  <data name="AudioHaptics.SystemAudio" xml:space="preserve">
+    <value>System audio</value>
+  </data>
+  <data name="MappingLive.Title" xml:space="preserve">
+    <value>Live input</value>
+  </data>
+  <data name="MappingLive.Subtitle" xml:space="preserve">
+    <value>Physical controller · before remapping</value>
+  </data>
+  <data name="MappingLive.Waiting" xml:space="preserve">
+    <value>Waiting</value>
+  </data>
+  <data name="MappingLive.LeftStick" xml:space="preserve">
+    <value>L stick</value>
+  </data>
+  <data name="MappingLive.RightStick" xml:space="preserve">
+    <value>R stick</value>
+  </data>
+  <data name="MappingLive.PressedLabel" xml:space="preserve">
+    <value>PRESSED</value>
+  </data>
+  <data name="MappingLive.NoControllerHint" xml:space="preserve">
+    <value>Connect a controller, then reopen this editor.</value>
+  </data>
+  <data name="TriggerLab.OverrideBadge" xml:space="preserve">
+    <value>LAB OVERRIDE</value>
+  </data>
+  <data name="TriggerLab.EffectDesign" xml:space="preserve">
+    <value>Effect design</value>
+  </data>
+  <data name="TriggerLab.Linked" xml:space="preserve">
+    <value>Linked</value>
+  </data>
+  <data name="TriggerLab.LinkedTip" xml:space="preserve">
+    <value>Use one shared effect design for L2 and R2. Presets, modes, and sliders mirror between both sides; each trigger's Active switch remains independent.</value>
+  </data>
+  <data name="TriggerLab.Split" xml:space="preserve">
+    <value>Split</value>
+  </data>
+  <data name="TriggerLab.SplitTip" xml:space="preserve">
+    <value>Configure separate effect designs for L2 and R2. Returning to Split restores your last independent settings, including which trigger was active.</value>
+  </data>
+  <data name="TriggerLab.Enabled" xml:space="preserve">
+    <value>Enabled</value>
+  </data>
+  <data name="TriggerLab.BehaviorNote" xml:space="preserve">
+    <value>Active lab effects override incoming game adaptive-trigger output.</value>
+  </data>
+  <data name="ViiperPrompt.WinTitle" xml:space="preserve">
+    <value>VIIPER virtual controller setup</value>
+  </data>
+  <data name="ViiperPrompt.Close" xml:space="preserve">
+    <value>Close</value>
+  </data>
+  <data name="ViiperPrompt.Heading" xml:space="preserve">
+    <value>VIIPER needs attention</value>
+  </data>
+  <data name="ViiperPrompt.Summary" xml:space="preserve">
+    <value>This profile uses a VIIPER virtual controller output.</value>
+  </data>
+  <data name="ViiperPrompt.RequirementsHeading" xml:space="preserve">
+    <value>What DS4Windows needs</value>
+  </data>
+  <data name="ViiperPrompt.RequirementsText" xml:space="preserve">
+    <value>• VIIPER helper/server
+• usbip-win2 Windows USB/IP driver</value>
+  </data>
+  <data name="ViiperPrompt.CurrentStatus" xml:space="preserve">
+    <value>Current status</value>
+  </data>
+  <data name="ViiperPrompt.ExistingHeading" xml:space="preserve">
+    <value>Competing VIIPER detected</value>
+  </data>
+  <data name="ViiperPrompt.ExistingDescription" xml:space="preserve">
+    <value>This executable will not be elevated or selected. Install or Repair uses the verified Program Files backend and removes only recognized legacy VIIPER files:</value>
+  </data>
+  <data name="ViiperPrompt.SuppressPrompt" xml:space="preserve">
+    <value>Don't show this setup prompt again</value>
+  </data>
+  <data name="ViiperPrompt.SuppressPromptTip" xml:space="preserve">
+    <value>You can turn setup prompts back on from Settings → VIIPER Virtual Controller Support.</value>
+  </data>
+  <data name="ViiperPrompt.PortableWarning" xml:space="preserve">
+    <value>Keep DS4Windows portable leaves this app exactly where it is, while installing the elevated VIIPER backend in protected Program Files. Standard also moves only package-owned DS4Windows files into Program Files. Profiles, settings, and unrecognized files are always preserved.</value>
+  </data>
+  <data name="ViiperPrompt.NotNow" xml:space="preserve">
+    <value>Not now</value>
+  </data>
+  <data name="ViiperPrompt.InstallPortable" xml:space="preserve">
+    <value>Keep DS4Windows portable</value>
+  </data>
+  <data name="ViiperPrompt.InstallStandard" xml:space="preserve">
+    <value>Install standard</value>
+  </data>
+  <data name="ViiperProgress.WinTitle" xml:space="preserve">
+    <value>VIIPER setup</value>
+  </data>
+  <data name="ViiperProgress.Heading" xml:space="preserve">
+    <value>Setting up VIIPER</value>
+  </data>
+  <data name="ViiperProgress.Summary" xml:space="preserve">
+    <value>DS4Windows is verifying the complete controller backend.</value>
+  </data>
+  <data name="ViiperProgress.PreparingPackage" xml:space="preserve">
+    <value>Preparing verified package...</value>
+  </data>
+  <data name="ViiperProgress.StepVerifyFiles" xml:space="preserve">
+    <value>• Verify packaged files</value>
+  </data>
+  <data name="ViiperProgress.StepInstallViiper" xml:space="preserve">
+    <value>• Install VIIPER 0.1.5-rc4.6</value>
+  </data>
+  <data name="ViiperProgress.StepVerifyUsbip" xml:space="preserve">
+    <value>• Verify USB-IP 0.9.7.7</value>
+  </data>
+  <data name="ViiperProgress.StepVerifyStartup" xml:space="preserve">
+    <value>• Verify startup and API</value>
+  </data>
+  <data name="ViiperProgress.DetailText" xml:space="preserve">
+    <value>Keep this window open. Setup will finish automatically.</value>
+  </data>
+  <data name="SwipeEditor.WinTitle" xml:space="preserve">
+    <value>Config Swipe Profiles</value>
+  </data>
+  <data name="SwipeEditor.Instructions" xml:space="preserve">
+    <value>Tick the profiles the two-finger touchpad swipe is allowed to switch between. If nothing is ticked, the swipe cycles through every profile (default behaviour).</value>
+  </data>
+  <data name="SwipeEditor.SelectAll" xml:space="preserve">
+    <value>Select All</value>
+  </data>
+  <data name="SwipeEditor.ClearAll" xml:space="preserve">
+    <value>Clear All</value>
+  </data>
+  <data name="Switch2Calib.WinTitle" xml:space="preserve">
+    <value>Switch 2 stick calibration</value>
+  </data>
+  <data name="Switch2Calib.Heading" xml:space="preserve">
+    <value>Calibrate your sticks</value>
+  </data>
+  <data name="Switch2Calib.ClosingWarning" xml:space="preserve">
+    <value>Closing cancels capture and live activation. A save already writing to disk may still finish; closing does not undo that write.</value>
+  </data>
+  <data name="Switch2Calib.CloseBtn" xml:space="preserve">
+    <value>_Close</value>
+  </data>
+  <data name="Switch2Calib.PhysicalStickLabel" xml:space="preserve">
+    <value>PHYSICAL STICK</value>
+  </data>
+  <data name="Switch2Calib.StartBtn" xml:space="preserve">
+    <value>_Start calibration</value>
+  </data>
+  <data name="Switch2Calib.SaveBtn" xml:space="preserve">
+    <value>Sa_ve calibration</value>
+  </data>
+  <data name="Switch2Calib.CancelBtn" xml:space="preserve">
+    <value>_Cancel capture</value>
+  </data>
+  <data name="Switch2Calib.StorageNote" xml:space="preserve">
+    <value>Calibration is saved on this PC for this physical stick, not in a profile or the controller's memory. USB and Bluetooth records may be separate. Mapped controller input is released while calibration is active.</value>
+  </data>
+  <data name="Switch2Calib.ResetBtn" xml:space="preserve">
+    <value>_Reset this stick's PC calibration…</value>
+  </data>
+  <data name="StickCalib.WinTitle" xml:space="preserve">
+    <value>StickCalibration</value>
+  </data>
+  <data name="StickCalib.Instructions" xml:space="preserve">
+    <value>Please move your stick to the sides and release it a few times, then after you are done press Save.</value>
+  </data>
+  <data name="TouchButton.ActivationMode" xml:space="preserve">
+    <value>Button Activation Mode</value>
+  </data>
+  <!-- ProfileEditor.xaml localization strings -->
+  <data name="SelectPreset" xml:space="preserve">
+    <value>Select Preset</value>
+  </data>
+  <data name="KeepThisWindowSizeAfterClosing" xml:space="preserve">
+    <value>Keep this window size after closing</value>
+  </data>
+  <data name="KeepSize" xml:space="preserve">
+    <value>Keep size</value>
+  </data>
+  <data name="ControllerMap" xml:space="preserve">
+    <value>Controller map</value>
+  </data>
+  <data name="ChooseAControlDirectlyOnTheController" xml:space="preserve">
+    <value>Choose a control directly on the controller.</value>
+  </data>
+  <data name="DualShock4" xml:space="preserve">
+    <value>DualShock 4</value>
+  </data>
+  <data name="DualSense" xml:space="preserve">
+    <value>DualSense</value>
+  </data>
+  <data name="DualSenseEdge" xml:space="preserve">
+    <value>DualSense Edge</value>
+  </data>
+  <data name="Switch2Pro" xml:space="preserve">
+    <value>Switch 2 Pro</value>
+  </data>
+  <data name="JoyConPair" xml:space="preserve">
+    <value>Joy-Con pair</value>
+  </data>
+  <data name="JoyConLUpright" xml:space="preserve">
+    <value>Joy-Con L (upright)</value>
+  </data>
+  <data name="JoyConRUpright" xml:space="preserve">
+    <value>Joy-Con R (upright)</value>
+  </data>
+  <data name="JoyConLSideways" xml:space="preserve">
+    <value>Joy-Con L (sideways)</value>
+  </data>
+  <data name="JoyConRSideways" xml:space="preserve">
+    <value>Joy-Con R (sideways)</value>
+  </data>
+  <data name="DPad" xml:space="preserve">
+    <value>DPad</value>
+  </data>
+  <data name="Inverted" xml:space="preserve">
+    <value>Inverted</value>
+  </data>
+  <data name="InvertedX" xml:space="preserve">
+    <value>Inverted X</value>
+  </data>
+  <data name="InvertedY" xml:space="preserve">
+    <value>Inverted Y</value>
+  </data>
+  <data name="Rotate90Deg" xml:space="preserve">
+    <value>Rotate 90°</value>
+  </data>
+  <data name="RotateNeg90Deg" xml:space="preserve">
+    <value>Rotate -90°</value>
+  </data>
+  <data name="FaceButtons" xml:space="preserve">
+    <value>Face Buttons</value>
+  </data>
+  <data name="WASD" xml:space="preserve">
+    <value>WASD</value>
+  </data>
+  <data name="ArrowKeys" xml:space="preserve">
+    <value>Arrow Keys</value>
+  </data>
+  <data name="Cross" xml:space="preserve">
+    <value>Cross</value>
+  </data>
+  <data name="Circle" xml:space="preserve">
+    <value>Circle</value>
+  </data>
+  <data name="Square" xml:space="preserve">
+    <value>Square</value>
+  </data>
+  <data name="Triangle" xml:space="preserve">
+    <value>Triangle</value>
+  </data>
+  <data name="L1" xml:space="preserve">
+    <value>L1</value>
+  </data>
+  <data name="R1" xml:space="preserve">
+    <value>R1</value>
+  </data>
+  <data name="L2" xml:space="preserve">
+    <value>L2</value>
+  </data>
+  <data name="R2" xml:space="preserve">
+    <value>R2</value>
+  </data>
+  <data name="Share" xml:space="preserve">
+    <value>Share</value>
+  </data>
+  <data name="Options" xml:space="preserve">
+    <value>Options</value>
+  </data>
+  <data name="Guide" xml:space="preserve">
+    <value>Guide</value>
+  </data>
+  <data name="Capture" xml:space="preserve">
+    <value>Capture</value>
+  </data>
+  <data name="C" xml:space="preserve">
+    <value>C</value>
+  </data>
+  <data name="Mute" xml:space="preserve">
+    <value>Mute</value>
+  </data>
+  <data name="FunctionLeft" xml:space="preserve">
+    <value>Function Left</value>
+  </data>
+  <data name="FunctionRight" xml:space="preserve">
+    <value>Function Right</value>
+  </data>
+  <data name="BottomLeftPaddle" xml:space="preserve">
+    <value>Bottom Left Paddle</value>
+  </data>
+  <data name="BottomRightPaddle" xml:space="preserve">
+    <value>Bottom Right Paddle</value>
+  </data>
+  <data name="LeftTouch" xml:space="preserve">
+    <value>Left Touch</value>
+  </data>
+  <data name="MultiTouch" xml:space="preserve">
+    <value>Multi Touch</value>
+  </data>
+  <data name="RightTouch" xml:space="preserve">
+    <value>Right Touch</value>
+  </data>
+  <data name="TopTouch" xml:space="preserve">
+    <value>Top Touch</value>
+  </data>
+  <data name="L3" xml:space="preserve">
+    <value>L3</value>
+  </data>
+  <data name="LSU" xml:space="preserve">
+    <value>LSU</value>
+  </data>
+  <data name="LSR" xml:space="preserve">
+    <value>LSR</value>
+  </data>
+  <data name="LSD" xml:space="preserve">
+    <value>LSD</value>
+  </data>
+  <data name="LSL" xml:space="preserve">
+    <value>LSL</value>
+  </data>
+  <data name="R3" xml:space="preserve">
+    <value>R3</value>
+  </data>
+  <data name="RSU" xml:space="preserve">
+    <value>RSU</value>
+  </data>
+  <data name="RSR" xml:space="preserve">
+    <value>RSR</value>
+  </data>
+  <data name="RSD" xml:space="preserve">
+    <value>RSD</value>
+  </data>
+  <data name="RSL" xml:space="preserve">
+    <value>RSL</value>
+  </data>
+  <data name="Up" xml:space="preserve">
+    <value>Up</value>
+  </data>
+  <data name="Right" xml:space="preserve">
+    <value>Right</value>
+  </data>
+  <data name="Down" xml:space="preserve">
+    <value>Down</value>
+  </data>
+  <data name="Left" xml:space="preserve">
+    <value>Left</value>
+  </data>
+  <data name="TipRightClickSupportedControlsForPresets" xml:space="preserve">
+    <value>Tip: right-click supported controls for presets.</value>
+  </data>
+  <data name="ButtonMappings" xml:space="preserve">
+    <value>Button mappings</value>
+  </data>
+  <data name="DoubleClickARowToChangeItsAction" xml:space="preserve">
+    <value>Double-click a row to change its action.</value>
+  </data>
+  <data name="ShowLivePreview" xml:space="preserve">
+    <value>Show live preview</value>
+  </data>
+  <data name="LISTONLY" xml:space="preserve">
+    <value>LIST ONLY</value>
+  </data>
+  <data name="SpecialActions" xml:space="preserve">
+    <value>Special Actions</value>
+  </data>
+  <data name="L2R2" xml:space="preserve">
+    <value>L2/R2</value>
+  </data>
+  <data name="MadeWithTriggerLab" xml:space="preserve">
+    <value>Made with Trigger Lab</value>
+  </data>
+  <data name="TriggerLabProtectedOverrideDesc" xml:space="preserve">
+    <value>This protected profile effect overrides incoming game adaptive-trigger output. Edit it in Trigger Lab.</value>
+  </data>
+  <data name="PROTECTED" xml:space="preserve">
+    <value>PROTECTED</value>
+  </data>
+  <data name="ControllerReadings" xml:space="preserve">
+    <value>Controller Readings</value>
+  </data>
+  <data name="LS" xml:space="preserve">
+    <value>LS</value>
+  </data>
+  <data name="Force" xml:space="preserve">
+    <value>Force</value>
+  </data>
+  <data name="Units" xml:space="preserve">
+    <value>units</value>
+  </data>
+  <data name="Ms" xml:space="preserve">
+    <value>ms</value>
+  </data>
+  <data name="Invert" xml:space="preserve">
+    <value>Invert</value>
+  </data>
+  <data name="Sec" xml:space="preserve">
+    <value>sec.</value>
+  </data>
+  <data name="ThisButtonIsReservedForCalibrationWhileThe" xml:space="preserve">
+    <value>This button is reserved for calibration while the left stick uses Flick Stick.</value>
+  </data>
+  <data name="SaveTheProfileThenTapTheSelectedButton" xml:space="preserve">
+    <value>Save the profile, then tap the selected button in-game for a 360° mouse-look turn. Active only in Flick Stick mode.</value>
+  </data>
+  <data name="IncreaseRealWorldCalibrationIfTheTurnFalls" xml:space="preserve">
+    <value>Increase Real World Calibration if the turn falls short; decrease it if the turn goes too far. Choose Not assigned to release the button.</value>
+  </data>
+  <data name="RS" xml:space="preserve">
+    <value>RS</value>
+  </data>
+  <data name="Rotation2" xml:space="preserve">
+    <value>Rotation:</value>
+  </data>
+  <data name="ThisButtonIsReservedForCalibrationWhileThe2" xml:space="preserve">
+    <value>This button is reserved for calibration while the right stick uses Flick Stick.</value>
+  </data>
+  <data name="L2R22" xml:space="preserve">
+    <value>L2 &amp; R2</value>
+  </data>
+  <data name="X" xml:space="preserve">
+    <value>X</value>
+  </data>
+  <data name="Z" xml:space="preserve">
+    <value>Z</value>
+  </data>
+  <data name="R" xml:space="preserve">
+    <value>R</value>
+  </data>
+  <data name="G" xml:space="preserve">
+    <value>G</value>
+  </data>
+  <data name="B" xml:space="preserve">
+    <value>B</value>
+  </data>
+  <data name="Empty" xml:space="preserve">
+    <value>Empty</value>
+  </data>
+  <data name="FlashAt" xml:space="preserve">
+    <value>Flash at</value>
+  </data>
+  <data name="PulseAt" xml:space="preserve">
+    <value>Pulse at</value>
+  </data>
+  <data name="WhileCharging" xml:space="preserve">
+    <value>While Charging:</value>
+  </data>
+  <data name="Pulse" xml:space="preserve">
+    <value>Pulse</value>
+  </data>
+  <data name="Rainbow" xml:space="preserve">
+    <value>Rainbow</value>
+  </data>
+  <data name="ColorByBattery" xml:space="preserve">
+    <value>Color by Battery %</value>
+  </data>
+  <data name="SecsCycle" xml:space="preserve">
+    <value>secs/cycle</value>
+  </data>
+  <data name="JitterCompensation" xml:space="preserve">
+    <value>Jitter Compensation</value>
+  </data>
+  <data name="DoubleTap" xml:space="preserve">
+    <value>Double Tap</value>
+  </data>
+  <data name="LowerRightAsRMB" xml:space="preserve">
+    <value>Lower Right as RMB</value>
+  </data>
+  <data name="PassthruClickActionDS4Mode" xml:space="preserve">
+    <value>Passthru Click Action (DS4 mode)</value>
+  </data>
+  <data name="StartWithSlideScrollOff" xml:space="preserve">
+    <value>Start with Slide/Scroll Off</value>
+  </data>
+  <data name="MinThreshold" xml:space="preserve">
+    <value>Min Threshold</value>
+  </data>
+  <data name="Trackball" xml:space="preserve">
+    <value>Trackball</value>
+  </data>
+  <data name="Friction" xml:space="preserve">
+    <value>Friction:</value>
+  </data>
+  <data name="Y" xml:space="preserve">
+    <value>Y</value>
+  </data>
+  <data name="XY" xml:space="preserve">
+    <value>X+Y</value>
+  </data>
+  <data name="DisableInvert" xml:space="preserve">
+    <value>Disable Invert</value>
+  </data>
+  <data name="FingerOnTouchpad" xml:space="preserve">
+    <value>Finger on Touchpad</value>
+  </data>
+  <data name="PS" xml:space="preserve">
+    <value>PS</value>
+  </data>
+  <data name="TouchpadClick" xml:space="preserve">
+    <value>Touchpad Click</value>
+  </data>
+  <data name="SideL" xml:space="preserve">
+    <value>Side L</value>
+  </data>
+  <data name="SideR" xml:space="preserve">
+    <value>Side R</value>
+  </data>
+  <data name="SwipeUp" xml:space="preserve">
+    <value>Swipe Up</value>
+  </data>
+  <data name="SwipeDown" xml:space="preserve">
+    <value>Swipe Down</value>
+  </data>
+  <data name="SwipeLeft" xml:space="preserve">
+    <value>Swipe Left</value>
+  </data>
+  <data name="SwipeRight" xml:space="preserve">
+    <value>Swipe Right</value>
+  </data>
+  <data name="OutputStick" xml:space="preserve">
+    <value>Output Stick</value>
+  </data>
+  <data name="OutputAxes" xml:space="preserve">
+    <value>Output Axes</value>
+  </data>
+  <data name="HorizontalAndVertical" xml:space="preserve">
+    <value>Horizontal and Vertical</value>
+  </data>
+  <data name="HorizontalOnly" xml:space="preserve">
+    <value>Horizontal Only</value>
+  </data>
+  <data name="VerticalOnly" xml:space="preserve">
+    <value>Vertical Only</value>
+  </data>
+  <data name="MinimumX" xml:space="preserve">
+    <value>Minimum X</value>
+  </data>
+  <data name="MinimumY" xml:space="preserve">
+    <value>Minimum Y</value>
+  </data>
+  <data name="InvertX" xml:space="preserve">
+    <value>Invert X</value>
+  </data>
+  <data name="InvertY" xml:space="preserve">
+    <value>Invert Y</value>
+  </data>
+  <data name="Smoothing" xml:space="preserve">
+    <value>Smoothing</value>
+  </data>
+  <data name="SmoothingOptions" xml:space="preserve">
+    <value>Smoothing Options</value>
+  </data>
+  <data name="MaxZoneX" xml:space="preserve">
+    <value>Max Zone X:</value>
+  </data>
+  <data name="MaxZoneY" xml:space="preserve">
+    <value>Max Zone Y:</value>
+  </data>
+  <data name="SnapToCenterOnRelease" xml:space="preserve">
+    <value>Snap To Center on Release:</value>
+  </data>
+  <data name="TiltUp" xml:space="preserve">
+    <value>Tilt Up</value>
+  </data>
+  <data name="TiltDown" xml:space="preserve">
+    <value>Tilt Down</value>
+  </data>
+  <data name="TiltLeft" xml:space="preserve">
+    <value>Tilt Left</value>
+  </data>
+  <data name="TiltRight" xml:space="preserve">
+    <value>Tilt Right</value>
+  </data>
+  <data name="Triggers" xml:space="preserve">
+    <value>Triggers</value>
+  </data>
+  <data name="TurnBehaviorTurnsGyro" xml:space="preserve">
+    <value>Turn Behavior - Turns Gyro</value>
+  </data>
+  <data name="EvalCond" xml:space="preserve">
+    <value>Eval Cond.</value>
+  </data>
+  <data name="And" xml:space="preserve">
+    <value>And</value>
+  </data>
+  <data name="Or" xml:space="preserve">
+    <value>Or</value>
+  </data>
+  <data name="SteeringWheelAxis" xml:space="preserve">
+    <value>Steering wheel axis</value>
+  </data>
+  <data name="LeftXAxis" xml:space="preserve">
+    <value>Left X-Axis</value>
+  </data>
+  <data name="LeftYAxis" xml:space="preserve">
+    <value>Left Y-Axis</value>
+  </data>
+  <data name="RightXAxis" xml:space="preserve">
+    <value>Right X-Axis</value>
+  </data>
+  <data name="RightYAxis" xml:space="preserve">
+    <value>Right Y-Axis</value>
+  </data>
+  <data name="TriggerLRAxis" xml:space="preserve">
+    <value>Trigger L+R Axis</value>
+  </data>
+  <data name="VJoy1XAxis" xml:space="preserve">
+    <value>VJoy1 X-Axis</value>
+  </data>
+  <data name="VJoy1YAxis" xml:space="preserve">
+    <value>VJoy1 Y-Axis</value>
+  </data>
+  <data name="VJoy1ZAxis" xml:space="preserve">
+    <value>VJoy1 Z-Axis</value>
+  </data>
+  <data name="VJoy2XAxis" xml:space="preserve">
+    <value>VJoy2 X-Axis</value>
+  </data>
+  <data name="VJoy2YAxis" xml:space="preserve">
+    <value>VJoy2 Y-Axis</value>
+  </data>
+  <data name="VJoy2ZAxis" xml:space="preserve">
+    <value>VJoy2 Z-Axis</value>
+  </data>
+  <data name="SteeringWheelRange" xml:space="preserve">
+    <value>Steering wheel range</value>
+  </data>
+  <data name="Calibrate" xml:space="preserve">
+    <value>Calibrate</value>
+  </data>
+  <data name="GyroCalibration" xml:space="preserve">
+    <value>Gyro Calibration</value>
+  </data>
+  <data name="GyroSensitivity" xml:space="preserve">
+    <value>Gyro Sensitivity:</value>
+  </data>
+  <data name="XAxis" xml:space="preserve">
+    <value>X Axis</value>
+  </data>
+  <data name="WeightedAverage" xml:space="preserve">
+    <value>Weighted Average</value>
+  </data>
+  <data name="SmoothWeight" xml:space="preserve">
+    <value>Smooth Weight</value>
+  </data>
+  <data name="XAxis2" xml:space="preserve">
+    <value>X-Axis</value>
+  </data>
+  <data name="Weight" xml:space="preserve">
+    <value>Weight</value>
+  </data>
+  <data name="DegSec" xml:space="preserve">
+    <value>deg/sec.</value>
+  </data>
+  <data name="DelayTime" xml:space="preserve">
+    <value>Delay Time</value>
+  </data>
+  <data name="TriggerLab" xml:space="preserve">
+    <value>Trigger Lab</value>
+  </data>
+  <data name="NintendoOptions" xml:space="preserve">
+    <value>Nintendo Options</value>
+  </data>
+  <data name="TheseSettingsAreSavedWithTheProfileAnd" xml:space="preserve">
+    <value>These settings are saved with the profile and apply to controllers that support them.</value>
+  </data>
+  <data name="HowDoYouWantToPlay" xml:space="preserve">
+    <value>How do you want to play?</value>
+  </data>
+  <data name="PointAtMenusAimByTiltingFeelThe" xml:space="preserve">
+    <value>Point at menus. Aim by tilting. Feel the game. Start with what you want to do; fine-tuning is tucked inside each section.</value>
+  </data>
+  <data name="SavedWithThisProfileForAnyControllerFeatures" xml:space="preserve">
+    <value>Saved with this profile for any controller. Features your controller doesn't support have no effect. Desk mouse and motion aiming are separate features.</value>
+  </data>
+  <data name="MouseOnADesk" xml:space="preserve">
+    <value>Mouse on a desk</value>
+  </data>
+  <data name="SlideAJoyConToPointOrAimUseItsStickToScroll" xml:space="preserve">
+    <value>Slide a Joy-Con to point or aim. Use its stick to scroll.</value>
+  </data>
+  <data name="SlideAJoyConToMoveTheMouse" xml:space="preserve">
+    <value>Slide a Joy-Con to move the mouse</value>
+  </data>
+  <data name="MoveAJoyConAcrossASurfaceToControlTheMousePointer" xml:space="preserve">
+    <value>Move a Joy-Con across a surface to control the mouse pointer.</value>
+  </data>
+  <data name="PlaceTheSensorEdgeAgainstADeskOr" xml:space="preserve">
+    <value>Place the sensor edge against a desk or mouse mat, then slide the Joy-Con. Lifting it lets you reposition without moving the pointer.</value>
+  </data>
+  <data name="SlideToAimOrPointAtMenusUse" xml:space="preserve">
+    <value>Slide to aim or point at menus. Use the stick to scroll while the sensor touches the surface.</value>
+  </data>
+  <data name="AssignMouseClicksInButtonMappingForDifferent" xml:space="preserve">
+    <value>Assign mouse clicks in Button Mapping. For different actions only while on the desk, use the matching IR Sensor as the Shift Modifier.</value>
+  </data>
+  <data name="WhichJoyCon" xml:space="preserve">
+    <value>Which Joy-Con:</value>
+  </data>
+  <data name="Automatic" xml:space="preserve">
+    <value>Automatic</value>
+  </data>
+  <data name="Both" xml:space="preserve">
+    <value>Both</value>
+  </data>
+  <data name="StickScroll" xml:space="preserve">
+    <value>Stick scroll:</value>
+  </data>
+  <data name="ChooseWhetherTheStickScrollsVerticallyOnlyOr" xml:space="preserve">
+    <value>Choose whether the stick scrolls vertically only or in all four directions.</value>
+  </data>
+  <data name="UpDown" xml:space="preserve">
+    <value>Up / Down</value>
+  </data>
+  <data name="FourWay" xml:space="preserve">
+    <value>Four-way</value>
+  </data>
+  <data name="LeftSensitivity" xml:space="preserve">
+    <value>Left sensitivity:</value>
+  </data>
+  <data name="RightSensitivity" xml:space="preserve">
+    <value>Right sensitivity:</value>
+  </data>
+  <data name="SurfaceDetection" xml:space="preserve">
+    <value>Surface detection</value>
+  </data>
+  <data name="TryRelaxedIfYourSurfaceIsNotDetected" xml:space="preserve">
+    <value>Try Relaxed if your surface is not detected. These settings also affect surface-triggered button actions and aiming.</value>
+  </data>
+  <data name="LeftSurfaceDetection" xml:space="preserve">
+    <value>Left surface detection:</value>
+  </data>
+  <data name="Strict" xml:space="preserve">
+    <value>Strict</value>
+  </data>
+  <data name="Relaxed" xml:space="preserve">
+    <value>Relaxed</value>
+  </data>
+  <data name="RightSurfaceDetection" xml:space="preserve">
+    <value>Right surface detection:</value>
+  </data>
+  <data name="AimByTilting" xml:space="preserve">
+    <value>Aim by tilting</value>
+  </data>
+  <data name="FineAimWithYourHandsWithOrWithoutAMousePointer" xml:space="preserve">
+    <value>Fine aim with your hands, with or without a mouse pointer.</value>
+  </data>
+  <data name="ChooseWhatTiltingDoes" xml:space="preserve">
+    <value>Choose what tilting does</value>
+  </data>
+  <data name="MappedTiltButtonsNoMouse" xml:space="preserve">
+    <value>Mapped tilt buttons (no mouse)</value>
+  </data>
+  <data name="MousePointer" xml:space="preserve">
+    <value>Mouse pointer</value>
+  </data>
+  <data name="VirtualAimingStick" xml:space="preserve">
+    <value>Virtual aiming stick</value>
+  </data>
+  <data name="QuickTiltActions" xml:space="preserve">
+    <value>Quick-tilt actions</value>
+  </data>
+  <data name="GameSOwnMotionControls" xml:space="preserve">
+    <value>Game's own motion controls</value>
+  </data>
+  <data name="WhenToAim" xml:space="preserve">
+    <value>When to aim:</value>
+  </data>
+  <data name="AlwaysOn" xml:space="preserve">
+    <value>Always on</value>
+  </data>
+  <data name="HoldZLL2" xml:space="preserve">
+    <value>Hold ZL / L2</value>
+  </data>
+  <data name="HoldZRR2" xml:space="preserve">
+    <value>Hold ZR / R2</value>
+  </data>
+  <data name="CustomSeeGyroSettings" xml:space="preserve">
+    <value>Custom — see Gyro settings</value>
+  </data>
+  <data name="TriggerChoicesFollowLayoutDesc" xml:space="preserve">
+    <value>Trigger choices follow your button layout. Custom combinations and toggle-to-aim are available in Gyro settings.</value>
+  </data>
+  <data name="MouseAimingSpeed" xml:space="preserve">
+    <value>Mouse aiming speed:</value>
+  </data>
+  <data name="OpenFullGyroSettings" xml:space="preserve">
+    <value>Open full Gyro settings…</value>
+  </data>
+  <data name="ChooseAimButtonsStickOutputSensitivityAndSmoothing" xml:space="preserve">
+    <value>Choose aim buttons, stick output, sensitivity and smoothing.</value>
+  </data>
+  <data name="FineTuneAiming" xml:space="preserve">
+    <value>Fine-tune aiming</value>
+  </data>
+  <data name="ReduceSidewaysGyroDrift" xml:space="preserve">
+    <value>Reduce sideways gyro drift</value>
+  </data>
+  <data name="HelpReduceSidewaysGyroDriftTurnThisOff" xml:space="preserve">
+    <value>Help reduce sideways gyro drift. Turn this off if nearby electronics affect aiming.</value>
+  </data>
+  <data name="IgnoreTinyGyroMovementsToSteadyAimSet" xml:space="preserve">
+    <value>Ignore tiny gyro movements to steady aim. Set to 0 for maximum sensitivity.</value>
+  </data>
+  <data name="IgnoreSmallMovements" xml:space="preserve">
+    <value>Ignore small movements:</value>
+  </data>
+  <data name="UseTheStickAlongsideGyroAimingToTurn" xml:space="preserve">
+    <value>Use the stick alongside gyro aiming to turn further. Set to 0 to turn this off.</value>
+  </data>
+  <data name="StickAssistedAiming" xml:space="preserve">
+    <value>Stick-assisted aiming:</value>
+  </data>
+  <data name="SmootherMouseMovement" xml:space="preserve">
+    <value>Smoother mouse movement</value>
+  </data>
+  <data name="SmootherMouseMovementTooltip" xml:space="preserve">
+    <value>Make mouse movement smoother between controller updates. This does not speed up the controller itself.</value>
+  </data>
+  <data name="SidewaysMotionSensitivityTooltip" xml:space="preserve">
+    <value>Adjust sideways motion sensitivity in compatible emulators. 1 is the normal level.</value>
+  </data>
+  <data name="EmulatorTurnSensitivity" xml:space="preserve">
+    <value>Emulator turn sensitivity:</value>
+  </data>
+  <data name="KeepMotionAimingLevel" xml:space="preserve">
+    <value>Keep motion aiming level</value>
+  </data>
+  <data name="KeepMotionAimingLevelWhenYouTiltTheController" xml:space="preserve">
+    <value>Keep motion aiming level when you tilt the controller.</value>
+  </data>
+  <data name="PauseAimingWithAButton" xml:space="preserve">
+    <value>Pause aiming with a button</value>
+  </data>
+  <data name="PauseAimingWithButtonTooltip" xml:space="preserve">
+    <value>Pause motion aiming with a button so you can reposition the controller.</value>
+  </data>
+  <data name="HoldToPauseAimingOrPressToToggle" xml:space="preserve">
+    <value>Hold to pause aiming, or press to toggle the pause. The pause clears when you stop using gyro.</value>
+  </data>
+  <data name="AimingSettingsToEdit" xml:space="preserve">
+    <value>Aiming settings to edit:</value>
+  </data>
+  <data name="HoldToLockButtons" xml:space="preserve">
+    <value>Hold-to-lock buttons:</value>
+  </data>
+  <data name="PressToToggleLockButtons" xml:space="preserve">
+    <value>Press-to-toggle lock buttons:</value>
+  </data>
+  <data name="SteadyAimAroundButtonPresses" xml:space="preserve">
+    <value>Steady aim around button presses</value>
+  </data>
+  <data name="SteadyAimAroundButtonsTooltip" xml:space="preserve">
+    <value>Reduce aim movement caused by pressing or releasing buttons.</value>
+  </data>
+  <data name="FineTuneAModeYouHaveAlreadyEnabled" xml:space="preserve">
+    <value>Fine-tune a mode you have already enabled above. These choices do not switch your aiming output.</value>
+  </data>
+  <data name="ActivationSource" xml:space="preserve">
+    <value>activation source:</value>
+  </data>
+  <data name="ButtonsThatSteadyAim" xml:space="preserve">
+    <value>Buttons that steady aim:</value>
+  </data>
+  <data name="AimDeadzone" xml:space="preserve">
+    <value>Deadzone:</value>
+  </data>
+  <data name="PressPause" xml:space="preserve">
+    <value>press pause:</value>
+  </data>
+  <data name="ReleasePause" xml:space="preserve">
+    <value>Release pause:</value>
+  </data>
+  <data name="DeadzoneAfterRelease" xml:space="preserve">
+    <value>deadzone after release:</value>
+  </data>
+  <data name="ButtonsThatSlowAim" xml:space="preserve">
+    <value>Buttons that slow aim:</value>
+  </data>
+  <data name="Dampening" xml:space="preserve">
+    <value>Dampening:</value>
+  </data>
+  <data name="AfterRelease" xml:space="preserve">
+    <value>after release:</value>
+  </data>
+  <data name="SteadyAimingWhenTouchingADesk" xml:space="preserve">
+    <value>Steady aiming when touching a desk</value>
+  </data>
+  <data name="ChooseTheLeftOrRightIRSensorIn" xml:space="preserve">
+    <value>Choose the left or right IR Sensor in the Gyro trigger menu to aim while touching a surface.</value>
+  </data>
+  <data name="PauseAimingAroundButtonPressesIgnoreSmallMovements" xml:space="preserve">
+    <value>Pause aiming around button presses, ignore small movements, or reduce sensitivity while a button is held.</value>
+  </data>
+  <data name="LeftOpticalSensor" xml:space="preserve">
+    <value>Left optical sensor</value>
+  </data>
+  <data name="DeadzoneClickStabilizationButtons" xml:space="preserve">
+    <value>Deadzone / click-stabilization buttons:</value>
+  </data>
+  <data name="DampeningButtons" xml:space="preserve">
+    <value>Dampening buttons:</value>
+  </data>
+  <data name="RightOpticalSensor" xml:space="preserve">
+    <value>Right optical sensor</value>
+  </data>
+  <data name="DualJoyConAiming" xml:space="preserve">
+    <value>Dual Joy-Con aiming</value>
+  </data>
+  <data name="LetYourTwoHandsShareTheAimOrSwitchBetweenThem" xml:space="preserve">
+    <value>Let your two hands share the aim, or switch between them.</value>
+  </data>
+  <data name="AimWithBothJoyConsDJG" xml:space="preserve">
+    <value>Aim with both Joy-Cons (DJG)</value>
+  </data>
+  <data name="LetAJoinedPairShareMotionAimingTurn" xml:space="preserve">
+    <value>Let a joined pair share motion aiming. Turn off to use the normal single motion source.</value>
+  </data>
+  <data name="ChooseWhichHandSuppliesMotionThisDoesNot" xml:space="preserve">
+    <value>Choose which hand supplies motion. This does not pair your Joy-Cons or turn on mouse aiming.</value>
+  </data>
+  <data name="ForMouseOrStickAimingStartWithAim" xml:space="preserve">
+    <value>For mouse or stick aiming, start with Aim by tilting → When to aim: Always on. Choosing a button there adds a separate on/off control; it does not choose a hand.</value>
+  </data>
+  <data name="SetUpMotionAiming" xml:space="preserve">
+    <value>Set up motion aiming…</value>
+  </data>
+  <data name="ChooseHowTheTwoHandsWorkTogether" xml:space="preserve">
+    <value>Choose how the two hands work together</value>
+  </data>
+  <data name="LeadHandSideSwitchingAndPauseButtons" xml:space="preserve">
+    <value>Lead hand, side switching and pause buttons.</value>
+  </data>
+  <data name="Mode2" xml:space="preserve">
+    <value>Mode:</value>
+  </data>
+  <data name="BothHandsSwitchLeadHand" xml:space="preserve">
+    <value>Both hands — switch lead hand</value>
+  </data>
+  <data name="OneHandAtATime" xml:space="preserve">
+    <value>One hand at a time</value>
+  </data>
+  <data name="BothHandsPauseEachSide" xml:space="preserve">
+    <value>Both hands — pause each side</value>
+  </data>
+  <data name="PreferredAimingHand" xml:space="preserve">
+    <value>Preferred aiming hand:</value>
+  </data>
+  <data name="ChooseTheHandThatLeadsYourAimOr" xml:space="preserve">
+    <value>Choose the hand that leads your aim, or combine both when pausing each side separately.</value>
+  </data>
+  <data name="CombineBoth" xml:space="preserve">
+    <value>Combine both</value>
+  </data>
+  <data name="ButtonBehavior" xml:space="preserve">
+    <value>Button behavior:</value>
+  </data>
+  <data name="WhileHeld" xml:space="preserve">
+    <value>While held</value>
+  </data>
+  <data name="PressToToggle" xml:space="preserve">
+    <value>Press to toggle</value>
+  </data>
+  <data name="LeftJoyConButtons" xml:space="preserve">
+    <value>Left Joy-Con buttons</value>
+  </data>
+  <data name="RightJoyConButtons" xml:space="preserve">
+    <value>Right Joy-Con buttons</value>
+  </data>
+  <data name="FeelGameFeedback" xml:space="preserve">
+    <value>Feel game feedback</value>
+  </data>
+  <data name="FeelImpactsTexturesAndTriggerEffectsAsHDRumble" xml:space="preserve">
+    <value>Feel impacts, textures and trigger effects as HD rumble.</value>
+  </data>
+  <data name="AdjustOverallRumbleStrength100IsTheNormal" xml:space="preserve">
+    <value>Adjust overall rumble strength. 100% is the normal level; 0% turns body rumble off.</value>
+  </data>
+  <data name="BodyRumbleStrength" xml:space="preserve">
+    <value>Body rumble strength:</value>
+  </data>
+  <data name="IncludeXboxTriggerRumble" xml:space="preserve">
+    <value>Include Xbox trigger rumble</value>
+  </data>
+  <data name="FeelXboxTriggerVibrationsOnTheMatchingSide" xml:space="preserve">
+    <value>Feel Xbox trigger vibrations on the matching side of your controller. Shares the setting in Advanced.</value>
+  </data>
+  <data name="VaryTriggerRumbleFeel" xml:space="preserve">
+    <value>Vary trigger rumble feel</value>
+  </data>
+  <data name="ChangeTheFeelOfTriggerRumbleAsItsStrengthChanges" xml:space="preserve">
+    <value>Change the feel of trigger rumble as its strength changes.</value>
+  </data>
+  <data name="TriggerRumbleStrength" xml:space="preserve">
+    <value>Trigger rumble strength:</value>
+  </data>
+  <data name="FixedRumbleFeel" xml:space="preserve">
+    <value>Fixed rumble feel:</value>
+  </data>
+  <data name="IncludeDetailedDualSenseVibrations" xml:space="preserve">
+    <value>Include detailed DualSense vibrations</value>
+  </data>
+  <data name="DetailedDualSenseVibrationsTooltip" xml:space="preserve">
+    <value>Turn detailed DualSense vibrations into left and right HD rumble.</value>
+  </data>
+  <data name="IncludeDualSenseTriggerEffects" xml:space="preserve">
+    <value>Include DualSense trigger effects</value>
+  </data>
+  <data name="TurnDualSenseTriggerEffectsIntoVibrationsSwitch2" xml:space="preserve">
+    <value>Turn DualSense trigger effects into vibrations. Switch 2 triggers cannot add physical resistance.</value>
+  </data>
+  <data name="UseXboxStyleBodyRumble" xml:space="preserve">
+    <value>Use Xbox-style body rumble</value>
+  </data>
+  <data name="GiveBodyRumbleAConsistentXboxStyleFeel" xml:space="preserve">
+    <value>Give body rumble a consistent Xbox-style feel instead of following each game's vibration detail.</value>
+  </data>
+  <data name="BodyRumbleFeel" xml:space="preserve">
+    <value>Body rumble feel:</value>
+  </data>
+  <data name="DelayRumbleToMatchDelayedGameAudioLeave" xml:space="preserve">
+    <value>Delay rumble to match delayed game audio. Leave at 0 for the quickest response.</value>
+  </data>
+  <data name="GameRumbleDelay" xml:space="preserve">
+    <value>Game rumble delay:</value>
+  </data>
+  <data name="ListenAndChatThroughYourSwitch2ProSHeadphoneJack" xml:space="preserve">
+    <value>Listen and chat through your Switch 2 Pro's headphone jack.</value>
+  </data>
+  <data name="AudioDirectThroughWindowsDesc" xml:space="preserve">
+    <value>Audio goes directly through Windows. It works independently of your chosen virtual controller; no DS4Windows audio toggle is needed.</value>
+  </data>
+  <data name="USBOnlyBluetoothHeadsetAudioIsNotSupported" xml:space="preserve">
+    <value>USB only. Bluetooth headset audio is not supported yet. A regular AUX cable carries sound out, but cannot test the headset microphone.</value>
+  </data>
+  <data name="GiveButtonsASecondJob" xml:space="preserve">
+    <value>Give buttons a second job</value>
+  </data>
+  <data name="HoldOrToggleAButtonToAccessAnotherSetOfActions" xml:space="preserve">
+    <value>Hold or toggle a button to access another set of actions.</value>
+  </data>
+  <data name="ExampleKeepAButtonSUsualActionThen" xml:space="preserve">
+    <value>Example: keep a button’s usual action, then give it a different job while you hold another button.</value>
+  </data>
+  <data name="ActionSetToEdit" xml:space="preserve">
+    <value>Action set to edit:</value>
+  </data>
+  <data name="PressAButtonToSwitchActions" xml:space="preserve">
+    <value>Press a button to switch actions:</value>
+  </data>
+  <data name="TheShortcutOpensShiftModifierForYouFor" xml:space="preserve">
+    <value>The shortcut opens Shift Modifier for you. For a new second action, Switch 2 Mode Shift is already selected. Existing shift triggers are kept.</value>
+  </data>
+  <data name="EditSecondAction" xml:space="preserve">
+    <value>Edit second action…</value>
+  </data>
+  <data name="OpenButtonMapping" xml:space="preserve">
+    <value>Open Button Mapping</value>
+  </data>
+  <data name="ChooseTheActionInTheWindowThenSave" xml:space="preserve">
+    <value>Choose the action in the window, then save this profile. A shift button is reserved for switching actions, so its normal game action is not sent.</value>
+  </data>
+  <data name="AutomaticSecondActionsOptional" xml:space="preserve">
+    <value>Automatic second actions (optional)</value>
+  </data>
+  <data name="WhenEnabledBelowAimingStartsInSecondActions" xml:space="preserve">
+    <value>When enabled below, aiming starts in second actions. Your hold or toggle buttons switch back to normal actions instead. These options do not enable aiming.</value>
+  </data>
+  <data name="AutomaticallyStartInSecondActionsWhile" xml:space="preserve">
+    <value>Automatically start in second actions while:</value>
+  </data>
+  <data name="MouseAimingIsActive" xml:space="preserve">
+    <value>Mouse aiming is active</value>
+  </data>
+  <data name="StickAimingIsActive" xml:space="preserve">
+    <value>Stick aiming is active</value>
+  </data>
+  <data name="MotionSteering" xml:space="preserve">
+    <value>Motion steering</value>
+  </data>
+  <data name="PointScrollOrTapWithAStick" xml:space="preserve">
+    <value>Point, scroll or tap with a stick</value>
+  </data>
+  <data name="FineTuneMouseButtonSticksDesc" xml:space="preserve">
+    <value>Fine-tune sticks you have assigned to mouse or button actions.</value>
+  </data>
+  <data name="StickScrolling" xml:space="preserve">
+    <value>Stick scrolling</value>
+  </data>
+  <data name="AssignScrollActionsInButtonMappingFirstTap" xml:space="preserve">
+    <value>Assign scroll actions in Button Mapping first. Tap scrolls once; Hold keeps scrolling.</value>
+  </data>
+  <data name="LeftStick2" xml:space="preserve">
+    <value>Left stick:</value>
+  </data>
+  <data name="Hold" xml:space="preserve">
+    <value>Hold</value>
+  </data>
+  <data name="RightStick2" xml:space="preserve">
+    <value>Right stick:</value>
+  </data>
+  <data name="StickButtonActions" xml:space="preserve">
+    <value>Stick button actions</value>
+  </data>
+  <data name="HoldKeepsAnActionPressedTapTriggersIt" xml:space="preserve">
+    <value>Hold keeps an action pressed. Tap triggers it once each time you move the stick into that direction.</value>
+  </data>
+  <data name="LeftStick3" xml:space="preserve">
+    <value>Left stick</value>
+  </data>
+  <data name="RightStick3" xml:space="preserve">
+    <value>Right stick</value>
+  </data>
+  <data name="StickMouseSpeed" xml:space="preserve">
+    <value>Stick mouse speed</value>
+  </data>
+  <data name="AdjustSpeedForSticksMappedToMouseMovement" xml:space="preserve">
+    <value>Adjust speed for sticks mapped to mouse movement. 5 is the normal speed; 0 stops movement.</value>
+  </data>
+  <data name="LayoutBattery" xml:space="preserve">
+    <value>Layout &amp; battery</value>
+  </data>
+  <data name="MatchButtonLabelsDesc" xml:space="preserve">
+    <value>Match your button labels, hold a single Joy-Con sideways, or save battery.</value>
+  </data>
+  <data name="XboxNintendoLabelStyleTooltip" xml:space="preserve">
+    <value>Xbox follows button positions. Nintendo follows the printed A, B, X and Y labels.</value>
+  </data>
+  <data name="FaceButtonLayout" xml:space="preserve">
+    <value>Face-button layout:</value>
+  </data>
+  <data name="Xbox" xml:space="preserve">
+    <value>Xbox</value>
+  </data>
+  <data name="Nintendo" xml:space="preserve">
+    <value>Nintendo</value>
+  </data>
+  <data name="JoyConHoldingStyle" xml:space="preserve">
+    <value>Joy-Con holding style:</value>
+  </data>
+  <data name="ChooseTheStartingOrientationAChoiceMadeOn" xml:space="preserve">
+    <value>Choose the starting orientation. A choice made on the Controllers tab takes priority for that Joy-Con.</value>
+  </data>
+  <data name="Upright" xml:space="preserve">
+    <value>Upright</value>
+  </data>
+  <data name="Sideways" xml:space="preserve">
+    <value>Sideways</value>
+  </data>
+  <data name="AutomaticBluetoothDisconnect" xml:space="preserve">
+    <value>Automatic Bluetooth disconnect</value>
+  </data>
+  <data name="DisconnectAfterInactivityToSaveBatteryOrAfter" xml:space="preserve">
+    <value>Disconnect after inactivity to save battery, or after a set time even while playing.</value>
+  </data>
+  <data name="WhenIdle" xml:space="preserve">
+    <value>When idle</value>
+  </data>
+  <data name="AfterASetTime" xml:space="preserve">
+    <value>After a set time</value>
+  </data>
+  <data name="DisconnectAfter" xml:space="preserve">
+    <value>Disconnect after:</value>
+  </data>
+  <data name="Day" xml:space="preserve">
+    <value>day</value>
+  </data>
+  <data name="Hour" xml:space="preserve">
+    <value>hour</value>
+  </data>
+  <data name="Minute" xml:space="preserve">
+    <value>minute</value>
+  </data>
+  <data name="SetTheDurationToZeroToDisableThe" xml:space="preserve">
+    <value>Set the duration to zero to disable the timer. Until changed here, existing profiles keep their Idle Disconnect setting.</value>
+  </data>
+  <data name="VibrateWhenConnected" xml:space="preserve">
+    <value>Vibrate when connected</value>
+  </data>
+  <data name="PlayAShortVibrationWhenTheControllerIsReady" xml:space="preserve">
+    <value>Play a short vibration when the controller is ready.</value>
+  </data>
+  <data name="CorrectDriftStickRange" xml:space="preserve">
+    <value>Correct drift &amp; stick range</value>
+  </data>
+  <data name="UseGuidedCalibrationIfAStickFeelsOffOrTheAimDrifts" xml:space="preserve">
+    <value>Use guided calibration if a stick feels off or the aim drifts.</value>
+  </data>
+  <data name="StickCalibration2" xml:space="preserve">
+    <value>Stick calibration</value>
+  </data>
+  <data name="FollowTheGuidedStepsToCorrectStickCenters" xml:space="preserve">
+    <value>Follow the guided steps to correct stick centers and range. Factory settings stay unchanged.</value>
+  </data>
+  <data name="CalibrateSticks" xml:space="preserve">
+    <value>Calibrate sticks…</value>
+  </data>
+  <data name="PlaceTheControllerOnAStableSurfaceAnd" xml:space="preserve">
+    <value>Place the controller on a stable surface and leave it still for at least five seconds after starting.</value>
+  </data>
+  <data name="RestartGyroCalibration" xml:space="preserve">
+    <value>Restart gyro calibration</value>
+  </data>
+  <data name="GyroCalibrationTooltip" xml:space="preserve">
+    <value>Correct gyro drift. Keep the controller still for at least five seconds.</value>
+  </data>
+  <data name="SlowlyRotateTheControllerInAFigureEight" xml:space="preserve">
+    <value>Slowly rotate the controller in a figure-eight. Game input pauses during calibration.</value>
+  </data>
+  <data name="CalibrateDriftCorrection" xml:space="preserve">
+    <value>Calibrate drift correction</value>
+  </data>
+  <data name="UseThisIfSidewaysDriftCorrectionFeelsInaccurate" xml:space="preserve">
+    <value>Use this if sideways drift correction feels inaccurate.</value>
+  </data>
+  <data name="Advanced" xml:space="preserve">
+    <value>Advanced</value>
+  </data>
+  <data name="Xbox360" xml:space="preserve">
+    <value>Xbox 360</value>
+  </data>
+  <data name="XboxOneSeries" xml:space="preserve">
+    <value>Xbox One / Series</value>
+  </data>
+  <data name="A" xml:space="preserve">
+    <value>A</value>
+  </data>
+  <data name="NintendoFaceLayout" xml:space="preserve">
+    <value>Nintendo face layout</value>
+  </data>
+  <data name="PlusMinusHomeCaptureLRZLZR" xml:space="preserve">
+    <value>Plus, Minus, Home, Capture, L/R, ZL/ZR</value>
+  </data>
+  <data name="Debouncing" xml:space="preserve">
+    <value>Debouncing</value>
+  </data>
+  <data name="TranslateXboxImpulseTriggerVibration" xml:space="preserve">
+    <value>Translate Xbox impulse-trigger vibration</value>
+  </data>
+  <data name="FeelXboxTriggerVibrationsThroughYourControllerS" xml:space="preserve">
+    <value>Feel Xbox trigger vibrations through your controller's triggers or rumble motors. Works independently of Trigger Lab.</value>
+  </data>
+  <data name="SendImpulseVibrationToAdaptiveTriggers" xml:space="preserve">
+    <value>Send impulse vibration to adaptive triggers</value>
+  </data>
+  <data name="DualSenseAndEdgeUseAdaptiveTriggersForXbox" xml:space="preserve">
+    <value>DualSense and Edge: use adaptive triggers for Xbox impulse vibration. Turn off to use body rumble. Requires impulse translation above.</value>
+  </data>
+  <data name="PlayStationControllerFeatures" xml:space="preserve">
+    <value>PlayStation controller features</value>
+  </data>
+  <data name="DualSenseHaptics" xml:space="preserve">
+    <value>DualSense haptics</value>
+  </data>
+  <data name="MutesTheBuiltInSpeakerWhileContinuingThe" xml:space="preserve">
+    <value>Mutes the built-in speaker while continuing the same stream through a headset connected to the controller's AUX port.</value>
+  </data>
+  <data name="MuteControllerSpeakerWithMuteButton" xml:space="preserve">
+    <value>Mute controller speaker with mute button</value>
+  </data>
+  <data name="WhenMuteButtonMutesInputOutputIsEnabled" xml:space="preserve">
+    <value>When Mute Button Mutes Input/Output is enabled, a lit mute LED turns off controller-speaker output. The setting has no effect while the master toggle is off.</value>
+  </data>
+  <data name="AudioSource" xml:space="preserve">
+    <value>Audio source:</value>
+  </data>
+  <data name="ForGameAudioSelectTheVirtualWirelessController" xml:space="preserve">
+    <value>For game audio, select the virtual Wireless Controller endpoint created by a VIIPER PlayStation output. The first stereo pair is mirrored to the physical controller speaker.</value>
+  </data>
+  <data name="AudioHapticsIsCurrentlySupplyingTheSelectedApp" xml:space="preserve">
+    <value>Audio Haptics is currently supplying the selected app to this controller. Choose another Audio source here to release that override.</value>
+  </data>
+  <data name="USBDualSenseSpeaker" xml:space="preserve">
+    <value>USB DualSense speaker:</value>
+  </data>
+  <data name="OnlyUsedForAPhysicalUSBDualSenseBluetooth" xml:space="preserve">
+    <value>Only used for a physical USB DualSense. Bluetooth controllers stream audio directly to the controller.</value>
+  </data>
+  <data name="SpeakerVolume" xml:space="preserve">
+    <value>Speaker volume:</value>
+  </data>
+  <data name="DynamicRange" xml:space="preserve">
+    <value>Dynamic range:</value>
+  </data>
+  <data name="BluetoothSpeakerProcessingTooltip" xml:space="preserve">
+    <value>Bluetooth speaker processing. Balanced raises quieter details and restrains loud effects. Strong narrows the range further. Processing is applied before native encoding (Opus on DualSense, SBC on DualShock 4) without look-ahead latency.</value>
+  </data>
+  <data name="BassBodyBoost" xml:space="preserve">
+    <value>Bass/body boost:</value>
+  </data>
+  <data name="AddsUpTo6DBAround200Hz" xml:space="preserve">
+    <value>Adds up to 6 dB around 200 Hz while filtering unusable sub-bass. Applies only to the Bluetooth controller speaker stream.</value>
+  </data>
+  <data name="MuteControllerMicrophoneWithMuteButton" xml:space="preserve">
+    <value>Mute controller microphone with mute button</value>
+  </data>
+  <data name="WhenMuteButtonMutesInputOutputIsEnabled2" xml:space="preserve">
+    <value>When Mute Button Mutes Input/Output is enabled, a lit mute LED turns off controller-microphone input. The setting has no effect while the master toggle is off.</value>
+  </data>
+  <data name="MicrophoneLevel" xml:space="preserve">
+    <value>Microphone level:</value>
+  </data>
+  <data name="AdjustsThePhysicalMicrophoneLevelAndTheSafely" xml:space="preserve">
+    <value>Adjusts the physical microphone level and the safely trimmed signal exposed to Windows.</value>
+  </data>
+  <data name="NoiseSuppression" xml:space="preserve">
+    <value>Noise suppression:</value>
+  </data>
+  <data name="MicNoiseProcessingTooltip" xml:space="preserve">
+    <value>Balanced applies RNNoise speech cleanup. Strong also reduces low-level residual noise. Off retains only gain, high-pass, and clipping protection.</value>
+  </data>
+  <data name="AdvancedAudio" xml:space="preserve">
+    <value>Advanced audio</value>
+  </data>
+  <data name="HeadsetAUXVolume" xml:space="preserve">
+    <value>Headset / AUX volume:</value>
+  </data>
+  <data name="HeadsetJackVolumeTooltip" xml:space="preserve">
+    <value>Controls the headset jack independently from the controller speaker. DualShock 4 maps the full slider range to Sony's documented 0-80 headset gain.</value>
+  </data>
+  <data name="MicRoutingDesc" xml:space="preserve">
+    <value>USB/legacy microphone routing captures the physical Windows controller-mic endpoint and sends it to a virtual audio render device such as VB-CABLE Input. Bluetooth VIIPER microphone routing does not need these endpoints.</value>
+  </data>
+  <data name="ControllerMic" xml:space="preserve">
+    <value>Controller mic:</value>
+  </data>
+  <data name="VirtualOutput" xml:space="preserve">
+    <value>Virtual output:</value>
+  </data>
+  <data name="DualSenseMuteButton" xml:space="preserve">
+    <value>DualSense mute button</value>
+  </data>
+  <data name="MuteButtonMutesInputOutput" xml:space="preserve">
+    <value>Mute Button Mutes Input/Output</value>
+  </data>
+  <data name="UsesTheControllerMuteButtonAsAMaster" xml:space="preserve">
+    <value>Uses the controller mute button as a master for the speaker and microphone targets selected above. The mute LED is on while those targets are muted and off while they are live.</value>
+  </data>
+  <data name="EnableMuteButtonLight" xml:space="preserve">
+    <value>Enable mute button light</value>
+  </data>
+  <data name="MirrorsThePhysicalDualSenseMuteButtonStateTo" xml:space="preserve">
+    <value>Mirrors the physical DualSense mute button state to the controller mute LED while this profile is active. This only controls the light, not Windows microphone routing.</value>
+  </data>
+  <data name="MuteButtonSwitchesProfiles" xml:space="preserve">
+    <value>Mute button switches profiles</value>
+  </data>
+  <data name="SwitchesBetweenTheSelectedProfilesWhenMuteChanges" xml:space="preserve">
+    <value>Switches between the selected profiles when mute changes. Enabling Mute Button Mutes Input/Output turns this option off and greys it out without erasing the saved profile choices.</value>
+  </data>
+  <data name="MuteOnProfile" xml:space="preserve">
+    <value>Mute on profile:</value>
+  </data>
+  <data name="OptionalSwitchToThisProfileWhenThePhysical" xml:space="preserve">
+    <value>Optional. Switch to this profile when the physical DualSense mute button toggles on.</value>
+  </data>
+  <data name="LeaveBlankToAvoidChangingProfilesWhenMuteTurnsOn" xml:space="preserve">
+    <value>Leave blank to avoid changing profiles when mute turns on.</value>
+  </data>
+  <data name="MuteOffProfile" xml:space="preserve">
+    <value>Mute off profile:</value>
+  </data>
+  <data name="OptionalSwitchToThisProfileWhenThePhysical2" xml:space="preserve">
+    <value>Optional. Switch to this profile when the physical DualSense mute button toggles off.</value>
+  </data>
+  <data name="LeaveBlankToAvoidChangingProfilesWhenMuteTurnsOff" xml:space="preserve">
+    <value>Leave blank to avoid changing profiles when mute turns off.</value>
+  </data>
+  <data name="ForReadout" xml:space="preserve">
+    <value>for readout</value>
+  </data>
+  <data name="GameBar" xml:space="preserve">
+    <value>Game Bar</value>
+  </data>
+  <data name="EnableGameBarControllerCompatibility" xml:space="preserve">
+    <value>Enable Game Bar controller compatibility</value>
+  </data>
+  <data name="WhileXboxGameBarIsVisibleTemporarilyRoute" xml:space="preserve">
+    <value>While Xbox Game Bar is visible, temporarily route this profile's mapped input through an Xbox-compatible controller. The selected profile and native DualSense output stay configured.</value>
+  </data>
+  <data name="KeepsThisProfileAndItsNativeOutputActive" xml:space="preserve">
+    <value>Keeps this profile and its native output active. Only mapped input is temporarily sent through an Xbox-compatible companion while Game Bar is open; audio, haptics, lighting, and microphone routing stay untouched.</value>
+  </data>
+  <data name="Mins" xml:space="preserve">
+    <value>mins</value>
+  </data>
+  <data name="Max1Ms" xml:space="preserve">
+    <value>Max (1 ms)</value>
+  </data>
+  <data name="BindingWin.ShowLivePreview" xml:space="preserve">
+    <value>Show live preview</value>
+  </data>
+  <data name="BindingWin.LivePreviewTooltip" xml:space="preserve">
+    <value>See what your controller is sending while you choose an action.</value>
+  </data>
+  <data name="UpperTouch" xml:space="preserve">
+    <value>Upper Touch</value>
+  </data>
+  <data name="SixaxisUp" xml:space="preserve">
+    <value>Sixaxis Up</value>
+  </data>
+  <data name="SixaxisDown" xml:space="preserve">
+    <value>Sixaxis Down</value>
+  </data>
+  <data name="SixaxisLeft" xml:space="preserve">
+    <value>Sixaxis Left</value>
+  </data>
+  <data name="SixaxisRight" xml:space="preserve">
+    <value>Sixaxis Right</value>
+  </data>
+  <data name="DSEFunctionLeft" xml:space="preserve">
+    <value>DSE Function Left</value>
+  </data>
+  <data name="DSEFunctionRight" xml:space="preserve">
+    <value>DSE Function Right</value>
+  </data>
+  <data name="DSELeftPaddle" xml:space="preserve">
+    <value>DSE Left Paddle</value>
+  </data>
+  <data name="DSERightPaddle" xml:space="preserve">
+    <value>DSE Right Paddle</value>
+  </data>
+  <data name="Switch2JoyConLeftIRSensor" xml:space="preserve">
+    <value>Switch 2 Joy-Con Left IR Sensor</value>
+  </data>
+  <data name="Switch2JoyConRightIRSensor" xml:space="preserve">
+    <value>Switch 2 Joy-Con Right IR Sensor</value>
+  </data>
+  <data name="Switch2ModeShift" xml:space="preserve">
+    <value>Switch 2 Mode Shift</value>
+  </data>
+  <data name="Switch2JoyConLeftSL" xml:space="preserve">
+    <value>Switch 2 Joy-Con Left SL</value>
+  </data>
+  <data name="Switch2JoyConLeftSR" xml:space="preserve">
+    <value>Switch 2 Joy-Con Left SR</value>
+  </data>
+  <data name="Switch2JoyConRightSL" xml:space="preserve">
+    <value>Switch 2 Joy-Con Right SL</value>
+  </data>
+  <data name="Switch2JoyConRightSR" xml:space="preserve">
+    <value>Switch 2 Joy-Con Right SR</value>
+  </data>
+  <data name="Switch2CChat" xml:space="preserve">
+    <value>Switch 2 C / Chat</value>
+  </data>
+  <data name="D" xml:space="preserve">
+    <value>D</value>
+  </data>
+  <data name="E" xml:space="preserve">
+    <value>E</value>
+  </data>
+  <data name="F" xml:space="preserve">
+    <value>F</value>
+  </data>
+  <data name="H" xml:space="preserve">
+    <value>H</value>
+  </data>
+  <data name="I" xml:space="preserve">
+    <value>I</value>
+  </data>
+  <data name="J" xml:space="preserve">
+    <value>J</value>
+  </data>
+  <data name="K" xml:space="preserve">
+    <value>K</value>
+  </data>
+  <data name="L" xml:space="preserve">
+    <value>L</value>
+  </data>
+  <data name="M" xml:space="preserve">
+    <value>M</value>
+  </data>
+  <data name="N" xml:space="preserve">
+    <value>N</value>
+  </data>
+  <data name="O" xml:space="preserve">
+    <value>O</value>
+  </data>
+  <data name="P" xml:space="preserve">
+    <value>P</value>
+  </data>
+  <data name="Q" xml:space="preserve">
+    <value>Q</value>
+  </data>
+  <data name="S" xml:space="preserve">
+    <value>S</value>
+  </data>
+  <data name="T" xml:space="preserve">
+    <value>T</value>
+  </data>
+  <data name="U" xml:space="preserve">
+    <value>U</value>
+  </data>
+  <data name="V" xml:space="preserve">
+    <value>V</value>
+  </data>
+  <data name="W" xml:space="preserve">
+    <value>W</value>
+  </data>
+  <data name="F1" xml:space="preserve">
+    <value>F1</value>
+  </data>
+  <data name="F2" xml:space="preserve">
+    <value>F2</value>
+  </data>
+  <data name="F3" xml:space="preserve">
+    <value>F3</value>
+  </data>
+  <data name="F4" xml:space="preserve">
+    <value>F4</value>
+  </data>
+  <data name="F5" xml:space="preserve">
+    <value>F5</value>
+  </data>
+  <data name="F6" xml:space="preserve">
+    <value>F6</value>
+  </data>
+  <data name="F7" xml:space="preserve">
+    <value>F7</value>
+  </data>
+  <data name="F8" xml:space="preserve">
+    <value>F8</value>
+  </data>
+  <data name="F9" xml:space="preserve">
+    <value>F9</value>
+  </data>
+  <data name="F10" xml:space="preserve">
+    <value>F10</value>
+  </data>
+  <data name="F11" xml:space="preserve">
+    <value>F11</value>
+  </data>
+  <data name="F12" xml:space="preserve">
+    <value>F12</value>
+  </data>
+  <data name="Tab" xml:space="preserve">
+    <value>Tab</value>
+  </data>
+  <data name="Esc" xml:space="preserve">
+    <value>Esc</value>
+  </data>
+  <data name="Prt" xml:space="preserve">
+    <value>Prt</value>
+  </data>
+  <data name="Del" xml:space="preserve">
+    <value>Del</value>
+  </data>
+  <data name="RCtrl" xml:space="preserve">
+    <value>RCtrl</value>
+  </data>
+  <data name="Brk" xml:space="preserve">
+    <value>Brk</value>
+  </data>
+  <data name="Ins" xml:space="preserve">
+    <value>Ins</value>
+  </data>
+  <data name="NumLk" xml:space="preserve">
+    <value>NumLk</value>
+  </data>
+  <data name="Home" xml:space="preserve">
+    <value>Home</value>
+  </data>
+  <data name="BkSpace" xml:space="preserve">
+    <value>BkSpace</value>
+  </data>
+  <data name="Space" xml:space="preserve">
+    <value>Space</value>
+  </data>
+  <data name="LAlt" xml:space="preserve">
+    <value>LAlt</value>
+  </data>
+  <data name="End" xml:space="preserve">
+    <value>End</value>
+  </data>
+  <data name="LCtrl" xml:space="preserve">
+    <value>LCtrl</value>
+  </data>
+  <data name="RShift" xml:space="preserve">
+    <value>RShift</value>
+  </data>
+  <data name="PgUp" xml:space="preserve">
+    <value>PgUp</value>
+  </data>
+  <data name="Scl" xml:space="preserve">
+    <value>Scl</value>
+  </data>
+  <data name="LWin" xml:space="preserve">
+    <value>LWin</value>
+  </data>
+  <data name="RAlt" xml:space="preserve">
+    <value>RAlt</value>
+  </data>
+  <data name="Enter" xml:space="preserve">
+    <value>Enter</value>
+  </data>
+  <data name="LShift" xml:space="preserve">
+    <value>LShift</value>
+  </data>
+  <data name="RWin" xml:space="preserve">
+    <value>RWin</value>
+  </data>
+  <data name="PgDown" xml:space="preserve">
+    <value>PgDown</value>
+  </data>
+  <data name="Caps" xml:space="preserve">
+    <value>Caps</value>
+  </data>
+  <data name="BindingWin.RightArrowKey" xml:space="preserve">
+    <value>R →</value>
+  </data>
+  <data name="Overview" xml:space="preserve">
+    <value>Overview</value>
+  </data>
+  <data name="General" xml:space="preserve">
+    <value>General</value>
+  </data>
+  <data name="Refresh" xml:space="preserve">
+    <value>Refresh</value>
+  </data>
+  <data name="Ping" xml:space="preserve">
+    <value>Ping</value>
+  </data>
+  <data name="Time" xml:space="preserve">
+    <value>Time</value>
+  </data>
+  <data name="Data" xml:space="preserve">
+    <value>Data</value>
+  </data>
+  <data name="MainWin.RightClickDisconnectWirelessTip" xml:space="preserve">
+    <value>Right click to disconnect wireless</value>
+  </data>
+  <data name="MainWin.LinkProfileTip" xml:space="preserve">
+    <value>Use the same profile whenever this physical controller reconnects.</value>
+  </data>
+  <data name="MainWin.JoyConHoldLabel" xml:space="preserve">
+    <value>JOY-CON HOLD</value>
+  </data>
+  <data name="MainWin.IdentifyLabel" xml:space="preserve">
+    <value>IDENTIFY</value>
+  </data>
+  <data name="MainWin.PingTip" xml:space="preserve">
+    <value>Vibrate this controller so you can tell which one it is.</value>
+  </data>
+  <data name="MainWin.LightbarSectionLabel" xml:space="preserve">
+    <value>LIGHTBAR</value>
+  </data>
+  <data name="MainWin.LightbarColorTip" xml:space="preserve">
+    <value>Choose a temporary lightbar color</value>
+  </data>
+  <data name="MainWin.YourProfilesTitle" xml:space="preserve">
+    <value>Your profiles</value>
+  </data>
+  <data name="MainWin.YourProfilesDesc" xml:space="preserve">
+    <value>Select a profile for actions, or double-click a card to edit it.</value>
+  </data>
+  <data name="MainWin.SearchProfilesTip" xml:space="preserve">
+    <value>Search profiles by name</value>
+  </data>
+  <data name="MainWin.ClearSearchTip" xml:space="preserve">
+    <value>Clear search</value>
+  </data>
+  <data name="MainWin.ProfileInitial" xml:space="preserve">
+    <value>P</value>
+  </data>
+  <data name="MainWin.ControllerProfileLabel" xml:space="preserve">
+    <value>Controller profile</value>
+  </data>
+  <data name="MainWin.NoProfilesYetTitle" xml:space="preserve">
+    <value>No profiles yet</value>
+  </data>
+  <data name="MainWin.NoProfilesYetDesc" xml:space="preserve">
+    <value>Create or import a profile to get started.</value>
+  </data>
+  <data name="MainWin.LoadingProfileEditorTitle" xml:space="preserve">
+    <value>Loading profile editor</value>
+  </data>
+  <data name="MainWin.LoadingProfileEditorDesc" xml:space="preserve">
+    <value>Applying the profile and preparing its controls...</value>
+  </data>
+  <data name="MainWin.GeneralSectionDesc" xml:space="preserve">
+    <value>Startup, notifications, charging, appearance, and update behavior used by most players.</value>
+  </data>
+  <data name="MainWin.HideDS4ControllerTip" xml:space="preserve">
+    <value>Prevents games from seeing both the physical controller and its virtual output. HidHide is recommended on current Windows versions.</value>
+  </data>
+  <data name="MainWin.ReclaimSteamInputLabel" xml:space="preserve">
+    <value>Reclaim controller from Steam Input automatically</value>
+  </data>
+  <data name="MainWin.ReclaimSteamInputTip" xml:space="preserve">
+    <value>Cloaks the physical controller with HidHide, then safely restarts only its HID collection so Steam releases any handle it opened first. The virtual controller remains available to games.</value>
+  </data>
+  <data name="MainWin.ConfigSwipeProfilesTip" xml:space="preserve">
+    <value>Choose which profiles the two-finger swipe is allowed to switch between</value>
+  </data>
+  <data name="MainWin.RunAtStartupTip" xml:space="preserve">
+    <value>Choose whether DS4Windows should open when you sign in to Windows. If setup is pending, your choice is saved and the message below explains the next step.</value>
+  </data>
+  <data name="MainWin.DisconnectBTStopTip" xml:space="preserve">
+    <value>Disconnect Bluetooth controllers when the DS4Windows service is stopped.</value>
+  </data>
+  <data name="MainWin.StartMinimizedTip" xml:space="preserve">
+    <value>Open DS4Windows quietly without showing the main window.</value>
+  </data>
+  <data name="MainWin.VerboseStartupLoggingLabel" xml:space="preserve">
+    <value>Verbose logging</value>
+  </data>
+  <data name="MainWin.VerboseStartupLoggingTip" xml:space="preserve">
+    <value>Writes detailed diagnostic markers to the log. Disable after testing.</value>
+  </data>
+  <data name="MainWin.CheckUpdateStartupTip" xml:space="preserve">
+    <value>Periodically check GitHub for a newer DS4Windows release.</value>
+  </data>
+  <data name="MainWin.AdvancedSettingsHeader" xml:space="preserve">
+    <value>Advanced settings</value>
+  </data>
+  <data name="MainWin.AdvancedSectionDesc" xml:space="preserve">
+    <value>Network servers, compatibility overrides, device registration, diagnostics, and maintenance tools. Defaults are best for most users.</value>
+  </data>
+  <data name="MainWin.SupportDS4WindowsTitle" xml:space="preserve">
+    <value>Support DS4Windows</value>
+  </data>
+  <data name="MainWin.SupportDS4WindowsDesc" xml:space="preserve">
+    <value>Help fund controller hardware, testing, and development.</value>
+  </data>
+  <data name="ViiperSettings.SectionHeader" xml:space="preserve">
+    <value>VIIPER Virtual Controller Support</value>
+  </data>
+  <data name="ViiperSettings.StatusUnknown" xml:space="preserve">
+    <value>VIIPER status unknown</value>
+  </data>
+  <data name="ViiperSettings.InstallRepairButton" xml:space="preserve">
+    <value>Install / Repair VIIPER</value>
+  </data>
+  <data name="ViiperSettings.RequiredOutputsNote" xml:space="preserve">
+    <value>Required for VIIPER outputs: DualSense, DualSense Edge, Switch 2 Pro, DS4, Xbox 360, and Xbox One / Series over USB/IP.</value>
+  </data>
+  <data name="ViiperSettings.PromptMeLabel" xml:space="preserve">
+    <value>Prompt me when VIIPER needs setup</value>
+  </data>
+  <data name="ViiperSettings.PromptMeTip" xml:space="preserve">
+    <value>Turn this off to suppress automatic VIIPER setup prompts. Install / Repair and Refresh remain available here.</value>
+  </data>
+  <data name="Switch2Settings.SectionHeader" xml:space="preserve">
+    <value>Switch 2 wireless controllers</value>
+  </data>
+  <data name="Switch2Settings.SyncInstructions" xml:space="preserve">
+    <value>Hold the controller’s sync button until its lights flash, then select it below. Controllers you have already added reconnect when you wake them.</value>
+  </data>
+  <data name="Switch2Settings.AutoJoyConPairingLabel" xml:space="preserve">
+    <value>Joy-Cons are automatically paired</value>
+  </data>
+  <data name="Switch2Settings.AutoJoyConPairingTip" xml:space="preserve">
+    <value>Join available left and right Joy-Cons into one controller. A Joy-Con on its own still works separately.</value>
+  </data>
+  <data name="Switch2Settings.DiscoveryStatusDefault" xml:space="preserve">
+    <value>Refresh to check Bluetooth discovery status.</value>
+  </data>
+  <data name="Switch2Settings.AddControllerButton" xml:space="preserve">
+    <value>Add controller</value>
+  </data>
+  <data name="Switch2Settings.JoinJoyConsTitle" xml:space="preserve">
+    <value>Join Joy-Cons</value>
+  </data>
+  <data name="Switch2Settings.JoinJoyConsDesc" xml:space="preserve">
+    <value>Each Joy-Con works on its own. To join two, select them here or use their link buttons on the Controllers tab.</value>
+  </data>
+  <data name="Switch2Settings.NoUnmatchedJoyCon2" xml:space="preserve">
+    <value>No unmatched Joy-Con 2 connections have been observed yet.</value>
+  </data>
+  <data name="Switch2Settings.LeftJoyCon2Label" xml:space="preserve">
+    <value>Left Joy-Con 2</value>
+  </data>
+  <data name="Switch2Settings.RightJoyCon2Label" xml:space="preserve">
+    <value>Right Joy-Con 2</value>
+  </data>
+  <data name="Switch2Settings.JoinSelectedPairButton" xml:space="preserve">
+    <value>Join selected Joy-Con 2 pair</value>
+  </data>
+  <data name="Switch2Settings.UseSelectedLeftButton" xml:space="preserve">
+    <value>Use selected left separately</value>
+  </data>
+  <data name="Switch2Settings.UseSelectedRightButton" xml:space="preserve">
+    <value>Use selected right separately</value>
+  </data>
+  <data name="Switch2Settings.UnmatchedJoyCon2Label" xml:space="preserve">
+    <value>UNMATCHED JOY-CON 2</value>
+  </data>
+  <data name="Switch2Settings.ManualLinkInstructions" xml:space="preserve">
+    <value>Click Link on one Joy-Con, then Link on the other. The first controller keeps its profile and virtual pad.</value>
+  </data>
+  <data name="DsxSettings.SectionHeader" xml:space="preserve">
+    <value>Game mod support (DSX)</value>
+  </data>
+  <data name="DsxSettings.EnableLabel" xml:space="preserve">
+    <value>Let game mods control triggers and lights</value>
+  </data>
+  <data name="DsxSettings.Description" xml:space="preserve">
+    <value>For compatible DSX game mods on this PC and a DualSense or DualSense Edge. Trigger Lab takes priority on each trigger you enable. This does not stream audio haptics.</value>
+  </data>
+  <data name="DsxSettings.ConnectionDetailsHeader" xml:space="preserve">
+    <value>Connection details</value>
+  </data>
+  <data name="DsxSettings.ConnectionDetailsDesc" xml:space="preserve">
+    <value>Use the same address and port in your mod. Most mods use 127.0.0.1 and port 6969. Close DSX or another listener using that port first.</value>
+  </data>
+  <data name="DsxSettings.ThisPcAddressLabel" xml:space="preserve">
+    <value>This PC address</value>
+  </data>
+  <data name="DsxSettings.ApplyRetryButton" xml:space="preserve">
+    <value>Apply / Retry</value>
+  </data>
+
+  <data name="BridgeShell.AppName" xml:space="preserve"><value>DS4Windows</value></data>
+  <data name="BridgeShell.AppTagline" xml:space="preserve"><value>Controller companion</value></data>
+  <data name="BridgeShell.ConnectControllerPrompt" xml:space="preserve"><value>Connect a controller to begin</value></data>
+  <data name="BridgeShell.NavigationHeader" xml:space="preserve"><value>NAVIGATION</value></data>
+  <data name="BridgeShell.ProfileEditorTitle" xml:space="preserve"><value>Profile Editor</value></data>
+  <data name="BridgeShell.ProfileBadgeLetter" xml:space="preserve"><value>P</value></data>
+  <data name="BridgeShell.FocusedWorkspace" xml:space="preserve"><value>Focused workspace</value></data>
+  <data name="BridgeShell.EditingProfileHeader" xml:space="preserve"><value>EDITING PROFILE</value></data>
+  <data name="BridgeShell.ProfileWorkspaceHeader" xml:space="preserve"><value>PROFILE WORKSPACE</value></data>
+  <data name="BridgeShell.BackToProfiles" xml:space="preserve"><value>Back to Profiles</value></data>
+  <data name="BridgeShell.BackToProfilesTip" xml:space="preserve"><value>Cancel editing and return to the profile list</value></data>
+  <data name="BridgeShell.ButtonMapping" xml:space="preserve"><value>Button Mapping</value></data>
+  <data name="BridgeShell.ButtonMappingTip" xml:space="preserve"><value>Buttons, sticks, touch gestures, and shortcuts</value></data>
+  <data name="BridgeShell.SpecialActionsTip" xml:space="preserve"><value>Macros, launches, shifts, and multi-actions</value></data>
+  <data name="BridgeShell.ControllerReadingsTip" xml:space="preserve"><value>Live inputs and calibration</value></data>
+  <data name="BridgeShell.AxisConfigTip" xml:space="preserve"><value>Sticks, triggers, dead zones, and curves</value></data>
+  <data name="BridgeShell.LightbarTip" xml:space="preserve"><value>Color, battery, flash, and charging</value></data>
+  <data name="BridgeShell.TouchpadTip" xml:space="preserve"><value>Mouse, gestures, passthrough, and positioning</value></data>
+  <data name="BridgeShell.GyroTip" xml:space="preserve"><value>Motion aiming, steering, and swipes</value></data>
+  <data name="BridgeShell.AudioHapticsTip" xml:space="preserve"><value>Turn system or app audio into advanced haptics</value></data>
+  <data name="BridgeShell.TriggerLabTip" xml:space="preserve"><value>Build persistent adaptive-trigger effects</value></data>
+  <data name="BridgeShell.NintendoOptionsTip" xml:space="preserve"><value>HD rumble, motion, optical mouse, and calibration</value></data>
+  <data name="BridgeShell.AdvancedTip" xml:space="preserve"><value>Output, rumble, latency, and compatibility</value></data>
+  <data name="BridgeShell.LogTip" xml:space="preserve"><value>Service events without leaving the editor</value></data>
+
+  <data name="ReadingsControl.LXInput" xml:space="preserve"><value>LX (I): </value></data>
+  <data name="ReadingsControl.LXOutput" xml:space="preserve"><value>LX (O): </value></data>
+  <data name="ReadingsControl.LYInput" xml:space="preserve"><value>LY (I): </value></data>
+  <data name="ReadingsControl.LYOutput" xml:space="preserve"><value>LY (O): </value></data>
+  <data name="ReadingsControl.RXInput" xml:space="preserve"><value>RX (I): </value></data>
+  <data name="ReadingsControl.RXOutput" xml:space="preserve"><value>RX (O): </value></data>
+  <data name="ReadingsControl.RYInput" xml:space="preserve"><value>RY (I): </value></data>
+  <data name="ReadingsControl.RYOutput" xml:space="preserve"><value>RY (O): </value></data>
+  <data name="ReadingsControl.SixAxisXInput" xml:space="preserve"><value>X (I): </value></data>
+  <data name="ReadingsControl.SixAxisXOutput" xml:space="preserve"><value>X (O): </value></data>
+  <data name="ReadingsControl.SixAxisZInput" xml:space="preserve"><value>Z (I): </value></data>
+  <data name="ReadingsControl.SixAxisZOutput" xml:space="preserve"><value>Z (O): </value></data>
+  <data name="ReadingsControl.InputLabel" xml:space="preserve"><value>I: </value></data>
+  <data name="ReadingsControl.OutputLabel" xml:space="preserve"><value>O: </value></data>
+  <data name="ReadingsControl.TouchXLabel" xml:space="preserve"><value>TX: </value></data>
+  <data name="ReadingsControl.TouchYLabel" xml:space="preserve"><value>TY: </value></data>
+
+  <data name="SpecialActionEdit.NameLabel" xml:space="preserve"><value>Name:</value></data>
+  <data name="SpecialActionEdit.TriggerHint" xml:space="preserve"><value>Check the buttons that start this action. Multiple buttons must be held together.</value></data>
+  <data name="SpecialActionEdit.UnloadTriggerHint" xml:space="preserve"><value>Check the buttons that end this action or return to the previous profile.</value></data>
+  <data name="SpecialActionEdit.LaunchProgramTab" xml:space="preserve"><value>Launch Program</value></data>
+  <data name="SpecialActionEdit.SecsLabel" xml:space="preserve"><value>secs</value></data>
+  <data name="SpecialActionEdit.ArgumentsLabel" xml:space="preserve"><value>Arguments</value></data>
+  <data name="SpecialActionEdit.LoadProfileTab" xml:space="preserve"><value>Load Profile</value></data>
+  <data name="SpecialActionEdit.PressKeyTab" xml:space="preserve"><value>Press Key</value></data>
+  <data name="SpecialActionEdit.DisBTTab" xml:space="preserve"><value>DisBT</value></data>
+  <data name="SpecialActionEdit.CheckBatteryTab" xml:space="preserve"><value>Check Battery</value></data>
+  <data name="SpecialActionEdit.MultiActTab" xml:space="preserve"><value>MultiAct</value></data>
+  <data name="SpecialActionEdit.SixaxisWheelTab" xml:space="preserve"><value>Sixaxis Wheel</value></data>
+
+  <data name="ControllerRegOptWin.AcceptMoonlight" xml:space="preserve"><value>Accept Moonlight / Sunshine virtual controllers</value></data>
+  <data name="ControllerRegOptWin.AcceptMoonlightTip" xml:space="preserve"><value>Accept every supported virtual controller created while Sunshine is running. DS4Windows' own VIIPER outputs are always excluded.</value></data>
+  <data name="ControllerRegOptWin.DS4Tab" xml:space="preserve"><value>DS4</value></data>
+  <data name="ControllerRegOptWin.SwitchProTab" xml:space="preserve"><value>Switch Pro</value></data>
+  <data name="ControllerRegOptWin.JoyConTab" xml:space="preserve"><value>JoyCon</value></data>
+
+  <data name="AutoProfiles.DeviceLabel" xml:space="preserve"><value>Device</value></data>
+  <data name="AutoProfiles.WindowTitlePlaceholder" xml:space="preserve"><value>Window title...</value></data>
+  <data name="AutoProfiles.SearchTooltip" xml:space="preserve"><value>Search by profile, window title, executable, or path</value></data>
+  <data name="AutoProfiles.DeviceLabelCaps" xml:space="preserve"><value>DEVICE</value></data>
+
+  <data name="About.FakerInputName" xml:space="preserve"><value>FakerInput</value></data>
+  <data name="About.Crc32Name" xml:space="preserve"><value>CRC32</value></data>
+  <data name="About.HNotifyIconName" xml:space="preserve"><value>H.NotifyIcon</value></data>
+  <data name="About.VJoyInterfaceCSName" xml:space="preserve"><value>vJoyInterfaceCS</value></data>
+
+  <data name="MappingLive.AxisPlaceholder" xml:space="preserve"><value>X &#x2014;&#x0a;Y &#x2014;</value></data>
+
+  <data name="Welcome.ViiperInstallHelpText" xml:space="preserve"><value>Required virtual-controller backend. DS4Windows requests administrator access and installs VIIPER plus usbip-win2 for you.</value></data>
+
+  <data name="RecordBox.CycleProgramsMenu" xml:space="preserve"><value>Cycle Programs</value></data>
+  <data name="RecordBox.FromFileMenu" xml:space="preserve"><value>From File...</value></data>
+
+  <data name="Finished" xml:space="preserve"><value>Finished</value></data>
+  <data name="PresetOptWin.WinTitle" xml:space="preserve"><value>Select Preset</value></data>
 </root>

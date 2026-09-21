@@ -36,7 +36,7 @@ public partial class Switch2StickCalibrationWindow : Window
     private async void Reset_Click(object sender, RoutedEventArgs e)
     {
         if (viewModel.CanStart && MessageBox.Show(this, viewModel.ResetConfirmation,
-                "Reset PC stick calibration", MessageBoxButton.YesNo, MessageBoxImage.Question,
+                Properties.Resources.Switch2CalibResetDialogTitle, MessageBoxButton.YesNo, MessageBoxImage.Question,
                 MessageBoxResult.No) == MessageBoxResult.Yes)
             await viewModel.ResetAsync();
     }

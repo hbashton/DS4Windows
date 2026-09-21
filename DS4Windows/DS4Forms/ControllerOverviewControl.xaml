@@ -4,6 +4,9 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:xctk="http://schemas.xceed.com/wpf/xaml/toolkit"
+             xmlns:lex="http://wpflocalizeextension.codeplex.com"
+             lex:ResxLocalizationProvider.DefaultAssembly="DS4Windows"
+             lex:ResxLocalizationProvider.DefaultDictionary="Strings"
              mc:Ignorable="d"
              d:DesignHeight="720" d:DesignWidth="940">
     <UserControl.Resources>
@@ -201,9 +204,9 @@
                                Foreground="{DynamicResource AccentColor}"
                                HorizontalAlignment="Center" VerticalAlignment="Center" />
                 </Border>
-                <TextBlock Text="No controller selected" Margin="0,16,0,5"
+                <TextBlock Text="{lex:Loc Overview.NoControllerSelected}" Margin="0,16,0,5"
                            FontSize="20" FontWeight="SemiBold" HorizontalAlignment="Center" />
-                <TextBlock Text="Connect a controller, then choose it from the device cards in the upper-left corner."
+                <TextBlock Text="{lex:Loc Overview.NoControllerHint}"
                            Foreground="{DynamicResource MutedForegroundColor}" TextAlignment="Center"
                            TextWrapping="Wrap" />
             </StackPanel>
@@ -245,7 +248,7 @@
                         </Border>
 
                         <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                            <TextBlock Text="SELECTED CONTROLLER" Style="{StaticResource OverviewEyebrowStyle}" />
+                            <TextBlock Text="{lex:Loc Overview.SelectedControllerLabel}" Style="{StaticResource OverviewEyebrowStyle}" />
                             <TextBlock Text="{Binding SelectedController.ControllerDisplayName}"
                                        Margin="0,5,0,3" FontSize="22" FontWeight="SemiBold"
                                        Foreground="{DynamicResource ForegroundColor}" />
@@ -258,7 +261,7 @@
                                         BorderBrush="{DynamicResource BorderColor}" BorderThickness="1"
                                         CornerRadius="3" Padding="8,4" Margin="0,0,8,0">
                                     <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="Profile  " Foreground="{DynamicResource MutedForegroundColor}" />
+                                        <TextBlock Text="{lex:Loc Overview.ProfileLabel}" Foreground="{DynamicResource MutedForegroundColor}" />
                                         <TextBlock Text="{Binding CurrentProfileName}" FontWeight="SemiBold"
                                                    Foreground="{DynamicResource AccentColor}"
                                                    MaxWidth="190" TextTrimming="CharacterEllipsis"
@@ -274,7 +277,7 @@
                         </StackPanel>
 
                         <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="18,0,0,0">
-                            <TextBlock Text="BATTERY" Style="{StaticResource OverviewEyebrowStyle}"
+                            <TextBlock Text="{lex:Loc Overview.BatteryLabel}" Style="{StaticResource OverviewEyebrowStyle}"
                                        HorizontalAlignment="Right" />
                             <TextBlock Text="{Binding SelectedControllerBattery}" Margin="0,5,0,0"
                                        FontSize="20" FontWeight="SemiBold"
@@ -286,26 +289,26 @@
                 <WrapPanel Grid.Row="1" Margin="-6,0,-6,8">
                     <Border Style="{StaticResource OverviewCardStyle}" Width="218" MinHeight="112" Margin="6">
                         <StackPanel>
-                            <TextBlock Text="CONNECTION" Style="{StaticResource OverviewEyebrowStyle}" />
+                            <TextBlock Text="{lex:Loc Overview.ConnectionLabel}" Style="{StaticResource OverviewEyebrowStyle}" />
                             <TextBlock Text="{Binding SelectedControllerConnection}" Margin="0,11,0,3"
                                        Style="{StaticResource OverviewValueStyle}" />
-                            <TextBlock Text="Observed input report interval · rate" Margin="0,5,0,2"
+                            <TextBlock Text="{lex:Loc Overview.ReportIntervalLabel}" Margin="0,5,0,2"
                                        FontSize="11"
                                        Foreground="{DynamicResource MutedForegroundColor}" />
                             <TextBlock Text="{Binding SelectedControllerLatency}"
                                        FontSize="12" FontWeight="SemiBold"
                                        Foreground="{DynamicResource AccentColor}"
                                        TextWrapping="Wrap"
-                                       ToolTip="Observed input delivery interval and rate. Joined controllers use their composite report cadence. This is not kernel completion time or end-to-end game latency." />
+                                       ToolTip="{lex:Loc Overview.ReportIntervalTip}" />
                         </StackPanel>
                     </Border>
 
                     <Border Style="{StaticResource OverviewCardStyle}" Width="218" MinHeight="112" Margin="6">
                         <StackPanel>
-                            <TextBlock Text="ACTIVE PROFILE" Style="{StaticResource OverviewEyebrowStyle}" />
+                            <TextBlock Text="{lex:Loc Overview.ActiveProfileLabel}" Style="{StaticResource OverviewEyebrowStyle}" />
                             <TextBlock Text="{Binding CurrentProfileName}" Margin="0,11,0,3"
                                        Style="{StaticResource OverviewValueStyle}" />
-                             <TextBlock Text="Settings below save to this profile"
+                             <TextBlock Text="{lex:Loc Overview.ActiveProfileHint}"
                                         TextWrapping="Wrap"
                                        Foreground="{DynamicResource MutedForegroundColor}" />
                         </StackPanel>
@@ -313,10 +316,10 @@
 
                     <Border Style="{StaticResource OverviewCardStyle}" Width="218" MinHeight="112" Margin="6">
                         <StackPanel>
-                            <TextBlock Text="EMULATED DEVICE" Style="{StaticResource OverviewEyebrowStyle}" />
+                            <TextBlock Text="{lex:Loc Overview.EmulatedDeviceLabel}" Style="{StaticResource OverviewEyebrowStyle}" />
                             <TextBlock Margin="0,11,0,3" Style="{StaticResource OverviewValueStyle}"
                                        Text="{Binding SelectedOutputControllerName}" />
-                             <TextBlock Text="Applied through the active profile"
+                             <TextBlock Text="{lex:Loc Overview.EmulatedDeviceHint}"
                                         TextWrapping="Wrap"
                                        Foreground="{DynamicResource MutedForegroundColor}" />
                         </StackPanel>
@@ -324,7 +327,7 @@
 
                     <Border Style="{StaticResource OverviewCardStyle}" Width="218" MinHeight="112" Margin="6">
                         <StackPanel>
-                            <TextBlock Text="CONTROLLER STATUS" Style="{StaticResource OverviewEyebrowStyle}" />
+                            <TextBlock Text="{lex:Loc Overview.ControllerStatusLabel}" Style="{StaticResource OverviewEyebrowStyle}" />
                             <TextBlock Text="{Binding SelectedControllerStartupTitle}"
                                        Margin="0,11,0,3">
                                 <TextBlock.Style>
@@ -356,8 +359,8 @@
                         </Grid.RowDefinitions>
 
                         <StackPanel Margin="0,0,0,18">
-                            <TextBlock Text="Quick profile controls" FontSize="18" FontWeight="SemiBold" />
-                            <TextBlock Text="Every change is saved to the selected controller's active profile and applied automatically."
+                            <TextBlock Text="{lex:Loc Overview.QuickProfileControlsTitle}" FontSize="18" FontWeight="SemiBold" />
+                            <TextBlock Text="{lex:Loc Overview.QuickProfileControlsDesc}"
                                        Margin="0,3,0,0" TextWrapping="Wrap"
                                        Foreground="{DynamicResource MutedForegroundColor}" />
                         </StackPanel>
@@ -372,8 +375,8 @@
                             <StackPanel>
                                 <Border Style="{StaticResource OverviewInsetCardStyle}">
                                     <StackPanel>
-                                        <TextBlock Text="Emulated controller" FontSize="15" FontWeight="SemiBold" />
-                                        <TextBlock Text="The virtual controller presented to games."
+                                        <TextBlock Text="{lex:Loc Overview.EmulatedControllerTitle}" FontSize="15" FontWeight="SemiBold" />
+                                        <TextBlock Text="{lex:Loc Overview.EmulatedControllerDesc}"
                                                    Margin="0,3,0,11" FontSize="11" TextWrapping="Wrap"
                                                    Foreground="{DynamicResource MutedForegroundColor}" />
                                         <ComboBox x:Name="outputControllerCombo"
@@ -391,7 +394,7 @@
                                                 </DataTemplate>
                                             </ComboBox.ItemTemplate>
                                         </ComboBox>
-                                        <TextBlock Text="Changing this setting saves the profile, then performs one controlled output reload."
+                                        <TextBlock Text="{lex:Loc Overview.EmulatedControllerNote}"
                                                    Margin="0,7,0,0" TextWrapping="Wrap" FontSize="11"
                                                    Foreground="{DynamicResource MutedForegroundColor}" />
                                     </StackPanel>
@@ -437,21 +440,21 @@
                                                    Margin="0,3,0,13" FontSize="11" TextWrapping="Wrap"
                                                    Foreground="{DynamicResource MutedForegroundColor}" />
                                         <StackPanel Grid.Row="2">
-                                            <CheckBox Content="Stream audio to controller"
+                                            <CheckBox Content="{lex:Loc Overview.StreamAudioToggle}"
                                                       Style="{StaticResource OverviewToggleStyle}"
                                                       IsChecked="{Binding SpeakerOutputEnabled, Mode=TwoWay}"
-                                                      ToolTip="Streams the selected audio to the controller. Uses its built-in speaker unless Headset only routes it exclusively to the AUX port."
+                                                      ToolTip="{lex:Loc Overview.StreamAudioTip}"
                                                       Margin="0,0,0,12" />
-                                            <CheckBox Content="Headset only (mute controller speaker)"
+                                            <CheckBox Content="{lex:Loc Overview.HeadsetOnlyToggle}"
                                                       Style="{StaticResource OverviewToggleStyle}"
                                                       IsChecked="{Binding HeadsetOnlyAudio, Mode=TwoWay}"
                                                       IsEnabled="{Binding SpeakerOutputEnabled}"
-                                                      ToolTip="Mutes the built-in speaker while continuing the stream through a headset connected to the controller's AUX port."
+                                                      ToolTip="{lex:Loc Overview.HeadsetOnlyTip}"
                                                       Margin="0,0,0,13" />
                                         </StackPanel>
                                         <StackPanel Grid.Row="3">
-                                            <TextBlock Text="Audio source" Margin="0,0,0,7" FontWeight="SemiBold"
-                                                       ToolTip="Default captures the normal endpoint mix. Choose an app to stream only that app." />
+                                            <TextBlock Text="{lex:Loc Overview.AudioSourceLabel}" Margin="0,0,0,7" FontWeight="SemiBold"
+                                                       ToolTip="{lex:Loc Overview.AudioSourceTip}" />
                                             <Grid>
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="*" />
@@ -480,7 +483,7 @@
                                                         Content="&#xE72C;"
                                                         FontFamily="Segoe MDL2 Assets"
                                                         FontSize="15"
-                                                        ToolTip="Refresh running audio sources"
+                                                        ToolTip="{lex:Loc Overview.RefreshAudioSourcesTip}"
                                                         Click="RefreshControllerAudioSources_Click" />
                                             </Grid>
                                         </StackPanel>
@@ -488,7 +491,7 @@
                                                 CornerRadius="4" Background="#26FFB020"
                                                 BorderBrush="#80FFB020" BorderThickness="1"
                                                 Visibility="{Binding AudioHapticsSpeakerOverrideActive, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                            <TextBlock Text="Audio Haptics is supplying this stream. Turn off Play this app through controller to choose another source."
+                                            <TextBlock Text="{lex:Loc Overview.AudioHapticsOverrideNotice}"
                                                        TextWrapping="Wrap" FontSize="11" Foreground="#FFFFC45C" />
                                         </Border>
                                     </Grid>
@@ -499,20 +502,20 @@
                                 <Border x:Name="nativeUsbHeadsetCard" Style="{StaticResource OverviewInsetCardStyle}"
                                         Visibility="{Binding SelectedControllerShowsUsbHeadsetHelp, Converter={StaticResource BooleanToVisibilityConverter}}">
                                     <StackPanel>
-                                        <TextBlock Text="Use a headset over USB" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                        <TextBlock Text="Connect your Switch 2 Pro by USB and plug in headphones or a headset. Choose Headphones (Switch 2 Pro Controller) in your game or Windows Sound settings. Adjust the volume there." Margin="0,10,0,10" TextWrapping="Wrap" />
-                                        <TextBlock Text="For voice chat, choose Microphone (Switch 2 Pro Controller) and use a headset with a microphone." Margin="0,0,0,10" TextWrapping="Wrap" />
-                                        <TextBlock Text="Works independently of your virtual controller. Bluetooth headset audio is not supported yet." Margin="0,0,0,12" TextWrapping="Wrap" Foreground="{DynamicResource MutedForegroundColor}" />
-                                        <Button Content="Open Windows Sound settings" HorizontalAlignment="Left" Padding="10,6"
+                                        <TextBlock Text="{lex:Loc Overview.UsbHeadsetTitle}" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                        <TextBlock Text="{lex:Loc Overview.UsbHeadsetStep1}" Margin="0,10,0,10" TextWrapping="Wrap" />
+                                        <TextBlock Text="{lex:Loc Overview.UsbHeadsetStep2}" Margin="0,0,0,10" TextWrapping="Wrap" />
+                                        <TextBlock Text="{lex:Loc Overview.UsbHeadsetNote}" Margin="0,0,0,12" TextWrapping="Wrap" Foreground="{DynamicResource MutedForegroundColor}" />
+                                        <Button Content="{lex:Loc Overview.OpenSoundSettingsBtn}" HorizontalAlignment="Left" Padding="10,6"
                                                 Style="{StaticResource BridgeSecondaryButtonStyle}"
-                                                Click="OpenWindowsSoundSettings_Click" ToolTip="Choose where your game sound and voice chat go." />
+                                                Click="OpenWindowsSoundSettings_Click" ToolTip="{lex:Loc Overview.OpenSoundSettingsTip}" />
                                     </StackPanel>
                                 </Border>
                                 <StackPanel x:Name="managedAudioLevelsPanel"
                                             Visibility="{Binding SelectedControllerSupportsAudio, Converter={StaticResource BooleanToVisibilityConverter}}">
                                 <Border Style="{StaticResource OverviewInsetCardStyle}">
                                     <StackPanel>
-                                        <TextBlock Text="Output levels" FontSize="15" FontWeight="SemiBold" />
+                                        <TextBlock Text="{lex:Loc Overview.OutputLevelsTitle}" FontSize="15" FontWeight="SemiBold" />
                                         <Grid Margin="0,13,0,0">
                                             <Grid.RowDefinitions>
                                                 <RowDefinition Height="Auto" />
@@ -524,7 +527,7 @@
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Text="Controller speaker"
+                                            <TextBlock Text="{lex:Loc Overview.ControllerSpeakerLabel}"
                                                        IsEnabled="{Binding HeadsetOnlyAudio, Converter={StaticResource InverseBoolConverter}}" />
                                             <TextBlock Grid.Column="1"
                                                        Text="{Binding SpeakerVolumePercent, StringFormat={}{0}%}"
@@ -535,9 +538,9 @@
                                                     Minimum="0" Maximum="100" TickFrequency="1"
                                                     IsEnabled="{Binding HeadsetOnlyAudio, Converter={StaticResource InverseBoolConverter}}"
                                                     Value="{Binding SpeakerVolumePercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=220}" />
-                                            <TextBlock Grid.Row="2" Text="Headset / AUX"
+                                            <TextBlock Grid.Row="2" Text="{lex:Loc Overview.HeadsetAuxLabel}"
                                                        IsEnabled="{Binding HeadsetOnlyAudio}"
-                                                       ToolTip="Controls the controller headset jack independently from its built-in speaker." />
+                                                       ToolTip="{lex:Loc Overview.HeadsetAuxTip}" />
                                             <TextBlock Grid.Row="2" Grid.Column="1"
                                                        Text="{Binding HeadphoneVolumePercent, StringFormat={}{0}%}"
                                                        IsEnabled="{Binding HeadsetOnlyAudio}"
@@ -553,7 +556,7 @@
 
                                 <Border Style="{StaticResource OverviewInsetCardStyle}">
                                     <StackPanel>
-                                        <TextBlock Text="Speaker processing" FontSize="15" FontWeight="SemiBold" />
+                                        <TextBlock Text="{lex:Loc Overview.SpeakerProcessingTitle}" FontSize="15" FontWeight="SemiBold" />
                                         <Grid Margin="0,12,0,0">
                                             <Grid.RowDefinitions>
                                                 <RowDefinition Height="Auto" />
@@ -563,18 +566,18 @@
                                                 <ColumnDefinition Width="2*" />
                                                 <ColumnDefinition Width="3*" />
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Text="Dynamic range" VerticalAlignment="Center"
-                                                       ToolTip="Raises quiet detail and safely restrains loud effects without look-ahead latency." />
+                                            <TextBlock Text="{lex:Loc Overview.DynamicRangeLabel}" VerticalAlignment="Center"
+                                                       ToolTip="{lex:Loc Overview.DynamicRangeTip}" />
                                             <ComboBox Grid.Column="1"
                                                       Style="{StaticResource OverviewSettingsComboBoxStyle}"
                                                       SelectedIndex="{Binding SpeakerCompressionIndex, Mode=TwoWay}">
-                                                <ComboBoxItem Content="Off" />
-                                                <ComboBoxItem Content="Balanced" />
-                                                <ComboBoxItem Content="Strong" />
+                                                <ComboBoxItem Content="{lex:Loc Overview.Off}" />
+                                                <ComboBoxItem Content="{lex:Loc Overview.Balanced}" />
+                                                <ComboBoxItem Content="{lex:Loc Overview.Strong}" />
                                             </ComboBox>
-                                            <TextBlock Grid.Row="1" Text="Bass / body" VerticalAlignment="Center"
+                                            <TextBlock Grid.Row="1" Text="{lex:Loc Overview.BassBodyLabel}" VerticalAlignment="Center"
                                                        Margin="0,13,0,0"
-                                                       ToolTip="Adds body around 200 Hz while filtering unusable sub-bass." />
+                                                       ToolTip="{lex:Loc Overview.BassBodyTip}" />
                                             <DockPanel Grid.Row="1" Grid.Column="1" Margin="0,13,0,0">
                                                 <TextBlock DockPanel.Dock="Right" Margin="10,0,0,0"
                                                            MinWidth="34" TextAlignment="Right"
@@ -591,7 +594,7 @@
 
                                 <Border Style="{StaticResource OverviewInsetCardStyle}" Margin="0">
                                     <StackPanel>
-                                        <TextBlock Text="Microphone" FontSize="15" FontWeight="SemiBold" />
+                                        <TextBlock Text="{lex:Loc Overview.MicrophoneTitle}" FontSize="15" FontWeight="SemiBold" />
                                         <CheckBox Content="{Binding SelectedController.MicrophoneToggleLabel}"
                                                   Style="{StaticResource OverviewToggleStyle}"
                                                   IsChecked="{Binding MicrophoneInputEnabled, Mode=TwoWay}"
@@ -614,7 +617,7 @@
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Text="Microphone level" />
+                                            <TextBlock Text="{lex:Loc Overview.MicrophoneLevelLabel}" />
                                             <TextBlock Grid.Column="1"
                                                        Text="{Binding MicrophoneVolumePercent, StringFormat={}{0}%}"
                                                        Foreground="{DynamicResource AccentColor}" />
@@ -628,14 +631,14 @@
                                                 <ColumnDefinition Width="2*" />
                                                 <ColumnDefinition Width="3*" />
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Text="Noise suppression" VerticalAlignment="Center" />
+                                            <TextBlock Text="{lex:Loc Overview.NoiseSuppressionLabel}" VerticalAlignment="Center" />
                                             <ComboBox Grid.Column="1"
                                                       Style="{StaticResource OverviewSettingsComboBoxStyle}"
                                                       SelectedIndex="{Binding MicrophoneNoiseSuppressionIndex, Mode=TwoWay}">
-                                                <ComboBoxItem Content="Off" />
-                                                <ComboBoxItem Content="Balanced" />
-                                                <ComboBoxItem Content="Strong" />
-                                                <ComboBoxItem Content="NVIDIA AI"
+                                                <ComboBoxItem Content="{lex:Loc Overview.Off}" />
+                                                <ComboBoxItem Content="{lex:Loc Overview.Balanced}" />
+                                                <ComboBoxItem Content="{lex:Loc Overview.Strong}" />
+                                                <ComboBoxItem Content="{lex:Loc Overview.NvidiaAI}"
                                                               IsEnabled="{Binding NvidiaNoiseSuppressionAvailable}"
                                                               ToolTip="{Binding NvidiaNoiseSuppressionAvailability}" />
                                             </ComboBox>
@@ -651,23 +654,23 @@
                 <Border Grid.Row="3" Style="{StaticResource OverviewCardStyle}">
                     <StackPanel>
                         <StackPanel>
-                            <TextBlock Text="Quick actions" FontSize="18" FontWeight="SemiBold" />
-                             <TextBlock Text="Jump into the full editor or manage the selected physical controller."
+                            <TextBlock Text="{lex:Loc Overview.QuickActionsTitle}" FontSize="18" FontWeight="SemiBold" />
+                             <TextBlock Text="{lex:Loc Overview.QuickActionsDesc}"
                                         Margin="0,3,0,0" TextWrapping="Wrap"
                                         Foreground="{DynamicResource MutedForegroundColor}" />
                         </StackPanel>
                         <WrapPanel Margin="0,15,0,0">
-                            <Button Content="Edit active profile" Margin="0,0,8,0"
+                            <Button Content="{lex:Loc Overview.EditActiveProfileBtn}" Margin="0,0,8,0"
                                     Style="{StaticResource BridgePrimaryButtonStyle}"
                                     Click="EditProfileBtn_Click" />
-                            <Button Content="Controller details" Margin="0,0,8,0"
+                            <Button Content="{lex:Loc Overview.ControllerDetailsBtn}" Margin="0,0,8,0"
                                     Style="{StaticResource BridgeSecondaryButtonStyle}"
                                     Click="ControllerDetailsBtn_Click" />
-                            <Button Content="Lightbar controls" Margin="0,0,8,0"
+                            <Button Content="{lex:Loc Overview.LightbarControlsBtn}" Margin="0,0,8,0"
                                     Style="{StaticResource BridgeSecondaryButtonStyle}"
-                                    ToolTip="Use profile lightbar controls or choose a temporary custom color"
+                                    ToolTip="{lex:Loc Overview.LightbarControlsTip}"
                                     Click="LightbarBtn_Click" />
-                            <Button Content="Disconnect"
+                            <Button Content="{lex:Loc Overview.DisconnectBtn}"
                                     Style="{StaticResource BridgeSecondaryButtonStyle}"
                                     IsEnabled="{Binding SelectedControllerIsWireless}"
                                     Click="DisconnectBtn_Click" />

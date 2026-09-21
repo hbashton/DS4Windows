@@ -3,6 +3,9 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:lex="http://wpflocalizeextension.codeplex.com"
+             lex:ResxLocalizationProvider.DefaultAssembly="DS4Windows"
+             lex:ResxLocalizationProvider.DefaultDictionary="Strings"
              mc:Ignorable="d" d:DesignHeight="760" d:DesignWidth="1040"
              HorizontalAlignment="Left" VerticalAlignment="Stretch"
              Width="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType={x:Type Window}}, Converter={StaticResource ShellViewportWidth}, ConverterParameter=318}">
@@ -115,7 +118,7 @@
                 <Border Style="{StaticResource FeatureCard}" Padding="14,9"
                         HorizontalAlignment="Right" VerticalAlignment="Center">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="Enabled" FontWeight="SemiBold" VerticalAlignment="Center"
+                        <TextBlock Text="{lex:Loc AudioHaptics.Enabled}" FontWeight="SemiBold" VerticalAlignment="Center"
                                    Margin="0,0,12,0" />
                         <CheckBox x:Name="enabledToggle" Style="{StaticResource ModernToggle}"
                                   Click="EnabledToggle_Click" />
@@ -150,8 +153,8 @@
                                                HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Border>
                                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                    <TextBlock Text="Audio Haptics" FontSize="17" FontWeight="SemiBold" />
-                                    <TextBlock Text="Audio-driven controller feedback" TextWrapping="Wrap"
+                                    <TextBlock Text="{lex:Loc AudioHaptics.Title}" FontSize="17" FontWeight="SemiBold" />
+                                    <TextBlock Text="{lex:Loc AudioHaptics.Subtitle}" TextWrapping="Wrap"
                                                Foreground="{DynamicResource MutedForegroundColor}" />
                                 </StackPanel>
                             </Grid>
@@ -185,15 +188,15 @@
                                     <ColumnDefinition Width="10" />
                                     <ColumnDefinition />
                                 </Grid.ColumnDefinitions>
-                                <Button x:Name="lowGainButton" Content="Low" Tag="50" Style="{StaticResource PresetButton}"
+                                <Button x:Name="lowGainButton" Content="{lex:Loc AudioHaptics.Low}" Tag="50" Style="{StaticResource PresetButton}"
                                         Click="GainPreset_Click" />
-                                <Button x:Name="mediumGainButton" Grid.Column="2" Content="Medium" Tag="100"
+                                <Button x:Name="mediumGainButton" Grid.Column="2" Content="{lex:Loc AudioHaptics.Medium}" Tag="100"
                                         Style="{StaticResource PresetButton}" Click="GainPreset_Click" />
-                                <Button x:Name="highGainButton" Grid.Column="4" Content="High" Tag="150"
+                                <Button x:Name="highGainButton" Grid.Column="4" Content="{lex:Loc AudioHaptics.High}" Tag="150"
                                         Style="{StaticResource PresetButton}" Click="GainPreset_Click" />
                             </Grid>
 
-                            <TextBlock Text="SOURCE" Style="{StaticResource FeatureLabel}" />
+                            <TextBlock Text="{lex:Loc AudioHaptics.SourceLabel}" Style="{StaticResource FeatureLabel}" />
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
@@ -204,11 +207,11 @@
                                           DisplayMemberPath="DisplayName" />
                                 <Button Grid.Column="1" Content="&#xE72C;" FontFamily="Segoe MDL2 Assets"
                                         Width="42" Height="42" Margin="8,0,0,0"
-                                        ToolTip="Refresh running audio sessions"
+                                        ToolTip="{lex:Loc AudioHaptics.RefreshSourcesTip}"
                                         Click="RefreshSources_Click" />
                             </Grid>
                             <TextBlock x:Name="sourceScopeHelp"
-                                       Text="System audio uses only Windows' default output, not every Sonar output. Choose an app to follow its audio on any output."
+                                       Text="{lex:Loc AudioHaptics.SourceScopeHelp}"
                                        Margin="0,7,0,0" FontSize="11" TextWrapping="Wrap"
                                        Foreground="{DynamicResource MutedForegroundColor}" />
 
@@ -222,9 +225,9 @@
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Margin="0,0,12,0">
-                                        <TextBlock Text="Automatically follow games"
+                                        <TextBlock Text="{lex:Loc AudioHaptics.AutoFollowGamesTitle}"
                                                    FontWeight="SemiBold" />
-                                        <TextBlock Text="Switch to the active game's audio using Windows game records and installed launcher manifests."
+                                        <TextBlock Text="{lex:Loc AudioHaptics.AutoFollowGamesDesc}"
                                                    Margin="0,3,0,0" FontSize="11"
                                                    TextWrapping="Wrap"
                                                    Foreground="{DynamicResource MutedForegroundColor}" />
@@ -233,7 +236,7 @@
                                               Grid.Column="1"
                                               Style="{StaticResource ModernToggle}"
                                               VerticalAlignment="Center"
-                                              ToolTip="Follows games recognized by Windows, Steam, Epic, or GOG. The selected app remains the fallback."
+                                              ToolTip="{lex:Loc AudioHaptics.AutoFollowGamesTip}"
                                               Click="AutomaticGameDetectionToggle_Click" />
                                 </Grid>
                             </Border>
@@ -254,9 +257,9 @@
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Margin="0,0,12,0">
-                                        <TextBlock Text="Play app through controller"
+                                        <TextBlock Text="{lex:Loc AudioHaptics.PlayThroughControllerTitle}"
                                                    FontWeight="SemiBold" />
-                                        <TextBlock Text="Also stream this selected app to the controller speaker and AUX headset."
+                                        <TextBlock Text="{lex:Loc AudioHaptics.PlayThroughControllerDesc}"
                                                    Margin="0,3,0,0" FontSize="11"
                                                    TextWrapping="Wrap"
                                                    Foreground="{DynamicResource MutedForegroundColor}" />
@@ -265,7 +268,7 @@
                                               Grid.Column="1"
                                               Style="{StaticResource ModernToggle}"
                                               VerticalAlignment="Center"
-                                              ToolTip="Overrides Advanced > Controller audio source while enabled. Choosing another source there releases this override."
+                                              ToolTip="{lex:Loc AudioHaptics.PlayThroughControllerTip}"
                                               Click="StreamAppToSpeakerToggle_Click" />
                                     <Grid x:Name="streamAppToHeadsetOnlyPanel"
                                           Grid.Row="1" Grid.ColumnSpan="2"
@@ -275,9 +278,9 @@
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,12,0">
-                                            <TextBlock Text="Headset only"
+                                            <TextBlock Text="{lex:Loc AudioHaptics.HeadsetOnlyTitle}"
                                                        FontWeight="SemiBold" />
-                                            <TextBlock Text="Send the captured app only through the controller AUX port."
+                                            <TextBlock Text="{lex:Loc AudioHaptics.HeadsetOnlyDesc}"
                                                        Margin="0,3,0,0" FontSize="11"
                                                        TextWrapping="Wrap"
                                                        Foreground="{DynamicResource MutedForegroundColor}" />
@@ -286,25 +289,25 @@
                                                   Grid.Column="1"
                                                   Style="{StaticResource ModernToggle}"
                                                   VerticalAlignment="Center"
-                                                  ToolTip="Routes captured app audio to headphones connected to the controller and mutes the controller speaker."
+                                                  ToolTip="{lex:Loc AudioHaptics.HeadsetOnlyTip}"
                                                   Click="StreamAppToHeadsetOnlyToggle_Click" />
                                     </Grid>
                                 </Grid>
                             </Border>
 
-                            <TextBlock Text="MODE" Style="{StaticResource FeatureLabel}"
+                            <TextBlock Text="{lex:Loc AudioHaptics.ModeLabel}" Style="{StaticResource FeatureLabel}"
                                        Margin="0,15,0,7" />
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition />
                                     <ColumnDefinition />
                                 </Grid.ColumnDefinitions>
-                                <Button x:Name="mixModeButton" Content="Mix" MinHeight="40"
+                                <Button x:Name="mixModeButton" Content="{lex:Loc AudioHaptics.MixMode}" MinHeight="40"
                                         Click="MixMode_Click"
-                                        ToolTip="Add audio-derived feedback to game haptics and rumble." />
-                                <Button x:Name="replaceModeButton" Grid.Column="1" Content="Replace"
+                                        ToolTip="{lex:Loc AudioHaptics.MixModeTip}" />
+                                <Button x:Name="replaceModeButton" Grid.Column="1" Content="{lex:Loc AudioHaptics.ReplaceMode}"
                                         MinHeight="40" Click="ReplaceMode_Click"
-                                        ToolTip="Use only audio-derived feedback." />
+                                        ToolTip="{lex:Loc AudioHaptics.ReplaceModeTip}" />
                             </Grid>
                             <TextBlock x:Name="modeHelpText" Margin="0,8,0,0" TextWrapping="Wrap"
                                        Foreground="{DynamicResource MutedForegroundColor}" />
@@ -332,8 +335,8 @@
                                                HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Border>
                                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                    <TextBlock Text="Response" FontSize="17" FontWeight="SemiBold" />
-                                    <TextBlock Text="Frequency focus and strength" TextWrapping="Wrap"
+                                    <TextBlock Text="{lex:Loc AudioHaptics.ResponseTitle}" FontSize="17" FontWeight="SemiBold" />
+                                    <TextBlock Text="{lex:Loc AudioHaptics.ResponseSubtitle}" TextWrapping="Wrap"
                                                Foreground="{DynamicResource MutedForegroundColor}" />
                                 </StackPanel>
                             </Grid>
@@ -361,8 +364,8 @@
                                     </Grid.ColumnDefinitions>
 
                                     <StackPanel>
-                                        <TextBlock Text="Bass Focus" Style="{StaticResource FeatureLabel}"
-                                                   ToolTip="Choose which low-frequency region becomes vibration." />
+                                        <TextBlock Text="{lex:Loc AudioHaptics.BassFocusLabel}" Style="{StaticResource FeatureLabel}"
+                                                   ToolTip="{lex:Loc AudioHaptics.BassFocusTip}" />
                                         <ComboBox x:Name="bassFocusCombo" MinHeight="38"
                                                   SelectionChanged="BassFocusCombo_SelectionChanged">
                                             <ComboBoxItem Content="80 Hz" />
@@ -372,36 +375,36 @@
                                         </ComboBox>
                                     </StackPanel>
                                     <StackPanel Grid.Column="2">
-                                        <TextBlock Text="Response" Style="{StaticResource FeatureLabel}"
-                                                   ToolTip="Control how strongly haptics react, especially to peaks." />
+                                        <TextBlock Text="{lex:Loc AudioHaptics.ResponseLabel}" Style="{StaticResource FeatureLabel}"
+                                                   ToolTip="{lex:Loc AudioHaptics.ResponseTip}" />
                                         <ComboBox x:Name="responseCombo" MinHeight="38"
                                                   SelectionChanged="ResponseCombo_SelectionChanged">
-                                            <ComboBoxItem Content="Subtle" />
-                                            <ComboBoxItem Content="Dynamic" />
-                                            <ComboBoxItem Content="Aggressive" />
+                                            <ComboBoxItem Content="{lex:Loc AudioHaptics.Subtle}" />
+                                            <ComboBoxItem Content="{lex:Loc AudioHaptics.Dynamic}" />
+                                            <ComboBoxItem Content="{lex:Loc AudioHaptics.Aggressive}" />
                                         </ComboBox>
                                     </StackPanel>
 
                                     <StackPanel Grid.Row="2">
-                                        <TextBlock Text="Ramp" Style="{StaticResource FeatureLabel}"
-                                                   ToolTip="Control how quickly haptics rise with the sound." />
+                                        <TextBlock Text="{lex:Loc AudioHaptics.RampLabel}" Style="{StaticResource FeatureLabel}"
+                                                   ToolTip="{lex:Loc AudioHaptics.RampTip}" />
                                         <ComboBox x:Name="attackCombo" MinHeight="38"
                                                   SelectionChanged="AttackCombo_SelectionChanged">
-                                            <ComboBoxItem Content="Slow Ramp" />
-                                            <ComboBoxItem Content="Medium Ramp" />
-                                            <ComboBoxItem Content="Fast Ramp" />
-                                            <ComboBoxItem Content="Instant Ramp" />
+                                            <ComboBoxItem Content="{lex:Loc AudioHaptics.SlowRamp}" />
+                                            <ComboBoxItem Content="{lex:Loc AudioHaptics.MediumRamp}" />
+                                            <ComboBoxItem Content="{lex:Loc AudioHaptics.FastRamp}" />
+                                            <ComboBoxItem Content="{lex:Loc AudioHaptics.InstantRamp}" />
                                         </ComboBox>
                                     </StackPanel>
                                     <StackPanel Grid.Row="2" Grid.Column="2">
-                                        <TextBlock Text="Fade" Style="{StaticResource FeatureLabel}"
-                                                   ToolTip="Control how quickly haptics fade after the sound drops." />
+                                        <TextBlock Text="{lex:Loc AudioHaptics.FadeLabel}" Style="{StaticResource FeatureLabel}"
+                                                   ToolTip="{lex:Loc AudioHaptics.FadeTip}" />
                                         <ComboBox x:Name="releaseCombo" MinHeight="38"
                                                   SelectionChanged="ReleaseCombo_SelectionChanged">
-                                            <ComboBoxItem Content="Fast Fade" />
-                                            <ComboBoxItem Content="Medium Fade" />
-                                            <ComboBoxItem Content="Slow Fade" />
-                                            <ComboBoxItem Content="Long Fade" />
+                                            <ComboBoxItem Content="{lex:Loc AudioHaptics.FastFade}" />
+                                            <ComboBoxItem Content="{lex:Loc AudioHaptics.MediumFade}" />
+                                            <ComboBoxItem Content="{lex:Loc AudioHaptics.SlowFade}" />
+                                            <ComboBoxItem Content="{lex:Loc AudioHaptics.LongFade}" />
                                         </ComboBox>
                                     </StackPanel>
                                 </Grid>
@@ -414,7 +417,7 @@
                                                  Fill="{DynamicResource MutedForegroundColor}"
                                                  VerticalAlignment="Center" />
                                         <TextBlock x:Name="statusText" Margin="8,0,0,0"
-                                                   Text="Audio Haptics is disabled." FontWeight="SemiBold"
+                                                   Text="{lex:Loc AudioHaptics.StatusDisabled}" FontWeight="SemiBold"
                                                    TextWrapping="Wrap" />
                                     </StackPanel>
                                 </Border>
@@ -423,7 +426,7 @@
                                         <Ellipse Width="8" Height="8" Fill="{DynamicResource MutedForegroundColor}"
                                                  VerticalAlignment="Center" />
                                         <TextBlock x:Name="sourceStatusText" Margin="8,0,0,0"
-                                                   Text="System audio" FontWeight="SemiBold" />
+                                                   Text="{lex:Loc AudioHaptics.SystemAudio}" FontWeight="SemiBold" />
                                     </StackPanel>
                                 </Border>
                             </WrapPanel>

@@ -32,7 +32,7 @@ namespace DS4WinWPF.DS4Forms
 
         public void ShowPreparing()
         {
-            phaseText.Text = "Verifying the DS4Windows package...";
+            phaseText.Text = Properties.Resources.VPVerifyingPackage;
             Show();
             logTimer.Start();
             // Render the window before the protected package snapshot begins.

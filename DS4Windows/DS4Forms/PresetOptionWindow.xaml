@@ -10,7 +10,7 @@
         lex:ResxLocalizationProvider.DefaultAssembly="DS4Windows"
         lex:ResxLocalizationProvider.DefaultDictionary="Strings"
         mc:Ignorable="d"
-        Title="Select Preset" Height="250" Width="600" Padding="0"
+        Title="{lex:Loc PresetOptWin.WinTitle}" Height="250" Width="600" Padding="0"
         Style="{DynamicResource WindowStyle}" Closed="Window_Closed">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
@@ -20,11 +20,11 @@
             <TabItem x:Name="IntroTab" Header="{lex:Loc Intro}">
                 <DockPanel Margin="4,0,4,8">
                     <StackPanel Orientation="Horizontal" DockPanel.Dock="Bottom" HorizontalAlignment="Right">
-                        <Button x:Name="noPresetBtn" Content="No" MinWidth="60" Margin="0,0,20,0" TabIndex="0" Click="NoPresetBtn_Click" />
-                        <Button x:Name="yesPresetBtn" Content="Yes" MinWidth="60" TabIndex="1" Click="YesPresetBtn_Click" />
+                        <Button x:Name="noPresetBtn" Content="{lex:Loc No}" MinWidth="60" Margin="0,0,20,0" TabIndex="0" Click="NoPresetBtn_Click" />
+                        <Button x:Name="yesPresetBtn" Content="{lex:Loc Yes}" MinWidth="60" TabIndex="1" Click="YesPresetBtn_Click" />
                     </StackPanel>
                     <StackPanel>
-                        <TextBlock Text="{lex:Loc PresetIntrotext}" TextWrapping="Wrap" />
+                        <TextBlock Text="{lex:Loc PresetIntroText}" TextWrapping="Wrap" />
                     </StackPanel>
                 </DockPanel>
             </TabItem>

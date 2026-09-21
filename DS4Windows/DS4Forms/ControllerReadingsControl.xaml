@@ -52,21 +52,21 @@
                 </Canvas>
                 <StackPanel Orientation="Horizontal">
                     <StackPanel Orientation="Horizontal">
-                        <Label Content="LX (I): " />
+                        <Label Content="{lex:Loc ReadingsControl.LXInput}" />
                         <Label x:Name="lxInValLb" Content="" Width="30" Padding="2,5"  />
                     </StackPanel>
                     <StackPanel Orientation="Horizontal">
-                        <Label Content="LX (O): " />
+                        <Label Content="{lex:Loc ReadingsControl.LXOutput}" />
                         <Label x:Name="lxOutValLb" Content="" Width="30" Padding="2,5" />
                     </StackPanel>
                 </StackPanel>
                 <StackPanel Orientation="Horizontal">
                     <StackPanel Orientation="Horizontal">
-                        <Label Content="LY (I): "/>
+                        <Label Content="{lex:Loc ReadingsControl.LYInput}"/>
                         <Label x:Name="lyInValLb" Content="" Width="30" Padding="2,5" />
                     </StackPanel>
                     <StackPanel Orientation="Horizontal">
-                        <Label Content="LY (O): " />
+                        <Label Content="{lex:Loc ReadingsControl.LYOutput}" />
                         <Label x:Name="lyOutValLb" Content="" Width="30" />
                     </StackPanel>
                 </StackPanel>
@@ -91,21 +91,21 @@
                 </Canvas>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                     <StackPanel Orientation="Horizontal">
-                        <Label Content="RX (I): "/>
+                        <Label Content="{lex:Loc ReadingsControl.RXInput}"/>
                         <Label x:Name="rxInValLb" Content="" Width="30" />
                     </StackPanel>
                     <StackPanel Orientation="Horizontal">
-                        <Label Content="RX (O): "/>
+                        <Label Content="{lex:Loc ReadingsControl.RXOutput}"/>
                         <Label x:Name="rxOutValLb" Content="" Width="30" />
                     </StackPanel>
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                     <StackPanel Orientation="Horizontal">
-                        <Label Content="RY (I): "/>
+                        <Label Content="{lex:Loc ReadingsControl.RYInput}"/>
                         <Label x:Name="ryInValLb" Content="" Width="30" />
                     </StackPanel>
                     <StackPanel Orientation="Horizontal">
-                        <Label Content="RY (O): "/>
+                        <Label Content="{lex:Loc ReadingsControl.RYOutput}"/>
                         <Label x:Name="ryOutValLb" Content="" Width="30" />
                     </StackPanel>
                 </StackPanel>
@@ -127,21 +127,21 @@
                 </Canvas>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                     <StackPanel Orientation="Horizontal">
-                        <Label Content="X (I): "/>
+                        <Label Content="{lex:Loc ReadingsControl.SixAxisXInput}"/>
                         <Label x:Name="sixAxisXInValLb" Content="" Width="40" />
                     </StackPanel>
                     <StackPanel Orientation="Horizontal">
-                        <Label Content="X (O): "/>
+                        <Label Content="{lex:Loc ReadingsControl.SixAxisXOutput}"/>
                         <Label x:Name="sixAxisXOutValLb" Content="" Width="40" />
                     </StackPanel>
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                     <StackPanel Orientation="Horizontal">
-                        <Label Content="Z (I): "/>
+                        <Label Content="{lex:Loc ReadingsControl.SixAxisZInput}"/>
                         <Label x:Name="sixAxisZInValLb" Content="" Width="40" />
                     </StackPanel>
                     <StackPanel Orientation="Horizontal">
-                        <Label Content="Z (O): "/>
+                        <Label Content="{lex:Loc ReadingsControl.SixAxisZOutput}"/>
                         <Label x:Name="sixAxisZOutValLb" Content="" Width="40" />
                     </StackPanel>
                 </StackPanel>
@@ -169,11 +169,11 @@
                     </StackPanel>
                     <StackPanel>
                         <StackPanel Orientation="Horizontal">
-                            <Label Content="I: " Width="30" />
+                            <Label Content="{lex:Loc ReadingsControl.InputLabel}" Width="30" />
                             <Label x:Name="l2InValLb" Content="" Width="30" />
                         </StackPanel>
                         <StackPanel Orientation="Horizontal">
-                            <Label Content="O: " Width="30" />
+                            <Label Content="{lex:Loc ReadingsControl.OutputLabel}" Width="30" />
                             <Label x:Name="l2OutValLb" Content="" Width="30" />
                         </StackPanel>
                     </StackPanel>
@@ -196,11 +196,11 @@
 
                     <StackPanel>
                         <StackPanel Orientation="Horizontal">
-                            <Label Content="I: " Width="30" />
+                            <Label Content="{lex:Loc ReadingsControl.InputLabel}" Width="30" />
                             <Label x:Name="r2InValLb" Content="" Width="30" />
                         </StackPanel>
                         <StackPanel Orientation="Horizontal">
-                            <Label Content="O: " Width="30" />
+                            <Label Content="{lex:Loc ReadingsControl.OutputLabel}" Width="30" />
                             <Label x:Name="r2OutValLb" Content="" Width="30" />
                         </StackPanel>
                     </StackPanel>
@@ -212,11 +212,11 @@
                     </StackPanel>
                     <StackPanel>
                         <StackPanel Orientation="Horizontal">
-                            <Label Content="TX: " Width="30" />
+                            <Label Content="{lex:Loc ReadingsControl.TouchXLabel}" Width="30" />
                             <Label x:Name="touchXValLb" Content="" Width="50" />
                         </StackPanel>
                         <StackPanel Orientation="Horizontal">
-                            <Label Content="TY: " Width="30" />
+                            <Label Content="{lex:Loc ReadingsControl.TouchYLabel}" Width="30" />
                             <Label x:Name="touchYValLb" Content="" Width="50" />
                         </StackPanel>
                     </StackPanel>
@@ -242,15 +242,15 @@
                     <StackPanel>
                         <Label Content="{lex:Loc Accel}" HorizontalAlignment="Center" Padding="0"/>
                         <StackPanel Orientation="Horizontal">
-                            <Label Content="X" Width="20" />
+                            <Label Content="{lex:Loc X}" Width="20" />
                             <Slider x:Name="accelXSlider" Width="80" Minimum="-128" Maximum="128" Value="0" Focusable="False" Margin="0,8,0,0"/>
                         </StackPanel>
                         <StackPanel Orientation="Horizontal">
-                            <Label Content="Y" Width="20" />
+                            <Label Content="{lex:Loc Y}" Width="20" />
                             <Slider x:Name="accelYSlider" Width="80" Minimum="-128" Maximum="128" Value="0" Focusable="False" Margin="0,4,0,0"/>
                         </StackPanel>
                         <StackPanel Orientation="Horizontal">
-                            <Label Content="Z" Width="20" />
+                            <Label Content="{lex:Loc Z}" Width="20" />
                             <Slider x:Name="accelZSlider" Width="80" Minimum="-128" Maximum="128" Value="0" Focusable="False" Margin="0,4,0,0"/>
                         </StackPanel>
                     </StackPanel>

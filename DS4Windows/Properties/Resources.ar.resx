@@ -1,0 +1,824 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    Microsoft ResX Schema
+
+    Version 2.0
+
+    The primary goals of this format is to allow a simple XML format
+    that is mostly human readable. The generation and parsing of the
+    various data types are done through the TypeConverter classes
+    associated with the data types.
+
+    Example:
+
+    ... ado.net/XML headers & schema ...
+    <resheader name="resmimetype">text/microsoft-resx</resheader>
+    <resheader name="version">2.0</resheader>
+    <resheader name="reader">System.Resources.ResXResourceReader, System.Windows.Forms, ...</resheader>
+    <resheader name="writer">System.Resources.ResXResourceWriter, System.Windows.Forms, ...</resheader>
+    <data name="Name1"><value>this is my long string</value><comment>this is a comment</comment></data>
+    <data name="Color1" type="System.Drawing.Color, System.Drawing">Blue</data>
+    <data name="Bitmap1" mimetype="application/x-microsoft.net.object.binary.base64">
+        <value>[base64 mime encoded serialized .NET Framework object]</value>
+    </data>
+    <data name="Icon1" type="System.Drawing.Icon, System.Drawing" mimetype="application/x-microsoft.net.object.bytearray.base64">
+        <value>[base64 mime encoded string representing a byte array form of the .NET Framework object]</value>
+        <comment>This is a comment</comment>
+    </data>
+
+    There are any number of "resheader" rows that contain simple
+    name/value pairs.
+
+    Each data row contains a name, and value. The row also contains a
+    type or mimetype. Type corresponds to a .NET class that support
+    text/value conversion through the TypeConverter architecture.
+    Classes that don't support this are serialized and stored with the
+    mimetype set.
+
+    The mimetype is used for serialized objects, and tells the
+    ResXResourceReader how to depersist the object. This is currently not
+    extensible. For a given mimetype the value must be set accordingly:
+
+    Note - application/x-microsoft.net.object.binary.base64 is the format
+    that the ResXResourceWriter will generate, however the reader can
+    read any of the formats listed below.
+
+    mimetype: application/x-microsoft.net.object.binary.base64
+    value   : The object must be serialized with
+            : System.Runtime.Serialization.Formatters.Binary.BinaryFormatter
+            : and then encoded with base64 encoding.
+
+    mimetype: application/x-microsoft.net.object.soap.base64
+    value   : The object must be serialized with
+            : System.Runtime.Serialization.Formatters.Soap.SoapFormatter
+            : and then encoded with base64 encoding.
+
+    mimetype: application/x-microsoft.net.object.bytearray.base64
+    value   : The object must be serialized into a byte array
+            : using a System.ComponentModel.TypeConverter
+            : and then encoded with base64 encoding.
+    -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="ActionExists" xml:space="preserve">
+    <value>هذا الاسم مستخدم بالفعل لهذا الفعل</value>
+  </data>
+  <data name="AddingToList" xml:space="preserve">
+    <value>جارٍ الإضافة إلى القائمة...</value>
+  </data>
+  <data name="AddPrograms" xml:space="preserve">
+    <value>إضافة برامج</value>
+  </data>
+  <data name="ALocactionNeeded" xml:space="preserve">
+    <value>يجب اختيار موقع للمتابعة</value>
+  </data>
+  <data name="AlwaysRainbow" xml:space="preserve">
+    <value>وضع قوس قزح دائمًا</value>
+  </data>
+  <data name="AssignProfile" xml:space="preserve">
+    <value>تعيين لليد المتحكم *number*</value>
+  </data>
+  <data name="Battery" xml:space="preserve">
+    <value>البطارية: *number*٪</value>
+  </data>
+  <data name="BestUsedRightSide" xml:space="preserve">
+    <value>يُفضل استخدامه مع الجانب الأيمن كوظيفة ماوس</value>
+  </data>
+  <data name="Browse" xml:space="preserve">
+    <value>تصفح...</value>
+  </data>
+  <data name="BTPollRate" xml:space="preserve">
+    <value>يحدد معدل الاستطلاع المستخدم لجهاز DS4 عند الاتصال عبر البلوتوث. (يسري عند حفظ الملف التعريفي)</value>
+  </data>
+  <data name="CannotMoveFiles" xml:space="preserve">
+    <value>تعذّر نقل الملفات إلى الموقع الجديد، يرجى إعادة تسمية مجلد DS4Tool إلى "DS4Windows"</value>
+  </data>
+  <data name="CannotWriteHere" xml:space="preserve">
+    <value>تعذّرت الكتابة في الموقع الحالي. هل تريد نسخ الإعدادات إلى appdata؟</value>
+  </data>
+  <data name="ChargeController" xml:space="preserve">
+    <value>اشحن البطارية</value>
+  </data>
+  <data name="Charged" xml:space="preserve">
+    <value>مشحونة</value>
+  </data>
+  <data name="Charging" xml:space="preserve">
+    <value>جارٍ الشحن: *number*٪</value>
+  </data>
+  <data name="CheckBattery" xml:space="preserve">
+    <value>فحص البطارية</value>
+  </data>
+  <data name="CloseConfirm" xml:space="preserve">
+    <value>سيؤدي هذا إلى قطع اتصال جميع أيادي التحكم المتصلة. هل تريد المتابعة؟</value>
+  </data>
+  <data name="CloseDS4W" xml:space="preserve">
+    <value>إغلاق DS4Windows؟</value>
+  </data>
+  <data name="CloseMinimize" xml:space="preserve">
+    <value>إغلاق النافذة الرئيسية يصغّر التطبيق فقط. سيتم الخروج من التطبيق عبر أيقونة الإشعارات</value>
+  </data>
+  <data name="Color" xml:space="preserve">
+    <value>اللون</value>
+  </data>
+  <data name="ColorByBattery" xml:space="preserve">
+    <value>اللون حسب نسبة البطارية</value>
+  </data>
+  <data name="Confirm" xml:space="preserve">
+    <value>تأكيد...</value>
+  </data>
+  <data name="Connecting" xml:space="preserve">
+    <value>جارٍ الاتصال...</value>
+  </data>
+  <data name="ContextEdit" xml:space="preserve">
+    <value>تعديل ملف تعريف يد التحكم *number*</value>
+  </data>
+  <data name="ContextNew" xml:space="preserve">
+    <value>إنشاء ملف تعريف ليد التحكم *number*</value>
+  </data>
+  <data name="ControllerWasRemoved" xml:space="preserve">
+    <value>تمت إزالة يد التحكم *Mac address* أو فقدت الاتصال</value>
+  </data>
+  <data name="CopyComplete" xml:space="preserve">
+    <value>اكتمل النسخ، يرجى إعادة تشغيل DS4Windows وإزالة الإعدادات من مجلد البرنامج</value>
+  </data>
+  <data name="CopyFullColor" xml:space="preserve">
+    <value>انقر لنسخ اللون الكامل</value>
+  </data>
+  <data name="CouldNotOpenDS4" xml:space="preserve">
+    <value>تحذير: تعذّر فتح DS4 *Mac address* بشكل حصري.</value>
+  </data>
+  <data name="Day" xml:space="preserve">
+    <value>يوم</value>
+  </data>
+  <data name="Days" xml:space="preserve">
+    <value>أيام</value>
+  </data>
+  <data name="DeleteProfile" xml:space="preserve">
+    <value>حذف الملف التعريفي؟</value>
+  </data>
+  <data name="DimByBattery" xml:space="preserve">
+    <value>تعتيم حسب نسبة البطارية</value>
+  </data>
+  <data name="DisconnectBT" xml:space="preserve">
+    <value>قطع اتصال البلوتوث</value>
+  </data>
+  <data name="Disconnected" xml:space="preserve">
+    <value>غير متصل</value>
+  </data>
+  <data name="Downloading" xml:space="preserve">
+    <value>جارٍ التنزيل *number*٪</value>
+  </data>
+  <data name="DownloadVersion" xml:space="preserve">
+    <value>تنزيل الإصدار *number* الآن؟</value>
+  </data>
+  <data name="DownText" xml:space="preserve">
+    <value>أسفل</value>
+  </data>
+  <assembly alias="System.Windows.Forms" name="System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089" />
+  <data name="DS4" type="System.Resources.ResXFileRef, System.Windows.Forms">
+    <value>..\Resources\DS4.ico;System.Drawing.Icon, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a</value>
+  </data>
+  <data name="DS4Update" xml:space="preserve">
+    <value>يتوفر تحديث لـ DS4Windows!</value>
+  </data>
+  <data name="DS4W" type="System.Resources.ResXFileRef, System.Windows.Forms">
+    <value>..\Resources\DS4W.ico;System.Drawing.Icon, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a</value>
+  </data>
+  <data name="DS4WindowsCannotEditHere" xml:space="preserve">
+    <value>لا يمكن لـ DS4Windows تعديل الإعدادات هنا، سيتم الإغلاق الآن</value>
+  </data>
+  <data name="DS4W___White" type="System.Resources.ResXFileRef, System.Windows.Forms">
+    <value>..\Resources\DS4W - White.ico;System.Drawing.Icon, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a</value>
+  </data>
+  <data name="EditProfile" xml:space="preserve">
+    <value>تعديل</value>
+  </data>
+  <data name="FallBack" xml:space="preserve">
+    <value>الرجوع</value>
+  </data>
+  <data name="FallBackTo" xml:space="preserve">
+    <value>الرجوع إلى *button*</value>
+  </data>
+  <data name="FifthMouseDown" xml:space="preserve">
+    <value>ضغط زر الماوس الخامس</value>
+  </data>
+  <data name="FifthMouseUp" xml:space="preserve">
+    <value>تحرير زر الماوس الخامس</value>
+  </data>
+  <data name="FlashAtTip" xml:space="preserve">
+    <value>انقر لتغيير لون الوميض. الأسود = اللون الافتراضي</value>
+  </data>
+  <data name="FlushHID" xml:space="preserve">
+    <value>تفريغ HID</value>
+  </data>
+  <data name="FlushHIDTip" xml:space="preserve">
+    <value>تفريغ قائمة انتظار HID بعد كل قراءة</value>
+  </data>
+  <data name="FoundController" xml:space="preserve">
+    <value>تم العثور على يد تحكم:</value>
+  </data>
+  <data name="FourthMouseDown" xml:space="preserve">
+    <value>ضغط زر الماوس الرابع</value>
+  </data>
+  <data name="FourthMouseUp" xml:space="preserve">
+    <value>تحرير زر الماوس الرابع</value>
+  </data>
+  <data name="Full" xml:space="preserve">
+    <value>كامل</value>
+  </data>
+  <data name="GyroReadout" xml:space="preserve">
+    <value>انقر لعرض قراءات Sixaxis Gyro</value>
+  </data>
+  <data name="GyroTriggerBehavior" xml:space="preserve">
+    <value>فعّل هذا الخيار ليبقى الجايرو نشطًا أثناء تفعيل الزناد. ألغِ تفعيله لتعطيل الجايرو أثناء تفعيل الزناد.</value>
+  </data>
+  <data name="GyroX" xml:space="preserve">
+    <value>GyroX، إمالة يسار ويمين</value>
+  </data>
+  <data name="GyroY" xml:space="preserve">
+    <value>GyroY، إمالة أمام وخلف</value>
+  </data>
+  <data name="GyroZ" xml:space="preserve">
+    <value>GyroZ، إمالة أعلى وأسفل</value>
+  </data>
+  <data name="Hour" xml:space="preserve">
+    <value>ساعة</value>
+  </data>
+  <data name="Hours" xml:space="preserve">
+    <value>ساعات</value>
+  </data>
+  <data name="HoverOverItems" xml:space="preserve">
+    <value>مرر المؤشر فوق العناصر لرؤية الوصف أو المزيد من المعلومات</value>
+  </data>
+  <data name="IfRemovingDS4Windows" xml:space="preserve">
+    <value>إذا كنت تزيل DS4Windows، يمكنك حذف الإعدادات باتباع رابط مجلد الملف التعريفي</value>
+  </data>
+  <data name="InputDelay" xml:space="preserve">
+    <value>الفاصل الزمني الملاحَظ للتقرير الفعلي: {0:0.##} ms</value>
+  </data>
+  <data name="InstallComplete" xml:space="preserve">
+    <value>اكتمل التثبيت</value>
+  </data>
+  <data name="InstallDriver" xml:space="preserve">
+    <value>ثبّت برامج التشغيل هنا</value>
+  </data>
+  <data name="InstallFailed" xml:space="preserve">
+    <value>فشل التثبيت، يرجى إعادة المحاولة</value>
+  </data>
+  <data name="Installing" xml:space="preserve">
+    <value>جارٍ التثبيت...</value>
+  </data>
+  <data name="Jitter" xml:space="preserve">
+    <value>استخدم Sixaxis للمساعدة في حساب حركة لوحة اللمس</value>
+  </data>
+  <data name="KeepThisSize" xml:space="preserve">
+    <value>الاحتفاظ بحجم هذه النافذة بعد الإغلاق</value>
+  </data>
+  <data name="LanguagePackApplyRestartRequired" xml:space="preserve">
+    <value>سيسري تغيير حزمة اللغة بعد إعادة تشغيل تطبيق DS4Windows.</value>
+  </data>
+  <data name="LatencyNotOverTen" xml:space="preserve">
+    <value>زمن استجابة يد التحكم *number* أصبح الآن أقل من 10 مللي ثانية</value>
+  </data>
+  <data name="LatencyOverTen" xml:space="preserve">
+    <value>زمن استجابة يد التحكم {0} تجاوز 10 مللي ثانية ({1} ms)</value>
+  </data>
+  <data name="LaunchProgram" xml:space="preserve">
+    <value>تشغيل *program*</value>
+  </data>
+  <data name="LightByBatteryTip" xml:space="preserve">
+    <value>تعتيم الإضاءة أيضًا حسب مهلة الخمول إذا كان مفعّلاً عندما تكون DS4 مشحونة بالكامل</value>
+  </data>
+  <data name="Loading" xml:space="preserve">
+    <value>جارٍ التحميل...</value>
+  </data>
+  <data name="LoadProfile" xml:space="preserve">
+    <value>تحميل *profile*</value>
+  </data>
+  <data name="Macro" xml:space="preserve">
+    <value>ماكرو</value>
+  </data>
+  <data name="MacroRecorded" xml:space="preserve">
+    <value>تم تسجيل الماكرو</value>
+  </data>
+  <data name="MakeNewProfile" xml:space="preserve">
+    <value>إنشاء ملف تعريف جديد</value>
+  </data>
+  <data name="MultiAction" xml:space="preserve">
+    <value>زر متعدد الأفعال</value>
+  </data>
+  <data name="NA" xml:space="preserve">
+    <value>غير متاح</value>
+  </data>
+  <data name="New" xml:space="preserve">
+    <value>جديد</value>
+  </data>
+  <data name="NoMacroRecorded" xml:space="preserve">
+    <value>لم يتم تسجيل أي ماكرو</value>
+  </data>
+  <data name="noneProfile" xml:space="preserve">
+    <value>(لا شيء)</value>
+  </data>
+  <data name="NoneText" xml:space="preserve">
+    <value>لا شيء</value>
+  </data>
+  <data name="NoProfileLoaded" xml:space="preserve">
+    <value>لم يتم تحميل أي ملف تعريفي</value>
+  </data>
+  <data name="NotUsingProfile" xml:space="preserve">
+    <value>يد التحكم {0} لا تستخدم ملفًا تعريفيًا. مستوى البطارية {1}٪</value>
+  </data>
+  <data name="NotValid" xml:space="preserve">
+    <value>غير صالح</value>
+  </data>
+  <data name="OpeningInstaller" xml:space="preserve">
+    <value>جارٍ فتح المثبِّت</value>
+  </data>
+  <data name="OpenScpDriver" xml:space="preserve">
+    <value>يرجى فتح ScpDriver.exe</value>
+  </data>
+  <data name="OtherFileLocation" xml:space="preserve">
+    <value>، سيتم حذف ملفات المواقع الأخرى</value>
+  </data>
+  <data name="PleaseDownloadUpdater" xml:space="preserve">
+    <value>يرجى تنزيل المحدِّث الآن، ووضعه في مجلد البرامج وإعادة تسميته إلى DS4Updater.exe إذا كنت تستخدم x86، ثم تحقق من التحديث مرة أخرى. سيحاول DS4Windows فتح صفحة إصدار DS4Updater عند إغلاق هذه النافذة.</value>
+  </data>
+  <data name="PleaseImport" xml:space="preserve">
+    <value>يرجى استيراد أو إنشاء ملف تعريفي</value>
+  </data>
+  <data name="PlusNewProfile" xml:space="preserve">
+    <value>ملف تعريفي جديد</value>
+  </data>
+  <data name="ProfileCannotRestore" xml:space="preserve">
+    <value>لا يمكن استعادة *Profile name*.</value>
+  </data>
+  <data name="ProfileFolderMoved" xml:space="preserve">
+    <value>تم نقل مجلد الملفات التعريفية إلى مجلد البرنامج</value>
+  </data>
+  <data name="Programs" xml:space="preserve">
+    <value>البرامج</value>
+  </data>
+  <data name="QuickCharge" xml:space="preserve">
+    <value>تعطيل البلوتوث تلقائيًا عند الاتصال بـ USB</value>
+  </data>
+  <data name="QuitOtherPrograms" xml:space="preserve">
+    <value>أغلق التطبيقات التي تستخدم حاليًا يد التحكم الفعلية قبل تفعيل "استخدام HidHide لمنع الإدخال المزدوج".</value>
+  </data>
+  <data name="RecordText" xml:space="preserve">
+    <value>تسجيل</value>
+  </data>
+  <data name="RightClickPresets" xml:space="preserve">
+    <value>انقر بزر الماوس الأيمن لتعيين إعدادات مسبقة لمجموعة من عناصر التحكم</value>
+  </data>
+  <data name="RunAtStartup" xml:space="preserve">
+    <value>يُخبر Windows ببدء تشغيل DS4Windows بعد تسجيل الدخول</value>
+  </data>
+  <data name="SaveRecordedMacro" xml:space="preserve">
+    <value>حفظ الماكرو المسجَّل؟</value>
+  </data>
+  <data name="ScanCode" xml:space="preserve">
+    <value>Scan Code</value>
+  </data>
+  <data name="SearchingController" xml:space="preserve">
+    <value>جارٍ البحث عن أيادي تحكم...</value>
+  </data>
+  <data name="SelectActionTitle" xml:space="preserve">
+    <value>اختر فعلاً لـ *action*</value>
+  </data>
+  <data name="SelectMacro" xml:space="preserve">
+    <value>اختر ماكرو</value>
+  </data>
+  <data name="SetRegularTrigger" xml:space="preserve">
+    <value>تعيين الزناد العادي</value>
+  </data>
+  <data name="SetUnloadTrigger" xml:space="preserve">
+    <value>تعيين زناد الإلغاء</value>
+  </data>
+  <data name="Shortcuts" xml:space="preserve">
+    <value>الاختصارات</value>
+  </data>
+  <data name="SASteeringWheelEmulationCalibrate" xml:space="preserve">
+    <value>معايرة محاكاة عجلة القيادة بالجايرو السداسي</value>
+  </data>
+  <data name="SASteeringWheelEmulationCalibrateInstruction1" xml:space="preserve">
+    <value>(1) ضع يد التحكم في المنتصف، ثبّتها واضغط "X"</value>
+  </data>
+  <data name="SASteeringWheelEmulationCalibrateInstruction2" xml:space="preserve">
+    <value>(2) أدر إلى وضعية 90 درجة يسارًا (أو يمينًا) واضغط "X"</value>
+  </data>
+  <data name="SASteeringWheelEmulationCalibrateInstruction3" xml:space="preserve">
+    <value>(3) أدر إلى وضعية 90 درجة يمينًا (أو يسارًا) واضغط "X"</value>
+  </data>
+  <data name="SASteeringWheelEmulationCalibrateInstruction" xml:space="preserve">
+    <value>يتم تعيين جميع نقاط المعايرة عندما يتحول لون الشريط الضوئي إلى الأخضر. أثناء تدوير يد التحكم، يومض لون الشريط الضوئي عندما تكون يد التحكم عند نقطة المعايرة. اقبل المعايرة بزر OK</value>
+  </data>
+  <data name="SASteeringWheelEmulationCalibrateNoControllerError" xml:space="preserve">
+    <value>لا يمكن معايرة قيم محاكاة عجلة القيادة بالجايرو (sixaxis) دون وجود يد تحكم. وصّل يد تحكم عبر البلوتوث أو USB</value>
+  </data>
+  <data name="SASteeringWheelEmulationCalibrateNoneAxisError" xml:space="preserve">
+    <value>خيار محور محاكاة عجلة القيادة بالجايرو مضبوط على NONE (المحاكاة غير مستخدمة). يرجى اختيار خيار محور قبل معايرة محاكاة عجلة القيادة بالجايرو السداسي</value>
+  </data>
+  <data name="SixAxisReading" xml:space="preserve">
+    <value>انقر لقراءة Sixaxis المتقدمة</value>
+  </data>
+  <data name="Starting" xml:space="preserve">
+    <value>جارٍ البدء...</value>
+  </data>
+  <data name="StartText" xml:space="preserve">
+    <value>بدء</value>
+  </data>
+  <data name="Step1" xml:space="preserve">
+    <value>الخطوة 1: تثبيت بنية VIIPER الخلفية</value>
+  </data>
+  <data name="StopHText" xml:space="preserve">
+    <value>إيقاف قوي</value>
+  </data>
+  <data name="StopLText" xml:space="preserve">
+    <value>إيقاف خفيف</value>
+  </data>
+  <data name="StoppedDS4Windows" xml:space="preserve">
+    <value>تم إيقاف DS4Windows</value>
+  </data>
+  <data name="StoppingDS4" xml:space="preserve">
+    <value>جارٍ إيقاف أيادي تحكم DS4 المدخلة</value>
+  </data>
+  <data name="StoppingX360" xml:space="preserve">
+    <value>جارٍ إيقاف أيادي التحكم الافتراضية للإخراج</value>
+  </data>
+  <data name="StopText" xml:space="preserve">
+    <value>إيقاف</value>
+  </data>
+  <data name="SwipeDown" xml:space="preserve">
+    <value>تمرير لأسفل</value>
+  </data>
+  <data name="SwipeLeft" xml:space="preserve">
+    <value>تمرير لليسار</value>
+  </data>
+  <data name="SwipeRight" xml:space="preserve">
+    <value>تمرير لليمين</value>
+  </data>
+  <data name="SwipeTouchpad" xml:space="preserve">
+    <value>تمرير لوحة اللمس لتغيير الملفات التعريفية</value>
+  </data>
+  <data name="SwipeUp" xml:space="preserve">
+    <value>تمرير لأعلى</value>
+  </data>
+  <data name="TapAndHold" xml:space="preserve">
+    <value>النقر مع الاستمرار للسحب، مع تأخير بسيط للنقرات المفردة</value>
+  </data>
+  <data name="TestHText" xml:space="preserve">
+    <value>اختبار قوي</value>
+  </data>
+  <data name="TestLText" xml:space="preserve">
+    <value>اختبار خفيف</value>
+  </data>
+  <data name="TestText" xml:space="preserve">
+    <value>اختبار</value>
+  </data>
+  <data name="TextDocs" xml:space="preserve">
+    <value>مستند نصي (*.txt)</value>
+  </data>
+  <data name="TiltDown" xml:space="preserve">
+    <value>إمالة لأسفل</value>
+  </data>
+  <data name="TiltLeft" xml:space="preserve">
+    <value>إمالة لليسار</value>
+  </data>
+  <data name="TiltRight" xml:space="preserve">
+    <value>إمالة لليمين</value>
+  </data>
+  <data name="TiltUp" xml:space="preserve">
+    <value>إمالة لأعلى</value>
+  </data>
+  <data name="TouchpadMovementOff" xml:space="preserve">
+    <value>حركة لوحة اللمس الآن معطّلة</value>
+  </data>
+  <data name="TouchpadMovementOn" xml:space="preserve">
+    <value>حركة لوحة اللمس الآن مفعّلة</value>
+  </data>
+  <data name="TouchpadOffTip" xml:space="preserve">
+    <value>أعد التفعيل بالضغط على PS+Touchpad</value>
+  </data>
+  <data name="TwoFingerSwipe" xml:space="preserve">
+    <value>تمرير بإصبعين على لوحة اللمس يسارًا أو يمينًا</value>
+  </data>
+  <data name="TypeNewName" xml:space="preserve">
+    <value>اكتب الاسم الجديد هنا</value>
+  </data>
+  <data name="TypeProfileName" xml:space="preserve">
+    <value>اكتب اسم الملف التعريفي هنا</value>
+  </data>
+  <data name="UACTask" xml:space="preserve">
+    <value>تحتاج إلى تشغيل DS4Windows كمسؤول لتفعيل هذا الوضع.</value>
+  </data>
+  <data name="Unassigned" xml:space="preserve">
+    <value>غير مُعيَّن</value>
+  </data>
+  <data name="UpText" xml:space="preserve">
+    <value>أعلى</value>
+  </data>
+  <data name="UpToDate" xml:space="preserve">
+    <value>تطبيق DS4Windows محدَّث.</value>
+  </data>
+  <data name="UseControllerForMapping" xml:space="preserve">
+    <value>يمكنك أيضًا استخدام يد التحكم لتغيير عناصر التحكم</value>
+  </data>
+  <data name="UsingExclusive" xml:space="preserve">
+    <value>جارٍ استخدام الوضع الحصري</value>
+  </data>
+  <data name="UsingProfile" xml:space="preserve">
+    <value>يد التحكم {0} تستخدم الملف التعريفي "{1}". مستوى البطارية {2}٪</value>
+  </data>
+  <data name="UsingShared" xml:space="preserve">
+    <value>جارٍ استخدام الوضع المشترك</value>
+  </data>
+  <data name="UsingTPSwipes" xml:space="preserve">
+    <value>هذا يعطّل لوحة اللمس كماوس</value>
+  </data>
+  <data name="ValidName" xml:space="preserve">
+    <value>يرجى إدخال اسم صالح</value>
+  </data>
+  <data name="WaitMS" xml:space="preserve">
+    <value>انتظر *number* مللي ثانية</value>
+  </data>
+  <data name="WillKeep" xml:space="preserve">
+    <value>سيتم الاحتفاظ به</value>
+  </data>
+  <data name="XMLFiles" xml:space="preserve">
+    <value>ملفات XML (*.xml)</value>
+  </data>
+  <data name="EnableTouchToggle" xml:space="preserve">
+    <value>السماح بتبديل وظيفة ماوس لوحة اللمس بواسطة PS + النقر على لوحة اللمس.</value>
+  </data>
+  <data name="UdpServer" xml:space="preserve">
+    <value>تفعيل خادم UDP. عنوان ومنفذ استماع الخادم. خيارات قيمة العنوان: 127.0.0.1 لـ localhost فقط | 0.0.0.0 كل العناوين | اسم مضيف أو عنوان IP محدد.</value>
+  </data>
+  <data name="AutoProfilePathAndWindowTitleEditTip" xml:space="preserve">
+    <value>^ABC = التطابق في بداية النص (^) | ABC$ = التطابق في نهاية النص ($) | *ABC = يحتوي على نص (*)</value>
+  </data>
+  <data name="ShowAutoProfileDebugLogTip" xml:space="preserve">
+    <value>إذا كان مفعّلاً، تعرض صفحة تبويب Log رسائل مفصّلة لأحداث الملفات التعريفية التلقائية.</value>
+  </data>
+  <data name="MacroScanCodeTip" xml:space="preserve">
+    <value>استخدم قيمة رمز مسح (Scan Code) لمفاتيح لوحة المفاتيح في الماكرو</value>
+  </data>
+  <data name="MacroRunOnReleaseTip" xml:space="preserve">
+    <value>شغّل الماكرو عند تحرير مفتاح الزناد</value>
+  </data>
+  <data name="MacroSynchronizedRunTip" xml:space="preserve">
+    <value>شغّل عدة ماكروهات بترتيب متزامن إذا كان لنفس الزناد عدة ماكروهات (يكتمل ماكرو الضغط قبل تشغيل ماكرو التحرير)</value>
+  </data>
+  <data name="MacroRepeatTip" xml:space="preserve">
+    <value>كرر الماكرو أثناء الضغط المستمر على مفتاح الزناد</value>
+  </data>
+  <data name="MacroKeepKeyStateTip" xml:space="preserve">
+    <value>احتفظ بحالة المفتاح الأخيرة عند اكتمال تنفيذ الماكرو (أي إذا بقي مفتاح في حالة مضغوطة فلن يعود تلقائيًا إلى الحالة الافتراضية)</value>
+  </data>
+  <data name="SquareStickRoundness" xml:space="preserve">
+    <value>استدارة زوايا العصا المربعة</value>
+  </data>
+  <data name="XMLActionsCorrupt" xml:space="preserve">
+    <value>ملف Actions.xml كان تالفًا. جارٍ البدء من جديد.</value>
+  </data>
+  <data name="OscServer" xml:space="preserve">
+    <value>تفعيل خادم OSC. الاستماع إلى المنفذ على جميع العناوين.</value>
+  </data>
+  <data name="UsingAutoTempProfile" xml:space="preserve">
+    <value>يد التحكم {0} تستخدم الملف التعريفي المؤقت "{1}"</value>
+  </data>
+  <data name="DinputOnly" xml:space="preserve">
+    <value />
+  </data>
+  <data name="OutContNotice" xml:space="preserve">
+    <value>اختر نوع يد التحكم الافتراضية للإخراج (يسري عند حفظ الملف التعريفي)</value>
+  </data>
+  <data name="TouchStarted" xml:space="preserve">
+    <value>بدأ اللمس</value>
+  </data>
+  <data name="TouchEnded" xml:space="preserve">
+    <value>انتهى اللمس</value>
+  </data>
+
+  <data name="Cancel" xml:space="preserve"><value>إلغاء</value></data>
+  <data name="Save" xml:space="preserve"><value>حفظ</value></data>
+  <data name="AHStatusSelectController" xml:space="preserve"><value>اختر يد تحكم</value></data>
+  <data name="AHStatusNoSource" xml:space="preserve"><value>لا يوجد مصدر</value></data>
+  <data name="AHStatusOff" xml:space="preserve"><value>معطّل</value></data>
+  <data name="AHStatusSavedToProfile" xml:space="preserve"><value>تم الحفظ في الملف التعريفي</value></data>
+  <data name="AHStatusActive" xml:space="preserve"><value>نشط</value></data>
+  <data name="AHSourceControllerAudio" xml:space="preserve"><value>صوت يد التحكم</value></data>
+  <data name="AHSourceAutoGameDetection" xml:space="preserve"><value>الكشف التلقائي عن اللعبة</value></data>
+  <data name="AHSourceSelectedApp" xml:space="preserve"><value>التطبيق المحدد</value></data>
+  <data name="AHSourceSystemAudioDefault" xml:space="preserve"><value>صوت النظام · المخرج الافتراضي</value></data>
+  <data name="MLLive" xml:space="preserve"><value>مباشر</value></data>
+  <data name="MLWaiting" xml:space="preserve"><value>في الانتظار</value></data>
+  <data name="MLControllerChanged" xml:space="preserve"><value>تغيّرت يد التحكم</value></data>
+  <data name="MLNoRecentInput" xml:space="preserve"><value>لا يوجد إدخال حديث</value></data>
+  <data name="MLReopenForNewController" xml:space="preserve"><value>أعد فتح المحرر لمعاينة يد التحكم الجديدة.</value></data>
+  <data name="MLControllerDisconnectedReopen" xml:space="preserve"><value>انقطع اتصال يد التحكم. أعد الاتصال وأعد فتح المحرر.</value></data>
+  <data name="MLWaitingForFreshInput" xml:space="preserve"><value>في انتظار إدخال جديد من يد التحكم…</value></data>
+  <data name="MLWaitingForInput" xml:space="preserve"><value>في انتظار إدخال يد التحكم…</value></data>
+  <data name="MLOpenFromConnectedController" xml:space="preserve"><value>افتح هذا الملف التعريفي من يد تحكم متصلة.</value></data>
+  <data name="MLNoButtonsPressed" xml:space="preserve"><value>لا توجد أزرار مضغوطة</value></data>
+  <data name="VPCitrixHeading" xml:space="preserve"><value>تم إيقاف VIIPER مؤقتًا لسلامة النظام</value></data>
+  <data name="VPCitrixSummary" xml:space="preserve"><value>يوجد تعارض مع مراقب USB الخاص بـ Citrix نشط حاليًا.</value></data>
+  <data name="VPCitrixRequirements" xml:space="preserve"><value>• تعطيل إعادة توجيه USB العامة في Citrix فقط
+• إعادة تشغيل Windows قبل بدء تشغيل VIIPER مرة أخرى</value></data>
+  <data name="VPDisableConflictingUsbMonitor" xml:space="preserve"><value>تعطيل مراقب USB المتعارض</value></data>
+  <data name="VPContinueWithoutVirtualOutput" xml:space="preserve"><value>المتابعة بدون إخراج افتراضي</value></data>
+  <data name="VPUsbipReplaceHeading" xml:space="preserve"><value>يجب استبدال إصدار USB-IP</value></data>
+  <data name="VPVerificationFailedHeading" xml:space="preserve"><value>فشل التحقق من VIIPER</value></data>
+  <data name="VPVerificationFailedSummary" xml:space="preserve"><value>إصدار VIIPER المثبَّت لا يطابق حزمة DS4Windows هذه.</value></data>
+  <data name="VPVerifiedUpdateRequired" xml:space="preserve"><value>مطلوب تحديث موثَّق</value></data>
+  <data name="VPUsbipReplaceRequirements" xml:space="preserve"><value>• تثبيت والتحقق من VIIPER 0.1.5-rc4.6 المرفق
+• إزالة حزمة USB-IP غير المدعومة بأمان
+• إعادة التشغيل، ثم إتمام تثبيت USB-IP 0.9.7.7</value></data>
+  <data name="VPVerificationFailedRequirements" xml:space="preserve"><value>• تثبيت نفس نسخة VIIPER المرفقة بالضبط
+• اختيار DS4Windows المُدار أو المحمول
+• لن يتم تشغيل البنية الخلفية غير الموثقة</value></data>
+  <data name="VPRepairViiperUsbip" xml:space="preserve"><value>إصلاح VIIPER + USB-IP</value></data>
+  <data name="VPInstallStandard" xml:space="preserve"><value>تثبيت عادي</value></data>
+  <data name="VPKeepPortable" xml:space="preserve"><value>إبقاء DS4Windows محمولاً</value></data>
+  <data name="VPSetupRequiredHeading" xml:space="preserve"><value>إعداد VIIPER مطلوب</value></data>
+  <data name="VPRequiredBeforeRun" xml:space="preserve"><value>مطلوب قبل تشغيل DS4Windows</value></data>
+  <data name="VPMandatoryRequirements" xml:space="preserve"><value>• تثبيت VIIPER 0.1.5-rc4.6 المرفق
+• تثبيت والتحقق من USB-IP 0.9.7.7
+• تشغيل DS4Windows فقط بعد نجاح فحص وقت التشغيل</value></data>
+  <data name="VPInstallRepair" xml:space="preserve"><value>تثبيت / إصلاح</value></data>
+  <data name="VPVerifyingPackage" xml:space="preserve"><value>جارٍ التحقق من حزمة DS4Windows...</value></data>
+  <data name="TLActiveLabel" xml:space="preserve"><value>نشط</value></data>
+  <data name="TLLeftTrigger" xml:space="preserve"><value>الزناد الأيسر</value></data>
+  <data name="TLRightTrigger" xml:space="preserve"><value>الزناد الأيمن</value></data>
+  <data name="TLShapeTriggerFeelFormat" xml:space="preserve"><value>شكّل إحساس زناد {0}</value></data>
+  <data name="TLSaveProfileTip" xml:space="preserve"><value>حفظ ملف تعريف زناد جديد</value></data>
+  <data name="TLRenameProfileTip" xml:space="preserve"><value>إعادة تسمية ملف تعريف الزناد</value></data>
+  <data name="TLDeleteProfileTip" xml:space="preserve"><value>حذف ملف تعريف الزناد</value></data>
+  <data name="TLModeFeedback" xml:space="preserve"><value>استجابة</value></data>
+  <data name="TLModeWeapon" xml:space="preserve"><value>سلاح</value></data>
+  <data name="TLModeVibration" xml:space="preserve"><value>اهتزاز</value></data>
+  <data name="TLMeterStart" xml:space="preserve"><value>البداية</value></data>
+  <data name="TLMeterWall" xml:space="preserve"><value>الجدار</value></data>
+  <data name="TLMeterForce" xml:space="preserve"><value>القوة</value></data>
+  <data name="TLPreview" xml:space="preserve"><value>معاينة</value></data>
+  <data name="TLResetFormat" xml:space="preserve"><value>إعادة تعيين {0}</value></data>
+  <data name="TLGameRumbleTitle" xml:space="preserve"><value>اهتزاز رامبل اللعبة</value></data>
+  <data name="TLGameRumbleDescFormat" xml:space="preserve"><value>بث محرك اهتزاز HID {0} الخاص باللعبة إلى {1} كتأثير اهتزاز منخفض الكمون.</value></data>
+  <data name="TLHeavyLeft" xml:space="preserve"><value>قوي / أيسر</value></data>
+  <data name="TLLightRight" xml:space="preserve"><value>خفيف / أيمن</value></data>
+  <data name="TLGameRumbleTipFormat" xml:space="preserve"><value>تفعيل اهتزاز رامبل اللعبة بشكل مستقل لـ {0}. هذا لا يربط الزناد الآخر.</value></data>
+  <data name="TLFullPullActionTitle" xml:space="preserve"><value>فعل الضغط الكامل</value></data>
+  <data name="TLEndOfTravelBadge" xml:space="preserve"><value>نهاية المسار</value></data>
+  <data name="TLFullPullDescFormat" xml:space="preserve"><value>عندما يُضغط {0} بالكامل، شغّل الفعل أدناه باستخدام السلوك المحدد.</value></data>
+  <data name="TLAssignedActionLabel" xml:space="preserve"><value>الفعل المُعيَّن</value></data>
+  <data name="TLChangeLabel" xml:space="preserve"><value>تغيير  ›</value></data>
+  <data name="TLBehaviorLabel" xml:space="preserve"><value>السلوك</value></data>
+  <data name="TLDelayLabel" xml:space="preserve"><value>التأخير</value></data>
+  <data name="TLSelectControllerOrProfile" xml:space="preserve"><value>اختر يد تحكم أو ملف تعريفي</value></data>
+  <data name="TLSelectToOpen" xml:space="preserve"><value>اختر يد تحكم أو ملف تعريفي لفتح Trigger Lab.</value></data>
+  <data name="TLSavedCustomEffect" xml:space="preserve"><value>تأثير مخصص محفوظ.</value></data>
+  <data name="TLSaveProfileDialogTitle" xml:space="preserve"><value>حفظ ملف تعريف الزناد</value></data>
+  <data name="TLDefaultCustomTriggerNameFormat" xml:space="preserve"><value>زناد مخصص {0}</value></data>
+  <data name="TLCustom" xml:space="preserve"><value>مخصص</value></data>
+  <data name="TLDeleteConfirmFormat" xml:space="preserve"><value>حذف {0}؟</value></data>
+  <data name="TLDialogTitle" xml:space="preserve"><value>Trigger Lab</value></data>
+  <data name="TLModeOff" xml:space="preserve"><value>معطّل</value></data>
+  <data name="TLModeOffDesc" xml:space="preserve"><value>يعمل فعل الزناد العادي فقط.</value></data>
+  <data name="TLModeAddAtFullPull" xml:space="preserve"><value>إضافة عند الضغط الكامل</value></data>
+  <data name="TLModeAddAtFullPullDesc" xml:space="preserve"><value>أبقِ فعل الزناد العادي نشطًا وشغّل أيضًا فعل الضغط الكامل عند نهاية المسار.</value></data>
+  <data name="TLModeReplaceAtFullPull" xml:space="preserve"><value>استبدال عند الضغط الكامل</value></data>
+  <data name="TLModeReplaceAtFullPullDesc" xml:space="preserve"><value>حرّر فعل الزناد العادي واستبدله بفعل الضغط الكامل عند نهاية المسار.</value></data>
+  <data name="TLModeHairTrigger" xml:space="preserve"><value>زناد شعري</value></data>
+  <data name="TLModeHairTriggerDesc" xml:space="preserve"><value>شغّل كلا الفعلين عند الضغط الكامل، ثم حرّرهما بمجرد ابتعاد الزناد عن نهاية المسار.</value></data>
+  <data name="TLModeHipFire" xml:space="preserve"><value>إطلاق سريع</value></data>
+  <data name="TLModeHipFireDesc" xml:space="preserve"><value>انتظر التأخير المختار، ثم شغّل الفعل العادي أو فعل الضغط الكامل حسب مدى ضغط الزناد.</value></data>
+  <data name="TLModeHipFireExclusive" xml:space="preserve"><value>إطلاق سريع (حصري)</value></data>
+  <data name="TLModeHipFireExclusiveDesc" xml:space="preserve"><value>انتظر التأخير المختار وشغّل فعلاً واحدًا فقط: الضغط العادي أو الضغط الكامل.</value></data>
+  <data name="TouchButtonModeClick" xml:space="preserve"><value>نقر</value></data>
+  <data name="TouchButtonModeTouch" xml:space="preserve"><value>لمس</value></data>
+  <data name="TouchButtonModeRelease" xml:space="preserve"><value>تحرير</value></data>
+  <data name="Switch2CalibLeftStick" xml:space="preserve"><value>العصا اليسرى</value></data>
+  <data name="Switch2CalibRightStick" xml:space="preserve"><value>العصا اليمنى</value></data>
+  <data name="Switch2CalibProControllerName" xml:space="preserve"><value>Switch 2 Pro Controller</value></data>
+  <data name="Switch2CalibJoinedJoyCon" xml:space="preserve"><value>Joy-Con 2 المدمج</value></data>
+  <data name="Switch2CalibJoyConLeft" xml:space="preserve"><value>Joy-Con 2 (الأيسر)</value></data>
+  <data name="Switch2CalibJoyConRight" xml:space="preserve"><value>Joy-Con 2 (الأيمن)</value></data>
+  <data name="Switch2CalibUsbSuffix" xml:space="preserve"><value> · USB</value></data>
+  <data name="Switch2CalibBluetoothSuffix" xml:space="preserve"><value> · بلوتوث</value></data>
+  <data name="Switch2CalibChoosePhysicalStick" xml:space="preserve"><value>اختر عصا فعلية</value></data>
+  <data name="Switch2CalibInitialInstructions" xml:space="preserve"><value>أدر العصا المحددة حول كامل حافتها، ثم دعها تستقر في المنتصف. لن يُحفظ شيء حتى تختار حفظ المعايرة.</value></data>
+  <data name="Switch2CalibPcActive" xml:space="preserve"><value>معايرة الكمبيوتر نشطة لهذه العصا.</value></data>
+  <data name="Switch2CalibUsingOriginal" xml:space="preserve"><value>يُستخدم معايرة يد التحكم الأصلية، أو الإعدادات الافتراضية إذا لم تكن متوفرة.</value></data>
+  <data name="Switch2CalibNotStarted" xml:space="preserve"><value>لم يبدأ</value></data>
+  <data name="Switch2CalibResetConfirmFormat" xml:space="preserve"><value>إزالة معايرة الكمبيوتر لـ {0} على يد التحكم هذه؟
+
+لن يتم تغيير معايرة المصنع الأصلية. بقية العصي وأيادي التحكم لن تتأثر.</value></data>
+  <data name="Switch2CalibPreparingReset" xml:space="preserve"><value>جارٍ تحضير إعادة التعيين</value></data>
+  <data name="Switch2CalibPreparingCalibration" xml:space="preserve"><value>جارٍ تحضير المعايرة</value></data>
+  <data name="Switch2CalibReleasingInput" xml:space="preserve"><value>جارٍ تحرير إدخال يد التحكم المُعيَّن…</value></data>
+  <data name="Switch2CalibPleaseWait" xml:space="preserve"><value>يرجى الانتظار</value></data>
+  <data name="Switch2CalibCouldNotStart" xml:space="preserve"><value>تعذّر بدء المعايرة</value></data>
+  <data name="Switch2CalibCouldNotStartDetail" xml:space="preserve"><value>انتظر إدخالاً حيًا من يد التحكم وأكمل أي معايرة أخرى، ثم أعد المحاولة. مطلوب هوية يد تحكم محفوظة ومخزن معايرة قابل للكتابة على الكمبيوتر.</value></data>
+  <data name="Switch2CalibCouldNotStartError" xml:space="preserve"><value>تعذّر بدء المعايرة. لم يتم حفظ أي معايرة.</value></data>
+  <data name="Switch2CalibResettingPc" xml:space="preserve"><value>جارٍ إعادة تعيين معايرة الكمبيوتر</value></data>
+  <data name="Switch2CalibSavingPc" xml:space="preserve"><value>جارٍ حفظ معايرة الكمبيوتر</value></data>
+  <data name="Switch2CalibInputReleasedWhileSaving" xml:space="preserve"><value>يبقى إدخال يد التحكم محررًا أثناء تخزين النتيجة وتطبيقها.</value></data>
+  <data name="Switch2CalibResetDone" xml:space="preserve"><value>تمت إعادة تعيين معايرة الكمبيوتر</value></data>
+  <data name="Switch2CalibSaveDone" xml:space="preserve"><value>تم حفظ المعايرة</value></data>
+  <data name="Switch2CalibCanCalibrateAnother" xml:space="preserve"><value>يمكنك معايرة عصا أخرى أو إغلاق هذه النافذة.</value></data>
+  <data name="Switch2CalibResetResultFormat" xml:space="preserve"><value>{0}: تمت إزالة تجاوز الكمبيوتر. معايرة المصدر نشطة مرة أخرى.</value></data>
+  <data name="Switch2CalibSaveResultFormat" xml:space="preserve"><value>{0}: تم الحفظ على هذا الكمبيوتر وتطبيقه على اتصال يد التحكم هذا.</value></data>
+  <data name="Switch2CalibComplete" xml:space="preserve"><value>اكتمل</value></data>
+  <data name="Switch2CalibStorageFailed" xml:space="preserve"><value>تعذّر تحديث ملف معايرة الكمبيوتر. المعايرة الحية السابقة لم تتغيّر. أعد محاولة حفظ المعايرة أو ألغِ.</value></data>
+  <data name="Switch2CalibNotReady" xml:space="preserve"><value>العملية ليست جاهزة للانتهاء بعد. انتظر عينات صالحة أو ألغِ وأعد المحاولة.</value></data>
+  <data name="Switch2CalibEnded" xml:space="preserve"><value>انتهت المعايرة</value></data>
+  <data name="Switch2CalibReopenBeforeRetry" xml:space="preserve"><value>أغلق هذه النافذة وأعد فتح المعايرة من يد التحكم الحالية قبل المحاولة مرة أخرى.</value></data>
+  <data name="Switch2CalibNotApplied" xml:space="preserve"><value>لم يُطبَّق</value></data>
+  <data name="Switch2CalibStoredNotApplied" xml:space="preserve"><value>تم تحديث ملف الكمبيوتر، لكن التغيير لم يُطبَّق على الاتصال النشط. أعد الاتصال لتحميله، أو أعد تعيينه صراحةً. الإلغاء لا يمكنه التراجع عن كتابة قيد التنفيذ بالفعل.</value></data>
+  <data name="Switch2CalibNoLongerCurrent" xml:space="preserve"><value>هذه العملية لم تعد سارية. لم تُكمل تغيير المعايرة.</value></data>
+  <data name="Switch2CalibFinishFailed" xml:space="preserve"><value>تعذّر إنهاء المعايرة. تعذّر تأكيد نتيجة الملف؛ أعد الاتصال وتحقق من العصا المحددة قبل إعادة المحاولة.</value></data>
+  <data name="Switch2CalibCancelled" xml:space="preserve"><value>تم إلغاء المعايرة</value></data>
+  <data name="Switch2CalibResumeInput" xml:space="preserve"><value>يمكن استئناف إدخال يد التحكم العادي. يمكنك البدء مرة أخرى عندما تكون جاهزًا.</value></data>
+  <data name="Switch2CalibSaveInProgress" xml:space="preserve"><value>قد يستمر حفظ قيد التنفيذ بالفعل في تحديث ملف الكمبيوتر. ستظهر نتيجته النهائية هنا.</value></data>
+  <data name="Switch2CalibDiscarded" xml:space="preserve"><value>تم تجاهل الالتقاط غير المحفوظ؛ لم تتغير المعايرة الحالية.</value></data>
+  <data name="Switch2CalibCancelledStatus" xml:space="preserve"><value>ألغيت</value></data>
+  <data name="Switch2CalibChangedRetry" xml:space="preserve"><value>تغيّرت يد التحكم أو المعايرة. ابدأ مرة أخرى من يد التحكم الحالية.</value></data>
+  <data name="Switch2CalibNotSaved" xml:space="preserve"><value>لم يُحفظ</value></data>
+  <data name="Switch2CalibRotateHeadingFormat" xml:space="preserve"><value>1 · أدر {0}</value></data>
+  <data name="Switch2CalibRotateInstructions" xml:space="preserve"><value>حرّك ببطء حول كامل الحافة الخارجية في كلا الاتجاهين. استمر في الحركة حتى تكتمل هذه الخطوة؛ التوقفات لا تُحتسب.</value></data>
+  <data name="Switch2CalibMovingSecondsFormat" xml:space="preserve"><value>{0} ثانية حركة متبقية</value></data>
+  <data name="Switch2CalibSettleHeading" xml:space="preserve"><value>2 · حرّر العصا</value></data>
+  <data name="Switch2CalibSettleInstructions" xml:space="preserve"><value>ارفع يدك عن العصا ودعها تعود إلى المنتصف.</value></data>
+  <data name="Switch2CalibWaitingRest" xml:space="preserve"><value>في انتظار ثانيتين من السكون</value></data>
+  <data name="Switch2CalibCenterHeading" xml:space="preserve"><value>3 · ابقَ ثابتًا</value></data>
+  <data name="Switch2CalibCenterInstructions" xml:space="preserve"><value>اترك العصا بدون لمس أثناء قياس مركزها. لمسها يعيد بدء فترة السكون.</value></data>
+  <data name="Switch2CalibStillSecondsFormat" xml:space="preserve"><value>{0} ثانية سكون متبقية</value></data>
+  <data name="Switch2CalibReadyToReset" xml:space="preserve"><value>جاهز لإعادة التعيين</value></data>
+  <data name="Switch2CalibReadyToSave" xml:space="preserve"><value>جاهز للحفظ</value></data>
+  <data name="Switch2CalibChooseSaveOrCancel" xml:space="preserve"><value>اختر حفظ المعايرة لتطبيق هذه النتيجة، أو إلغاء لتجاهلها.</value></data>
+  <data name="Switch2CalibReady" xml:space="preserve"><value>جاهز</value></data>
+  <data name="Switch2CalibMoreTravelNeeded" xml:space="preserve"><value>مطلوب مزيد من حركة العصا</value></data>
+  <data name="Switch2CalibReachFullEdge" xml:space="preserve"><value>ألغِ وأعد المحاولة. اصل إلى الحافة الكاملة في كل اتجاه، ثم دع العصا تتمركز تلقائيًا.</value></data>
+  <data name="Switch2CalibRejected" xml:space="preserve"><value>تم رفض المعايرة</value></data>
+  <data name="Switch2CalibStartNewWhenReady" xml:space="preserve"><value>ابدأ معايرة جديدة عندما تكون يد التحكم جاهزة.</value></data>
+  <data name="Switch2CalibContextChanged" xml:space="preserve"><value>تغيّر سياق يد التحكم</value></data>
+  <data name="Switch2CalibContextChangedDetail" xml:space="preserve"><value>تغيّرت يد التحكم أو الملف التعريفي أو الزوج. أغلق هذه النافذة وأعد فتح المعايرة من يد التحكم التي تريد استخدامها.</value></data>
+  <data name="Switch2CalibStopped" xml:space="preserve"><value>توقفت المعايرة</value></data>
+  <data name="Switch2CalibResetDialogTitle" xml:space="preserve"><value>إعادة تعيين معايرة الكمبيوتر للعصا</value></data>
+</root>

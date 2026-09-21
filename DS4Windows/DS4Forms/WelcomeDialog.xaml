@@ -23,9 +23,9 @@
     </Window.Resources>
     <ScrollViewer>
         <DockPanel Margin="10,10,10,10" LastChildFill="False">
-            <Button x:Name="viiperInstallBtn" Content="Install / Repair VIIPER" Style="{StaticResource CommonMargin}" DockPanel.Dock="Top" Click="ViiperInstallBtn_Click" />
+            <Button x:Name="viiperInstallBtn" Content="{lex:Loc ViiperSettings.InstallRepairButton}" Style="{StaticResource CommonMargin}" DockPanel.Dock="Top" Click="ViiperInstallBtn_Click" />
             <TextBlock TextAlignment="Center" DockPanel.Dock="Top" TextWrapping="Wrap"
-                       Text="Required virtual-controller backend. DS4Windows requests administrator access and installs VIIPER plus usbip-win2 for you." />
+                       Text="{lex:Loc Welcome.ViiperInstallHelpText}" />
             <Button x:Name="step2Btn" IsEnabled="False" Content="{lex:Loc Welcome.Step2Text}" Style="{StaticResource CommonMargin}" DockPanel.Dock="Top"
                 Click="Step2Btn_Click" />
             <TextBlock TextAlignment="Center" DockPanel.Dock="Top">
@@ -45,7 +45,7 @@
                         <Run Text="{lex:Loc Welcome.BluetoothSettings}" />
                     </Hyperlink>
                 </TextBlock>
-                <Image Source="{Binding Source={StaticResource resourcePaths}, Path=PairmodePNG}" Height="80" DockPanel.Dock="Top" />
+                <Image Source="{Binding Source={StaticResource resourcePaths}, Path=PairmodePNG}" Height="80" DockPanel.Dock="Top" FlowDirection="LeftToRight" />
             </DockPanel>
 
             <StackPanel x:Name="step4HidHidePanel" DockPanel.Dock="Top" Margin="0,8,0,0">
@@ -66,7 +66,7 @@
                 </TextBlock>
             </StackPanel>
 
-            <Button x:Name="finishedBtn" Content="Finished" HorizontalAlignment="Center" Padding="10,1" Style="{StaticResource CommonMargin}" Click="FinishedBtn_Click" DockPanel.Dock="Bottom" />
+            <Button x:Name="finishedBtn" Content="{lex:Loc Finished}" HorizontalAlignment="Center" Padding="10,1" Style="{StaticResource CommonMargin}" Click="FinishedBtn_Click" DockPanel.Dock="Bottom" />
         </DockPanel>
     </ScrollViewer>
 </Window>

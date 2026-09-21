@@ -1,5 +1,6 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:lex="http://wpflocalizeextension.codeplex.com">
 
     <!--
         DS4Windows application shell.
@@ -452,13 +453,13 @@
                                     <StackPanel Orientation="Horizontal" Margin="4,0,0,20">
                                         <Border Width="30" Height="30" CornerRadius="5"
                                                 Background="{DynamicResource AccentColor}" Margin="0,0,10,0">
-                                            <TextBlock Text="D" Foreground="White" FontSize="17" FontWeight="Bold"
+                                            <TextBlock Text="{lex:Loc D}" Foreground="White" FontSize="17" FontWeight="Bold"
                                                        HorizontalAlignment="Center" VerticalAlignment="Center" />
                                         </Border>
                                         <StackPanel VerticalAlignment="Center">
-                                            <TextBlock Text="DS4Windows" FontSize="17" FontWeight="SemiBold"
+                                            <TextBlock Text="{lex:Loc BridgeShell.AppName}" FontSize="17" FontWeight="SemiBold"
                                                        Foreground="{DynamicResource ForegroundColor}" />
-                                            <TextBlock Text="Controller companion" FontSize="10"
+                                            <TextBlock Text="{lex:Loc BridgeShell.AppTagline}" FontSize="10"
                                                        Foreground="{DynamicResource MutedForegroundColor}" />
                                         </StackPanel>
                                     </StackPanel>
@@ -505,7 +506,7 @@
                                                     </DataTemplate>
                                                 </ListBox.ItemTemplate>
                                             </ListBox>
-                                            <TextBlock Text="Connect a controller to begin" TextWrapping="Wrap"
+                                            <TextBlock Text="{lex:Loc BridgeShell.ConnectControllerPrompt}" TextWrapping="Wrap"
                                                        Foreground="{DynamicResource MutedForegroundColor}" FontSize="11">
                                                 <TextBlock.Style>
                                                     <Style TargetType="TextBlock">
@@ -521,7 +522,7 @@
                                         </Grid>
                                     </Border>
 
-                                    <TextBlock Grid.Row="2" Text="NAVIGATION" Margin="10,0,0,8"
+                                    <TextBlock Grid.Row="2" Text="{lex:Loc BridgeShell.NavigationHeader}" Margin="10,0,0,8"
                                                FontSize="10" FontWeight="Bold"
                                                Foreground="{DynamicResource MutedForegroundColor}" />
                                     <ScrollViewer Grid.Row="3"
@@ -573,13 +574,13 @@
                                     <StackPanel Orientation="Horizontal" Margin="4,0,0,16">
                                         <Border Width="30" Height="30" CornerRadius="5"
                                                 Background="{DynamicResource AccentColor}" Margin="0,0,10,0">
-                                            <TextBlock Text="P" Foreground="White" FontSize="17" FontWeight="Bold"
+                                            <TextBlock Text="{lex:Loc BridgeShell.ProfileBadgeLetter}" Foreground="White" FontSize="17" FontWeight="Bold"
                                                        HorizontalAlignment="Center" VerticalAlignment="Center" />
                                         </Border>
                                         <StackPanel VerticalAlignment="Center">
-                                            <TextBlock Text="Profile Editor" FontSize="17" FontWeight="SemiBold"
+                                            <TextBlock Text="{lex:Loc BridgeShell.ProfileEditorTitle}" FontSize="17" FontWeight="SemiBold"
                                                        Foreground="{DynamicResource ForegroundColor}" />
-                                            <TextBlock Text="Focused workspace" FontSize="10"
+                                            <TextBlock Text="{lex:Loc BridgeShell.FocusedWorkspace}" FontSize="10"
                                                        Foreground="{DynamicResource MutedForegroundColor}" />
                                         </StackPanel>
                                     </StackPanel>
@@ -598,7 +599,7 @@
                                                        RenderOptions.BitmapScalingMode="HighQuality" />
                                             </Border>
                                             <StackPanel Grid.Column="1">
-                                                <TextBlock Text="EDITING PROFILE" FontSize="9" FontWeight="Bold"
+                                                <TextBlock Text="{lex:Loc BridgeShell.EditingProfileHeader}" FontSize="9" FontWeight="Bold"
                                                            Foreground="{DynamicResource AccentColor}" />
                                                 <TextBlock Text="{Binding EditingProfileName}" Margin="0,3,0,0"
                                                            FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
@@ -615,7 +616,7 @@
                                         </Grid>
                                     </Border>
 
-                                    <TextBlock Grid.Row="2" Text="PROFILE WORKSPACE" Margin="10,0,0,7"
+                                    <TextBlock Grid.Row="2" Text="{lex:Loc BridgeShell.ProfileWorkspaceHeader}" Margin="10,0,0,7"
                                                FontSize="10" FontWeight="Bold"
                                                Foreground="{DynamicResource MutedForegroundColor}" />
 
@@ -623,19 +624,19 @@
                                              SelectedIndex="{Binding ProfileEditorNavigationIndex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                              ItemContainerStyle="{StaticResource BridgeEditorNavigationListItemStyle}"
                                              ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                                        <ListBoxItem Content="Back to Profiles" Tag="&#x2190;" ToolTip="Cancel editing and return to the profile list" />
-                                        <ListBoxItem Content="Button Mapping" Tag="&#x25A3;" ToolTip="Buttons, sticks, touch gestures, and shortcuts" />
-                                        <ListBoxItem Content="Special Actions" Tag="&#x2726;" ToolTip="Macros, launches, shifts, and multi-actions" />
-                                        <ListBoxItem Content="Controller Readings" Tag="&#x223F;" ToolTip="Live inputs and calibration" />
-                                        <ListBoxItem Content="Axis Config" Tag="&#x2194;" ToolTip="Sticks, triggers, dead zones, and curves" />
-                                        <ListBoxItem Content="Lightbar" Tag="&#x25C9;" ToolTip="Color, battery, flash, and charging" />
-                                        <ListBoxItem Content="Touchpad" Tag="&#x25A1;" ToolTip="Mouse, gestures, passthrough, and positioning" />
-                                        <ListBoxItem Content="Gyro" Tag="&#x25CE;" ToolTip="Motion aiming, steering, and swipes" />
-                                        <ListBoxItem Content="Audio Haptics" Tag="&#xE767;" ToolTip="Turn system or app audio into advanced haptics" />
-                                        <ListBoxItem Content="Trigger Lab" Tag="TriggerPair" ToolTip="Build persistent adaptive-trigger effects" />
-                                        <ListBoxItem Content="Nintendo Options" Tag="&#xE7FC;" ToolTip="HD rumble, motion, optical mouse, and calibration" />
-                                        <ListBoxItem Content="Advanced" Tag="&#x2699;" ToolTip="Output, rumble, latency, and compatibility" />
-                                        <ListBoxItem Content="Log" Tag="&#x2261;" ToolTip="Service events without leaving the editor" />
+                                        <ListBoxItem Content="{lex:Loc BridgeShell.BackToProfiles}" Tag="&#x2190;" ToolTip="{lex:Loc BridgeShell.BackToProfilesTip}" />
+                                        <ListBoxItem Content="{lex:Loc BridgeShell.ButtonMapping}" Tag="&#x25A3;" ToolTip="{lex:Loc BridgeShell.ButtonMappingTip}" />
+                                        <ListBoxItem Content="{lex:Loc SpecialActions}" Tag="&#x2726;" ToolTip="{lex:Loc BridgeShell.SpecialActionsTip}" />
+                                        <ListBoxItem Content="{lex:Loc ControllerReadings}" Tag="&#x223F;" ToolTip="{lex:Loc BridgeShell.ControllerReadingsTip}" />
+                                        <ListBoxItem Content="{lex:Loc AxisConfig}" Tag="&#x2194;" ToolTip="{lex:Loc BridgeShell.AxisConfigTip}" />
+                                        <ListBoxItem Content="{lex:Loc Lightbar}" Tag="&#x25C9;" ToolTip="{lex:Loc BridgeShell.LightbarTip}" />
+                                        <ListBoxItem Content="{lex:Loc Touchpad}" Tag="&#x25A1;" ToolTip="{lex:Loc BridgeShell.TouchpadTip}" />
+                                        <ListBoxItem Content="{lex:Loc Gyro}" Tag="&#x25CE;" ToolTip="{lex:Loc BridgeShell.GyroTip}" />
+                                        <ListBoxItem Content="{lex:Loc AudioHaptics.Title}" Tag="&#xE767;" ToolTip="{lex:Loc BridgeShell.AudioHapticsTip}" />
+                                        <ListBoxItem Content="{lex:Loc TriggerLab}" Tag="TriggerPair" ToolTip="{lex:Loc BridgeShell.TriggerLabTip}" />
+                                        <ListBoxItem Content="{lex:Loc NintendoOptions}" Tag="&#xE7FC;" ToolTip="{lex:Loc BridgeShell.NintendoOptionsTip}" />
+                                        <ListBoxItem Content="{lex:Loc Advanced}" Tag="&#x2699;" ToolTip="{lex:Loc BridgeShell.AdvancedTip}" />
+                                        <ListBoxItem Content="{lex:Loc Log}" Tag="&#x2261;" ToolTip="{lex:Loc BridgeShell.LogTip}" />
                                     </ListBox>
                                 </Grid>
                             </Border>

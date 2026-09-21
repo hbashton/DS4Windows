@@ -23,10 +23,10 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
         <Button x:Name="liveInputPreviewToggle" Grid.Row="0"
-                Content="Show live preview" Visibility="Collapsed"
+                Content="{lex:Loc BindingWin.ShowLivePreview}" Visibility="Collapsed"
                 HorizontalAlignment="Right" Margin="6,3,6,3" Padding="10,4"
                 Click="LiveInputPreviewToggle_Click"
-                ToolTip="See what your controller is sending while you choose an action." />
+                ToolTip="{lex:Loc BindingWin.LivePreviewTooltip}" />
         <ScrollViewer x:Name="liveInputPreviewScroll" Grid.Row="1"
                       Visibility="Collapsed" Margin="6,6,6,8" MaxHeight="180"
                       HorizontalScrollBarVisibility="Disabled"
@@ -78,15 +78,15 @@
                                     <StackPanel>
                                         <CheckBox Content="{lex:Loc BindingWin.ChangeLight}" IsChecked="{Binding UseExtrasColor}" Margin="{StaticResource spaceMargin}" />
                                         <StackPanel Orientation="Horizontal">
-                                            <Label Content="R" />
+                                            <Label Content="{lex:Loc R}" />
                                             <Slider Value="{Binding ExtrasColorR}" Minimum="0" Maximum="255" ToolTip="{Binding ExtrasColorR}" MinWidth="100" Background="{Binding ExtrasColorRString, FallbackValue=Red}"/>
                                         </StackPanel>
                                         <StackPanel Orientation="Horizontal">
-                                            <Label Content="G" />
+                                            <Label Content="{lex:Loc G}" />
                                             <Slider Value="{Binding ExtrasColorG}" MinWidth="100" Minimum="0" Maximum="255" ToolTip="{Binding ExtrasColorG}" Background="{Binding ExtrasColorGString, FallbackValue=Lime}"/>
                                         </StackPanel>
                                         <StackPanel Orientation="Horizontal">
-                                            <Label Content="B" />
+                                            <Label Content="{lex:Loc B}" />
                                             <Slider Value="{Binding ExtrasColorB}" MinWidth="100" Minimum="0" Maximum="255" ToolTip="{Binding ExtrasColorB}" Background="{Binding ExtrasColorBString, FallbackValue=Blue}"/>
                                         </StackPanel>
                                         <Button x:Name="extrasColorChoosebtn" Width="20" Height="20" Background="{Binding ExtrasColorString}" HorizontalAlignment="Right" Margin="0,10,10,0" Click="ExtrasColorChoosebtn_Click" />
@@ -122,48 +122,48 @@
 
                     <ComboBox x:Name="shiftTriggerCombo" Margin="0,8,0,0" SelectedIndex="{Binding ShiftTrigger,FallbackValue=0}">
                         <ComboBoxItem Content="{lex:Loc BindingWin.SelectShiftTrigger}"/>
-                        <ComboBoxItem Content="Cross"/>
-                        <ComboBoxItem Content="Circle"/>
-                        <ComboBoxItem Content="Square"/>
-                        <ComboBoxItem Content="Triangle"/>
-                        <ComboBoxItem Content="Options"/>
-                        <ComboBoxItem Content="Share"/>
-                        <ComboBoxItem Content="Up"/>
-                        <ComboBoxItem Content="Down"/>
-                        <ComboBoxItem Content="Left"/>
-                        <ComboBoxItem Content="Right"/>
-                        <ComboBoxItem Content="PS"/>
-                        <ComboBoxItem Content="L1"/>
-                        <ComboBoxItem Content="R1"/>
-                        <ComboBoxItem Content="L2"/>
-                        <ComboBoxItem Content="R2"/>
-                        <ComboBoxItem Content="L3"/>
-                        <ComboBoxItem Content="R3"/>
-                        <ComboBoxItem Content="Left Touch"/>
-                        <ComboBoxItem Content="Upper Touch"/>
-                        <ComboBoxItem Content="Multitouch"/>
-                        <ComboBoxItem Content="Right Touch"/>
-                        <ComboBoxItem Content="Sixaxis Up"/>
-                        <ComboBoxItem Content="Sixaxis Down"/>
-                        <ComboBoxItem Content="Sixaxis Left"/>
-                        <ComboBoxItem Content="Sixaxis Right"/>
-                        <ComboBoxItem Content="Finger on Touchpad"/>
-                        <ComboBoxItem Content="Mute"/>
-                        <ComboBoxItem Content="DSE Function Left"/>
-                        <ComboBoxItem Content="DSE Function Right"/>
-                        <ComboBoxItem Content="DSE Left Paddle"/>
-                        <ComboBoxItem Content="DSE Right Paddle"/>
-                        <ComboBoxItem Content="Capture" />
-                        <ComboBoxItem Content="Side L" />
-                        <ComboBoxItem Content="Side R" />
-                        <ComboBoxItem Content="Switch 2 Joy-Con Left IR Sensor" />
-                        <ComboBoxItem Content="Switch 2 Joy-Con Right IR Sensor" />
-                        <ComboBoxItem Content="Switch 2 Mode Shift" />
-                        <ComboBoxItem Content="Switch 2 Joy-Con Left SL" />
-                        <ComboBoxItem Content="Switch 2 Joy-Con Left SR" />
-                        <ComboBoxItem Content="Switch 2 Joy-Con Right SL" />
-                        <ComboBoxItem Content="Switch 2 Joy-Con Right SR" />
-                        <ComboBoxItem Content="Switch 2 C / Chat" />
+                        <ComboBoxItem Content="{lex:Loc Cross}"/>
+                        <ComboBoxItem Content="{lex:Loc Circle}"/>
+                        <ComboBoxItem Content="{lex:Loc Square}"/>
+                        <ComboBoxItem Content="{lex:Loc Triangle}"/>
+                        <ComboBoxItem Content="{lex:Loc Options}"/>
+                        <ComboBoxItem Content="{lex:Loc Share}"/>
+                        <ComboBoxItem Content="{lex:Loc Up}"/>
+                        <ComboBoxItem Content="{lex:Loc Down}"/>
+                        <ComboBoxItem Content="{lex:Loc Left}"/>
+                        <ComboBoxItem Content="{lex:Loc Right}"/>
+                        <ComboBoxItem Content="{lex:Loc PS}"/>
+                        <ComboBoxItem Content="{lex:Loc L1}"/>
+                        <ComboBoxItem Content="{lex:Loc R1}"/>
+                        <ComboBoxItem Content="{lex:Loc L2}"/>
+                        <ComboBoxItem Content="{lex:Loc R2}"/>
+                        <ComboBoxItem Content="{lex:Loc L3}"/>
+                        <ComboBoxItem Content="{lex:Loc R3}"/>
+                        <ComboBoxItem Content="{lex:Loc LeftTouch}"/>
+                        <ComboBoxItem Content="{lex:Loc UpperTouch}"/>
+                        <ComboBoxItem Content="{lex:Loc MultiTouch}"/>
+                        <ComboBoxItem Content="{lex:Loc RightTouch}"/>
+                        <ComboBoxItem Content="{lex:Loc SixaxisUp}"/>
+                        <ComboBoxItem Content="{lex:Loc SixaxisDown}"/>
+                        <ComboBoxItem Content="{lex:Loc SixaxisLeft}"/>
+                        <ComboBoxItem Content="{lex:Loc SixaxisRight}"/>
+                        <ComboBoxItem Content="{lex:Loc FingerOnTouchpad}"/>
+                        <ComboBoxItem Content="{lex:Loc Mute}"/>
+                        <ComboBoxItem Content="{lex:Loc DSEFunctionLeft}"/>
+                        <ComboBoxItem Content="{lex:Loc DSEFunctionRight}"/>
+                        <ComboBoxItem Content="{lex:Loc DSELeftPaddle}"/>
+                        <ComboBoxItem Content="{lex:Loc DSERightPaddle}"/>
+                        <ComboBoxItem Content="{lex:Loc Capture}" />
+                        <ComboBoxItem Content="{lex:Loc SideL}" />
+                        <ComboBoxItem Content="{lex:Loc SideR}" />
+                        <ComboBoxItem Content="{lex:Loc Switch2JoyConLeftIRSensor}" />
+                        <ComboBoxItem Content="{lex:Loc Switch2JoyConRightIRSensor}" />
+                        <ComboBoxItem Content="{lex:Loc Switch2ModeShift}" />
+                        <ComboBoxItem Content="{lex:Loc Switch2JoyConLeftSL}" />
+                        <ComboBoxItem Content="{lex:Loc Switch2JoyConLeftSR}" />
+                        <ComboBoxItem Content="{lex:Loc Switch2JoyConRightSL}" />
+                        <ComboBoxItem Content="{lex:Loc Switch2JoyConRightSR}" />
+                        <ComboBoxItem Content="{lex:Loc Switch2CChat}" />
                     </ComboBox>
 
                     <Button x:Name="defaultBtn" Content="{Binding DefaultBtnString,FallbackValue={lex:Loc Default}}" Background="{Binding DefaultColor,FallbackValue={StaticResource SecondaryColor}}" Margin="0,50,0,0" Click="DefaultBtn_Click" />
@@ -199,7 +199,7 @@
                               Fill="{DynamicResource AccentColor}" Stroke="{DynamicResource AccentColor}"
                               StrokeThickness="1.5" Opacity="0.62" IsHitTestVisible="False" />
                         <Image x:Name="highlightImg" Width="20" Height="20" Source="{Binding Source={StaticResource resourcePaths}, Path=Xbox360HighlightPNG}" Canvas.Left="622" Canvas.Top="11" IsEnabled="False" Visibility="Collapsed" />
-                        <Label x:Name="highlightLb" Content="A" Background="Black" Foreground="White" IsEnabled="False" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" />
+                        <Label x:Name="highlightLb" Content="{lex:Loc A}" Background="Black" Foreground="White" IsEnabled="False" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" />
 
                         <!--<Button x:Name="guideBtn2" Width="16" Height="30" Tag="Ni" Style="{StaticResource NoBGHoverBtn}" Canvas.Left="212" Canvas.Top="112"  />-->
                         <Button x:Name="guideBtn" Width="26" Height="20" Tag="Guide" Style="{StaticResource NoBGHoverBtn}" Canvas.Left="303" Canvas.Top="87" MouseEnter="OutConBtn_MouseEnter" MouseLeave="OutConBtn_MouseLeave"  />
@@ -297,19 +297,19 @@
                                         </Style>
                                     </Grid.Resources>
 
-                                    <Button x:Name="escBtn" Content="Esc" Grid.Column="0"/>
-                                    <Button x:Name="f1Btn" Content="F1" Grid.Column="1" Style="{StaticResource midMar}"/>
-                                    <Button x:Name="f2Btn" Content="F2" Grid.Column="2" Style="{StaticResource midMar}"/>
-                                    <Button x:Name="f3Btn" Content="F3" Grid.Column="3" Style="{StaticResource midMar}"/>
-                                    <Button x:Name="f4Btn" Content="F4" Grid.Column="4" Style="{StaticResource midMar}"/>
-                                    <Button x:Name="f5Btn" Content="F5" Grid.Column="5" Style="{StaticResource midMar}"/>
-                                    <Button x:Name="f6Btn" Content="F6" Grid.Column="6" Style="{StaticResource midMar}"/>
-                                    <Button x:Name="f7Btn" Content="F7" Grid.Column="7" Style="{StaticResource midMar}"/>
-                                    <Button x:Name="f8Btn" Content="F8" Grid.Column="8" Style="{StaticResource midMar}"/>
-                                    <Button x:Name="f9Btn" Content="F9" Grid.Column="9" Style="{StaticResource midMar}"/>
-                                    <Button x:Name="f10Btn" Content="F10" Grid.Column="10" Style="{StaticResource midMar}"/>
-                                    <Button x:Name="f11Btn" Content="F11" Grid.Column="11" Style="{StaticResource midMar}"/>
-                                    <Button x:Name="f12Btn" Content="F12" Grid.Column="12" Style="{StaticResource midMar}"/>
+                                    <Button x:Name="escBtn" Content="{lex:Loc Esc}" Grid.Column="0"/>
+                                    <Button x:Name="f1Btn" Content="{lex:Loc F1}" Grid.Column="1" Style="{StaticResource midMar}"/>
+                                    <Button x:Name="f2Btn" Content="{lex:Loc F2}" Grid.Column="2" Style="{StaticResource midMar}"/>
+                                    <Button x:Name="f3Btn" Content="{lex:Loc F3}" Grid.Column="3" Style="{StaticResource midMar}"/>
+                                    <Button x:Name="f4Btn" Content="{lex:Loc F4}" Grid.Column="4" Style="{StaticResource midMar}"/>
+                                    <Button x:Name="f5Btn" Content="{lex:Loc F5}" Grid.Column="5" Style="{StaticResource midMar}"/>
+                                    <Button x:Name="f6Btn" Content="{lex:Loc F6}" Grid.Column="6" Style="{StaticResource midMar}"/>
+                                    <Button x:Name="f7Btn" Content="{lex:Loc F7}" Grid.Column="7" Style="{StaticResource midMar}"/>
+                                    <Button x:Name="f8Btn" Content="{lex:Loc F8}" Grid.Column="8" Style="{StaticResource midMar}"/>
+                                    <Button x:Name="f9Btn" Content="{lex:Loc F9}" Grid.Column="9" Style="{StaticResource midMar}"/>
+                                    <Button x:Name="f10Btn" Content="{lex:Loc F10}" Grid.Column="10" Style="{StaticResource midMar}"/>
+                                    <Button x:Name="f11Btn" Content="{lex:Loc F11}" Grid.Column="11" Style="{StaticResource midMar}"/>
+                                    <Button x:Name="f12Btn" Content="{lex:Loc F12}" Grid.Column="12" Style="{StaticResource midMar}"/>
                                 </Grid>
 
                                 <Grid Margin="0,0,0,6">
@@ -352,7 +352,7 @@
                                     <Button x:Name="zeroBtn" Content="0" Grid.Column="10" Style="{StaticResource midMargin}"/>
                                     <Button x:Name="minusBtn" Content="-" Grid.Column="11" Style="{StaticResource midMargin}"/>
                                     <Button x:Name="equalBtn" Content="=" Grid.Column="12" Style="{StaticResource midMargin}"/>
-                                    <Button x:Name="bsBtn" Content="BkSpace" Grid.Column="13" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="bsBtn" Content="{lex:Loc BkSpace}" Grid.Column="13" Style="{StaticResource midMargin}"/>
                                 </Grid>
 
                                 <Grid Margin="0,0,0,6">
@@ -381,17 +381,17 @@
                                         </Style>
                                     </Grid.Resources>
 
-                                    <Button x:Name="tabBtn" Content="Tab" Grid.Column="0"/>
-                                    <Button x:Name="qKey" Content="Q" Grid.Column="1" Style="{StaticResource midMargin}"/>
-                                    <Button x:Name="wKey" Content="W" Grid.Column="2" Style="{StaticResource midMargin}"/>
-                                    <Button x:Name="eKey" Content="E" Grid.Column="3" Style="{StaticResource midMargin}"/>
-                                    <Button x:Name="rKey" Content="R" Grid.Column="4" Style="{StaticResource midMargin}"/>
-                                    <Button x:Name="tKey" Content="T" Grid.Column="5" Style="{StaticResource midMargin}"/>
-                                    <Button x:Name="yKey" Content="Y" Grid.Column="6" Style="{StaticResource midMargin}"/>
-                                    <Button x:Name="uKey" Content="U" Grid.Column="7" Style="{StaticResource midMargin}"/>
-                                    <Button x:Name="iKey" Content="I" Grid.Column="8" Style="{StaticResource midMargin}"/>
-                                    <Button x:Name="oKey" Content="O" Grid.Column="9" Style="{StaticResource midMargin}"/>
-                                    <Button x:Name="pKey" Content="P" Grid.Column="10" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="tabBtn" Content="{lex:Loc Tab}" Grid.Column="0"/>
+                                    <Button x:Name="qKey" Content="{lex:Loc Q}" Grid.Column="1" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="wKey" Content="{lex:Loc W}" Grid.Column="2" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="eKey" Content="{lex:Loc E}" Grid.Column="3" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="rKey" Content="{lex:Loc R}" Grid.Column="4" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="tKey" Content="{lex:Loc T}" Grid.Column="5" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="yKey" Content="{lex:Loc Y}" Grid.Column="6" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="uKey" Content="{lex:Loc U}" Grid.Column="7" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="iKey" Content="{lex:Loc I}" Grid.Column="8" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="oKey" Content="{lex:Loc O}" Grid.Column="9" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="pKey" Content="{lex:Loc P}" Grid.Column="10" Style="{StaticResource midMargin}"/>
                                     <Button x:Name="lbracketBtn" Content="[" Grid.Column="11" Style="{StaticResource midMargin}"/>
                                     <Button x:Name="rbracketBtn" Content="]" Grid.Column="12" Style="{StaticResource midMargin}"/>
                                     <Button x:Name="bSlashBtn" Content="\" Grid.Column="13" Style="{StaticResource midMargin}"/>
@@ -423,19 +423,19 @@
                                         </Style>
                                     </Grid.Resources>
 
-                                    <Button x:Name="capsLBtn" Content="Caps" Grid.Column="0"/>
-                                    <Button x:Name="aKeyBtn" Content="A" Grid.Column="1" Style="{StaticResource midMargin}"/>
-                                    <Button x:Name="sBtn" Content="S" Grid.Column="2" Style="{StaticResource midMargin}"/>
-                                    <Button x:Name="dBtn" Content="D" Grid.Column="3" Style="{StaticResource midMargin}"/>
-                                    <Button x:Name="fBtn" Content="F" Grid.Column="4" Style="{StaticResource midMargin}"/>
-                                    <Button x:Name="gBtn" Content="G" Grid.Column="5" Style="{StaticResource midMargin}"/>
-                                    <Button x:Name="hBtn" Content="H" Grid.Column="6" Style="{StaticResource midMargin}"/>
-                                    <Button x:Name="jBtn" Content="J" Grid.Column="7" Style="{StaticResource midMargin}"/>
-                                    <Button x:Name="kBtn" Content="K" Grid.Column="8" Style="{StaticResource midMargin}"/>
-                                    <Button x:Name="lBtn" Content="L" Grid.Column="9" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="capsLBtn" Content="{lex:Loc Caps}" Grid.Column="0"/>
+                                    <Button x:Name="aKeyBtn" Content="{lex:Loc A}" Grid.Column="1" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="sBtn" Content="{lex:Loc S}" Grid.Column="2" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="dBtn" Content="{lex:Loc D}" Grid.Column="3" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="fBtn" Content="{lex:Loc F}" Grid.Column="4" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="gBtn" Content="{lex:Loc G}" Grid.Column="5" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="hBtn" Content="{lex:Loc H}" Grid.Column="6" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="jBtn" Content="{lex:Loc J}" Grid.Column="7" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="kBtn" Content="{lex:Loc K}" Grid.Column="8" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="lBtn" Content="{lex:Loc L}" Grid.Column="9" Style="{StaticResource midMargin}"/>
                                     <Button x:Name="semicolonBtn" Content=";" Grid.Column="10" Style="{StaticResource midMargin}"/>
                                     <Button x:Name="aposBtn" Content="'" Grid.Column="11" Style="{StaticResource midMargin}"/>
-                                    <Button x:Name="enterBtn" Content="Enter" Grid.Column="12" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="enterBtn" Content="{lex:Loc Enter}" Grid.Column="12" Style="{StaticResource midMargin}"/>
                                 </Grid>
 
                                 <Grid Margin="0,0,0,6">
@@ -463,18 +463,18 @@
                                         </Style>
                                     </Grid.Resources>
 
-                                    <Button x:Name="lshiftBtn" Content="LShift" Grid.Column="0"/>
-                                    <Button x:Name="zBtn" Content="Z" Grid.Column="1" Style="{StaticResource midMargin}"/>
-                                    <Button x:Name="xKeyBtn" Content="X" Grid.Column="2" Style="{StaticResource midMargin}"/>
-                                    <Button x:Name="cBtn" Content="C" Grid.Column="3" Style="{StaticResource midMargin}"/>
-                                    <Button x:Name="vBtn" Content="V" Grid.Column="4" Style="{StaticResource midMargin}"/>
-                                    <Button x:Name="bKeyBtn" Content="B" Grid.Column="5" Style="{StaticResource midMargin}"/>
-                                    <Button x:Name="nBtn" Content="N" Grid.Column="6" Style="{StaticResource midMargin}"/>
-                                    <Button x:Name="mBtn" Content="M" Grid.Column="7" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="lshiftBtn" Content="{lex:Loc LShift}" Grid.Column="0"/>
+                                    <Button x:Name="zBtn" Content="{lex:Loc Z}" Grid.Column="1" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="xKeyBtn" Content="{lex:Loc X}" Grid.Column="2" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="cBtn" Content="{lex:Loc C}" Grid.Column="3" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="vBtn" Content="{lex:Loc V}" Grid.Column="4" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="bKeyBtn" Content="{lex:Loc B}" Grid.Column="5" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="nBtn" Content="{lex:Loc N}" Grid.Column="6" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="mBtn" Content="{lex:Loc M}" Grid.Column="7" Style="{StaticResource midMargin}"/>
                                     <Button x:Name="commaBtn" Content="," Grid.Column="8" Style="{StaticResource midMargin}"/>
                                     <Button x:Name="periodBtn" Content="." Grid.Column="9" Style="{StaticResource midMargin}"/>
                                     <Button x:Name="bslashBtn" Content="/" Grid.Column="10" Style="{StaticResource midMargin}"/>
-                                    <Button x:Name="rshiftBtn" Content="RShift" Grid.Column="11" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="rshiftBtn" Content="{lex:Loc RShift}" Grid.Column="11" Style="{StaticResource midMargin}"/>
                                 </Grid>
 
                                 <Grid Margin="0,0,0,6">
@@ -497,13 +497,13 @@
                                         </Style>
                                     </Grid.Resources>
 
-                                    <Button x:Name="lctrlBtn" Content="LCtrl" Grid.Column="0"/>
-                                    <Button x:Name="lWinBtn" Content="LWin" Grid.Column="1" Style="{StaticResource midMargin}"/>
-                                    <Button x:Name="laltBtn" Content="LAlt" Grid.Column="2" Style="{StaticResource midMargin}"/>
-                                    <Button x:Name="spaceBtn" Content="Space" Grid.Column="3" Style="{StaticResource midMargin}"/>
-                                    <Button x:Name="raltBtn" Content="RAlt" Grid.Column="4" Style="{StaticResource midMargin}"/>
-                                    <Button x:Name="rwinBtn" Content="RWin" Grid.Column="5" Style="{StaticResource midMargin}"/>
-                                    <Button x:Name="rctrlBtn" Content="RCtrl" Grid.Column="6" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="lctrlBtn" Content="{lex:Loc LCtrl}" Grid.Column="0"/>
+                                    <Button x:Name="lWinBtn" Content="{lex:Loc LWin}" Grid.Column="1" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="laltBtn" Content="{lex:Loc LAlt}" Grid.Column="2" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="spaceBtn" Content="{lex:Loc Space}" Grid.Column="3" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="raltBtn" Content="{lex:Loc RAlt}" Grid.Column="4" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="rwinBtn" Content="{lex:Loc RWin}" Grid.Column="5" Style="{StaticResource midMargin}"/>
+                                    <Button x:Name="rctrlBtn" Content="{lex:Loc RCtrl}" Grid.Column="6" Style="{StaticResource midMargin}"/>
                                 </Grid>
                             </UniformGrid>
                             <Grid x:Name="otherKeysMouseGrid" Grid.Column="1">
@@ -519,17 +519,17 @@
                                                 <Setter Property="Margin" Value="3,0,3,6"/>
                                             </Style>
                                         </UniformGrid.Resources>
-                                        <Button x:Name="prtBtn" Content="Prt" Style="{StaticResource btnMargin}" />
-                                        <Button x:Name="sclBtn" Content="Scl" Style="{StaticResource btnMargin}" />
-                                        <Button x:Name="brkBtn" Content="Brk" Style="{StaticResource btnMargin}" />
+                                        <Button x:Name="prtBtn" Content="{lex:Loc Prt}" Style="{StaticResource btnMargin}" />
+                                        <Button x:Name="sclBtn" Content="{lex:Loc Scl}" Style="{StaticResource btnMargin}" />
+                                        <Button x:Name="brkBtn" Content="{lex:Loc Brk}" Style="{StaticResource btnMargin}" />
 
-                                        <Button x:Name="insBtn" Content="Ins" Style="{StaticResource btnMargin}" />
-                                        <Button x:Name="homeBtn" Content="Home" Style="{StaticResource btnMargin}" />
-                                        <Button x:Name="pgupBtn" Content="PgUp" Style="{StaticResource btnMargin}" />
+                                        <Button x:Name="insBtn" Content="{lex:Loc Ins}" Style="{StaticResource btnMargin}" />
+                                        <Button x:Name="homeBtn" Content="{lex:Loc Home}" Style="{StaticResource btnMargin}" />
+                                        <Button x:Name="pgupBtn" Content="{lex:Loc PgUp}" Style="{StaticResource btnMargin}" />
 
-                                        <Button x:Name="delBtn" Content="Del" Style="{StaticResource btnMargin}" />
-                                        <Button x:Name="endBtn" Content="End" Style="{StaticResource btnMargin}" />
-                                        <Button x:Name="pgdwBtn" Content="PgDown" Style="{StaticResource btnMargin}" />
+                                        <Button x:Name="delBtn" Content="{lex:Loc Del}" Style="{StaticResource btnMargin}" />
+                                        <Button x:Name="endBtn" Content="{lex:Loc End}" Style="{StaticResource btnMargin}" />
+                                        <Button x:Name="pgdwBtn" Content="{lex:Loc PgDown}" Style="{StaticResource btnMargin}" />
                                     </UniformGrid>
 
                                     <Grid DockPanel.Dock="Bottom" MinHeight="60" Margin="2,0">
@@ -546,7 +546,7 @@
                                         <Button x:Name="uarrowBtn" Content="↑ U" Grid.Row="0" Grid.Column="1" Margin="6,0,0,6" />
                                         <Button x:Name="larrowBtn" Content="← L" Grid.Row="1" Grid.Column="0" Margin="6,0,0,6" />
                                         <Button x:Name="darrowBtn" Content="↓ D" Grid.Row="1" Grid.Column="1" Margin="6,0,0,6" />
-                                        <Button x:Name="rarrowBtn" Content="R →" Grid.Row="1" Grid.Column="2" Margin="6,0,0,6" />
+                                        <Button x:Name="rarrowBtn" Content="{lex:Loc BindingWin.RightArrowKey}" Grid.Row="1" Grid.Column="2" Margin="6,0,0,6" />
                                     </Grid>
                                 </DockPanel>
 
@@ -578,7 +578,7 @@
                                     <Button x:Name="nextTrackBtn" Content=":" FontFamily="Webdings" Grid.Column="3" />
                                     <Button x:Name="volupBtn" Content="↑ Vol" Grid.Column="4" FontSize="10" />
 
-                                    <Button x:Name="numlockBtn" Content="NumLk" Grid.Row="1" Grid.Column="0" />
+                                    <Button x:Name="numlockBtn" Content="{lex:Loc NumLk}" Grid.Row="1" Grid.Column="0" />
                                     <Button x:Name="numdivideBtn" Content="/" Grid.Row="1" Grid.Column="1" />
                                     <Button x:Name="nummultiBtn" Content="*" Grid.Row="1" Grid.Column="2" />
                                     <Button x:Name="numminusBtn" Content="-" Grid.Row="1" Grid.Column="3" />
@@ -588,7 +588,7 @@
                                     <Button x:Name="num8Btn" Content="8" Grid.Row="2" Grid.Column="1" />
                                     <Button x:Name="num9Btn" Content="9" Grid.Row="2" Grid.Column="2" />
                                     <Button x:Name="numplusBtn" Content="+" Grid.Row="2" Grid.Column="3" Grid.RowSpan="2" />
-                                    <Button x:Name="volmuteBtn" Content="Mute" Grid.Row="2" Grid.Column="4" FontSize="10" />
+                                    <Button x:Name="volmuteBtn" Content="{lex:Loc Mute}" Grid.Row="2" Grid.Column="4" FontSize="10" />
 
                                     <Button x:Name="num4Btn" Content="4" Grid.Row="3" Grid.Column="0" />
                                     <Button x:Name="num5Btn" Content="5" Grid.Row="3" Grid.Column="1" />
@@ -599,7 +599,7 @@
                                     <Button x:Name="num3Btn" Content="3" Grid.Row="4" Grid.Column="2" />
                                     <Button x:Name="numEnterBtn" Grid.Row="4" Grid.Column="3" Grid.RowSpan="2">
                                         <Button.Content>
-                                            <TextBlock Text="Enter" TextWrapping="Wrap"/>
+                                            <TextBlock Text="{lex:Loc Enter}" TextWrapping="Wrap"/>
                                         </Button.Content>
                                     </Button>
 
@@ -617,9 +617,9 @@
                                     <Button x:Name="mouseLeftBtn" Content="←" Width="20" Height="20" Canvas.Left="0" Canvas.Top="84" />
                                     <Button x:Name="mouseRightBtn" Content="→" Width="20" Height="20" Canvas.Left="99" Canvas.Top="84" />
 
-                                    <Button x:Name="mouseLBBtn" Content="L" Width="20" Height="20" Canvas.Left="18" Canvas.Top="52" />
-                                    <Button x:Name="mouseMBBtn" Content="M" Width="20" Height="20" Canvas.Left="50" Canvas.Top="52" />
-                                    <Button x:Name="mouseRBBtn" Content="R" Width="20" Height="20" Canvas.Left="78" Canvas.Top="52" />
+                                    <Button x:Name="mouseLBBtn" Content="{lex:Loc L}" Width="20" Height="20" Canvas.Left="18" Canvas.Top="52" />
+                                    <Button x:Name="mouseMBBtn" Content="{lex:Loc M}" Width="20" Height="20" Canvas.Left="50" Canvas.Top="52" />
+                                    <Button x:Name="mouseRBBtn" Content="{lex:Loc R}" Width="20" Height="20" Canvas.Left="78" Canvas.Top="52" />
 
                                     <Button x:Name="mouse4Btn" Content="4" Width="20" Height="20" Canvas.Left="24" Canvas.Top="108" />
                                     <Button x:Name="mouse5Btn" Content="5" Width="20" Height="20" Canvas.Left="76" Canvas.Top="108" />

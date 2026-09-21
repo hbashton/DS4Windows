@@ -47,16 +47,16 @@ public sealed class Switch2StickCalibrationViewModel : INotifyPropertyChanged
             InputDeviceType.Switch2JoyConRight => new[] { Switch2StickSide.Right },
             _ => throw new ArgumentException("A Switch 2 controller is required.", nameof(runtime)),
         };
-        SideLabels = Array.ConvertAll(sides, side => side == Switch2StickSide.Left ? "Left stick" : "Right stick");
+        SideLabels = Array.ConvertAll(sides, side => side == Switch2StickSide.Left ? Properties.Resources.Switch2CalibLeftStick : Properties.Resources.Switch2CalibRightStick);
         ControllerLabel = runtime.DeviceType switch
         {
-            InputDeviceType.Switch2Pro => "Switch 2 Pro Controller",
-            InputDeviceType.Switch2JoyConJoined => "Joined Joy-Con 2",
-            InputDeviceType.Switch2JoyConLeft => "Joy-Con 2 (Left)",
-            _ => "Joy-Con 2 (Right)",
-        } + (runtime.Transport == Switch2Transport.Usb ? " · USB" : " · Bluetooth");
-        Heading = "Choose a physical stick";
-        Instructions = "Rotate the selected stick around its full edge, then let it rest in the center. Nothing is saved until you choose Save calibration.";
+            InputDeviceType.Switch2Pro => Properties.Resources.Switch2CalibProControllerName,
+            InputDeviceType.Switch2JoyConJoined => Properties.Resources.Switch2CalibJoinedJoyCon,
+            InputDeviceType.Switch2JoyConLeft => Properties.Resources.Switch2CalibJoyConLeft,
+            _ => Properties.Resources.Switch2CalibJoyConRight,
+        } + (runtime.Transport == Switch2Transport.Usb ? Properties.Resources.Switch2CalibUsbSuffix : Properties.Resources.Switch2CalibBluetoothSuffix);
+        Heading = Properties.Resources.Switch2CalibChoosePhysicalStick;
+        Instructions = Properties.Resources.Switch2CalibInitialInstructions;
         Poll();
     }
 
@@ -76,19 +76,19 @@ public sealed class Switch2StickCalibrationViewModel : INotifyPropertyChanged
     public string SelectedSideLabel => SideLabels[selectedSideIndex];
     public string CalibrationStatus => (sides[selectedSideIndex] == Switch2StickSide.Left ?
         runtime.HasLocalLeftStickCalibration : runtime.HasLocalRightStickCalibration) ?
-        "PC calibration is active for this stick." : "Using original controller calibration, or defaults if unavailable.";
+        Properties.Resources.Switch2CalibPcActive : Properties.Resources.Switch2CalibUsingOriginal;
     public string Heading { get; private set; }
     public string Instructions { get; private set; }
     public string ResultText { get; private set; } = string.Empty;
     public double Progress { get; private set; }
-    public string ProgressLabel { get; private set; } = "Not started";
+    public string ProgressLabel { get; private set; } = Properties.Resources.Switch2CalibNotStarted;
     public bool IsBusy => busy;
     public bool CanStart => !closed && !busy && operation == null && ContextIsCurrent;
     public bool CanChooseSide => CanStart;
     public bool CanSave => !closed && !busy && operation != null &&
         stage == Switch2RawStickCalibrationStage.Ready && ContextIsCurrent;
     public bool CanCancel => !closed && operation != null;
-    public string ResetConfirmation => $"Remove the PC calibration for the {SelectedSideLabel.ToLowerInvariant()} on this controller?\n\nThe original factory calibration will not be changed. Other sticks and controllers are unaffected.";
+    public string ResetConfirmation => string.Format(Properties.Resources.Switch2CalibResetConfirmFormat, SelectedSideLabel.ToLowerInvariant());
 
     private bool ContextIsCurrent => !contextEnded &&
         runtime.RuntimeState == Switch2RuntimeInputDeviceState.Active &&
@@ -109,10 +109,10 @@ public sealed class Switch2StickCalibrationViewModel : INotifyPropertyChanged
         var selected = sides[selectedSideIndex];
         busy = true;
         ResultText = string.Empty;
-        Heading = reset ? "Preparing reset" : "Preparing calibration";
-        Instructions = "Releasing this controller's mapped input…";
+        Heading = reset ? Properties.Resources.Switch2CalibPreparingReset : Properties.Resources.Switch2CalibPreparingCalibration;
+        Instructions = Properties.Resources.Switch2CalibReleasingInput;
         Progress = 0;
-        ProgressLabel = "Please wait";
+        ProgressLabel = Properties.Resources.Switch2CalibPleaseWait;
         RaiseAll();
         Switch2RawStickCalibrationOperation started = null;
         var beginCancellation = new CancellationTokenSource();
@@ -128,9 +128,9 @@ public sealed class Switch2StickCalibrationViewModel : INotifyPropertyChanged
             }
             if (started == null)
             {
-                Heading = "Calibration could not start";
-                Instructions = "Wait for live controller input and finish any other calibration, then try again. A remembered controller identity and writable PC calibration store are required.";
-                ProgressLabel = "Not started";
+                Heading = Properties.Resources.Switch2CalibCouldNotStart;
+                Instructions = Properties.Resources.Switch2CalibCouldNotStartDetail;
+                ProgressLabel = Properties.Resources.Switch2CalibNotStarted;
                 return false;
             }
             operation = started;
@@ -140,7 +140,7 @@ public sealed class Switch2StickCalibrationViewModel : INotifyPropertyChanged
         catch
         {
             if (started != null) runtime.CancelRawStickCalibration(started);
-            if (!closed) ResultText = "Calibration could not start. No calibration was saved.";
+            if (!closed) ResultText = Properties.Resources.Switch2CalibCouldNotStartError;
             return false;
         }
         finally
@@ -158,10 +158,10 @@ public sealed class Switch2StickCalibrationViewModel : INotifyPropertyChanged
         var saving = operation;
         string side = SelectedSideLabel;
         busy = true;
-        Heading = saving.Reset ? "Resetting PC calibration" : "Saving PC calibration";
-        Instructions = "Controller input remains released while the result is stored and applied.";
+        Heading = saving.Reset ? Properties.Resources.Switch2CalibResettingPc : Properties.Resources.Switch2CalibSavingPc;
+        Instructions = Properties.Resources.Switch2CalibInputReleasedWhileSaving;
         ResultText = string.Empty;
-        ProgressLabel = "Please wait";
+        ProgressLabel = Properties.Resources.Switch2CalibPleaseWait;
         RaiseAll();
         try
         {
@@ -171,40 +171,40 @@ public sealed class Switch2StickCalibrationViewModel : INotifyPropertyChanged
             if (result == Switch2RawStickCalibrationCommitResult.AppliedAndStored)
             {
                 operation = null;
-                Heading = saving.Reset ? "PC calibration reset" : "Calibration saved";
-                Instructions = "You can calibrate another stick or close this window.";
-                ResultText = saving.Reset ? $"{side}: the PC override was removed. Source calibration is active again." :
-                    $"{side}: saved on this PC and applied to this controller connection.";
+                Heading = saving.Reset ? Properties.Resources.Switch2CalibResetDone : Properties.Resources.Switch2CalibSaveDone;
+                Instructions = Properties.Resources.Switch2CalibCanCalibrateAnother;
+                ResultText = saving.Reset ? string.Format(Properties.Resources.Switch2CalibResetResultFormat, side) :
+                    string.Format(Properties.Resources.Switch2CalibSaveResultFormat, side);
                 Progress = 100;
-                ProgressLabel = "Complete";
+                ProgressLabel = Properties.Resources.Switch2CalibComplete;
             }
             else if (result == Switch2RawStickCalibrationCommitResult.StorageFailed && stillOwnsReceipt)
             {
-                ResultText = "The PC calibration file could not be updated. The previous live calibration is unchanged. Retry Save calibration or cancel.";
+                ResultText = Properties.Resources.Switch2CalibStorageFailed;
                 UpdateProgress();
             }
             else if ((result is Switch2RawStickCalibrationCommitResult.NotReady or Switch2RawStickCalibrationCommitResult.Busy) && stillOwnsReceipt)
             {
-                ResultText = "The operation is not ready to finish. Wait for valid samples or cancel and retry.";
+                ResultText = Properties.Resources.Switch2CalibNotReady;
                 UpdateProgress();
             }
             else
             {
                 runtime.CancelRawStickCalibration(saving);
                 operation = null;
-                Heading = "Calibration ended";
-                Instructions = "Close this window and reopen calibration from the current controller before trying again.";
-                ProgressLabel = "Not applied";
+                Heading = Properties.Resources.Switch2CalibEnded;
+                Instructions = Properties.Resources.Switch2CalibReopenBeforeRetry;
+                ProgressLabel = Properties.Resources.Switch2CalibNotApplied;
                 ResultText = result == Switch2RawStickCalibrationCommitResult.StoredNotApplied ?
-                    "The PC file was updated, but the change was not applied to the active connection. Reconnect to load it, or explicitly reset it. Cancellation cannot undo a write already in progress." :
-                    "This operation is no longer current. It did not complete a calibration change.";
+                    Properties.Resources.Switch2CalibStoredNotApplied :
+                    Properties.Resources.Switch2CalibNoLongerCurrent;
             }
         }
         catch
         {
             runtime.CancelRawStickCalibration(saving);
             operation = null;
-            if (!closed) ResultText = "Calibration could not finish. The file outcome could not be confirmed; reconnect and check the selected stick before retrying.";
+            if (!closed) ResultText = Properties.Resources.Switch2CalibFinishFailed;
         }
         finally
         {
@@ -218,11 +218,11 @@ public sealed class Switch2StickCalibrationViewModel : INotifyPropertyChanged
         if (closed || operation == null) return;
         runtime.CancelRawStickCalibration(operation);
         operation = null;
-        Heading = "Calibration cancelled";
-        Instructions = "Ordinary controller input can resume. You can start again when ready.";
-        ResultText = busy ? "A save already in progress may still update the PC file. Its final result will appear here." :
-            "The unsaved capture was discarded; the existing calibration was not changed.";
-        ProgressLabel = "Cancelled";
+        Heading = Properties.Resources.Switch2CalibCancelled;
+        Instructions = Properties.Resources.Switch2CalibResumeInput;
+        ResultText = busy ? Properties.Resources.Switch2CalibSaveInProgress :
+            Properties.Resources.Switch2CalibDiscarded;
+        ProgressLabel = Properties.Resources.Switch2CalibCancelledStatus;
         Progress = 0;
         RaiseAll();
     }
@@ -240,24 +240,24 @@ public sealed class Switch2StickCalibrationViewModel : INotifyPropertyChanged
         if (!runtime.TryGetRawStickCalibrationProgress(operation, out var progress))
         {
             operation = null;
-            Heading = "Calibration ended";
-            Instructions = "The controller or calibration changed. Start again from the current controller.";
-            ProgressLabel = "Not saved";
+            Heading = Properties.Resources.Switch2CalibEnded;
+            Instructions = Properties.Resources.Switch2CalibChangedRetry;
+            ProgressLabel = Properties.Resources.Switch2CalibNotSaved;
             return;
         }
         stage = progress.Stage;
         Progress = (stage == Switch2RawStickCalibrationStage.Rotate ? progress.RotationProgress : progress.StationaryProgress) * 100;
         (Heading, Instructions, ProgressLabel) = stage switch
         {
-            Switch2RawStickCalibrationStage.Rotate => ($"1 · Rotate the {SelectedSideLabel.ToLowerInvariant()}",
-                "Move slowly around the full outer edge in both directions. Keep moving until this step completes; pauses do not count.",
-                $"{Math.Max(0, Math.Ceiling(10 * (1 - progress.RotationProgress))):0} moving seconds remaining"),
-            Switch2RawStickCalibrationStage.Settle => ("2 · Release the stick", "Take your hand off the stick and let it return to center.", "Waiting for 2 seconds of rest"),
-            Switch2RawStickCalibrationStage.Center => ("3 · Hold still", "Leave the stick untouched while its center is measured. Touching it restarts the rest period.",
-                $"{Math.Max(0, Math.Ceiling(3 * (1 - progress.StationaryProgress))):0} still seconds remaining"),
-            Switch2RawStickCalibrationStage.Ready => (progress.Reset ? "Ready to reset" : "Ready to save", "Choose Save calibration to apply this result, or Cancel to discard it.", "Ready"),
-            Switch2RawStickCalibrationStage.InsufficientTravel => ("More stick travel is needed", "Cancel and try again. Reach the full edge in every direction, then let the stick center itself.", "Calibration rejected"),
-            _ => ("Calibration cancelled", "Start a new calibration when the controller is ready.", "Cancelled"),
+            Switch2RawStickCalibrationStage.Rotate => (string.Format(Properties.Resources.Switch2CalibRotateHeadingFormat, SelectedSideLabel.ToLowerInvariant()),
+                Properties.Resources.Switch2CalibRotateInstructions,
+                string.Format(Properties.Resources.Switch2CalibMovingSecondsFormat, Math.Max(0, Math.Ceiling(10 * (1 - progress.RotationProgress))).ToString("0"))),
+            Switch2RawStickCalibrationStage.Settle => (Properties.Resources.Switch2CalibSettleHeading, Properties.Resources.Switch2CalibSettleInstructions, Properties.Resources.Switch2CalibWaitingRest),
+            Switch2RawStickCalibrationStage.Center => (Properties.Resources.Switch2CalibCenterHeading, Properties.Resources.Switch2CalibCenterInstructions,
+                string.Format(Properties.Resources.Switch2CalibStillSecondsFormat, Math.Max(0, Math.Ceiling(3 * (1 - progress.StationaryProgress))).ToString("0"))),
+            Switch2RawStickCalibrationStage.Ready => (progress.Reset ? Properties.Resources.Switch2CalibReadyToReset : Properties.Resources.Switch2CalibReadyToSave, Properties.Resources.Switch2CalibChooseSaveOrCancel, Properties.Resources.Switch2CalibReady),
+            Switch2RawStickCalibrationStage.InsufficientTravel => (Properties.Resources.Switch2CalibMoreTravelNeeded, Properties.Resources.Switch2CalibReachFullEdge, Properties.Resources.Switch2CalibRejected),
+            _ => (Properties.Resources.Switch2CalibCancelled, Properties.Resources.Switch2CalibStartNewWhenReady, Properties.Resources.Switch2CalibCancelledStatus),
         };
     }
 
@@ -267,9 +267,9 @@ public sealed class Switch2StickCalibrationViewModel : INotifyPropertyChanged
         pendingBegin?.Cancel();
         if (operation != null) runtime.CancelRawStickCalibration(operation);
         operation = null;
-        Heading = "Controller context changed";
-        Instructions = "The controller, profile or pair changed. Close this window and reopen calibration from the controller you want to use.";
-        ProgressLabel = "Calibration stopped";
+        Heading = Properties.Resources.Switch2CalibContextChanged;
+        Instructions = Properties.Resources.Switch2CalibContextChangedDetail;
+        ProgressLabel = Properties.Resources.Switch2CalibStopped;
         // Preserve the explicit asynchronous disk outcome, if one exists.
     }
 

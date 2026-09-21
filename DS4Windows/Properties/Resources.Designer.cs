@@ -1673,5 +1673,1418 @@ namespace DS4WinWPF.Properties {
                 return ResourceManager.GetString("XMLFiles", resourceCulture);
             }
         }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Cancel.
+        /// </summary>
+        public static string Cancel {
+            get {
+                return ResourceManager.GetString("Cancel", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Save.
+        /// </summary>
+        public static string Save {
+            get {
+                return ResourceManager.GetString("Save", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Select a controller.
+        /// </summary>
+        public static string AHStatusSelectController {
+            get {
+                return ResourceManager.GetString("AHStatusSelectController", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to No source.
+        /// </summary>
+        public static string AHStatusNoSource {
+            get {
+                return ResourceManager.GetString("AHStatusNoSource", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Off.
+        /// </summary>
+        public static string AHStatusOff {
+            get {
+                return ResourceManager.GetString("AHStatusOff", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Saved to profile.
+        /// </summary>
+        public static string AHStatusSavedToProfile {
+            get {
+                return ResourceManager.GetString("AHStatusSavedToProfile", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Active.
+        /// </summary>
+        public static string AHStatusActive {
+            get {
+                return ResourceManager.GetString("AHStatusActive", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Controller audio.
+        /// </summary>
+        public static string AHSourceControllerAudio {
+            get {
+                return ResourceManager.GetString("AHSourceControllerAudio", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Automatic game detection.
+        /// </summary>
+        public static string AHSourceAutoGameDetection {
+            get {
+                return ResourceManager.GetString("AHSourceAutoGameDetection", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Selected app.
+        /// </summary>
+        public static string AHSourceSelectedApp {
+            get {
+                return ResourceManager.GetString("AHSourceSelectedApp", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to System audio &#183; default output.
+        /// </summary>
+        public static string AHSourceSystemAudioDefault {
+            get {
+                return ResourceManager.GetString("AHSourceSystemAudioDefault", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Live.
+        /// </summary>
+        public static string MLLive {
+            get {
+                return ResourceManager.GetString("MLLive", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Waiting.
+        /// </summary>
+        public static string MLWaiting {
+            get {
+                return ResourceManager.GetString("MLWaiting", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Controller changed.
+        /// </summary>
+        public static string MLControllerChanged {
+            get {
+                return ResourceManager.GetString("MLControllerChanged", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to No recent input.
+        /// </summary>
+        public static string MLNoRecentInput {
+            get {
+                return ResourceManager.GetString("MLNoRecentInput", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Reopen the editor to preview the new controller..
+        /// </summary>
+        public static string MLReopenForNewController {
+            get {
+                return ResourceManager.GetString("MLReopenForNewController", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Controller disconnected. Reconnect and reopen the editor..
+        /// </summary>
+        public static string MLControllerDisconnectedReopen {
+            get {
+                return ResourceManager.GetString("MLControllerDisconnectedReopen", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Waiting for fresh controller input&#8230;.
+        /// </summary>
+        public static string MLWaitingForFreshInput {
+            get {
+                return ResourceManager.GetString("MLWaitingForFreshInput", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Waiting for controller input&#8230;.
+        /// </summary>
+        public static string MLWaitingForInput {
+            get {
+                return ResourceManager.GetString("MLWaitingForInput", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Open this profile from a connected controller..
+        /// </summary>
+        public static string MLOpenFromConnectedController {
+            get {
+                return ResourceManager.GetString("MLOpenFromConnectedController", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to No buttons pressed.
+        /// </summary>
+        public static string MLNoButtonsPressed {
+            get {
+                return ResourceManager.GetString("MLNoButtonsPressed", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to VIIPER paused for system safety.
+        /// </summary>
+        public static string VPCitrixHeading {
+            get {
+                return ResourceManager.GetString("VPCitrixHeading", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to A conflicting Citrix USB monitor is active..
+        /// </summary>
+        public static string VPCitrixSummary {
+            get {
+                return ResourceManager.GetString("VPCitrixSummary", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to &#8226; Disable Citrix generic USB redirection only
+        ///&#8226; Restart Windows before VIIPER starts again.
+        /// </summary>
+        public static string VPCitrixRequirements {
+            get {
+                return ResourceManager.GetString("VPCitrixRequirements", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Disable conflicting USB monitor.
+        /// </summary>
+        public static string VPDisableConflictingUsbMonitor {
+            get {
+                return ResourceManager.GetString("VPDisableConflictingUsbMonitor", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Continue without virtual output.
+        /// </summary>
+        public static string VPContinueWithoutVirtualOutput {
+            get {
+                return ResourceManager.GetString("VPContinueWithoutVirtualOutput", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to USB-IP version must be replaced.
+        /// </summary>
+        public static string VPUsbipReplaceHeading {
+            get {
+                return ResourceManager.GetString("VPUsbipReplaceHeading", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to VIIPER verification failed.
+        /// </summary>
+        public static string VPVerificationFailedHeading {
+            get {
+                return ResourceManager.GetString("VPVerificationFailedHeading", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to The installed VIIPER does not match this DS4Windows package..
+        /// </summary>
+        public static string VPVerificationFailedSummary {
+            get {
+                return ResourceManager.GetString("VPVerificationFailedSummary", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Verified update required.
+        /// </summary>
+        public static string VPVerifiedUpdateRequired {
+            get {
+                return ResourceManager.GetString("VPVerifiedUpdateRequired", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to &#8226; Install and verify bundled VIIPER 0.1.5-rc4.6
+        ///&#8226; Safely remove the unsupported USB-IP package
+        ///&#8226; Restart, then finish installing USB-IP 0.9.7.7.
+        /// </summary>
+        public static string VPUsbipReplaceRequirements {
+            get {
+                return ResourceManager.GetString("VPUsbipReplaceRequirements", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to &#8226; Install the exact bundled VIIPER build
+        ///&#8226; Choose managed or portable DS4Windows
+        ///&#8226; The unverified backend will not be started.
+        /// </summary>
+        public static string VPVerificationFailedRequirements {
+            get {
+                return ResourceManager.GetString("VPVerificationFailedRequirements", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Repair VIIPER + USB-IP.
+        /// </summary>
+        public static string VPRepairViiperUsbip {
+            get {
+                return ResourceManager.GetString("VPRepairViiperUsbip", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Install standard.
+        /// </summary>
+        public static string VPInstallStandard {
+            get {
+                return ResourceManager.GetString("VPInstallStandard", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Keep DS4Windows portable.
+        /// </summary>
+        public static string VPKeepPortable {
+            get {
+                return ResourceManager.GetString("VPKeepPortable", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to VIIPER setup required.
+        /// </summary>
+        public static string VPSetupRequiredHeading {
+            get {
+                return ResourceManager.GetString("VPSetupRequiredHeading", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Required before DS4Windows can run.
+        /// </summary>
+        public static string VPRequiredBeforeRun {
+            get {
+                return ResourceManager.GetString("VPRequiredBeforeRun", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to &#8226; Install the bundled VIIPER 0.1.5-rc4.6 build
+        ///&#8226; Install and verify USB-IP 0.9.7.7
+        ///&#8226; Start DS4Windows only after the runtime probe passes.
+        /// </summary>
+        public static string VPMandatoryRequirements {
+            get {
+                return ResourceManager.GetString("VPMandatoryRequirements", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Install / Repair.
+        /// </summary>
+        public static string VPInstallRepair {
+            get {
+                return ResourceManager.GetString("VPInstallRepair", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Verifying the DS4Windows package....
+        /// </summary>
+        public static string VPVerifyingPackage {
+            get {
+                return ResourceManager.GetString("VPVerifyingPackage", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Active.
+        /// </summary>
+        public static string TLActiveLabel {
+            get {
+                return ResourceManager.GetString("TLActiveLabel", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Left Trigger.
+        /// </summary>
+        public static string TLLeftTrigger {
+            get {
+                return ResourceManager.GetString("TLLeftTrigger", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Right Trigger.
+        /// </summary>
+        public static string TLRightTrigger {
+            get {
+                return ResourceManager.GetString("TLRightTrigger", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Shape the {0} trigger feel.
+        /// </summary>
+        public static string TLShapeTriggerFeelFormat {
+            get {
+                return ResourceManager.GetString("TLShapeTriggerFeelFormat", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Save new trigger profile.
+        /// </summary>
+        public static string TLSaveProfileTip {
+            get {
+                return ResourceManager.GetString("TLSaveProfileTip", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Rename trigger profile.
+        /// </summary>
+        public static string TLRenameProfileTip {
+            get {
+                return ResourceManager.GetString("TLRenameProfileTip", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Delete trigger profile.
+        /// </summary>
+        public static string TLDeleteProfileTip {
+            get {
+                return ResourceManager.GetString("TLDeleteProfileTip", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Feedback.
+        /// </summary>
+        public static string TLModeFeedback {
+            get {
+                return ResourceManager.GetString("TLModeFeedback", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Weapon.
+        /// </summary>
+        public static string TLModeWeapon {
+            get {
+                return ResourceManager.GetString("TLModeWeapon", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Vibration.
+        /// </summary>
+        public static string TLModeVibration {
+            get {
+                return ResourceManager.GetString("TLModeVibration", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Start.
+        /// </summary>
+        public static string TLMeterStart {
+            get {
+                return ResourceManager.GetString("TLMeterStart", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Wall.
+        /// </summary>
+        public static string TLMeterWall {
+            get {
+                return ResourceManager.GetString("TLMeterWall", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Force.
+        /// </summary>
+        public static string TLMeterForce {
+            get {
+                return ResourceManager.GetString("TLMeterForce", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Preview.
+        /// </summary>
+        public static string TLPreview {
+            get {
+                return ResourceManager.GetString("TLPreview", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Reset {0}.
+        /// </summary>
+        public static string TLResetFormat {
+            get {
+                return ResourceManager.GetString("TLResetFormat", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Game rumble vibration.
+        /// </summary>
+        public static string TLGameRumbleTitle {
+            get {
+                return ResourceManager.GetString("TLGameRumbleTitle", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Stream the game&#39;s {0} HID rumble motor to {1} as a low-latency vibration effect..
+        /// </summary>
+        public static string TLGameRumbleDescFormat {
+            get {
+                return ResourceManager.GetString("TLGameRumbleDescFormat", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to heavy / left.
+        /// </summary>
+        public static string TLHeavyLeft {
+            get {
+                return ResourceManager.GetString("TLHeavyLeft", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to light / right.
+        /// </summary>
+        public static string TLLightRight {
+            get {
+                return ResourceManager.GetString("TLLightRight", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Independently enable game-rumble vibration for {0}. This does not link the other trigger..
+        /// </summary>
+        public static string TLGameRumbleTipFormat {
+            get {
+                return ResourceManager.GetString("TLGameRumbleTipFormat", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Full-pull action.
+        /// </summary>
+        public static string TLFullPullActionTitle {
+            get {
+                return ResourceManager.GetString("TLFullPullActionTitle", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to END OF TRAVEL.
+        /// </summary>
+        public static string TLEndOfTravelBadge {
+            get {
+                return ResourceManager.GetString("TLEndOfTravelBadge", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to When {0} is pressed completely, run the action below using the selected behavior..
+        /// </summary>
+        public static string TLFullPullDescFormat {
+            get {
+                return ResourceManager.GetString("TLFullPullDescFormat", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Assigned action.
+        /// </summary>
+        public static string TLAssignedActionLabel {
+            get {
+                return ResourceManager.GetString("TLAssignedActionLabel", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Change  &#8250;.
+        /// </summary>
+        public static string TLChangeLabel {
+            get {
+                return ResourceManager.GetString("TLChangeLabel", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Behavior.
+        /// </summary>
+        public static string TLBehaviorLabel {
+            get {
+                return ResourceManager.GetString("TLBehaviorLabel", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Delay.
+        /// </summary>
+        public static string TLDelayLabel {
+            get {
+                return ResourceManager.GetString("TLDelayLabel", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Select a controller or profile.
+        /// </summary>
+        public static string TLSelectControllerOrProfile {
+            get {
+                return ResourceManager.GetString("TLSelectControllerOrProfile", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Select a controller or profile to open Trigger Lab..
+        /// </summary>
+        public static string TLSelectToOpen {
+            get {
+                return ResourceManager.GetString("TLSelectToOpen", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Saved custom effect..
+        /// </summary>
+        public static string TLSavedCustomEffect {
+            get {
+                return ResourceManager.GetString("TLSavedCustomEffect", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Save trigger profile.
+        /// </summary>
+        public static string TLSaveProfileDialogTitle {
+            get {
+                return ResourceManager.GetString("TLSaveProfileDialogTitle", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Custom Trigger {0}.
+        /// </summary>
+        public static string TLDefaultCustomTriggerNameFormat {
+            get {
+                return ResourceManager.GetString("TLDefaultCustomTriggerNameFormat", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Custom.
+        /// </summary>
+        public static string TLCustom {
+            get {
+                return ResourceManager.GetString("TLCustom", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Delete {0}?.
+        /// </summary>
+        public static string TLDeleteConfirmFormat {
+            get {
+                return ResourceManager.GetString("TLDeleteConfirmFormat", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Trigger Lab.
+        /// </summary>
+        public static string TLDialogTitle {
+            get {
+                return ResourceManager.GetString("TLDialogTitle", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Off.
+        /// </summary>
+        public static string TLModeOff {
+            get {
+                return ResourceManager.GetString("TLModeOff", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Only the regular trigger action runs..
+        /// </summary>
+        public static string TLModeOffDesc {
+            get {
+                return ResourceManager.GetString("TLModeOffDesc", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Add at full pull.
+        /// </summary>
+        public static string TLModeAddAtFullPull {
+            get {
+                return ResourceManager.GetString("TLModeAddAtFullPull", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Keep the regular trigger action active and also run the full-pull action at the end of travel..
+        /// </summary>
+        public static string TLModeAddAtFullPullDesc {
+            get {
+                return ResourceManager.GetString("TLModeAddAtFullPullDesc", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Replace at full pull.
+        /// </summary>
+        public static string TLModeReplaceAtFullPull {
+            get {
+                return ResourceManager.GetString("TLModeReplaceAtFullPull", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Release the regular trigger action and replace it with the full-pull action at the end of travel..
+        /// </summary>
+        public static string TLModeReplaceAtFullPullDesc {
+            get {
+                return ResourceManager.GetString("TLModeReplaceAtFullPullDesc", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Hair trigger.
+        /// </summary>
+        public static string TLModeHairTrigger {
+            get {
+                return ResourceManager.GetString("TLModeHairTrigger", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Run both actions at full pull, then release both as soon as the trigger backs away from the end stop..
+        /// </summary>
+        public static string TLModeHairTriggerDesc {
+            get {
+                return ResourceManager.GetString("TLModeHairTriggerDesc", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Hip fire.
+        /// </summary>
+        public static string TLModeHipFire {
+            get {
+                return ResourceManager.GetString("TLModeHipFire", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Wait for the chosen delay, then run the regular or full-pull action based on how far the trigger was pressed..
+        /// </summary>
+        public static string TLModeHipFireDesc {
+            get {
+                return ResourceManager.GetString("TLModeHipFireDesc", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Hip fire (exclusive).
+        /// </summary>
+        public static string TLModeHipFireExclusive {
+            get {
+                return ResourceManager.GetString("TLModeHipFireExclusive", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Wait for the chosen delay and run only one action: regular pull or full pull..
+        /// </summary>
+        public static string TLModeHipFireExclusiveDesc {
+            get {
+                return ResourceManager.GetString("TLModeHipFireExclusiveDesc", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Click.
+        /// </summary>
+        public static string TouchButtonModeClick {
+            get {
+                return ResourceManager.GetString("TouchButtonModeClick", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Touch.
+        /// </summary>
+        public static string TouchButtonModeTouch {
+            get {
+                return ResourceManager.GetString("TouchButtonModeTouch", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Release.
+        /// </summary>
+        public static string TouchButtonModeRelease {
+            get {
+                return ResourceManager.GetString("TouchButtonModeRelease", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Left stick.
+        /// </summary>
+        public static string Switch2CalibLeftStick {
+            get {
+                return ResourceManager.GetString("Switch2CalibLeftStick", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Right stick.
+        /// </summary>
+        public static string Switch2CalibRightStick {
+            get {
+                return ResourceManager.GetString("Switch2CalibRightStick", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Switch 2 Pro Controller.
+        /// </summary>
+        public static string Switch2CalibProControllerName {
+            get {
+                return ResourceManager.GetString("Switch2CalibProControllerName", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Joined Joy-Con 2.
+        /// </summary>
+        public static string Switch2CalibJoinedJoyCon {
+            get {
+                return ResourceManager.GetString("Switch2CalibJoinedJoyCon", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Joy-Con 2 (Left).
+        /// </summary>
+        public static string Switch2CalibJoyConLeft {
+            get {
+                return ResourceManager.GetString("Switch2CalibJoyConLeft", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Joy-Con 2 (Right).
+        /// </summary>
+        public static string Switch2CalibJoyConRight {
+            get {
+                return ResourceManager.GetString("Switch2CalibJoyConRight", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to &#183; USB.
+        /// </summary>
+        public static string Switch2CalibUsbSuffix {
+            get {
+                return ResourceManager.GetString("Switch2CalibUsbSuffix", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to &#183; Bluetooth.
+        /// </summary>
+        public static string Switch2CalibBluetoothSuffix {
+            get {
+                return ResourceManager.GetString("Switch2CalibBluetoothSuffix", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Choose a physical stick.
+        /// </summary>
+        public static string Switch2CalibChoosePhysicalStick {
+            get {
+                return ResourceManager.GetString("Switch2CalibChoosePhysicalStick", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Rotate the selected stick around its full edge, then let it rest in the center. Nothing is saved until you choose Save calibration..
+        /// </summary>
+        public static string Switch2CalibInitialInstructions {
+            get {
+                return ResourceManager.GetString("Switch2CalibInitialInstructions", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to PC calibration is active for this stick..
+        /// </summary>
+        public static string Switch2CalibPcActive {
+            get {
+                return ResourceManager.GetString("Switch2CalibPcActive", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Using original controller calibration, or defaults if unavailable..
+        /// </summary>
+        public static string Switch2CalibUsingOriginal {
+            get {
+                return ResourceManager.GetString("Switch2CalibUsingOriginal", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Not started.
+        /// </summary>
+        public static string Switch2CalibNotStarted {
+            get {
+                return ResourceManager.GetString("Switch2CalibNotStarted", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Remove the PC calibration for the {0} on this controller?
+        ///
+        ///The original factory calibration will not be changed. Other sticks and controllers are unaffected..
+        /// </summary>
+        public static string Switch2CalibResetConfirmFormat {
+            get {
+                return ResourceManager.GetString("Switch2CalibResetConfirmFormat", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Preparing reset.
+        /// </summary>
+        public static string Switch2CalibPreparingReset {
+            get {
+                return ResourceManager.GetString("Switch2CalibPreparingReset", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Preparing calibration.
+        /// </summary>
+        public static string Switch2CalibPreparingCalibration {
+            get {
+                return ResourceManager.GetString("Switch2CalibPreparingCalibration", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Releasing this controller&#39;s mapped input&#8230;.
+        /// </summary>
+        public static string Switch2CalibReleasingInput {
+            get {
+                return ResourceManager.GetString("Switch2CalibReleasingInput", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Please wait.
+        /// </summary>
+        public static string Switch2CalibPleaseWait {
+            get {
+                return ResourceManager.GetString("Switch2CalibPleaseWait", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Calibration could not start.
+        /// </summary>
+        public static string Switch2CalibCouldNotStart {
+            get {
+                return ResourceManager.GetString("Switch2CalibCouldNotStart", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Wait for live controller input and finish any other calibration, then try again. A remembered controller identity and writable PC calibration store are required..
+        /// </summary>
+        public static string Switch2CalibCouldNotStartDetail {
+            get {
+                return ResourceManager.GetString("Switch2CalibCouldNotStartDetail", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Calibration could not start. No calibration was saved..
+        /// </summary>
+        public static string Switch2CalibCouldNotStartError {
+            get {
+                return ResourceManager.GetString("Switch2CalibCouldNotStartError", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Resetting PC calibration.
+        /// </summary>
+        public static string Switch2CalibResettingPc {
+            get {
+                return ResourceManager.GetString("Switch2CalibResettingPc", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Saving PC calibration.
+        /// </summary>
+        public static string Switch2CalibSavingPc {
+            get {
+                return ResourceManager.GetString("Switch2CalibSavingPc", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Controller input remains released while the result is stored and applied..
+        /// </summary>
+        public static string Switch2CalibInputReleasedWhileSaving {
+            get {
+                return ResourceManager.GetString("Switch2CalibInputReleasedWhileSaving", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to PC calibration reset.
+        /// </summary>
+        public static string Switch2CalibResetDone {
+            get {
+                return ResourceManager.GetString("Switch2CalibResetDone", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Calibration saved.
+        /// </summary>
+        public static string Switch2CalibSaveDone {
+            get {
+                return ResourceManager.GetString("Switch2CalibSaveDone", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to You can calibrate another stick or close this window..
+        /// </summary>
+        public static string Switch2CalibCanCalibrateAnother {
+            get {
+                return ResourceManager.GetString("Switch2CalibCanCalibrateAnother", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to {0}: the PC override was removed. Source calibration is active again..
+        /// </summary>
+        public static string Switch2CalibResetResultFormat {
+            get {
+                return ResourceManager.GetString("Switch2CalibResetResultFormat", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to {0}: saved on this PC and applied to this controller connection..
+        /// </summary>
+        public static string Switch2CalibSaveResultFormat {
+            get {
+                return ResourceManager.GetString("Switch2CalibSaveResultFormat", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Complete.
+        /// </summary>
+        public static string Switch2CalibComplete {
+            get {
+                return ResourceManager.GetString("Switch2CalibComplete", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to The PC calibration file could not be updated. The previous live calibration is unchanged. Retry Save calibration or cancel..
+        /// </summary>
+        public static string Switch2CalibStorageFailed {
+            get {
+                return ResourceManager.GetString("Switch2CalibStorageFailed", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to The operation is not ready to finish. Wait for valid samples or cancel and retry..
+        /// </summary>
+        public static string Switch2CalibNotReady {
+            get {
+                return ResourceManager.GetString("Switch2CalibNotReady", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Calibration ended.
+        /// </summary>
+        public static string Switch2CalibEnded {
+            get {
+                return ResourceManager.GetString("Switch2CalibEnded", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Close this window and reopen calibration from the current controller before trying again..
+        /// </summary>
+        public static string Switch2CalibReopenBeforeRetry {
+            get {
+                return ResourceManager.GetString("Switch2CalibReopenBeforeRetry", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Not applied.
+        /// </summary>
+        public static string Switch2CalibNotApplied {
+            get {
+                return ResourceManager.GetString("Switch2CalibNotApplied", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to The PC file was updated, but the change was not applied to the active connection. Reconnect to load it, or explicitly reset it. Cancellation cannot undo a write already in progress..
+        /// </summary>
+        public static string Switch2CalibStoredNotApplied {
+            get {
+                return ResourceManager.GetString("Switch2CalibStoredNotApplied", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to This operation is no longer current. It did not complete a calibration change..
+        /// </summary>
+        public static string Switch2CalibNoLongerCurrent {
+            get {
+                return ResourceManager.GetString("Switch2CalibNoLongerCurrent", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Calibration could not finish. The file outcome could not be confirmed; reconnect and check the selected stick before retrying..
+        /// </summary>
+        public static string Switch2CalibFinishFailed {
+            get {
+                return ResourceManager.GetString("Switch2CalibFinishFailed", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Calibration cancelled.
+        /// </summary>
+        public static string Switch2CalibCancelled {
+            get {
+                return ResourceManager.GetString("Switch2CalibCancelled", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Ordinary controller input can resume. You can start again when ready..
+        /// </summary>
+        public static string Switch2CalibResumeInput {
+            get {
+                return ResourceManager.GetString("Switch2CalibResumeInput", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to A save already in progress may still update the PC file. Its final result will appear here..
+        /// </summary>
+        public static string Switch2CalibSaveInProgress {
+            get {
+                return ResourceManager.GetString("Switch2CalibSaveInProgress", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to The unsaved capture was discarded; the existing calibration was not changed..
+        /// </summary>
+        public static string Switch2CalibDiscarded {
+            get {
+                return ResourceManager.GetString("Switch2CalibDiscarded", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Cancelled.
+        /// </summary>
+        public static string Switch2CalibCancelledStatus {
+            get {
+                return ResourceManager.GetString("Switch2CalibCancelledStatus", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to The controller or calibration changed. Start again from the current controller..
+        /// </summary>
+        public static string Switch2CalibChangedRetry {
+            get {
+                return ResourceManager.GetString("Switch2CalibChangedRetry", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Not saved.
+        /// </summary>
+        public static string Switch2CalibNotSaved {
+            get {
+                return ResourceManager.GetString("Switch2CalibNotSaved", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to 1 &#183; Rotate the {0}.
+        /// </summary>
+        public static string Switch2CalibRotateHeadingFormat {
+            get {
+                return ResourceManager.GetString("Switch2CalibRotateHeadingFormat", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Move slowly around the full outer edge in both directions. Keep moving until this step completes; pauses do not count..
+        /// </summary>
+        public static string Switch2CalibRotateInstructions {
+            get {
+                return ResourceManager.GetString("Switch2CalibRotateInstructions", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to {0} moving seconds remaining.
+        /// </summary>
+        public static string Switch2CalibMovingSecondsFormat {
+            get {
+                return ResourceManager.GetString("Switch2CalibMovingSecondsFormat", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to 2 &#183; Release the stick.
+        /// </summary>
+        public static string Switch2CalibSettleHeading {
+            get {
+                return ResourceManager.GetString("Switch2CalibSettleHeading", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Take your hand off the stick and let it return to center..
+        /// </summary>
+        public static string Switch2CalibSettleInstructions {
+            get {
+                return ResourceManager.GetString("Switch2CalibSettleInstructions", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Waiting for 2 seconds of rest.
+        /// </summary>
+        public static string Switch2CalibWaitingRest {
+            get {
+                return ResourceManager.GetString("Switch2CalibWaitingRest", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to 3 &#183; Hold still.
+        /// </summary>
+        public static string Switch2CalibCenterHeading {
+            get {
+                return ResourceManager.GetString("Switch2CalibCenterHeading", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Leave the stick untouched while its center is measured. Touching it restarts the rest period..
+        /// </summary>
+        public static string Switch2CalibCenterInstructions {
+            get {
+                return ResourceManager.GetString("Switch2CalibCenterInstructions", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to {0} still seconds remaining.
+        /// </summary>
+        public static string Switch2CalibStillSecondsFormat {
+            get {
+                return ResourceManager.GetString("Switch2CalibStillSecondsFormat", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Ready to reset.
+        /// </summary>
+        public static string Switch2CalibReadyToReset {
+            get {
+                return ResourceManager.GetString("Switch2CalibReadyToReset", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Ready to save.
+        /// </summary>
+        public static string Switch2CalibReadyToSave {
+            get {
+                return ResourceManager.GetString("Switch2CalibReadyToSave", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Choose Save calibration to apply this result, or Cancel to discard it..
+        /// </summary>
+        public static string Switch2CalibChooseSaveOrCancel {
+            get {
+                return ResourceManager.GetString("Switch2CalibChooseSaveOrCancel", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Ready.
+        /// </summary>
+        public static string Switch2CalibReady {
+            get {
+                return ResourceManager.GetString("Switch2CalibReady", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to More stick travel is needed.
+        /// </summary>
+        public static string Switch2CalibMoreTravelNeeded {
+            get {
+                return ResourceManager.GetString("Switch2CalibMoreTravelNeeded", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Cancel and try again. Reach the full edge in every direction, then let the stick center itself..
+        /// </summary>
+        public static string Switch2CalibReachFullEdge {
+            get {
+                return ResourceManager.GetString("Switch2CalibReachFullEdge", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Calibration rejected.
+        /// </summary>
+        public static string Switch2CalibRejected {
+            get {
+                return ResourceManager.GetString("Switch2CalibRejected", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Start a new calibration when the controller is ready..
+        /// </summary>
+        public static string Switch2CalibStartNewWhenReady {
+            get {
+                return ResourceManager.GetString("Switch2CalibStartNewWhenReady", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Controller context changed.
+        /// </summary>
+        public static string Switch2CalibContextChanged {
+            get {
+                return ResourceManager.GetString("Switch2CalibContextChanged", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to The controller, profile or pair changed. Close this window and reopen calibration from the controller you want to use..
+        /// </summary>
+        public static string Switch2CalibContextChangedDetail {
+            get {
+                return ResourceManager.GetString("Switch2CalibContextChangedDetail", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Calibration stopped.
+        /// </summary>
+        public static string Switch2CalibStopped {
+            get {
+                return ResourceManager.GetString("Switch2CalibStopped", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Reset PC stick calibration.
+        /// </summary>
+        public static string Switch2CalibResetDialogTitle {
+            get {
+                return ResourceManager.GetString("Switch2CalibResetDialogTitle", resourceCulture);
+            }
+        }
     }
 }

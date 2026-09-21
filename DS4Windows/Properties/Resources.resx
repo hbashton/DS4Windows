@@ -655,4 +655,176 @@
   <data name="TouchEnded" xml:space="preserve">
     <value>Touch Ended</value>
   </data>
+
+  <data name="Cancel" xml:space="preserve"><value>Cancel</value></data>
+  <data name="Save" xml:space="preserve"><value>Save</value></data>
+
+  <data name="AHStatusSelectController" xml:space="preserve"><value>Select a controller</value></data>
+  <data name="AHStatusNoSource" xml:space="preserve"><value>No source</value></data>
+  <data name="AHStatusOff" xml:space="preserve"><value>Off</value></data>
+  <data name="AHStatusSavedToProfile" xml:space="preserve"><value>Saved to profile</value></data>
+  <data name="AHStatusActive" xml:space="preserve"><value>Active</value></data>
+  <data name="AHSourceControllerAudio" xml:space="preserve"><value>Controller audio</value></data>
+  <data name="AHSourceAutoGameDetection" xml:space="preserve"><value>Automatic game detection</value></data>
+  <data name="AHSourceSelectedApp" xml:space="preserve"><value>Selected app</value></data>
+  <data name="AHSourceSystemAudioDefault" xml:space="preserve"><value>System audio · default output</value></data>
+
+  <data name="MLLive" xml:space="preserve"><value>Live</value></data>
+  <data name="MLWaiting" xml:space="preserve"><value>Waiting</value></data>
+  <data name="MLControllerChanged" xml:space="preserve"><value>Controller changed</value></data>
+  <data name="MLNoRecentInput" xml:space="preserve"><value>No recent input</value></data>
+  <data name="MLReopenForNewController" xml:space="preserve"><value>Reopen the editor to preview the new controller.</value></data>
+  <data name="MLControllerDisconnectedReopen" xml:space="preserve"><value>Controller disconnected. Reconnect and reopen the editor.</value></data>
+  <data name="MLWaitingForFreshInput" xml:space="preserve"><value>Waiting for fresh controller input…</value></data>
+  <data name="MLWaitingForInput" xml:space="preserve"><value>Waiting for controller input…</value></data>
+  <data name="MLOpenFromConnectedController" xml:space="preserve"><value>Open this profile from a connected controller.</value></data>
+  <data name="MLNoButtonsPressed" xml:space="preserve"><value>No buttons pressed</value></data>
+
+  <data name="VPCitrixHeading" xml:space="preserve"><value>VIIPER paused for system safety</value></data>
+  <data name="VPCitrixSummary" xml:space="preserve"><value>A conflicting Citrix USB monitor is active.</value></data>
+  <data name="VPCitrixRequirements" xml:space="preserve"><value>• Disable Citrix generic USB redirection only
+• Restart Windows before VIIPER starts again</value></data>
+  <data name="VPDisableConflictingUsbMonitor" xml:space="preserve"><value>Disable conflicting USB monitor</value></data>
+  <data name="VPContinueWithoutVirtualOutput" xml:space="preserve"><value>Continue without virtual output</value></data>
+  <data name="VPUsbipReplaceHeading" xml:space="preserve"><value>USB-IP version must be replaced</value></data>
+  <data name="VPVerificationFailedHeading" xml:space="preserve"><value>VIIPER verification failed</value></data>
+  <data name="VPVerificationFailedSummary" xml:space="preserve"><value>The installed VIIPER does not match this DS4Windows package.</value></data>
+  <data name="VPVerifiedUpdateRequired" xml:space="preserve"><value>Verified update required</value></data>
+  <data name="VPUsbipReplaceRequirements" xml:space="preserve"><value>• Install and verify bundled VIIPER 0.1.5-rc4.6
+• Safely remove the unsupported USB-IP package
+• Restart, then finish installing USB-IP 0.9.7.7</value></data>
+  <data name="VPVerificationFailedRequirements" xml:space="preserve"><value>• Install the exact bundled VIIPER build
+• Choose managed or portable DS4Windows
+• The unverified backend will not be started</value></data>
+  <data name="VPRepairViiperUsbip" xml:space="preserve"><value>Repair VIIPER + USB-IP</value></data>
+  <data name="VPInstallStandard" xml:space="preserve"><value>Install standard</value></data>
+  <data name="VPKeepPortable" xml:space="preserve"><value>Keep DS4Windows portable</value></data>
+  <data name="VPSetupRequiredHeading" xml:space="preserve"><value>VIIPER setup required</value></data>
+  <data name="VPRequiredBeforeRun" xml:space="preserve"><value>Required before DS4Windows can run</value></data>
+  <data name="VPMandatoryRequirements" xml:space="preserve"><value>• Install the bundled VIIPER 0.1.5-rc4.6 build
+• Install and verify USB-IP 0.9.7.7
+• Start DS4Windows only after the runtime probe passes</value></data>
+  <data name="VPInstallRepair" xml:space="preserve"><value>Install / Repair</value></data>
+  <data name="VPVerifyingPackage" xml:space="preserve"><value>Verifying the DS4Windows package...</value></data>
+
+  <data name="TLActiveLabel" xml:space="preserve"><value>Active</value></data>
+  <data name="TLLeftTrigger" xml:space="preserve"><value>Left Trigger</value></data>
+  <data name="TLRightTrigger" xml:space="preserve"><value>Right Trigger</value></data>
+  <data name="TLShapeTriggerFeelFormat" xml:space="preserve"><value>Shape the {0} trigger feel</value></data>
+  <data name="TLSaveProfileTip" xml:space="preserve"><value>Save new trigger profile</value></data>
+  <data name="TLRenameProfileTip" xml:space="preserve"><value>Rename trigger profile</value></data>
+  <data name="TLDeleteProfileTip" xml:space="preserve"><value>Delete trigger profile</value></data>
+  <data name="TLModeFeedback" xml:space="preserve"><value>Feedback</value></data>
+  <data name="TLModeWeapon" xml:space="preserve"><value>Weapon</value></data>
+  <data name="TLModeVibration" xml:space="preserve"><value>Vibration</value></data>
+  <data name="TLMeterStart" xml:space="preserve"><value>Start</value></data>
+  <data name="TLMeterWall" xml:space="preserve"><value>Wall</value></data>
+  <data name="TLMeterForce" xml:space="preserve"><value>Force</value></data>
+  <data name="TLPreview" xml:space="preserve"><value>Preview</value></data>
+  <data name="TLResetFormat" xml:space="preserve"><value>Reset {0}</value></data>
+  <data name="TLGameRumbleTitle" xml:space="preserve"><value>Game rumble vibration</value></data>
+  <data name="TLGameRumbleDescFormat" xml:space="preserve"><value>Stream the game's {0} HID rumble motor to {1} as a low-latency vibration effect.</value></data>
+  <data name="TLHeavyLeft" xml:space="preserve"><value>heavy / left</value></data>
+  <data name="TLLightRight" xml:space="preserve"><value>light / right</value></data>
+  <data name="TLGameRumbleTipFormat" xml:space="preserve"><value>Independently enable game-rumble vibration for {0}. This does not link the other trigger.</value></data>
+  <data name="TLFullPullActionTitle" xml:space="preserve"><value>Full-pull action</value></data>
+  <data name="TLEndOfTravelBadge" xml:space="preserve"><value>END OF TRAVEL</value></data>
+  <data name="TLFullPullDescFormat" xml:space="preserve"><value>When {0} is pressed completely, run the action below using the selected behavior.</value></data>
+  <data name="TLAssignedActionLabel" xml:space="preserve"><value>Assigned action</value></data>
+  <data name="TLChangeLabel" xml:space="preserve"><value>Change  ›</value></data>
+  <data name="TLBehaviorLabel" xml:space="preserve"><value>Behavior</value></data>
+  <data name="TLDelayLabel" xml:space="preserve"><value>Delay</value></data>
+  <data name="TLSelectControllerOrProfile" xml:space="preserve"><value>Select a controller or profile</value></data>
+  <data name="TLSelectToOpen" xml:space="preserve"><value>Select a controller or profile to open Trigger Lab.</value></data>
+  <data name="TLSavedCustomEffect" xml:space="preserve"><value>Saved custom effect.</value></data>
+  <data name="TLSaveProfileDialogTitle" xml:space="preserve"><value>Save trigger profile</value></data>
+  <data name="TLDefaultCustomTriggerNameFormat" xml:space="preserve"><value>Custom Trigger {0}</value></data>
+  <data name="TLCustom" xml:space="preserve"><value>Custom</value></data>
+  <data name="TLDeleteConfirmFormat" xml:space="preserve"><value>Delete {0}?</value></data>
+  <data name="TLDialogTitle" xml:space="preserve"><value>Trigger Lab</value></data>
+  <data name="TLModeOff" xml:space="preserve"><value>Off</value></data>
+  <data name="TLModeOffDesc" xml:space="preserve"><value>Only the regular trigger action runs.</value></data>
+  <data name="TLModeAddAtFullPull" xml:space="preserve"><value>Add at full pull</value></data>
+  <data name="TLModeAddAtFullPullDesc" xml:space="preserve"><value>Keep the regular trigger action active and also run the full-pull action at the end of travel.</value></data>
+  <data name="TLModeReplaceAtFullPull" xml:space="preserve"><value>Replace at full pull</value></data>
+  <data name="TLModeReplaceAtFullPullDesc" xml:space="preserve"><value>Release the regular trigger action and replace it with the full-pull action at the end of travel.</value></data>
+  <data name="TLModeHairTrigger" xml:space="preserve"><value>Hair trigger</value></data>
+  <data name="TLModeHairTriggerDesc" xml:space="preserve"><value>Run both actions at full pull, then release both as soon as the trigger backs away from the end stop.</value></data>
+  <data name="TLModeHipFire" xml:space="preserve"><value>Hip fire</value></data>
+  <data name="TLModeHipFireDesc" xml:space="preserve"><value>Wait for the chosen delay, then run the regular or full-pull action based on how far the trigger was pressed.</value></data>
+  <data name="TLModeHipFireExclusive" xml:space="preserve"><value>Hip fire (exclusive)</value></data>
+  <data name="TLModeHipFireExclusiveDesc" xml:space="preserve"><value>Wait for the chosen delay and run only one action: regular pull or full pull.</value></data>
+
+  <data name="TouchButtonModeClick" xml:space="preserve"><value>Click</value></data>
+  <data name="TouchButtonModeTouch" xml:space="preserve"><value>Touch</value></data>
+  <data name="TouchButtonModeRelease" xml:space="preserve"><value>Release</value></data>
+
+  <data name="Switch2CalibLeftStick" xml:space="preserve"><value>Left stick</value></data>
+  <data name="Switch2CalibRightStick" xml:space="preserve"><value>Right stick</value></data>
+  <data name="Switch2CalibProControllerName" xml:space="preserve"><value>Switch 2 Pro Controller</value></data>
+  <data name="Switch2CalibJoinedJoyCon" xml:space="preserve"><value>Joined Joy-Con 2</value></data>
+  <data name="Switch2CalibJoyConLeft" xml:space="preserve"><value>Joy-Con 2 (Left)</value></data>
+  <data name="Switch2CalibJoyConRight" xml:space="preserve"><value>Joy-Con 2 (Right)</value></data>
+  <data name="Switch2CalibUsbSuffix" xml:space="preserve"><value> · USB</value></data>
+  <data name="Switch2CalibBluetoothSuffix" xml:space="preserve"><value> · Bluetooth</value></data>
+  <data name="Switch2CalibChoosePhysicalStick" xml:space="preserve"><value>Choose a physical stick</value></data>
+  <data name="Switch2CalibInitialInstructions" xml:space="preserve"><value>Rotate the selected stick around its full edge, then let it rest in the center. Nothing is saved until you choose Save calibration.</value></data>
+  <data name="Switch2CalibPcActive" xml:space="preserve"><value>PC calibration is active for this stick.</value></data>
+  <data name="Switch2CalibUsingOriginal" xml:space="preserve"><value>Using original controller calibration, or defaults if unavailable.</value></data>
+  <data name="Switch2CalibNotStarted" xml:space="preserve"><value>Not started</value></data>
+  <data name="Switch2CalibResetConfirmFormat" xml:space="preserve"><value>Remove the PC calibration for the {0} on this controller?
+
+The original factory calibration will not be changed. Other sticks and controllers are unaffected.</value></data>
+  <data name="Switch2CalibPreparingReset" xml:space="preserve"><value>Preparing reset</value></data>
+  <data name="Switch2CalibPreparingCalibration" xml:space="preserve"><value>Preparing calibration</value></data>
+  <data name="Switch2CalibReleasingInput" xml:space="preserve"><value>Releasing this controller's mapped input…</value></data>
+  <data name="Switch2CalibPleaseWait" xml:space="preserve"><value>Please wait</value></data>
+  <data name="Switch2CalibCouldNotStart" xml:space="preserve"><value>Calibration could not start</value></data>
+  <data name="Switch2CalibCouldNotStartDetail" xml:space="preserve"><value>Wait for live controller input and finish any other calibration, then try again. A remembered controller identity and writable PC calibration store are required.</value></data>
+  <data name="Switch2CalibCouldNotStartError" xml:space="preserve"><value>Calibration could not start. No calibration was saved.</value></data>
+  <data name="Switch2CalibResettingPc" xml:space="preserve"><value>Resetting PC calibration</value></data>
+  <data name="Switch2CalibSavingPc" xml:space="preserve"><value>Saving PC calibration</value></data>
+  <data name="Switch2CalibInputReleasedWhileSaving" xml:space="preserve"><value>Controller input remains released while the result is stored and applied.</value></data>
+  <data name="Switch2CalibResetDone" xml:space="preserve"><value>PC calibration reset</value></data>
+  <data name="Switch2CalibSaveDone" xml:space="preserve"><value>Calibration saved</value></data>
+  <data name="Switch2CalibCanCalibrateAnother" xml:space="preserve"><value>You can calibrate another stick or close this window.</value></data>
+  <data name="Switch2CalibResetResultFormat" xml:space="preserve"><value>{0}: the PC override was removed. Source calibration is active again.</value></data>
+  <data name="Switch2CalibSaveResultFormat" xml:space="preserve"><value>{0}: saved on this PC and applied to this controller connection.</value></data>
+  <data name="Switch2CalibComplete" xml:space="preserve"><value>Complete</value></data>
+  <data name="Switch2CalibStorageFailed" xml:space="preserve"><value>The PC calibration file could not be updated. The previous live calibration is unchanged. Retry Save calibration or cancel.</value></data>
+  <data name="Switch2CalibNotReady" xml:space="preserve"><value>The operation is not ready to finish. Wait for valid samples or cancel and retry.</value></data>
+  <data name="Switch2CalibEnded" xml:space="preserve"><value>Calibration ended</value></data>
+  <data name="Switch2CalibReopenBeforeRetry" xml:space="preserve"><value>Close this window and reopen calibration from the current controller before trying again.</value></data>
+  <data name="Switch2CalibNotApplied" xml:space="preserve"><value>Not applied</value></data>
+  <data name="Switch2CalibStoredNotApplied" xml:space="preserve"><value>The PC file was updated, but the change was not applied to the active connection. Reconnect to load it, or explicitly reset it. Cancellation cannot undo a write already in progress.</value></data>
+  <data name="Switch2CalibNoLongerCurrent" xml:space="preserve"><value>This operation is no longer current. It did not complete a calibration change.</value></data>
+  <data name="Switch2CalibFinishFailed" xml:space="preserve"><value>Calibration could not finish. The file outcome could not be confirmed; reconnect and check the selected stick before retrying.</value></data>
+  <data name="Switch2CalibCancelled" xml:space="preserve"><value>Calibration cancelled</value></data>
+  <data name="Switch2CalibResumeInput" xml:space="preserve"><value>Ordinary controller input can resume. You can start again when ready.</value></data>
+  <data name="Switch2CalibSaveInProgress" xml:space="preserve"><value>A save already in progress may still update the PC file. Its final result will appear here.</value></data>
+  <data name="Switch2CalibDiscarded" xml:space="preserve"><value>The unsaved capture was discarded; the existing calibration was not changed.</value></data>
+  <data name="Switch2CalibCancelledStatus" xml:space="preserve"><value>Cancelled</value></data>
+  <data name="Switch2CalibChangedRetry" xml:space="preserve"><value>The controller or calibration changed. Start again from the current controller.</value></data>
+  <data name="Switch2CalibNotSaved" xml:space="preserve"><value>Not saved</value></data>
+  <data name="Switch2CalibRotateHeadingFormat" xml:space="preserve"><value>1 · Rotate the {0}</value></data>
+  <data name="Switch2CalibRotateInstructions" xml:space="preserve"><value>Move slowly around the full outer edge in both directions. Keep moving until this step completes; pauses do not count.</value></data>
+  <data name="Switch2CalibMovingSecondsFormat" xml:space="preserve"><value>{0} moving seconds remaining</value></data>
+  <data name="Switch2CalibSettleHeading" xml:space="preserve"><value>2 · Release the stick</value></data>
+  <data name="Switch2CalibSettleInstructions" xml:space="preserve"><value>Take your hand off the stick and let it return to center.</value></data>
+  <data name="Switch2CalibWaitingRest" xml:space="preserve"><value>Waiting for 2 seconds of rest</value></data>
+  <data name="Switch2CalibCenterHeading" xml:space="preserve"><value>3 · Hold still</value></data>
+  <data name="Switch2CalibCenterInstructions" xml:space="preserve"><value>Leave the stick untouched while its center is measured. Touching it restarts the rest period.</value></data>
+  <data name="Switch2CalibStillSecondsFormat" xml:space="preserve"><value>{0} still seconds remaining</value></data>
+  <data name="Switch2CalibReadyToReset" xml:space="preserve"><value>Ready to reset</value></data>
+  <data name="Switch2CalibReadyToSave" xml:space="preserve"><value>Ready to save</value></data>
+  <data name="Switch2CalibChooseSaveOrCancel" xml:space="preserve"><value>Choose Save calibration to apply this result, or Cancel to discard it.</value></data>
+  <data name="Switch2CalibReady" xml:space="preserve"><value>Ready</value></data>
+  <data name="Switch2CalibMoreTravelNeeded" xml:space="preserve"><value>More stick travel is needed</value></data>
+  <data name="Switch2CalibReachFullEdge" xml:space="preserve"><value>Cancel and try again. Reach the full edge in every direction, then let the stick center itself.</value></data>
+  <data name="Switch2CalibRejected" xml:space="preserve"><value>Calibration rejected</value></data>
+  <data name="Switch2CalibStartNewWhenReady" xml:space="preserve"><value>Start a new calibration when the controller is ready.</value></data>
+  <data name="Switch2CalibContextChanged" xml:space="preserve"><value>Controller context changed</value></data>
+  <data name="Switch2CalibContextChangedDetail" xml:space="preserve"><value>The controller, profile or pair changed. Close this window and reopen calibration from the controller you want to use.</value></data>
+  <data name="Switch2CalibStopped" xml:space="preserve"><value>Calibration stopped</value></data>
+  <data name="Switch2CalibResetDialogTitle" xml:space="preserve"><value>Reset PC stick calibration</value></data>
 </root>

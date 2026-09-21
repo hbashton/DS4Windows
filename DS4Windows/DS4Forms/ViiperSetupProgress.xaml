@@ -1,7 +1,10 @@
 <Window x:Class="DS4WinWPF.DS4Forms.ViiperSetupProgress"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="VIIPER setup"
+        xmlns:lex="http://wpflocalizeextension.codeplex.com"
+        lex:ResxLocalizationProvider.DefaultAssembly="DS4Windows"
+        lex:ResxLocalizationProvider.DefaultDictionary="Strings"
+        Title="{lex:Loc ViiperProgress.WinTitle}"
         Width="560"
         SizeToContent="Height"
         ResizeMode="NoResize"
@@ -26,7 +29,7 @@
                     BorderThickness="0,0,0,1"
                     CornerRadius="8,8,0,0"
                     Padding="18,14">
-                <TextBlock Text="VIIPER virtual controller setup"
+                <TextBlock Text="{lex:Loc ViiperPrompt.WinTitle}"
                            FontSize="14"
                            FontWeight="SemiBold" />
             </Border>
@@ -53,10 +56,10 @@
                     </Border>
                     <StackPanel Grid.Column="1">
                         <TextBlock x:Name="headingText"
-                                   Text="Setting up VIIPER"
+                                   Text="{lex:Loc ViiperProgress.Heading}"
                                    Style="{StaticResource BridgeSectionTitleStyle}"
                                    FontSize="20" />
-                        <TextBlock Text="DS4Windows is verifying the complete controller backend."
+                        <TextBlock Text="{lex:Loc ViiperProgress.Summary}"
                                    Foreground="{DynamicResource MutedForegroundColor}"
                                    TextWrapping="Wrap" />
                     </StackPanel>
@@ -67,7 +70,7 @@
                         Margin="0,0,0,14">
                     <StackPanel>
                         <TextBlock x:Name="phaseText"
-                                   Text="Preparing verified package..."
+                                   Text="{lex:Loc ViiperProgress.PreparingPackage}"
                                    FontWeight="SemiBold"
                                    TextWrapping="Wrap" />
                         <ProgressBar x:Name="setupProgress"
@@ -82,13 +85,13 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <StackPanel>
-                                <TextBlock Text="&#x2022; Verify packaged files" />
-                                <TextBlock Text="&#x2022; Install VIIPER 0.1.5-rc4.6"
+                                <TextBlock Text="{lex:Loc ViiperProgress.StepVerifyFiles}" />
+                                <TextBlock Text="{lex:Loc ViiperProgress.StepInstallViiper}"
                                            Margin="0,5,0,0" />
                             </StackPanel>
                             <StackPanel Grid.Column="1">
-                                <TextBlock Text="&#x2022; Verify USB-IP 0.9.7.7" />
-                                <TextBlock Text="&#x2022; Verify startup and API"
+                                <TextBlock Text="{lex:Loc ViiperProgress.StepVerifyUsbip}" />
+                                <TextBlock Text="{lex:Loc ViiperProgress.StepVerifyStartup}"
                                            Margin="0,5,0,0" />
                             </StackPanel>
                         </Grid>
@@ -96,7 +99,7 @@
                 </Border>
 
                 <TextBlock x:Name="detailText"
-                           Text="Keep this window open. Setup will finish automatically."
+                           Text="{lex:Loc ViiperProgress.DetailText}"
                            Foreground="{DynamicResource MutedForegroundColor}"
                            TextWrapping="Wrap" />
             </StackPanel>

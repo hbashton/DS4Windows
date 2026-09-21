@@ -7,13 +7,16 @@
     {
       "version_str": "5.0.9.0",
       "version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 9},
-      "base_header": "Release Candidate 4.6.3 — Concurrent Mouse Clicks",
+      "base_header": "Release Candidate 4.6.3 — Smooth Profile Switching & Mouse Clicks",
       "release_date": "2026-09-21T00:48:00+0000",
       "locales": [
         {
           "code": "en",
-          "header": "Release Candidate 4.6.3 — Concurrent Mouse Clicks",
+          "header": "Release Candidate 4.6.3 — Smooth Profile Switching & Mouse Clicks",
           "log_text": [
+            "* **Temporary profile switching** - one activation per hold, correct cancellation on early release, and no late switch into a released profile",
+            "* **Input continuity** - prepare profiles without blocking reports, preserve held keys during automatic switches, and keep backend/audio setup off the physical input queue",
+            "* **Connection safety** - reject stale profile work after replacement connections or newer selections; keep the existing virtual pad for same-output switches",
             "* **Independent mouse toggles** - unrelated toggled actions no longer block mouse-button presses or releases",
             "* **Shared mouse-button ownership** - ending a mouse macro no longer releases a click still held by another binding or macro",
             "* **FakerInput side buttons** - correctly translate X1 and X2 mouse events"

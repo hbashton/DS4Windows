@@ -12026,7 +12026,8 @@ namespace DS4Windows
                         Global.IsCurrentProfileSwitchRevision(device,
                             transitionRevision))
                     {
-                        control.CheckProfileOptions(device, tempDev, true);
+                        control.CheckProfileOptionsAfterLoad(device, tempDev,
+                            transitionRevision);
                     }
                 }
 

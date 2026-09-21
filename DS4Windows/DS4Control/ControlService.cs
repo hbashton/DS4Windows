@@ -1150,6 +1150,20 @@ namespace DS4Windows
             finally { Monitor.Exit(outputKbmHandlerLock); }
         }
 
+        // Queued profile workers acquire this BEFORE pausing a source. A KBM
+        // replacement may take time, but the existing profile keeps reporting
+        // while we wait; the final mapping commit never waits on that work.
+        internal bool RunWithStableProfileKbmMapping(Action apply)
+        {
+            lock (outputKbmHandlerLock)
+            {
+                if (Global.outputKBMMapping == null)
+                    return false;
+                apply();
+                return true;
+            }
+        }
+
         public void LoadPermanentSlotsConfig()
         {
             OutputSlotPersist.ReadConfig(outputslotMan);
@@ -4044,13 +4058,79 @@ namespace DS4Windows
 
         public void CheckProfileOptions(int ind, DS4Device device, bool startUp = false)
         {
-            EnsureVirtualMouseForStickMouseProfile(ind);
+            CheckProfileMappingOptions(ind, device);
+            CheckProfileColdOptions(ind, device);
+            if (!startUp) CheckLauchProfileOption(ind, device);
+        }
 
-            ViiperOutDevice playStationFeatureOutput =
-                EnsurePlayStationFeatureOutput(ind, device);
-            OutContType playStationFeatureOutputType =
-                playStationFeatureOutput?.OutputType ?? OutContType.None;
+        private readonly ProfileColdWorkQueue[] profileColdWorkQueues =
+            Enumerable.Range(0, MAX_DS4_CONTROLLER_COUNT).Select(index =>
+                new ProfileColdWorkQueue(ex => StartupDiag(
+                    $"Profile cold options failed index={index}: {ex}"))).ToArray();
 
+        private readonly ProfileColdWorkQueue[] profileOptionsRefreshQueues =
+            Enumerable.Range(0, MAX_DS4_CONTROLLER_COUNT).Select(index =>
+                new ProfileColdWorkQueue(ex => StartupDiag(
+                    $"Profile options refresh failed index={index}: {ex}"))).ToArray();
+
+        internal void QueueProfileOptionsRefresh(int ind, DS4Device device)
+        {
+            if (!TryCaptureProfileActionTarget(ind, device, out var target)) return;
+            long revision = Global.ReadProfileSwitchRevision(ind);
+            long deadline = Environment.TickCount64 + 500;
+            _ = profileOptionsRefreshQueues[ind].Queue(() =>
+            {
+                if (!target.IsCurrent ||
+                    !Global.IsCurrentProfileSwitchRevision(ind, revision)) return true;
+                if (Environment.TickCount64 >= deadline)
+                {
+                    StartupDiag($"Profile options refresh admission remained busy index={ind}; no stale refresh was applied.");
+                    return true;
+                }
+                // Retry outside all gates and the physical event queue. That
+                // queue still drains while another action owns a report pause.
+                bool finished = ProfileColdWorkQueue.TryRefreshMapping(ind,
+                    target, revision, TryRunWithStableProfileKbmMapping,
+                    () => CheckProfileMappingOptions(ind, device), out bool applied);
+                if (applied)
+                    QueueProfileColdOptions(ind, target, revision, launchProgram: true);
+                return finished;
+            });
+        }
+
+        internal void CheckProfileOptionsAfterLoad(int ind, DS4Device device,
+            long revision)
+        {
+            // Called only on the source's serialized queue. Touch/gyro filters
+            // and mapping state must remain owned by that bounded boundary.
+            CheckProfileMappingOptions(ind, device);
+            if (!TryCaptureProfileActionTarget(ind, device, out var target)) return;
+            QueueProfileColdOptions(ind, target, revision, launchProgram: false);
+        }
+
+        private void QueueProfileColdOptions(int ind, ControllerProfileActionTarget target,
+            long revision, bool launchProgram)
+        {
+            _ = profileColdWorkQueues[ind].Queue(() =>
+                TryApplyProfileColdOptions(ind, target, revision, launchProgram));
+        }
+
+        private bool TryApplyProfileColdOptions(int ind, ControllerProfileActionTarget target,
+            long revision, bool launchProgram)
+        {
+            bool IsCurrent() => target.IsCurrent && !target.Source.IsRemoved &&
+                (revision <= 0 || Global.IsCurrentProfileSwitchRevision(ind, revision));
+            return ProfileColdWorkQueue.TryApply(ind, serviceLifecycleLock,
+                IsCurrent, () =>
+                {
+                    CheckProfileColdOptions(ind, target.Source);
+                    if (launchProgram && IsCurrent())
+                        CheckLauchProfileOption(ind, target.Source);
+                });
+        }
+
+        private void CheckProfileMappingOptions(int ind, DS4Device device)
+        {
             if (device.DeviceType == InputDevices.InputDeviceType.DS4)
                 device.ConfigureDualShock4ProfileOutput(getEnableOutputDataToDS4(ind));
             else
@@ -4101,6 +4181,15 @@ namespace DS4Windows
             device.RumbleAutostopTime = getRumbleAutostopTime(ind);
             device.setRumble(0, 0);
             device.LightBarColor = Global.getMainColor(ind);
+        }
+
+        private void CheckProfileColdOptions(int ind, DS4Device device)
+        {
+            EnsureVirtualMouseForStickMouseProfile(ind);
+            ViiperOutDevice playStationFeatureOutput =
+                EnsurePlayStationFeatureOutput(ind, device);
+            OutContType playStationFeatureOutputType =
+                playStationFeatureOutput?.OutputType ?? OutContType.None;
 
             // DualSense specific profile settings
             if (device is InputDevices.DualSenseDevice dualsense)
@@ -4292,10 +4381,6 @@ namespace DS4Windows
                 DualSenseAudioSpeakerEndpointId[ind],
                 playStationFeatureOutput?.DirectSpeakerUsbipPort ?? -1);
 
-            if (!startUp)
-            {
-                CheckLauchProfileOption(ind, device);
-            }
         }
 
         internal bool ApplyAudioHapticsToGameReport(int deviceIndex,

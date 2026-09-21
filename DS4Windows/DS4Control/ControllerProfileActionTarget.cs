@@ -19,6 +19,12 @@ internal readonly struct ControllerProfileActionTarget
 
     internal DS4Device Source => source;
     internal int Slot => slot;
+    // A cold worker holds the service lifecycle gate, not a report/action
+    // lease. Bind that work to the original registration generation as well
+    // as the object reference, including a same-object slot reattachment.
+    internal bool IsCurrent => MatchesSource() && (table == null ||
+        table.TryCaptureAttachedToken(slot, source, out var current, out _) &&
+        current == token);
     internal bool IsExactTargetFor(ControlService candidate) => table != null &&
         token.IsValid && ReferenceEquals(service, candidate);
 

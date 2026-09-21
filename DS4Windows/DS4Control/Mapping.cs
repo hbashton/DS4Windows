@@ -300,6 +300,8 @@ namespace DS4Windows
             public Func<bool> LoadGuard;
             public long Revision;
             public ControlService Control;
+            public DS4Device Source;
+            public ControllerProfileActionTarget Target;
             public GuardedNamedProfileLoad Guarded;
             // Immutable work-item identity is the enqueue ticket. Guarded
             // enqueue must not advance the live profile revision before prepare.
@@ -317,6 +319,32 @@ namespace DS4Windows
             new ProfileSwitchRequest(), new ProfileSwitchRequest(), new ProfileSwitchRequest(), new ProfileSwitchRequest(),
             new ProfileSwitchRequest(), new ProfileSwitchRequest(), new ProfileSwitchRequest(), new ProfileSwitchRequest(),
         };
+
+        // Physical trigger intent is distinct from a profile that has finished
+        // loading. A held trigger must submit once even while preparation waits;
+        // releasing it must cancel that pending load, not wait for publication.
+        private sealed class AutomaticProfileSwitchIntent
+        {
+            internal readonly SpecialAction Action;
+            internal readonly string OriginalName;
+            internal readonly bool OriginalTemporary;
+            internal readonly string TargetName;
+            internal long ActivationRevision;
+            internal long ReturnRevision;
+            internal int Released;
+
+            internal AutomaticProfileSwitchIntent(SpecialAction action,
+                string originalName, bool originalTemporary)
+            {
+                Action = action;
+                OriginalName = originalName;
+                OriginalTemporary = originalTemporary;
+                TargetName = action.details;
+            }
+        }
+
+        private static readonly AutomaticProfileSwitchIntent[] automaticProfileSwitchIntents =
+            new AutomaticProfileSwitchIntent[Global.MAX_DS4_CONTROLLER_COUNT];
 
         struct DS4Vector2
         {
@@ -1242,17 +1270,18 @@ namespace DS4Windows
         private const double MOUSESTICKMINVELOCITY = 67.5;
         //private const double MOUSESTICKMINVELOCITY = 40.0;
 
-        private static void RequestProfileSwitch(int device, string profileName, bool tempProfile,
+        private static long RequestProfileSwitch(int device, string profileName, bool tempProfile,
             bool launchProgram, ControlService ctrl, Action<bool> afterLoad = null,
             Func<bool> loadGuard = null)
         {
             if (device < 0 || device >= Global.MAX_DS4_CONTROLLER_COUNT)
             {
-                return;
+                return 0;
             }
 
             GuardedNamedProfileLoad displaced;
             bool startWorker;
+            long revision;
             lock (profileSwitchRequestLocks[device])
             {
                 ProfileSwitchRequest request = profileSwitchRequests[device];
@@ -1260,7 +1289,11 @@ namespace DS4Windows
                 request.Guarded = null;
                 Volatile.Write(ref request.LatestGuarded, null);
                 request.Control = ctrl;
-                request.Revision = Global.BeginProfileSwitchRevision(device);
+                request.Source = ctrl?.DS4Controllers?[device];
+                request.Target = default;
+                if (request.Source != null)
+                    ctrl.TryCaptureProfileActionTarget(device, request.Source, out request.Target);
+                request.Revision = revision = Global.BeginProfileSwitchRevision(device);
                 request.Pending = true;
                 request.TempProfile = tempProfile;
                 request.LaunchProgram = launchProgram;
@@ -1278,6 +1311,99 @@ namespace DS4Windows
             displaced?.Complete(new(GuardedProfileSwitchStatus.Superseded));
             if (startWorker)
                 Task.Run(() => RunProfileSwitchRequests(device));
+            return revision;
+        }
+
+        private static AutomaticProfileSwitchIntent BeginAutomaticProfileSwitch(
+            int device, SpecialAction action)
+        {
+            AutomaticProfileSwitchIntent previous = Volatile.Read(ref automaticProfileSwitchIntents[device]);
+            bool repressedBeforeReturn = previous != null &&
+                ReferenceEquals(previous.Action, action) && Volatile.Read(ref previous.Released) != 0 &&
+                Volatile.Read(ref previous.ReturnRevision) == Global.ReadProfileSwitchRevision(device) &&
+                useTempProfile[device] && string.Equals(tempprofilename[device], previous.TargetName,
+                    StringComparison.Ordinal);
+            var intent = new AutomaticProfileSwitchIntent(action,
+                repressedBeforeReturn ? previous.OriginalName :
+                    useTempProfile[device] ? tempprofilename[device] : ProfilePath[device],
+                repressedBeforeReturn ? previous.OriginalTemporary : useTempProfile[device]);
+            Volatile.Write(ref automaticProfileSwitchIntents[device], intent);
+            return intent;
+        }
+
+        private static bool IsAutomaticProfileSwitchHeld(int device, SpecialAction action)
+        {
+            AutomaticProfileSwitchIntent intent = Volatile.Read(ref automaticProfileSwitchIntents[device]);
+            return intent != null && ReferenceEquals(intent.Action, action) &&
+                Volatile.Read(ref intent.Released) == 0;
+        }
+
+        private static bool IsAutomaticProfileActivationCurrent(int device, AutomaticProfileSwitchIntent intent) =>
+            ReferenceEquals(Volatile.Read(ref automaticProfileSwitchIntents[device]), intent) &&
+            Volatile.Read(ref intent.Released) == 0;
+
+        private static bool IsOriginalProfileCurrent(int device, AutomaticProfileSwitchIntent intent) =>
+            useTempProfile[device] == intent.OriginalTemporary &&
+            string.Equals(intent.OriginalTemporary ? tempprofilename[device] : ProfilePath[device],
+                intent.OriginalName, StringComparison.Ordinal);
+
+        private static void ClearAutomaticProfileSwitchIntent(int device)
+        {
+            AutomaticProfileSwitchIntent intent = Volatile.Read(ref automaticProfileSwitchIntents[device]);
+            if (intent == null || !ReferenceEquals(
+                    Interlocked.CompareExchange(ref automaticProfileSwitchIntents[device], null, intent), intent))
+                return;
+
+            // Retirement is not a trigger release: invalidate both queued
+            // activation and return guards without loading into a reused slot.
+            Interlocked.Exchange(ref intent.Released, 1);
+            if (ReferenceEquals(untriggeraction[device], intent.Action))
+            {
+                int index = untriggerindex[device];
+                untriggeraction[device] = null;
+                untriggerindex[device] = -1;
+                if ((uint)index < actionDone.Count)
+                    actionDone[index].dev[device] = false;
+            }
+        }
+
+        private static bool TryReturnAutomaticProfile(int device, SpecialAction action,
+            int actionIndex, ControlService control)
+        {
+            AutomaticProfileSwitchIntent intent = Volatile.Read(ref automaticProfileSwitchIntents[device]);
+            if (intent == null || !ReferenceEquals(intent.Action, action)) return false;
+            if (ReferenceEquals(untriggeraction[device], action)) untriggeraction[device] = null;
+            if ((uint)actionIndex < actionDone.Count) actionDone[actionIndex].dev[device] = false;
+            if (Interlocked.Exchange(ref intent.Released, 1) != 0) return true;
+
+            // An explicit profile selection or another action has superseded
+            // this hold. Releasing an old trigger cannot undo that new choice.
+            if (Volatile.Read(ref intent.ActivationRevision) != Global.ReadProfileSwitchRevision(device))
+            {
+                Interlocked.CompareExchange(ref automaticProfileSwitchIntents[device], null, intent);
+                return true;
+            }
+
+            bool ShouldRestore()
+            {
+                if (!ReferenceEquals(Volatile.Read(ref automaticProfileSwitchIntents[device]), intent) ||
+                    Volatile.Read(ref intent.Released) == 0) return false;
+                if (!IsOriginalProfileCurrent(device, intent)) return true;
+                // Activation never published (or already returned). Consuming
+                // this cancellation must not reset the still-current mappings.
+                Interlocked.CompareExchange(ref automaticProfileSwitchIntents[device], null, intent);
+                return false;
+            }
+
+            long revision = RequestProfileSwitch(device, intent.OriginalName,
+                intent.OriginalTemporary, intent.OriginalTemporary, control,
+                loaded =>
+                {
+                    if (loaded)
+                        Interlocked.CompareExchange(ref automaticProfileSwitchIntents[device], null, intent);
+                }, ShouldRestore);
+            Volatile.Write(ref intent.ReturnRevision, revision);
+            return true;
         }
 
         /// <summary>
@@ -1373,6 +1499,8 @@ namespace DS4Windows
                 Func<bool> loadGuard;
                 long revision;
                 ControlService ctrl;
+                DS4Device source;
+                ControllerProfileActionTarget target;
                 GuardedNamedProfileLoad guarded;
 
                 lock (profileSwitchRequestLocks[device])
@@ -1386,6 +1514,8 @@ namespace DS4Windows
 
                     request.Pending = false;
                     ctrl = request.Control;
+                    source = request.Source;
+                    target = request.Target;
                     guarded = request.Guarded;
                     request.Control = null;
                     request.Guarded = null;
@@ -1429,13 +1559,9 @@ namespace DS4Windows
                 bool requestAccepted = false;
                 try
                 {
-                    loaded = TryExecuteCurrentProfileSwitchRequest(device,
-                        revision, loadGuard, () => tempProfile ?
-                            LoadTempProfile(device, profileName, launchProgram,
-                                ctrl, transitionRevision: revision) :
-                            LoadProfile(device, launchProgram, ctrl,
-                                transitionRevision: revision, profileName: profileName),
-                        out requestAccepted);
+                    loaded = GuardedProfileReload.Execute(device, profileName,
+                        tempProfile, launchProgram, ctrl, source, revision,
+                        loadGuard, out requestAccepted, target);
                 }
                 catch (Exception ex)
                 {
@@ -1841,6 +1967,7 @@ namespace DS4Windows
 
         internal static void CommitNeutral(int device)
         {
+            ClearAutomaticProfileSwitchIntent(device);
             syncStateLock.EnterWriteLock();
             try
             {
@@ -5008,9 +5135,13 @@ namespace DS4Windows
                             {
                                 actionFound = true;
 
-                                if (!actionDone[index].dev[device] && (!useTempProfile[device] || untriggeraction[device] == null || untriggeraction[device].typeID != SpecialAction.ActionTypeId.Profile))
+                                if (!actionDone[index].dev[device] &&
+                                    (!action.automaticUntrigger || !IsAutomaticProfileSwitchHeld(device, action)) &&
+                                    (!useTempProfile[device] || untriggeraction[device] == null || untriggeraction[device].typeID != SpecialAction.ActionTypeId.Profile))
                                 {
                                     actionDone[index].dev[device] = true;
+                                    AutomaticProfileSwitchIntent automaticIntent = action.automaticUntrigger ?
+                                        BeginAutomaticProfileSwitch(device, action) : null;
                                     // If Loadprofile special action doesn't have untrigger keys or automatic untrigger option is not set then don't set untrigger status. This way the new loaded profile allows yet another loadProfile action key event.
                                     if (action.uTrigger.Count > 0 || action.automaticUntrigger)
                                     {
@@ -5020,8 +5151,11 @@ namespace DS4Windows
                                         // If the existing profile is a temp profile then store its name, because automaticUntrigger needs to know where to go back (empty name goes back to default regular profile)
                                         untriggeraction[device].prevProfileName = (useTempProfile[device] ? tempprofilename[device] : string.Empty);
                                     }
-                                    //foreach (DS4Controls dc in action.trigger)
-                                    for (int i = 0, arlen = action.trigger.Count; i < arlen; i++)
+                                    // Automatic temporary switches keep mapping
+                                    // while the worker prepares. Let Commit
+                                    // reconcile old/new owners; a direct key-up
+                                    // would cancel another held binding's key.
+                                    for (int i = 0, arlen = action.automaticUntrigger ? 0 : action.trigger.Count; i < arlen; i++)
                                     {
                                         DS4Controls dc = action.trigger[i];
                                         DS4ControlSettings dcs = GetDS4CSetting(device, dc);
@@ -5050,7 +5184,7 @@ namespace DS4Windows
 
                                     AppLogger.LogToGui(prolog, false);
                                     if (Global.ProfileChangedNotification) AppLogger.LogToTray(prolog);
-                                    RequestProfileSwitch(device, action.details, true, true, ctrl, loaded =>
+                                    long activationRevision = RequestProfileSwitch(device, action.details, true, true, ctrl, loaded =>
                                     {
                                         if (loaded && action.uTrigger.Count == 0 && !action.automaticUntrigger)
                                         {
@@ -5067,7 +5201,10 @@ namespace DS4Windows
                                                     actionDone[indexNext].dev[device] = true;
                                             }
                                         }
-                                    });
+                                    }, automaticIntent == null ? null :
+                                        () => IsAutomaticProfileActivationCurrent(device, automaticIntent));
+                                    if (automaticIntent != null)
+                                        Volatile.Write(ref automaticIntent.ActivationRevision, activationRevision);
 
                                     return;
                                 }
@@ -5509,9 +5646,13 @@ namespace DS4Windows
 
                 if (utriggeractivated && action.typeID == SpecialAction.ActionTypeId.Profile)
                 {
-                    if ((action.controls == action.ucontrols && !actionDone[index].dev[device]) || //if trigger and end trigger are the same
+                    if (action.automaticUntrigger ||
+                        (action.controls == action.ucontrols && !actionDone[index].dev[device]) || //if trigger and end trigger are the same
                     action.controls != action.ucontrols)
                     {
+                        if (action.automaticUntrigger &&
+                            TryReturnAutomaticProfile(device, action, index, ctrl))
+                            return;
                         if (useTempProfile[device])
                         {
                             //foreach (DS4Controls dc in action.uTrigger)
@@ -5551,7 +5692,8 @@ namespace DS4Windows
                 }
                 else
                 {
-                    actionDone[index].dev[device] = false;
+                    if (!action.automaticUntrigger)
+                        actionDone[index].dev[device] = false;
                 }
             }
         }

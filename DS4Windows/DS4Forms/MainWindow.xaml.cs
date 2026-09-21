@@ -1613,7 +1613,7 @@ Suspend support not enabled.", true);
                         deviceIndex];
                     if (device != null)
                     {
-                        App.rootHub.CheckProfileOptions(deviceIndex, device);
+                        App.rootHub.QueueProfileOptionsRefresh(deviceIndex, device);
                     }
                 }
             }

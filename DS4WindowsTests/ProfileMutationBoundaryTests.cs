@@ -14,6 +14,148 @@ public class ProfileMutationBoundaryTests
     private const int Slot = Global.MAX_DS4_CONTROLLER_COUNT - 1;
 
     [TestMethod]
+    public void QueuedTemporaryWorkerCannotAdoptASameObjectReattachmentAfterEnqueue()
+    {
+        using var fixture = new Fixture();
+        fixture.MakeValid();
+        var source = fixture.AttachSwitch2();
+        bool previousTemporary = Global.useTempProfile[Slot];
+        string previousName = Global.tempprofilename[Slot];
+        int completions = 0;
+        try
+        {
+            Mapping.ExecuteSerializedProfileMutation(Slot, () =>
+            {
+                Assert.IsTrue(fixture.Service.TryCaptureProfileActionTarget(Slot, source, out var original));
+                Mapping.RequestTemporaryProfileLoad(Slot, "Candidate", false, fixture.Service,
+                    _ => Interlocked.Increment(ref completions));
+                // The same reference and valid profile name must not let old
+                // queued input intent cross into a newly attached lifetime.
+                fixture.RetireAndReattachSameSource(source);
+                Assert.IsFalse(original.IsCurrent);
+                Assert.IsTrue(fixture.Service.TryCaptureProfileActionTarget(Slot, source, out var successor));
+                Assert.IsTrue(successor.IsCurrent);
+            });
+            WaitForOrdinaryWorker();
+            Assert.AreEqual(77, (int)fixture.Store.rumble[Slot]);
+            Assert.AreEqual(previousTemporary, Global.useTempProfile[Slot]);
+            Assert.AreEqual(previousName, Global.tempprofilename[Slot]);
+            Assert.AreEqual(0, Volatile.Read(ref completions), "A rejected captured lifetime was never accepted for loading.");
+            Assert.IsTrue(fixture.Table.TryAcquireReportLease(fixture.Token, source, out var report, out _));
+            report.Dispose();
+            Assert.AreEqual(0, ((Queue<Action>)typeof(DS4Device).GetField("eventQueue",
+                BindingFlags.Instance | BindingFlags.NonPublic).GetValue(source)).Count);
+        }
+        finally { WaitForOrdinaryWorker(); }
+    }
+
+    private static void WaitForOrdinaryWorker()
+    {
+        var gates = (object[])typeof(Mapping).GetField("profileSwitchRequestLocks",
+            BindingFlags.Static | BindingFlags.NonPublic).GetValue(null);
+        var requests = (Array)typeof(Mapping).GetField("profileSwitchRequests",
+            BindingFlags.Static | BindingFlags.NonPublic).GetValue(null);
+        Assert.IsTrue(SpinWait.SpinUntil(() =>
+        {
+            lock (gates[Slot])
+            {
+                object request = requests.GetValue(Slot);
+                return !(bool)request.GetType().GetField("Running").GetValue(request) &&
+                    !(bool)request.GetType().GetField("Pending").GetValue(request);
+            }
+        }, 5000), "Rejected ordinary requests must also drain before restoring fixture globals.");
+    }
+
+    [DataTestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void QueuedReloadRetriesBusyActionAdmissionWithoutRetainingTheReportPause(bool superseded)
+    {
+        using var fixture = new Fixture();
+        fixture.MakeValid();
+        DS4Device source = fixture.AttachLegacy();
+        source.ReadWaitEv.Set();
+        Assert.IsTrue(fixture.Service.TryCaptureProfileActionTarget(Slot, source, out var target));
+        Assert.IsTrue(target.TryAcquire(out var busy));
+        long revision = Global.BeginProfileSwitchRevision(Slot);
+        using var retryEntered = new ManualResetEventSlim();
+        using var resumeRetry = new ManualResetEventSlim();
+        int guardCalls = 0;
+        Task<bool> pending = Task.Run(() => GuardedProfileReload.Execute(Slot,
+            "Candidate", true, false, fixture.Service, source, revision, () =>
+            {
+                // First attempt checks once under the writer gate, then once
+                // before the pause. Its occupied action lease rejects admission.
+                // The third check is the next attempt, before its report pause.
+                if (Interlocked.Increment(ref guardCalls) == 3)
+                {
+                    retryEntered.Set();
+                    if (!resumeRetry.Wait(5000)) throw new TimeoutException("Retry barrier was not released.");
+                }
+                return true;
+            }, out _));
+        try
+        {
+            Assert.IsTrue(retryEntered.Wait(5000), "Busy admission must retry, rather than discard the profile intent.");
+            Assert.IsTrue(source.FireReport, "The first rejected admission must have resumed the input publisher.");
+            Assert.AreEqual(77, (int)fixture.Store.rumble[Slot]);
+            if (superseded) Global.BeginProfileSwitchRevision(Slot);
+            busy.Dispose();
+            // The old settings can still admit reports while the retry's cold
+            // checks run. The worker owns no report/action lease at this barrier.
+            Assert.IsTrue(fixture.Table.TryAcquireReportLease(fixture.Token, source, out var report, out _));
+            report.Dispose();
+            resumeRetry.Set();
+            Assert.IsTrue(pending.Wait(5000));
+            Assert.AreEqual(!superseded, pending.Result);
+            Assert.AreEqual(superseded ? 77 : 42, (int)fixture.Store.rumble[Slot]);
+            Assert.IsTrue(source.FireReport);
+            Assert.IsFalse(fixture.Table.GetSnapshot()[Slot].ActionActive);
+        }
+        finally
+        {
+            busy.Dispose();
+            resumeRetry.Set();
+            Assert.IsTrue(pending.Wait(5000));
+        }
+    }
+
+    [DataTestMethod]
+    [DataRow("guard")]
+    [DataRow("revision")]
+    [DataRow("source")]
+    public void QueuedReloadRechecksIntentAndExactSourceInsideThePublicationPause(string invalidation)
+    {
+        using var fixture = new Fixture();
+        fixture.MakeValid();
+        FakeSource source = fixture.AttachSource();
+        using var replacement = new FakeSource();
+        bool current = true;
+        long revision = Global.BeginProfileSwitchRevision(Slot);
+        source.BeforeAction = () =>
+        {
+            Assert.IsFalse(source.FireReport);
+            switch (invalidation)
+            {
+                case "guard": current = false; break;
+                case "revision": Global.BeginProfileSwitchRevision(Slot); break;
+                case "source": fixture.Service.DS4Controllers[Slot] = replacement; break;
+            }
+        };
+
+        Assert.IsFalse(GuardedProfileReload.Execute(Slot, "Candidate", true, false,
+            fixture.Service, source, revision, () => current, out _));
+
+        Assert.IsTrue(source.PauseEntered.IsSet, "Invalidate at the actual final mutation boundary.");
+        Assert.IsTrue(source.FireReport, "Rejected application must restore report publication.");
+        Assert.AreEqual(77, (int)fixture.Store.rumble[Slot], "No reset or partial profile may escape.");
+        Assert.AreEqual("Candidate", fixture.Store.profilePath[Slot]);
+        Assert.AreEqual(0, ((Queue<Action>)typeof(DS4Device).GetField("eventQueue",
+            BindingFlags.Instance | BindingFlags.NonPublic).GetValue(source)).Count,
+            "A rejected candidate must not schedule output reconfiguration.");
+    }
+
+    [TestMethod]
     public void ExplicitUiNameSurvivesAnOlderNamedApplyBetweenSelectionAndEnqueue()
     {
         using var fixture = new Fixture();
@@ -496,6 +638,7 @@ public class ProfileMutationBoundaryTests
         fixture.MakeValid();
         var source = fixture.AttachSwitch2();
         Assert.IsTrue(fixture.Service.TryCaptureProfileActionTarget(Slot, source, out var captured));
+        Assert.IsTrue(captured.IsCurrent);
         Assert.IsTrue(Global.TryLoadAutoProfile(Slot, source, "Candidate", false, fixture.Service));
         Assert.AreEqual(42, (int)fixture.Store.rumble[Slot]);
         Assert.IsTrue(Global.useTempProfile[Slot]);
@@ -507,6 +650,7 @@ public class ProfileMutationBoundaryTests
         Action queued = fixture.DequeueOutput(source);
         fixture.RetireAndReattachSameSource(source);
         Assert.IsFalse(source.IsRemoving);
+        Assert.IsFalse(captured.IsCurrent, "Cold work must also reject an old registration generation with the same object.");
         // Deliberately retain the source reference and profile revision. Only
         // the captured slot generation can reject this old output callback.
         Assert.IsFalse(captured.TryAcquire(out var staleLease));
@@ -806,6 +950,9 @@ public class ProfileMutationBoundaryTests
             Service.DS4Controllers[Slot] = device;
             Service.touchPad = new Mouse[Global.MAX_DS4_CONTROLLER_COUNT];
             Service.touchreleased = new bool[Global.MAX_DS4_CONTROLLER_COUNT];
+            typeof(ControlService).GetField("outputKbmHandlerLock", BindingFlags.Instance |
+                BindingFlags.NonPublic).SetValue(Service, new object());
+            Global.outputKBMMapping = new SendInputMapping(); // Key translation only; never a native input backend.
         }
 
         internal Switch2RuntimeInputDevice AttachSwitch2(bool register = true)

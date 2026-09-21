@@ -39,7 +39,7 @@ FakerInput report state without connecting the driver, explicit concurrent
 barriers, and warmed allocation assertions. They do not inject Windows input,
 restart applications, or alter profiles/touchpad settings.
 
-## Local result
+## Mouse-only local result
 
 `dotnet test DS4WindowsTests/DS4WindowsTests.csproj -c Release -p:Platform=x64`
 
@@ -48,9 +48,21 @@ restart applications, or alter profiles/touchpad settings.
 `MousePublicationFenceTests`. Existing compile warnings remain; they were not
 silenced or treated as new evidence.
 
+The 276 mouse-focused tests also passed five consecutive runs. Initial CI run
+`35549434528` passed its full test job, package build, offline layout and MSI
+install/repair/uninstall tests. Its previous-release upgrade fixture rejected
+the correctly versioned `5.0.9.0` MSI because the fixture still hardcoded
+`5.0.8.0`. The fixture now receives the expected product version explicitly
+from CI; identity and hosted-runner safety checks remain mandatory. A fresh
+successful final-source CI run is required before tagging/publication.
+
 Publication additionally requires the final-source GitHub CI and tagged draft
 workflow, installer lifecycle/upgrade tests, and final downloaded asset checks.
 Their receipts are separate from this local test result.
+
+The subsequent temporary-profile fix requested before publication was validated
+together with these mouse changes: **6,681 passed, 0 failed, 12 opt-in hardware
+cases skipped**. See [the combined profile-switch ledger](2026-09-21-temporary-profile-input-continuity.md).
 
 ## Limitations
 

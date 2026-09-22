@@ -13,6 +13,8 @@ namespace DS4Windows.Tests;
 [DoNotParallelize]
 public class PortableBrokerIntegrationTests
 {
+    public TestContext TestContext { get; set; }
+
     [TestMethod]
     public void PortablePreflightFollowsHelpersAndLegacyArgumentsButPrecedesMutation()
     {
@@ -258,20 +260,42 @@ public class PortableBrokerIntegrationTests
         using ProbeFixture fixture = new();
         using TcpListener listener = new(IPAddress.Loopback, 0);
         listener.Start();
+        using ManualResetEventSlim measuredServerReady = new();
         using ManualResetEventSlim reachedPhase = new();
         using ManualResetEventSlim peerClosed = new();
         byte[] key = ViiperAuthentication.DeriveKey(ProbeFixture.Password);
+        string serverPhase = "WarmupAccept";
         Task server = Task.Factory.StartNew(() =>
         {
+            // Exercise the real key-file cache, authenticated handshake and both
+            // encrypted-record directions before measuring the trickle deadline.
+            // A fresh fixture path otherwise puts cold PBKDF/cipher/JIT work and
+            // dedicated-thread startup inside the unrelated 500 ms stall budget.
+            using (TcpClient warmPeer = listener.AcceptTcpClient())
+            {
+                warmPeer.ReceiveTimeout = 4000;
+                warmPeer.SendTimeout = 4000;
+                using NetworkStream warmWire = warmPeer.GetStream();
+                Volatile.Write(ref serverPhase, "WarmupAuthenticate");
+                byte[] warmHello = ReadProbeHello(warmWire, key);
+                byte[] warmNonce = Enumerable.Repeat((byte)0x5a, 32).ToArray();
+                using ViiperEncryptedStream warmEncrypted = new(warmWire,
+                    ViiperAuthentication.DeriveSessionKey(key, warmNonce, warmHello[5..37]),
+                    ViiperConnectionRole.Server);
+                warmWire.Write("OK\0"u8.ToArray().Concat(warmNonce).ToArray());
+                Volatile.Write(ref serverPhase, "WarmupReadPing");
+                ReadProbePing(warmEncrypted);
+                warmEncrypted.Write("VIIPER warmup fixture\0"u8);
+            }
+
+            Volatile.Write(ref serverPhase, "MeasuredAccept");
+            measuredServerReady.Set();
             using TcpClient peer = listener.AcceptTcpClient();
             peer.ReceiveTimeout = 4000;
             peer.SendTimeout = 4000;
             using NetworkStream wire = peer.GetStream();
-            byte[] hello = new byte[69];
-            wire.ReadExactly(hello);
-            CollectionAssert.AreEqual("eVI2\0"u8.ToArray(), hello[..5]);
-            byte[] authInput = "VIIPER-Auth-v2"u8.ToArray().Concat(hello[5..37]).ToArray();
-            CollectionAssert.AreEqual(HMACSHA256.HashData(key, authInput), hello[37..]);
+            Volatile.Write(ref serverPhase, "MeasuredAuthenticate");
+            byte[] hello = ReadProbeHello(wire, key);
             byte[] nonce = Enumerable.Repeat((byte)0x5a, 32).ToArray();
             byte[] reply = "OK\0"u8.ToArray().Concat(nonce).ToArray();
             using ViiperEncryptedStream encrypted = duringAuthentication ? null : new(wire,
@@ -280,9 +304,8 @@ public class PortableBrokerIntegrationTests
             if (!duringAuthentication)
             {
                 wire.Write(reply);
-                byte[] ping = new byte[5];
-                encrypted.ReadExactly(ping);
-                CollectionAssert.AreEqual("ping\0"u8.ToArray(), ping);
+                Volatile.Write(ref serverPhase, "MeasuredReadPing");
+                ReadProbePing(encrypted);
                 // Produce a valid first server record, then trickle its bytes.
                 using MemoryStream captured = new();
                 using ViiperEncryptedStream encoder = new(captured,
@@ -291,6 +314,7 @@ public class PortableBrokerIntegrationTests
                 encoder.Write("VIIPER deadline fixture\0"u8);
                 reply = captured.ToArray();
             }
+            Volatile.Write(ref serverPhase, duringAuthentication ? "TrickleAuthenticate" : "TrickleReadPing");
             reachedPhase.Set();
             try
             {
@@ -305,15 +329,24 @@ public class PortableBrokerIntegrationTests
             catch (IOException) { peerClosed.Set(); }
             catch (SocketException) { peerClosed.Set(); }
         }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        Exception primaryFailure = null;
         try
         {
+            int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            bool warmReady = ViiperSetupManager.ProbeServer("127.0.0.1", port,
+                authenticated: true, out string warmFailure, totalTimeoutMilliseconds: 3000);
+            Assert.IsTrue(warmReady,
+                $"The positive authenticated warmup failed: {warmFailure}; server={Volatile.Read(ref serverPhase)}.");
+            Assert.IsTrue(measuredServerReady.Wait(5000),
+                $"The same server thread was not ready for the measured connection; server={Volatile.Read(ref serverPhase)}.");
             Stopwatch elapsed = Stopwatch.StartNew();
-            bool ready = ViiperSetupManager.ProbeServer("127.0.0.1",
-                ((IPEndPoint)listener.LocalEndpoint).Port, authenticated: true,
+            bool ready = ViiperSetupManager.ProbeServer("127.0.0.1", port, authenticated: true,
                 out string failure, totalTimeoutMilliseconds: 500);
             elapsed.Stop();
+            string phaseEvidence = $"probe={failure}; server={Volatile.Read(ref serverPhase)}; elapsed={elapsed.ElapsedMilliseconds} ms";
+            TestContext?.WriteLine(phaseEvidence);
             Assert.IsFalse(ready);
-            Assert.IsTrue(reachedPhase.IsSet, "The real handshake reached the intended stall.");
+            Assert.IsTrue(reachedPhase.IsSet, "The real handshake must reach the intended stall: " + phaseEvidence);
             StringAssert.StartsWith(failure, duringAuthentication ? "Authenticate:" : "ReadPing:");
             Assert.IsTrue(elapsed.ElapsedMilliseconds < 1800,
                 $"The 500 ms whole-probe deadline took {elapsed.ElapsedMilliseconds} ms.");
@@ -322,12 +355,51 @@ public class PortableBrokerIntegrationTests
             Assert.IsFalse(failure.Contains(ProbeFixture.Password, StringComparison.Ordinal));
             Assert.IsFalse(failure.Contains(fixture.Context.KeyPath, StringComparison.Ordinal));
         }
+        catch (Exception failure)
+        {
+            primaryFailure = failure;
+            throw;
+        }
         finally
         {
             listener.Stop();
-            try { server.Wait(5000); }
+            try
+            {
+                bool stopped = server.Wait(5000);
+                if (!stopped)
+                {
+                    const string message = "The loopback server did not retire during bounded cleanup.";
+                    if (primaryFailure == null) Assert.Fail(message);
+                    TestContext?.WriteLine(message);
+                    primaryFailure.Data["ProbeServerCleanup"] = message;
+                }
+            }
+            catch (AggregateException cleanupFailure) when (primaryFailure != null)
+            {
+                // Preserve the original phase/assertion failure; do not turn an
+                // early handshake error into an apparently unrelated Wait fault.
+                primaryFailure.Data["ProbeServerCleanup"] = cleanupFailure.ToString();
+                TestContext?.WriteLine($"Server cleanup after {Volatile.Read(ref serverPhase)}: {cleanupFailure}");
+            }
             finally { CryptographicOperations.ZeroMemory(key); }
         }
+    }
+
+    private static byte[] ReadProbeHello(NetworkStream wire, byte[] key)
+    {
+        byte[] hello = new byte[69];
+        wire.ReadExactly(hello);
+        CollectionAssert.AreEqual("eVI2\0"u8.ToArray(), hello[..5]);
+        byte[] authInput = "VIIPER-Auth-v2"u8.ToArray().Concat(hello[5..37]).ToArray();
+        CollectionAssert.AreEqual(HMACSHA256.HashData(key, authInput), hello[37..]);
+        return hello;
+    }
+
+    private static void ReadProbePing(ViiperEncryptedStream encrypted)
+    {
+        byte[] ping = new byte[5];
+        encrypted.ReadExactly(ping);
+        CollectionAssert.AreEqual("ping\0"u8.ToArray(), ping);
     }
 
     private sealed class ProbeFixture : IDisposable

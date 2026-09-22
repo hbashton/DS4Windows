@@ -3,7 +3,7 @@
 # github.com/Alia5/VIIPER
 
 * Name: github.com/Alia5/VIIPER
-* Version: v0.1.5-rc4.6
+* Version: v0.1.6-rc4.6.4
 * License: [GPL-3.0](https://github.com/Alia5/VIIPER/blob/HEAD/LICENSE.txt)
 
 VIIPER - Virtual Input over IP EmulatoR
@@ -237,6 +237,40 @@ dependency report also covers the copied and modified Windows tray source.
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+
+## WDL fixed-rate rear resampler
+
+This notice is explicit because the module-level VIIPER exclusion in the
+dependency report also covers the altered Go port of the WDL resampler.
+
+WDL - resample.cpp / resample.h
+Copyright (C) 2010 and later Cockos Incorporated
+
+This software is provided 'as-is', without any express or implied
+warranty. In no event will the authors be held liable for any damages
+arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, and to alter it and redistribute it
+freely, subject to the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not
+   claim that you wrote the original software. If you use this software
+   in a product, an acknowledgment in the product documentation would be
+   appreciated but is not required.
+2. Altered source versions must be plainly marked as such, and must not be
+   misrepresented as being the original software.
+3. This notice may not be removed or altered from any source distribution.
+
+You may also distribute this software under the LGPL v2 or later.
+
+Upstream: https://www.cockos.com/wdl/
+Official mirror: https://github.com/justinfrankel/WDL
+Pinned revision: 8f4d783de745126ac8c201455dc30818c8613324
+
+VIIPER's device/dualsense/rear_sinc64.go is an altered, fixed-rate Go port,
+not the original WDL resampler. The original attribution and license apply
+to its derived filter coefficients and sampling algorithm.
 
 
 ## github.com/alecthomas/kong

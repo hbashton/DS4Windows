@@ -19,10 +19,11 @@ REQUIRED = (
     "BouncyCastle.Cryptography.dll", "Resources/BouncyCastle.NOTICE.txt",
     "Resources/DsxTriggerEffects.NOTICE.txt",
     "xbox-one-authorized-persona.json", "extras/XBOX-ONE-PERSONA-NOTICE.md",
-    "extras/install-viiper-backend.ps1", "extras/VIIPER-0.1.5-rc4.6-x64.exe",
-    "extras/VIIPER-0.1.5-rc4.6-LICENSES.txt", "extras/VIIPER-0.1.5-rc4.6-PROVENANCE.txt",
-    "extras/VIIPER-0.1.5-rc4.6-BUILD-NOTES.txt", "extras/LICENSE.txt",
+    "extras/install-viiper-backend.ps1", "extras/VIIPER-0.1.6-rc4.6.4-x64.exe",
+    "extras/VIIPER-0.1.6-rc4.6.4-LICENSES.txt", "extras/VIIPER-0.1.6-rc4.6.4-PROVENANCE.txt",
+    "extras/VIIPER-0.1.6-rc4.6.4-BUILD-NOTES.txt", "extras/LICENSE.txt",
     "extras/VIIPER-SYSTRAY-NOTICE.md", "extras/VIIPER-SYSTRAY-LICENSE.txt",
+    "extras/VIIPER-WDL-NOTICE.txt",
     "extras/USBip-0.9.7.7-x64.exe", "extras/HidHide_1.5.230_x64.exe",
     "extras/FakerInput_0.1.0_x64.msi",
 )
@@ -42,7 +43,7 @@ VALIDATOR_SPEC.loader.exec_module(VALIDATOR)
 class LocalizationPackageTests(unittest.TestCase):
     def test_missing_cipher_or_required_notice_is_rejected_before_composition(self):
         for missing in ("BouncyCastle.Cryptography.dll", "Resources/BouncyCastle.NOTICE.txt",
-                        "Resources/DsxTriggerEffects.NOTICE.txt"):
+                        "Resources/DsxTriggerEffects.NOTICE.txt", "extras/VIIPER-WDL-NOTICE.txt"):
             with self.subTest(missing=missing), tempfile.TemporaryDirectory(prefix="ds4w-missing-cipher-") as temporary:
                 root = Path(temporary)
                 publish = root / "x64" / "Release" / "output"
@@ -78,6 +79,21 @@ class LocalizationPackageTests(unittest.TestCase):
         self.assertEqual(1, len(entries))
         self.assertEqual("PreserveNewest", entries[0].findtext("CopyToPublishDirectory"))
         self.assertIn(relative, REQUIRED)
+        self.assertIn(relative, VALIDATOR.REQUIRED_PUBLISH_FILES)
+
+    def test_wdl_notice_is_pinned_and_published_without_normalization(self):
+        relative = "extras/VIIPER-WDL-NOTICE.txt"
+        notice = REPOSITORY / relative
+        self.assertEqual(VALIDATOR.VIIPER_NOTICE_HASHES[notice.name],
+                         hashlib.sha256(notice.read_bytes()).hexdigest().upper())
+        project = ET.parse(REPOSITORY / "DS4Windows" / "DS4WinWPF.csproj")
+        entries = [entry for entry in project.findall(".//Content")
+                   if entry.get("Include", "").replace("\\", "/") == "../" + relative]
+        self.assertEqual(1, len(entries))
+        self.assertEqual(relative, entries[0].findtext("Link").replace("\\", "/"))
+        self.assertEqual("PreserveNewest", entries[0].findtext("CopyToPublishDirectory"))
+        self.assertIn(relative + " -text whitespace=cr-at-eol",
+                      (REPOSITORY / ".gitattributes").read_text(encoding="utf-8"))
         self.assertIn(relative, VALIDATOR.REQUIRED_PUBLISH_FILES)
 
     def test_missing_xbox_persona_is_rejected_before_replacing_package(self):
@@ -123,9 +139,9 @@ class LocalizationPackageTests(unittest.TestCase):
                 relative: ("fixture:" + relative).encode("utf-8")
                 for relative in fixture_paths
             }
-            broker_name = "VIIPER-0.1.5-rc4.6-x64.exe"
+            broker_name = "VIIPER-0.1.6-rc4.6.4-x64.exe"
             expected_hash = hashlib.sha256(contents["extras/" + broker_name]).hexdigest()
-            provenance_name = "extras/VIIPER-0.1.5-rc4.6-PROVENANCE.txt"
+            provenance_name = "extras/VIIPER-0.1.6-rc4.6.4-PROVENANCE.txt"
             contents[provenance_name] = (
                 f"Binary: {broker_name}\nBinary SHA-256: {expected_hash.upper()}\n"
                 "Source commit: 0123456789abcdef0123456789abcdef01234567\n"
@@ -169,7 +185,7 @@ class LocalizationPackageTests(unittest.TestCase):
                 for relative in fixture_paths:
                     self.assertIn("DS4Windows/" + relative, packaged.namelist())
                     self.assertEqual(contents[relative], packaged.read("DS4Windows/" + relative))
-                broker = packaged.read("DS4Windows/extras/VIIPER-0.1.5-rc4.6-x64.exe")
+                broker = packaged.read("DS4Windows/extras/VIIPER-0.1.6-rc4.6.4-x64.exe")
                 self.assertEqual(broker, packaged.read("DS4Windows/viiper.exe"))
                 broker_hash = hashlib.sha256(broker).hexdigest()
                 self.assertEqual(expected_hash, broker_hash)
@@ -183,8 +199,8 @@ class LocalizationPackageTests(unittest.TestCase):
                     packaged.read("DS4Windows/viiper.exe.sha256"),
                 )
                 self.assertEqual(
-                    f"{broker_hash} *VIIPER-0.1.5-rc4.6-x64.exe\n".encode("ascii"),
-                    packaged.read("DS4Windows/extras/VIIPER-0.1.5-rc4.6-x64.exe.sha256"),
+                    f"{broker_hash} *VIIPER-0.1.6-rc4.6.4-x64.exe\n".encode("ascii"),
+                    packaged.read("DS4Windows/extras/VIIPER-0.1.6-rc4.6.4-x64.exe.sha256"),
                 )
                 self.assertEqual(PORTABLE_MARKER, packaged.read("DS4Windows/DS4Windows.portable"))
                 zip_owned = set(packaged.read("DS4Windows/.ds4windows-managed-files.txt").decode("utf-8").splitlines())

@@ -2,8 +2,8 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$PublishRoot,
-    [string]$ProductVersion = "5.0.9.0",
-    [string]$DisplayVersion = "VIIPERRC4.6.3",
+    [string]$ProductVersion = "5.0.10.0",
+    [string]$DisplayVersion = "VIIPERRC4.6.4",
     [string]$BundleVersion,
     [string]$OutputDirectory,
     [switch]$SkipApplicationPublish,
@@ -304,7 +304,7 @@ Invoke-SignOrVerify (Join-Path $publishPath "DS4Windows.exe")
 # VIIPER is an immutable upstream release payload. Its compiled-in SHA-256
 # and generated package sidecar are validated below; signing it here would
 # mutate the executable after DS4Windows has pinned that identity.
-$bundledViiper = Join-Path $publishPath "extras\VIIPER-0.1.5-rc4.6-x64.exe"
+$bundledViiper = Join-Path $publishPath "extras\VIIPER-0.1.6-rc4.6.4-x64.exe"
 if (-not (Test-Path -LiteralPath $bundledViiper -PathType Leaf)) {
     throw "Published VIIPER payload is missing: $bundledViiper"
 }

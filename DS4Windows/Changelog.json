@@ -1,9 +1,31 @@
 {
-  "latest_version": "5.0.9.0",
-  "latest_version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 9},
-  "updated_at": "2026-09-21T00:48:00+0000",
+  "latest_version": "5.0.10.0",
+  "latest_version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 10},
+  "updated_at": "2026-09-22T11:00:00+0000",
   "changelog": {
     "versions": [
+    {
+      "version_str": "5.0.10.0",
+      "version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 10},
+      "base_header": "Release Candidate 4.6.4 — Smoother DualSense Haptics",
+      "release_date": "2026-09-22T11:00:00+0000",
+      "locales": [
+        {
+          "code": "en",
+          "header": "Release Candidate 4.6.4 — Smoother DualSense Haptics",
+          "log_text": [
+            "* **More faithful advanced haptics** - improved Bluetooth haptic conversion preserves more detail in supported games",
+            "* **Fewer interrupted effects** - fixes brief gaps that could make closely spaced haptic effects feel incomplete or skippy",
+            "* **More reliable rumble** - settings updates no longer cut the affected active rumble effects short; genuine stop commands still work normally",
+            "* **Responsive triggers and lighting** - updates continue alongside rumble without unnecessarily interrupting it",
+            "* **Complete matching packages** - installer and portable ZIP include the updated VIIPER backend"
+          ],
+          "editor": "hbashton",
+          "editors_note": ["Unsigned Windows x64 release candidate. Close games, DS4Windows and VIIPER before updating. Portable users should extract the complete ZIP. DualSense advanced haptics require a supported game and controller audio/speaker support."],
+          "updated_at": "2026-09-22T11:00:00+0000"
+        }
+      ]
+    },
     {
       "version_str": "5.0.9.0",
       "version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 9},

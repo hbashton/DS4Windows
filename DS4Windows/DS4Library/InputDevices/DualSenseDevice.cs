@@ -769,6 +769,7 @@ namespace DS4Windows.InputDevices
         private long pendingBluetoothNativeGameRevision;
         private long pendingBluetoothNativeGameHapticsGeneration;
         private long pendingBluetoothNativeGameHapticsExpiryQpc;
+        private DualSenseBluetoothAudioPacer.NativeRumbleUpdatePolicy pendingBluetoothNativeGameRumblePolicy;
         // Capacity pressure belongs to this exact retained transaction/helper,
         // never to an unavailable or replacement transport owner.
         private DualSenseBluetoothAudioPacer pendingBluetoothNativeGameCapacityOwner;
@@ -6343,6 +6344,14 @@ namespace DS4Windows.InputDevices
             long nativeOutputRevision, long hapticsGeneration, byte[] nativeUnderlay = null, int nativeUnderlayStateOffset = 0,
             byte preparedTriggerLabValidity = 0)
         {
+            // Classify the original 48-byte USB view, never the profile/TL/DSX
+            // composition or a coincidentally similar synthetic media template.
+            var rumblePolicy = conType == ConnectionType.BT &&
+                hDevice?.Attributes?.VendorId == DS4Devices.SONY_VID &&
+                (hDevice.Attributes.ProductId == 0x0CE6 || hDevice.Attributes.ProductId == 0x0DF2) &&
+                IsNativeRumbleSettingsRefresh(nativeUnderlay, nativeUnderlayStateOffset - 1) ?
+                    DualSenseBluetoothAudioPacer.NativeRumbleUpdatePolicy.SettingsRefresh :
+                    DualSenseBluetoothAudioPacer.NativeRumbleUpdatePolicy.Authoritative;
             DualSensePhysicalOutputSnapshot outputState =
                 physicalOutputStateMailbox.ReadLatest();
             if (nativeUnderlay != null)
@@ -6388,7 +6397,7 @@ namespace DS4Windows.InputDevices
                 {
                     published = pacer.UpdateGameStateAndTemplate(
                         exactState, quiescentTemplate,
-                        hapticsExpiryQpc, out bool capacityUnavailable);
+                        hapticsExpiryQpc, out bool capacityUnavailable, rumblePolicy);
                     if (!published && capacityUnavailable)
                     {
                         pendingBluetoothNativeGameCapacityOwner = pacer;
@@ -6417,6 +6426,7 @@ namespace DS4Windows.InputDevices
                     hapticsGeneration;
                 pendingBluetoothNativeGameHapticsExpiryQpc =
                     hapticsExpiryQpc;
+                pendingBluetoothNativeGameRumblePolicy = rumblePolicy;
                 pendingBluetoothNativeGameRevision = nativeOutputRevision;
                 LastBluetoothHapticsWriteStatus =
                     "Could not atomically publish native game state to the unified Bluetooth compositor.";
@@ -6448,7 +6458,7 @@ namespace DS4Windows.InputDevices
                         pendingBluetoothNativeGameExactState,
                         pendingBluetoothNativeGameQuiescentTemplate,
                         pendingBluetoothNativeGameHapticsExpiryQpc,
-                        out bool capacityUnavailable);
+                        out bool capacityUnavailable, pendingBluetoothNativeGameRumblePolicy);
                     if (!published && capacityUnavailable)
                     {
                         pendingBluetoothNativeGameCapacityOwner = pacer;
@@ -6483,6 +6493,32 @@ namespace DS4Windows.InputDevices
             pendingBluetoothNativeGameRevision = 0;
             pendingBluetoothNativeGameHapticsGeneration = 0;
             pendingBluetoothNativeGameHapticsExpiryQpc = 0;
+            pendingBluetoothNativeGameRumblePolicy =
+                DualSenseBluetoothAudioPacer.NativeRumbleUpdatePolicy.Authoritative;
+        }
+
+        internal static bool IsNativeRumbleSettingsRefresh(byte[] original, int reportOffset)
+        {
+            if (original == null || reportOffset < 0 ||
+                reportOffset > original.Length - USB_OUTPUT_CHANGE_LENGTH)
+                return false;
+
+            // This is a deliberately narrow compatibility contract for the
+            // captured settings refresh, not a general zero-mode/LED rule.
+            // Player/RGB bytes may vary; every other original byte is exact.
+            for (int index = 0; index < 44; index++)
+            {
+                byte expected = index switch
+                {
+                    0 => 0x02,
+                    1 => 0x0C,
+                    2 => 0x57,
+                    11 or 22 => 0x05,
+                    _ => 0,
+                };
+                if (original[reportOffset + index] != expected) return false;
+            }
+            return true;
         }
 
         internal static void ConsumeNativeGameStateValidity(byte[] report,

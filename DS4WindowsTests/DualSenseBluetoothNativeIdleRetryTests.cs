@@ -231,7 +231,9 @@ public class DualSenseBluetoothNativeIdleRetryTests
             Receive("ReceiveGameStateAndTemplate", payload);
         }
 
-        internal void ReceiveNativeCommand(byte[] nativeCommand)
+        internal void ReceiveNativeCommand(byte[] nativeCommand,
+            DualSenseBluetoothAudioPacer.NativeRumbleUpdatePolicy rumblePolicy =
+                DualSenseBluetoothAudioPacer.NativeRumbleUpdatePolicy.Authoritative)
         {
             const int stateLength = DualSenseBluetoothPhysicalOutputSequence.ControllerStatePayloadLength;
             Assert.AreEqual(48, nativeCommand.Length);
@@ -244,6 +246,7 @@ public class DualSenseBluetoothNativeIdleRetryTests
             DualSenseDevice.ConsumeNativeGameStateValidity(quiescent, 13);
             quiescent.CopyTo(payload, stateLength + sizeof(long));
             AppendNativeIdentity(payload);
+            payload[DualSenseBluetoothAudioPacer.NativeCommandRumblePolicyOffset] = (byte)rumblePolicy;
             Receive("ReceiveGameStateAndTemplate", payload);
         }
 

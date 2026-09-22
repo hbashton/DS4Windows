@@ -140,6 +140,21 @@ namespace DS4Windows.InputDevices
             }
         }
         internal bool HasPreparedGeneration => prepared;
+        // One-based publication identities, not payload/nonzero heuristics.
+        // A prepared slot has already passed the accepted-generation check.
+        internal long PublishedSequence
+        {
+            get
+            {
+                long sequence = view.ReadInt64(WriteSequenceOffset);
+                Thread.MemoryBarrier();
+                return sequence;
+            }
+        }
+        internal long PreparedSequence
+        {
+            get { lock (consumerLock) return prepared ? preparedSequence + 1 : 0; }
+        }
         internal int MaximumQueueDepth => maximumQueueDepth;
         internal long MaximumQueueAgeTicks => maximumQueueAgeTicks;
         internal long PresentedCount => presentedCount;

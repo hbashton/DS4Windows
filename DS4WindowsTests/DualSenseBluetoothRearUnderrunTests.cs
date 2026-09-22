@@ -16,6 +16,7 @@ namespace DS4Windows.Tests;
 public class DualSenseBluetoothRearUnderrunTests
 {
     private const BindingFlags Private = BindingFlags.Instance | BindingFlags.NonPublic;
+    public TestContext TestContext { get; set; }
 
     [TestMethod]
     public void ActualHelperDoesNotInsertAnUnauthoredRearBlockBetweenFiniteSourceBlocks()
@@ -303,8 +304,15 @@ public class DualSenseBluetoothRearUnderrunTests
     public void ActualHelperRechecksBusyNativeCreditWithoutSpendingTheRearWait()
     {
         using var scenario = new Scenario();
+        var writer = (DualSenseBluetoothRealtimeWriter)typeof(Fixture)
+            .GetField("writer", Private)!.GetValue(scenario.Fixture)!;
         bool heldA = false;
+        bool busyArmed = false;
+        bool creditReturned = false;
         bool nativeAcceptedDuringWait = false;
+        int presenterThread = 0;
+        long armedQpc = 0, gateObservedQpc = 0, gateDeadlineQpc = 0;
+        long busyQpc = 0, creditReturnedQpc = 0, nativeSubmitQpc = 0;
         scenario.OnEveryDue = () =>
         {
             if (!heldA && scenario.Pcm.Count == 1 && scenario.Pcm.PresentedCount == 0)
@@ -315,40 +323,79 @@ public class DualSenseBluetoothRearUnderrunTests
         };
         scenario.OnEmptyDue = () =>
         {
+            presenterThread = Environment.CurrentManagedThreadId;
+            // Stage the predecessor's completion on the presenter, before it
+            // starts the real bounded gate. No test-thread scheduling belongs
+            // inside the 10.667 ms credit/deferral contract under test.
+            scenario.Fixture.Native.DuringCompletionProbe = () =>
+                busyQpc = Stopwatch.GetTimestamp();
+            armedQpc = Stopwatch.GetTimestamp();
+            scenario.Fixture.Native.ArmBusyProbe();
+            busyArmed = true;
             scenario.Fixture.ReceiveNativeCommand(Trigger());
             scenario.OnNextSubmit(() =>
             {
+                nativeSubmitQpc = Stopwatch.GetTimestamp();
+                Assert.AreEqual(presenterThread, Environment.CurrentManagedThreadId);
+                Assert.IsTrue(creditReturned,
+                    "The native command must first traverse a real Busy write and returned credit.");
                 scenario.AssertNativeClaim();
                 scenario.AssertDeferring();
+                Assert.IsTrue(nativeSubmitQpc < gateDeadlineQpc,
+                    "Native acceptance must precede the original absolute rear deadline.");
                 Assert.AreEqual(9, Media(scenario.Fixture.Native.Reports.ToArray()).Length,
                     "Returned native credit must be observed without first spending a front/rear media interval.");
                 scenario.Publish(scenario.B);
                 nativeAcceptedDuringWait = true;
             });
         };
+        scenario.SetBeforeNativeCreditProbe(() =>
+        {
+            if (!busyArmed || creditReturned) return;
+            Assert.AreEqual(presenterThread, Environment.CurrentManagedThreadId);
+            scenario.AssertDeferring();
+            if (gateObservedQpc == 0)
+            {
+                gateObservedQpc = Stopwatch.GetTimestamp();
+                gateDeadlineQpc = scenario.DeferralDeadline;
+            }
+            Assert.AreEqual(gateDeadlineQpc, scenario.DeferralDeadline,
+                "A Busy retry must not renew the rear wait.");
+            if (Volatile.Read(ref scenario.Fixture.Native.ProbeReturned) == 0) return;
+
+            // This hook is after the previous writer call has fully returned,
+            // not inside its completion callback. Prove the failed admission
+            // left the same native command queued and spent no front/rear data.
+            writer.GetOwnershipState(out bool disposed, out bool activeWrite, out _);
+            Assert.IsFalse(disposed || activeWrite);
+            Assert.AreEqual((31, 1, 1, 0L), scenario.Fixture.NativeOwnershipSnapshot());
+            Assert.AreEqual(9, Media(scenario.Fixture.Native.Reports.ToArray()).Length);
+            Assert.AreEqual(1L, scenario.Pcm.PresentedCount);
+            Assert.AreEqual(0, scenario.Pcm.Count);
+            Assert.IsFalse(scenario.Pcm.HasPreparedGeneration);
+            // Only native credit returns: no rear/data/reservoir notification.
+            scenario.Fixture.Native.ReturnCredit();
+            creditReturnedQpc = Stopwatch.GetTimestamp();
+            creditReturned = true;
+        });
+        byte[][] all;
         scenario.Start();
         try
         {
-            Assert.IsTrue(SpinWait.SpinUntil(() => scenario.Failure != null ||
-                scenario.DeferralDeadline != 0, 3000),
-                "The actual helper must enter its bounded empty-rear gate after accepting A.");
-            scenario.AssertNoFailure();
-            // Complete the pending synthetic A, but leave its physical slot's
-            // event deliberately unavailable for the first credit probe.
-            scenario.Fixture.Native.ArmBusyProbe();
-            Assert.IsTrue(SpinWait.SpinUntil(() => scenario.Failure != null ||
-                Volatile.Read(ref scenario.Fixture.Native.ProbeReturned) != 0, 3000));
-            scenario.AssertNoFailure();
-            // No new rear data, controller packet, or reservoir wake follows.
-            // Only native credit becomes available; the real loop must poll it.
-            scenario.Fixture.Native.ReturnCredit();
+            all = scenario.Finish(16);
         }
         finally
         {
             scenario.Fixture.Native.ReturnCredit();
+            TestContext?.WriteLine($"Busy/rear QPC frequency={Stopwatch.Frequency}; " +
+                $"armed={armedQpc}; gateObserved={gateObservedQpc}; deadline={gateDeadlineQpc}; " +
+                $"busyCompletion={busyQpc}; creditReturned={creditReturnedQpc}; nativeSubmit={nativeSubmitQpc}");
         }
-        byte[][] all = scenario.Finish(16);
-        Assert.IsTrue(heldA && nativeAcceptedDuringWait);
+        Assert.IsTrue(heldA && busyArmed && creditReturned && nativeAcceptedDuringWait);
+        Assert.IsTrue(armedQpc <= gateObservedQpc && gateObservedQpc <= busyQpc &&
+            busyQpc <= creditReturnedQpc && creditReturnedQpc <= nativeSubmitQpc &&
+            nativeSubmitQpc < gateDeadlineQpc,
+            "The actual Busy/retry/accept sequence must remain inside its unchanged absolute gate.");
         byte[][] media = Media(all);
         AssertFrontOrder(media);
         Assert.AreEqual(RearIndex(media, scenario.A) + 1, RearIndex(media, scenario.B));
@@ -438,6 +485,9 @@ public class DualSenseBluetoothRearUnderrunTests
 
         internal void AssertNativeClaim() => Assert.IsNotNull(NativeClaim);
         internal void OnNextSubmit(Action action) => Fixture.Native.DuringSubmit = () => Guard(action);
+        internal void SetBeforeNativeCreditProbe(Action action) =>
+            host.GetType().GetField("BeforeNativeCommandCreditProbeTestHook", Private)!
+                .SetValue(host, (Action)(() => Guard(action)));
         internal void Publish(byte[] block, int generation = 1) =>
             Assert.IsTrue(Pcm.Publish(block, 0, generation, long.MaxValue, Stopwatch.GetTimestamp()));
 

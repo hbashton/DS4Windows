@@ -25,8 +25,15 @@ namespace DS4Windows.InputDevices
         internal const int NativeCommandIdentityOffset =
             DualSenseBluetoothPhysicalOutputSequence.
                 ControllerStatePayloadLength + sizeof(long) + ReportLength;
-        internal const int GameStateAndTemplatePayloadLength =
+        internal const int NativeCommandRumblePolicyOffset =
             NativeCommandIdentityOffset + sizeof(long) + sizeof(int);
+        internal const int GameStateAndTemplatePayloadLength =
+            NativeCommandRumblePolicyOffset + sizeof(byte);
+        internal enum NativeRumbleUpdatePolicy : byte
+        {
+            Authoritative = 0,
+            SettingsRefresh = 1,
+        }
         // Keep media on the hardware-validated MeasuredTransport-sized carrier: one
         // complete speaker/haptics generation per 10.667 ms. The 547-byte
         // paired carrier is valid on the combined-report reference's raw L2CAP stack, but Windows
@@ -165,7 +172,7 @@ namespace DS4Windows.InputDevices
         }
 
         private const string HelperArgument = "--dualsense-bt-audio-pacer-helper";
-        private const int ProtocolVersion = 16;
+        private const int ProtocolVersion = 17;
         private const int PipeConnectTimeoutMilliseconds = 5000;
         private const int HelperReadyTimeoutMilliseconds = 5000;
         private const int HelperStopTimeoutMilliseconds = 3000;
@@ -1772,13 +1779,15 @@ namespace DS4Windows.InputDevices
 
         public bool UpdateGameStateAndTemplate(byte[] gameStateReport,
             byte[] quiescentTemplate, long hapticsExpiryQpc,
-            out bool capacityUnavailable)
+            out bool capacityUnavailable,
+            NativeRumbleUpdatePolicy rumblePolicy = NativeRumbleUpdatePolicy.Authoritative)
         {
             capacityUnavailable = false;
             if (gameStateReport == null ||
                 gameStateReport.Length != ReportLength ||
                 quiescentTemplate == null ||
-                quiescentTemplate.Length != ReportLength || !IsRunning)
+                quiescentTemplate.Length != ReportLength || !IsRunning ||
+                rumblePolicy > NativeRumbleUpdatePolicy.SettingsRefresh)
             {
                 return false;
             }
@@ -1829,6 +1838,7 @@ namespace DS4Windows.InputDevices
                     AsSpan(NativeCommandIdentityOffset), commandId);
                 BinaryPrimitives.WriteInt32LittleEndian(command.Payload.Buffer.
                     AsSpan(NativeCommandIdentityOffset + sizeof(long)), generation);
+                command.Payload.Buffer[NativeCommandRumblePolicyOffset] = (byte)rumblePolicy;
                 // Do not replace an older game delta in the parent FIFO. The
                 // helper preserves exact commands at the physical
                 // boundary; replacing here could erase a rumble stop,
@@ -3048,6 +3058,7 @@ namespace DS4Windows.InputDevices
             {
                 public long Id;
                 public int Generation;
+                public NativeRumbleUpdatePolicy RumblePolicy;
                 public readonly byte[] State = new byte[DualSensePendingGameStateComposer.StateLength];
                 public readonly byte[] QuiescentState = new byte[DualSensePendingGameStateComposer.StateLength];
             }
@@ -3143,6 +3154,14 @@ namespace DS4Windows.InputDevices
             private byte acceptedImprovedRumbleMode;
             private byte acceptedLightRumble;
             private byte acceptedHeavyRumble;
+            private bool acceptedSettingsRefreshRumbleRetained;
+            private long acceptedRumbleMediaWatermark;
+            // These describe the original claimed command, before an unowned
+            // local LED/trigger update inherits the accepted continuous tuple.
+            private bool claimedControllerRumbleExplicit;
+            private bool claimedSettingsRefreshRumbleRetained;
+            internal Action BeforeMediaPhysicalWriteTestHook = null;
+            internal Action BeforeNativeCommandCreditProbeTestHook = null;
             private bool HasPendingControllerState => pendingControllerStateAvailable || nativeCommands.Count != 0;
             private readonly byte[] controllerStatePresentation = new byte[
                 DualSenseBluetoothPhysicalOutputSequence.
@@ -3952,6 +3971,7 @@ namespace DS4Windows.InputDevices
                             ref appliedWriterClockResetRevision);
                         if (rearHapticsDeferralDeadlineQpc != 0)
                             UpdateRearHapticsDeferral(Stopwatch.GetTimestamp());
+                        BeforeNativeCommandCreditProbeTestHook?.Invoke();
                         // Completion polling is physical I/O and must remain
                         // outside stateLock. The write rechecks credit
                         // atomically; a busy native lane never blocks media.
@@ -4148,7 +4168,8 @@ namespace DS4Windows.InputDevices
                                     lock (stateLock)
                                     {
                                         if (!claimedNative && lifecycleResetRevision == appliedLifecycleResetRevision)
-                                            CommitAcceptedRumbleModeLocked(controllerStatePresentation);
+                                            CommitAcceptedRumbleModeLocked(controllerStatePresentation,
+                                                claimedControllerRumbleExplicit);
                                         // A newer state/reset remains pending;
                                         // completing this older claimed write
                                         // must not clear or overwrite it.
@@ -4552,6 +4573,9 @@ namespace DS4Windows.InputDevices
                         int claimedEpoch = 0;
                         bool claimedLifecycleStillCurrent = false;
                         bool resetWriterClockAfterFinalize = false;
+                        bool settingsRumbleMayYieldToPcm = false;
+                        long settingsRumbleMediaWatermark = 0;
+                        bool pcmTakesOverSettingsRumble = false;
                         lock (stateLock)
                         {
                             if (lifecycleResetRevision !=
@@ -4679,6 +4703,11 @@ namespace DS4Windows.InputDevices
                             {
                                 nativeStatePiggybacked = ClaimControllerStateLocked();
                             }
+                            settingsRumbleMayYieldToPcm =
+                                !(controllerStatePiggybacked && claimedControllerRumbleExplicit) &&
+                                (nativeStatePiggybacked ? claimedSettingsRefreshRumbleRetained :
+                                    acceptedSettingsRefreshRumbleRetained);
+                            settingsRumbleMediaWatermark = acceptedRumbleMediaWatermark;
                         }
 
                         if (item.Epoch != claimedEpoch ||
@@ -4741,8 +4770,21 @@ namespace DS4Windows.InputDevices
                                 // interval after template/state composition.
                                 // A rejected HID write retains both this
                                 // report and this haptics generation.
-                                realtimeHaptics.PrepareForPresentation(
+                                bool realRearBlock = realtimeHaptics.PrepareForPresentation(
                                     item.Report, presentedAt);
+                                pcmTakesOverSettingsRumble = realRearBlock &&
+                                    settingsRumbleMayYieldToPcm &&
+                                    realtimeHaptics.PreparedSequence > settingsRumbleMediaWatermark;
+                                if (pcmTakesOverSettingsRumble)
+                                {
+                                    // Only a real, newer rear generation can end
+                                    // provisional refresh protection. Authored
+                                    // zero is real PCM; synthesized silence is not.
+                                    ClearRumbleTuple(item.Report,
+                                        DualSenseBluetoothPhysicalOutputSequence.ControllerStateSourceOffset);
+                                    if (controllerStatePiggybacked)
+                                        ClearRumbleTuple(controllerStatePresentation, 0);
+                                }
                             }
 
                             // Filter at the last mutable boundary, after
@@ -4807,6 +4849,8 @@ namespace DS4Windows.InputDevices
                                 // once WriteFile accepts/PENDING. Draining
                                 // every outstanding 0x36 and then waiting
                                 // for 0x32 completion breaks that FIFO.
+                                if (!controlOnly)
+                                    BeforeMediaPhysicalWriteTestHook?.Invoke();
                                 accepted = physicalWriteBoundary.TryWrite(
                                     writer, physicalReport, nativeStatePiggybacked,
                                     out transportFault);
@@ -4888,10 +4932,13 @@ namespace DS4Windows.InputDevices
                                         claimedLifecycleResetRevision &&
                                     currentEpoch == claimedEpoch;
                                 if (nativeStatePiggybacked)
-                                    FinishNativeClaimLocked(accepted, presentedAt);
+                                    FinishNativeClaimLocked(accepted, presentedAt, pcmTakesOverSettingsRumble);
                                 if (accepted && controllerStatePiggybacked && !nativeStatePiggybacked &&
                                     claimedLifecycleStillCurrent)
-                                    CommitAcceptedRumbleModeLocked(controllerStatePresentation);
+                                    CommitAcceptedRumbleModeLocked(controllerStatePresentation,
+                                        claimedControllerRumbleExplicit);
+                                if (accepted && pcmTakesOverSettingsRumble && claimedLifecycleStillCurrent)
+                                    ResetAcceptedRumbleModeLocked();
                                 if (accepted && controllerStatePiggybacked && !nativeStatePiggybacked &&
                                     claimedLifecycleStillCurrent &&
                                     controllerStateRevision ==
@@ -5123,6 +5170,9 @@ namespace DS4Windows.InputDevices
                 int generation = BinaryPrimitives.ReadInt32LittleEndian(payload.AsSpan(NativeCommandIdentityOffset + sizeof(long)));
                 if (id == 0 || generation == 0)
                     throw new InvalidDataException("Invalid native command identity.");
+                var rumblePolicy = (NativeRumbleUpdatePolicy)payload[NativeCommandRumblePolicyOffset];
+                if (rumblePolicy > NativeRumbleUpdatePolicy.SettingsRefresh)
+                    throw new InvalidDataException("Invalid native rumble update policy.");
                 lock (stateLock)
                 {
                     if (generation != lifecycleHapticsGeneration)
@@ -5161,6 +5211,7 @@ namespace DS4Windows.InputDevices
                     }
                     command.Id = id;
                     command.Generation = generation;
+                    command.RumblePolicy = rumblePolicy;
                     Buffer.BlockCopy(payload, 0, command.State, 0, stateLength);
                     Buffer.BlockCopy(payload, templateOffset +
                         DualSenseBluetoothPhysicalOutputSequence.ControllerStateSourceOffset,
@@ -5245,6 +5296,7 @@ namespace DS4Windows.InputDevices
 
             private bool ClaimControllerStateLocked()
             {
+                claimedSettingsRefreshRumbleRetained = false;
                 if (nativeCommands.TryPeek(out NativeStateCommand command))
                 {
                     if (claimedNativeCommand != null)
@@ -5252,17 +5304,26 @@ namespace DS4Windows.InputDevices
                     claimedNativeCommand = command;
                     Buffer.BlockCopy(command.State, 0, controllerStatePresentation, 0,
                         controllerStatePresentation.Length);
+                    claimedControllerRumbleExplicit =
+                        command.RumblePolicy == NativeRumbleUpdatePolicy.Authoritative;
+                    claimedSettingsRefreshRumbleRetained =
+                        command.RumblePolicy == NativeRumbleUpdatePolicy.SettingsRefresh &&
+                        HasAcceptedActiveHidRumbleLocked();
+                    if (claimedSettingsRefreshRumbleRetained)
+                        ApplyAcceptedRumbleModeLocked(controllerStatePresentation, 0);
                     return true;
                 }
                 Buffer.BlockCopy(pendingControllerState, 0, controllerStatePresentation, 0,
                     controllerStatePresentation.Length);
-                if ((controllerStatePresentation[0] & 0x03) == 0 &&
-                    (controllerStatePresentation[38] & 0x04) == 0)
+                claimedControllerRumbleExplicit = (pendingControllerState[0] & 0x03) != 0 ||
+                    (pendingControllerState[38] & 0x04) != 0;
+                if (!claimedControllerRumbleExplicit)
                     ApplyAcceptedRumbleModeLocked(controllerStatePresentation, 0);
                 return false;
             }
 
-            private void FinishNativeClaimLocked(bool accepted, long submittedAt)
+            private void FinishNativeClaimLocked(bool accepted, long submittedAt,
+                bool pcmTakesOverSettingsRumble = false)
             {
                 NativeStateCommand command = claimedNativeCommand;
                 if (command == null) throw new InvalidOperationException("No native state claim.");
@@ -5273,7 +5334,13 @@ namespace DS4Windows.InputDevices
                 if (current)
                 {
                     nativeCommands.TryDequeue(out _);
-                    CommitAcceptedRumbleModeLocked(command.State);
+                    // The original FIFO bytes remain immutable for retry.
+                    // Commit the effective tuple that was physically accepted,
+                    // not a protected refresh's original zero-mode tuple.
+                    CommitAcceptedRumbleModeLocked(controllerStatePresentation,
+                        claimedControllerRumbleExplicit);
+                    acceptedSettingsRefreshRumbleRetained =
+                        claimedSettingsRefreshRumbleRetained && !pcmTakesOverSettingsRumble;
                     Buffer.BlockCopy(command.QuiescentState, 0, nativeQuiescentState, 0,
                         nativeQuiescentState.Length);
                     if (latestTemplateAvailable)
@@ -5294,13 +5361,26 @@ namespace DS4Windows.InputDevices
                     DualSenseBluetoothPhysicalOutputSequence.ControllerStateSourceOffset);
             }
 
-            private void CommitAcceptedRumbleModeLocked(byte[] state)
+            private bool HasAcceptedActiveHidRumbleLocked() =>
+                acceptedRumbleModeAvailable && (acceptedRumbleMode & 0x02) != 0 &&
+                ((acceptedRumbleMode & 0x01) != 0 || (acceptedImprovedRumbleMode & 0x04) != 0) &&
+                (acceptedLightRumble != 0 || acceptedHeavyRumble != 0);
+
+            private void CommitAcceptedRumbleModeLocked(byte[] state, bool explicitRumbleOwnership)
             {
                 acceptedRumbleModeAvailable = true;
                 acceptedRumbleMode = (byte)(state[0] & 0x03);
                 acceptedImprovedRumbleMode = (byte)(state[38] & 0x04);
                 acceptedLightRumble = state[2];
                 acceptedHeavyRumble = state[3];
+                if (explicitRumbleOwnership)
+                {
+                    acceptedSettingsRefreshRumbleRetained = false;
+                    // Older queued PCM must not undo a later explicit motor
+                    // owner. Sequence identity also distinguishes real authored
+                    // zero from our continuously generated idle carriers.
+                    acceptedRumbleMediaWatermark = realtimeHaptics.PublishedSequence;
+                }
                 if (latestTemplateAvailable) ApplyAcceptedRumbleModeLocked(latestTemplate, 13);
                 if (previousTemplateAvailable) ApplyAcceptedRumbleModeLocked(previousTemplate, 13);
             }
@@ -5321,9 +5401,18 @@ namespace DS4Windows.InputDevices
                 acceptedRumbleModeAvailable = true;
                 acceptedRumbleMode = acceptedImprovedRumbleMode = 0;
                 acceptedLightRumble = acceptedHeavyRumble = 0;
+                acceptedSettingsRefreshRumbleRetained = false;
+                acceptedRumbleMediaWatermark = 0;
                 if (latestTemplateAvailable) ApplyAcceptedRumbleModeLocked(latestTemplate, 13);
                 if (previousTemplateAvailable) ApplyAcceptedRumbleModeLocked(previousTemplate, 13);
                 ApplyAcceptedRumbleModeLocked(nativeQuiescentState, 0);
+            }
+
+            private static void ClearRumbleTuple(byte[] state, int offset)
+            {
+                state[offset] &= 0xFC;
+                state[offset + 38] &= 0xFB;
+                state[offset + 2] = state[offset + 3] = 0;
             }
 
             private void MergeNativeQuiescentStateIntoTemplateLocked(byte[] template)

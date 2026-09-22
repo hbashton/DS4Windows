@@ -9,7 +9,7 @@ namespace DS4WindowsTests
     {
         private const string HelperArgument =
             "--dualsense-bt-audio-pacer-helper";
-        private const int ProtocolVersion = 16;
+        private const int ProtocolVersion = 17;
 
         private static readonly MethodInfo TryParseHelperArgumentsMethod =
             typeof(DualSenseBluetoothAudioPacer).GetMethod(
@@ -83,7 +83,7 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void Protocol16HelloContainsOnlyVersionAndAuthenticationToken()
+        public void Protocol17HelloContainsOnlyVersionAndAuthenticationToken()
         {
             Guid token = new Guid("8c264fb4-ebc7-4e9d-b79b-0911497418d2");
             byte[] payload = BuildCurrentHello(ProtocolVersion, token);
@@ -94,7 +94,7 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void Protocol16RejectsVersion11AndHandleBearingHelloForms()
+        public void Protocol17RejectsVersion11AndHandleBearingHelloForms()
         {
             Guid token = new Guid("ba637939-7cca-47b8-b410-56f743c6ab00");
 
@@ -125,13 +125,16 @@ namespace DS4WindowsTests
                 DualSensePendingGameStateComposer.StateLength +
                     sizeof(long) +
                     DualSenseBluetoothAudioPacer.ReportLength +
-                    sizeof(long) + sizeof(int),
+                    sizeof(long) + sizeof(int) + sizeof(byte),
                 DualSenseBluetoothAudioPacer.
                     GameStateAndTemplatePayloadLength);
             Assert.AreEqual(453,
                 DualSenseBluetoothAudioPacer.NativeCommandIdentityOffset,
                 "Append identity without changing any original state/template offset.");
             Assert.AreEqual(465,
+                DualSenseBluetoothAudioPacer.NativeCommandRumblePolicyOffset,
+                "Append one explicit policy byte without repurposing native report bytes.");
+            Assert.AreEqual(466,
                 DualSenseBluetoothAudioPacer.GameStateAndTemplatePayloadLength);
             Assert.IsTrue(
                 DualSenseBluetoothAudioPacer.
@@ -142,12 +145,21 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
-        public void Protocol16RejectsPreCreditProtocol15Hello()
+        public void Protocol17RejectsPreCreditProtocol15Hello()
         {
             Guid token = new Guid("e6e855d5-35ab-4ea3-a777-81cce1fa94b4");
             Assert.IsFalse(TryParseHello(BuildCurrentHello(15, token), token,
                 out string error));
             StringAssert.Contains(error, "Unsupported pacer protocol version 15");
+        }
+
+        [TestMethod]
+        public void Protocol17RejectsVersion16WithoutNativeRumblePolicy()
+        {
+            Guid token = new Guid("af1e69b8-c157-4fc1-a29a-d07db14ce5e8");
+            Assert.IsFalse(TryParseHello(BuildCurrentHello(16, token), token,
+                out string error));
+            StringAssert.Contains(error, "Unsupported pacer protocol version 16");
         }
 
         private static string[] BuildValidHelperArguments(Guid token,

@@ -1789,6 +1789,190 @@ namespace DS4WindowsTests
             }
         }
 
+        [DataTestMethod]
+        [DataRow(0, false, false)]
+        [DataRow(8, false, false)]
+        [DataRow(0, true, false)]
+        [DataRow(8, true, false)]
+        [DataRow(0, false, true)]
+        [DataRow(8, false, true)]
+        public void BluetoothRawFifoLedReleaseWaitsForFinalNeutral(
+            int precedingCommands, bool supersedingVisual, bool finalTriggerCommand)
+        {
+            DualSenseDevice device = CreateBluetoothDevice();
+            using var pacer = new QueueOnlyPacerFixture();
+            SetFieldValue(BluetoothAudioPacerField, device, pacer.Owner);
+            byte[] profile = new byte[78];
+            profile[0] = 0x31;
+            SetFieldValue(OutputReportField, device, profile);
+            PublishProfileVisualState(device, playerLedMask: 0x04,
+                new DS4Color(0xFF, 0x25, 0x00));
+            const BindingFlags fields = BindingFlags.Instance | BindingFlags.NonPublic;
+            FieldInfo pendingRelease = typeof(DualSenseDevice).GetField(
+                "pendingNativeGameLedReleaseRevision", fields);
+            try
+            {
+                byte[] visual = new byte[48];
+                visual[0] = 0x02;
+                visual[1] = 0x0C;
+                visual[2] = 0x14;
+                visual[11] = 0x21;
+                visual[22] = 0x22;
+                visual[44] = 0x01;
+                visual[45] = 0x02;
+                visual[46] = 0x04;
+                visual[47] = 0x80;
+                for (int index = 0; index <= precedingCommands; index++)
+                    Assert.IsTrue(device.WriteRawOutputReportFromGame(
+                        visual, 0, visual.Length, out _));
+                byte[] neutral = new byte[48];
+                neutral[0] = 0x02;
+                if (finalTriggerCommand)
+                {
+                    neutral[1] = 0x0C;
+                    neutral[11] = 0x51;
+                    neutral[22] = 0x52;
+                }
+                Assert.IsTrue(device.WriteRawOutputReportFromGame(
+                    neutral, 0, neutral.Length, out long finalRevision));
+                for (int index = 0; index < precedingCommands; index++)
+                    Assert.AreEqual(DualSenseDevice.PhysicalOutputCommandProcessResult.Published,
+                        device.ProcessNextPhysicalOutputCommand());
+
+                // Either admission arrived after the worker observed an empty
+                // FIFO, or its eight-command burst ended before the final pair.
+                // The final neutral is already the newest admitted revision.
+                Assert.IsTrue(device.RequestNativeGameLedOwnershipRelease(finalRevision));
+                ClaimPhysicalOutputStateMethod.Invoke(device, null);
+                long retainedRelease = (long)pendingRelease.GetValue(device);
+                if (supersedingVisual)
+                {
+                    byte[] newer = (byte[])visual.Clone();
+                    newer[45] = 0x91;
+                    newer[46] = 0x92;
+                    newer[47] = 0x93;
+                    Assert.IsTrue(device.WriteRawOutputReportFromGame(
+                        newer, 0, newer.Length, out long newerRevision));
+                    Assert.IsTrue(newerRevision > finalRevision);
+                }
+                Assert.AreEqual(DualSenseDevice.PhysicalOutputCommandProcessResult.Published,
+                    device.ProcessNextPhysicalOutputCommand());
+                Assert.AreEqual(DualSenseDevice.PhysicalOutputCommandProcessResult.Published,
+                    device.ProcessNextPhysicalOutputCommand());
+                if (supersedingVisual)
+                    Assert.AreEqual(DualSenseDevice.PhysicalOutputCommandProcessResult.Published,
+                        device.ProcessNextPhysicalOutputCommand());
+                Assert.AreEqual(DualSenseDevice.PhysicalOutputCommandProcessResult.None,
+                    device.ProcessNextPhysicalOutputCommand());
+                byte[] beforeRestore = (byte[])GetFieldValue<byte[]>(
+                    CachedCombinedReportField, device).Clone();
+                ClaimPhysicalOutputStateMethod.Invoke(device, null);
+                Assert.IsTrue((bool)UpdateCachedCombinedStateFromBluetoothOutputMethod.Invoke(
+                    device, new object[] { profile }));
+                byte[] cached = GetFieldValue<byte[]>(CachedCombinedReportField, device);
+
+                Assert.AreEqual(!supersedingVisual, GetPublishedPhysicalOutputState(device).
+                    NativeGameLightbarOwnershipReleased,
+                    "An older queued visual reclaimed LEDs, or a stale release overwrote the newer owner.");
+                Assert.AreEqual(finalRevision, retainedRelease,
+                    "The visual release was consumed before its exact raw command left the FIFO.");
+                Assert.AreEqual(0L, (long)pendingRelease.GetValue(device));
+                CollectionAssert.AreEqual(supersedingVisual
+                        ? new byte[] { 0x01, 0x91, 0x92, 0x93 }
+                        : new byte[] { 0x04, 0xFF, 0x25, 0x00 },
+                    cached.Skip(56).Take(4).ToArray());
+                Assert.AreEqual(beforeRestore[14] & ~0x1C, cached[14] & ~0x1C,
+                    "Visual restore changed non-LED validity1 bits.");
+                Assert.AreEqual(beforeRestore[51] & ~0x02, cached[51] & ~0x02,
+                    "Visual restore changed non-LED validity2 bits.");
+                for (int index = 0; index < cached.Length; index++)
+                {
+                    if (index == 14 || index == 51 || index >= 54 && index <= 59) continue;
+                    Assert.AreEqual(beforeRestore[index], cached[index],
+                        $"Visual restore changed non-LED byte {index}.");
+                }
+                DualSenseBluetoothAudioPacer.OutboundCommand[] commands = GetQueuedCommands(pacer.Owner);
+                Assert.AreEqual(precedingCommands + 2 + (supersedingVisual ? 1 : 0), commands.Length);
+                Assert.IsTrue(commands.All(command => command.Kind ==
+                    DualSenseBluetoothAudioPacer.MessageKind.UpdateGameStateAndTemplate));
+                Assert.AreEqual((byte)0x21, commands[precedingCommands].Payload.Buffer[10]);
+                Assert.AreEqual((byte)0x22, commands[precedingCommands].Payload.Buffer[21]);
+                Assert.AreEqual(finalTriggerCommand ? (byte)0x51 : (byte)0,
+                    commands[precedingCommands + 1].Payload.Buffer[10]);
+                Assert.AreEqual(finalTriggerCommand ? (byte)0x52 : (byte)0,
+                    commands[precedingCommands + 1].Payload.Buffer[21]);
+            }
+            finally
+            {
+                SetFieldValue(BluetoothAudioPacerField, device, null);
+            }
+        }
+
+        [TestMethod]
+        public void BluetoothCombinedLedReleaseWaitsForOlderRawFallback()
+        {
+            const int nativeReportOffset = 28;
+            DualSenseDevice device = CreateBluetoothDevice();
+            SetFieldValue(OutputTransportStoppingField, device, 1);
+            SetFieldValue(OutputReportField, device, new byte[78]);
+            PublishProfileVisualState(device, playerLedMask: 0x04,
+                new DS4Color(0xFF, 0x25, 0x00));
+            var output = new ViiperOutDevice(OutContType.None,
+                ViiperVirtualDeviceType.DualSense);
+            byte[] scratch = new byte[48];
+            Assert.IsTrue(ApplyCombinedThenRawFallback(output, device,
+                BuildAtomicNativeFeedback(0x31), scratch));
+            byte[] visual = BuildAtomicNativeFeedback(0x41);
+            visual[nativeReportOffset + 2] = 0x14;
+            visual[nativeReportOffset + 45] = 0x02;
+            visual[nativeReportOffset + 46] = 0x04;
+            visual[nativeReportOffset + 47] = 0x80;
+            Assert.IsTrue(ApplyCombinedThenRawFallback(output, device, visual, scratch));
+            using var pacer = new QueueOnlyPacerFixture();
+            SetFieldValue(BluetoothAudioPacerField, device, pacer.Owner);
+            SetFieldValue(OutputTransportStoppingField, device, 0);
+            try
+            {
+                byte[] final = BuildAtomicNativeFeedback(0);
+                Array.Clear(final, nativeReportOffset + 1, 47);
+                Assert.IsTrue(ApplyCombinedThenRawFallback(output, device, final, scratch));
+                long revision = GetFieldValue<long>(NativeGameOutputRevisionField, device);
+                Assert.AreEqual(3L, revision,
+                    "The fixture must admit combined N after raw fallback M.");
+                Assert.IsTrue(device.RequestNativeGameLedOwnershipRelease(revision));
+                ClaimPhysicalOutputStateMethod.Invoke(device, null);
+                Assert.AreEqual(DualSenseDevice.PhysicalOutputCommandProcessResult.Published,
+                    device.ProcessNextPhysicalOutputCommand());
+                Assert.AreEqual(DualSenseDevice.PhysicalOutputCommandProcessResult.None,
+                    device.ProcessNextPhysicalOutputCommand());
+                byte[] beforeRestore = (byte[])GetFieldValue<byte[]>(
+                    CachedCombinedReportField, device).Clone();
+                ClaimPhysicalOutputStateMethod.Invoke(device, null);
+                byte[] profile = new byte[78];
+                profile[0] = 0x31;
+                Assert.IsTrue((bool)UpdateCachedCombinedStateFromBluetoothOutputMethod.Invoke(
+                    device, new object[] { profile }));
+                byte[] cached = GetFieldValue<byte[]>(CachedCombinedReportField, device);
+                Assert.IsTrue(GetPublishedPhysicalOutputState(device).
+                    NativeGameLightbarOwnershipReleased,
+                    "Older raw fallback reclaimed LEDs after the later combined release.");
+                CollectionAssert.AreEqual(new byte[] { 0x04, 0xFF, 0x25, 0x00 },
+                    cached.Skip(56).Take(4).ToArray());
+                Assert.AreEqual(beforeRestore[14] & ~0x1C, cached[14] & ~0x1C);
+                Assert.AreEqual(beforeRestore[51] & ~0x02, cached[51] & ~0x02);
+                for (int index = 0; index < cached.Length; index++)
+                {
+                    if (index == 14 || index == 51 || index >= 54 && index <= 59) continue;
+                    Assert.AreEqual(beforeRestore[index], cached[index],
+                        $"Visual restore changed non-LED byte {index}.");
+                }
+            }
+            finally
+            {
+                SetFieldValue(BluetoothAudioPacerField, device, null);
+            }
+        }
+
         [TestMethod]
         public void DeferredNativeTransitionPrecedesLocalVisualRestore()
         {

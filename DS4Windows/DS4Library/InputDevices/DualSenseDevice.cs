@@ -4053,6 +4053,23 @@ namespace DS4Windows.InputDevices
                 return;
             }
 
+            if (conType == ConnectionType.BT &&
+                HasPendingPhysicalOutputCommand())
+            {
+                // Admission assigns the revision before this worker merges
+                // the raw FIFO into the BT cache. With the current revision
+                // fence above, queued commands precede this visual release,
+                // including raw fallbacks older than a combined revision.
+                // A newer admission cancels the release on the next pass.
+                if (TryPublishNewestNativeGameLedReleaseRevision(
+                        ref pendingNativeGameLedReleaseRevision,
+                        expectedLedReleaseRevision))
+                {
+                    QueuePhysicalOutputUpdate();
+                }
+                return;
+            }
+
             if (conType == ConnectionType.USB &&
                 (!latestUsbNativeGameOutputAvailable ||
                  latestUsbNativeGameOutputRevision !=

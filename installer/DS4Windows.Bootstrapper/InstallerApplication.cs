@@ -536,7 +536,7 @@ namespace DS4Windows.Bootstrapper
                 if (attempt <= maximumRetries)
                 {
                     engine.Log(LogLevel.Standard,
-                        "Windows Installer is busy; retrying package '" +
+                        "Another setup or repair is busy; retrying package '" +
                         packageId + "' (" + attempt + "/" +
                         maximumRetries + ").");
                     Ui(() => window.ShowInstallerBusyRetry(attempt,
@@ -547,10 +547,9 @@ namespace DS4Windows.Bootstrapper
                     return;
                 }
 
-                lastError = "Another Windows installation is still active. " +
-                    "Let it finish, close any stale installer windows, then " +
-                    "choose Retry. DS4Windows did not wait indefinitely or " +
-                    "change the existing installation.";
+                lastError = "Another setup or repair still owns the installation " +
+                    "resources. Let it finish or close its setup window, then " +
+                    "choose Retry. See the setup logs if no other setup is visible.";
             }
             else if (e.Status >= 0)
             {

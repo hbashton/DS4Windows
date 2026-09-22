@@ -95,7 +95,7 @@ namespace DS4Windows.Bootstrapper
 
         internal void ShowInstallerBusyRetry(int attempt, int maximumRetries)
         {
-            ProgressDetail.Text = "Another Windows installation is finishing; " +
+            ProgressDetail.Text = "Another setup or repair is busy; " +
                 "retrying safely (" + attempt + " of " + maximumRetries + ")";
         }
 

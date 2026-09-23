@@ -11,6 +11,152 @@ namespace DS4WindowsTests;
 public sealed class ViiperNativeCommandDispatchTests
 {
     [TestMethod]
+    public void EdgeExtensionAdmissionOnlyRecognizesItsTwoAuthorizationBits()
+    {
+        byte[] envelope = Envelope(Led(31));
+        // Independent references: daidr/dualsense-tester's Edge stick/trigger
+        // preview and neptuwunium/titania's control2 + 16-byte Edge extension.
+        foreach (int offset in new[] { 39, 41 })
+        {
+            for (int value = 0; value <= byte.MaxValue; value++)
+            {
+                envelope[28 + offset] = (byte)value;
+                Assert.AreEqual((value & 0x80) != 0,
+                    ViiperOutDevice.IsUnsupportedEdgeNativeOutput(
+                        ViiperVirtualDeviceType.DualSenseEdge, envelope, envelope.Length),
+                    $"USB byte {offset}, value {value:X2}");
+                Assert.IsFalse(ViiperOutDevice.IsUnsupportedEdgeNativeOutput(
+                    ViiperVirtualDeviceType.DualSense, envelope, envelope.Length),
+                    "The policy must not reinterpret ordinary DualSense fields.");
+            }
+            envelope[28 + offset] = 0;
+        }
+        envelope[28 + 39] = 0x80;
+        Assert.IsFalse(ViiperOutDevice.IsUnsupportedEdgeNativeOutput(
+            ViiperVirtualDeviceType.DualSenseEdge, envelope, 75));
+        Assert.IsFalse(ViiperOutDevice.IsUnsupportedEdgeNativeOutput(
+            ViiperVirtualDeviceType.DualSenseEdge, envelope, envelope.Length + 1));
+        envelope[28] = 0;
+        Assert.IsFalse(ViiperOutDevice.IsUnsupportedEdgeNativeOutput(
+            ViiperVirtualDeviceType.DualSenseEdge, envelope, envelope.Length));
+    }
+
+    [DataTestMethod]
+    [DataRow(39, false, false)]
+    [DataRow(41, false, false)]
+    [DataRow(39, true, false)]
+    [DataRow(41, true, false)]
+    [DataRow(39, false, true)]
+    [DataRow(41, false, true)]
+    [DataRow(39, true, true)]
+    [DataRow(41, true, true)]
+    public void OldBrokerEdgeConfigurationCommandsCannotReachPhysicalOrFallback(
+        int authorizationOffset, bool combined, bool physicalEdge)
+    {
+        using var fixture = new AdmissionFixture(ViiperVirtualDeviceType.DualSenseEdge, physicalEdge);
+        byte[] envelope = Envelope(Led(31));
+        Assert.IsTrue(fixture.Output.TryCaptureNativeCommandContext(envelope,
+            envelope.Length, 0, out var context));
+        envelope[0] = 173; // A dropped config command must not become rumble.
+        envelope[28 + authorizationOffset] = 0x80;
+        if (combined) envelope[76] = 0x36;
+        byte[] original = (byte[])envelope.Clone();
+
+        Assert.IsFalse(fixture.Output.TryCaptureNativeCommandContext(envelope,
+            envelope.Length, 0, out _));
+        Assert.IsTrue(fixture.Output.TryApplyRetainedNativeCommand(envelope,
+            envelope.Length, 0, 0, context, new byte[48]),
+            "Unsupported configuration is retired, never stuck in retry.");
+        typeof(ViiperOutDevice).GetMethod("ApplyFeedback", PrivateInstance)!
+            .Invoke(fixture.Output, new object[] { envelope, envelope.Length, 0, true, new byte[48], 0L });
+
+        Assert.AreEqual(DualSenseDevice.PhysicalOutputCommandProcessResult.None,
+            fixture.Device.ProcessNextPhysicalOutputCommand());
+        Assert.AreEqual(0, fixture.Reports.Count);
+        Assert.AreEqual(0, fixture.Device.CompatibilityRumbleCalls);
+        CollectionAssert.AreEqual(original, envelope,
+            "Do not partially rewrite a configuration command into a game effect.");
+    }
+
+    [DataTestMethod]
+    [DataRow(ViiperVirtualDeviceType.DualSense, false)]
+    [DataRow(ViiperVirtualDeviceType.DualSense, true)]
+    [DataRow(ViiperVirtualDeviceType.DualSenseEdge, false)]
+    [DataRow(ViiperVirtualDeviceType.DualSenseEdge, true)]
+    public void CommonEffectsCrossSonyPersonasAndRetainPhysicalDescriptorLength(
+        ViiperVirtualDeviceType virtualType, bool physicalEdge)
+    {
+        using var fixture = new AdmissionFixture(virtualType, physicalEdge);
+        byte[] raw = Burst(true, 2)[0];
+        raw[1] |= 0x08;
+        raw[2] = 0x20; // Preserve the existing motor-power authorization.
+        raw[39] = 0x07;
+        raw[41] = 0x03;
+        for (int index = 12; index <= 32; index++) raw[index] = (byte)(index + 11);
+        byte[] envelope = Envelope(raw);
+        Assert.IsTrue(fixture.Output.TryCaptureNativeCommandContext(envelope,
+            envelope.Length, 0, out var context));
+        Assert.IsTrue(fixture.Output.TryApplyRetainedNativeCommand(envelope,
+            envelope.Length, 0, 0, context, new byte[48]));
+        Assert.AreEqual(DualSenseDevice.PhysicalOutputCommandProcessResult.Published,
+            fixture.Device.ProcessNextPhysicalOutputCommand());
+        byte[] written = fixture.Reports.Single();
+        Assert.AreEqual(physicalEdge ? 64 : 48, written.Length);
+        CollectionAssert.AreEqual(raw.AsSpan(11, 22).ToArray(), written.AsSpan(11, 22).ToArray());
+        Assert.AreEqual(raw[2] & 0x20, written[2] & 0x20);
+        Assert.AreEqual(raw[39], written[39]);
+        Assert.AreEqual(raw[41], written[41]);
+        Assert.IsTrue(written.AsSpan(48).ToArray().All(value => value == 0));
+    }
+
+    [DataTestMethod]
+    [DataRow(0x054C, 0x0CE6, true)]
+    [DataRow(0x054C, 0x0DF2, true)]
+    [DataRow(0x054C, 0x09CC, false)]
+    [DataRow(0x1234, 0x0CE6, false)]
+    [DataRow(0x1234, 0x0DF2, false)]
+    public void CrossPersonaNativeFeedbackStillRequiresVerifiedPhysicalSony(
+        int vendor, int product, bool expected)
+    {
+        using var fixture = new AdmissionFixture(ViiperVirtualDeviceType.DualSenseEdge, false);
+        typeof(HidDevice).GetField("_deviceAttributes", PrivateInstance)!.SetValue(fixture.Device.HidDevice,
+            new HidDeviceAttributes(new NativeMethods.HIDD_ATTRIBUTES {
+                VendorID = (ushort)vendor, ProductID = (ushort)product }));
+        byte[] envelope = Envelope(Led(31));
+        Assert.AreEqual(expected, fixture.Output.TryCaptureNativeCommandContext(envelope,
+            envelope.Length, 0, out _));
+        SetField(fixture.Output, "physicalDualSenseIdentityVerified", false);
+        Assert.IsFalse(fixture.Output.TryCaptureNativeCommandContext(envelope,
+            envelope.Length, 0, out _), "A matching VID/PID alone cannot authorize physical writes.");
+    }
+
+    [TestMethod]
+    public void EdgeMediaSnapshotDoesNotImportUnsupportedConfigurationOrLosePcm()
+    {
+        using var fixture = new AdmissionFixture(ViiperVirtualDeviceType.DualSenseEdge);
+        var cache = typeof(DualSenseDevice).GetMethod("CacheBluetoothCombinedSpeakerReport", PrivateInstance)!;
+        byte[] valid = new byte[398];
+        valid[13] = 0x03;
+        valid[15] = 90;
+        valid[16] = 120;
+        cache.Invoke(fixture.Device, new object[] { valid, 0, true });
+        var cachedField = typeof(DualSenseDevice).GetField("latestBluetoothCombinedSpeakerReport", PrivateInstance)!;
+        byte[] before = ((byte[])cachedField.GetValue(fixture.Device)!).AsSpan(13, 63).ToArray();
+
+        byte[] media = new byte[398];
+        media[13 + 38] = 0x80;
+        media[13 + 40] = 0x83;
+        media.AsSpan(13 + 47, 16).Fill(0xF1);
+        for (int index = 0; index < 64; index++) media[78 + index] = (byte)(index * 3);
+        cache.Invoke(fixture.Device, new object[] { media, 0, false });
+        byte[] after = (byte[])cachedField.GetValue(fixture.Device)!;
+        CollectionAssert.AreEqual(before, after.AsSpan(13, 63).ToArray(),
+            "Media-only carriers retain the last admitted safe controller state, including rumble mode.");
+        CollectionAssert.AreEqual(media.AsSpan(78, 64).ToArray(), after.AsSpan(78, 64).ToArray(),
+            "Fresh PCM is independent of the old broker's unsupported cached Edge configuration.");
+    }
+
+    [TestMethod]
     public void GamepadOnlyNativeReaderHasControlConsumerWithoutSpeakerWorker()
     {
         using var fixture = new AdmissionFixture();
@@ -495,16 +641,17 @@ public sealed class ViiperNativeCommandDispatchTests
         internal List<byte[]> Reports { get; } = new();
         internal byte[] Scratch { get; } = new byte[ViiperOutDevice.DualSenseAtomicFeedbackLength];
 
-        internal AdmissionFixture()
+        internal AdmissionFixture(ViiperVirtualDeviceType type = ViiperVirtualDeviceType.DualSense,
+            bool? physicalEdge = null)
         {
-            Device = CreateDevice();
+            Device = CreateDevice(physicalEdge ?? type == ViiperVirtualDeviceType.DualSenseEdge);
             var hub = (ControlService)RuntimeHelpers.GetUninitializedObject(typeof(ControlService));
             hub.DS4Controllers = new DS4Device[4];
             hub.DS4Controllers[0] = Device;
             typeof(ControlService).GetField("audioHapticsService", PrivateInstance)!.SetValue(hub, audio);
             DS4Windows.Program.rootHub = hub;
             Global.EnableOutputDataToDS4[0] = true;
-            Output = new(OutContType.None, ViiperVirtualDeviceType.DualSense);
+            Output = new(OutContType.None, type);
             SetField(Output, "physicalDualSenseIdentityPath", string.Empty);
             SetField(Output, "physicalDualSenseIdentityVerified", true);
             Output.BindPhysicalController(0);
@@ -514,14 +661,17 @@ public sealed class ViiperNativeCommandDispatchTests
                 .GetField("feedbackDispatchBuffer", PrivateInstance)!.GetValue(Output)!;
         }
 
-        internal RecordingDualSense CreateDevice()
+        internal RecordingDualSense CreateDevice(bool isEdge = false)
         {
             var hid = (HidDevice)RuntimeHelpers.GetUninitializedObject(typeof(HidDevice));
             typeof(HidDevice).GetField("_deviceAttributes", PrivateInstance)!.SetValue(hid,
-                new HidDeviceAttributes(new NativeMethods.HIDD_ATTRIBUTES { VendorID = 0x054C, ProductID = 0x0CE6 }));
+                new HidDeviceAttributes(new NativeMethods.HIDD_ATTRIBUTES { VendorID = 0x054C,
+                    ProductID = isEdge ? (ushort)0x0DF2 : (ushort)0x0CE6 }));
             var device = new RecordingDualSense(hid);
+            typeof(DualSenseDevice).GetField("subType", PrivateInstance)!.SetValue(device,
+                isEdge ? DualSenseDevice.DeviceSubType.DSEdge : DualSenseDevice.DeviceSubType.DualSense);
             typeof(DS4Device).GetField("conType", PrivateInstance)!.SetValue(device, ConnectionType.USB);
-            typeof(DS4Device).GetField("outputReport", PrivateInstance)!.SetValue(device, new byte[48]);
+            typeof(DS4Device).GetField("outputReport", PrivateInstance)!.SetValue(device, new byte[isEdge ? 64 : 48]);
             device.PhysicalRawOutputWriteTestHook = report => { Reports.Add((byte[])report.Clone()); return true; };
             return device;
         }

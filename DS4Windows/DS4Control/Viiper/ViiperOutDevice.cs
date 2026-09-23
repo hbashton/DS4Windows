@@ -518,7 +518,6 @@ namespace DS4Windows
         private bool hasPendingSwitch2RuntimeStatus;
         private int switch2RuntimeStatusFailureLogged;
         private int lastMicrophoneRecoveryStage;
-        private int edgePhysicalMismatchLogged;
         private int feedbackSpeakerCallbackFailureLogged;
         private int feedbackControlCallbackFailureLogged;
         private long lastFeedbackSpeakerDispatchTimestamp;
@@ -1212,7 +1211,6 @@ namespace DS4Windows
             stateWriteMinimumIntervalTicks =
                 ViiperStateWriteRateSettings.GetMinimumIntervalTicks(
                     stateWriteRateHz);
-            Volatile.Write(ref edgePhysicalMismatchLogged, 0);
             Volatile.Write(ref feedbackSpeakerCallbackFailureLogged, 0);
             Volatile.Write(ref feedbackControlCallbackFailureLogged, 0);
             Interlocked.Exchange(ref lastFeedbackSpeakerDispatchTimestamp, 0);
@@ -6455,12 +6453,22 @@ namespace DS4Windows
                 (feedback[DualSenseCombinedBluetoothReportOffset] != 0x36 &&
                  feedback[DualSenseCombinedBluetoothReportOffset] != 0x32));
 
+        internal static bool IsUnsupportedEdgeNativeOutput(
+            ViiperVirtualDeviceType type, byte[] feedback, int length) =>
+            type == ViiperVirtualDeviceType.DualSenseEdge &&
+            feedback != null && length <= feedback.Length &&
+            length >= DualSenseNativeOutputReportOffset + DualSenseNativeOutputReportLength &&
+            feedback[DualSenseNativeOutputReportOffset] == 0x02 &&
+            ((feedback[DualSenseNativeOutputReportOffset + 39] & 0x80) != 0 ||
+             (feedback[DualSenseNativeOutputReportOffset + 41] & 0x80) != 0);
+
         internal bool TryCaptureNativeCommandContext(byte[] feedback, int length,
             int deviceIndex, out ViiperNativeCommandContext context)
         {
             context = default;
             if (audioOnlySidecar || !IsDualSenseType() ||
-                !IsExactNativeDualSenseCommand(feedback, length)) return false;
+                !IsExactNativeDualSenseCommand(feedback, length) ||
+                IsUnsupportedEdgeNativeOutput(viiperType, feedback, length)) return false;
             lock (feedbackCallbackAdmissionLock)
             {
                 DualSenseDevice target = ResolvePhysicalControllerTarget(deviceIndex);
@@ -6587,7 +6595,8 @@ namespace DS4Windows
                     sourceGeneration != Interlocked.Read(ref streamGeneration) ||
                     !IsNativeCommandTargetCurrent(deviceIndex, context) ||
                     !Global.EnableOutputDataToDS4[deviceIndex]) return true;
-                if (!IsExactNativeDualSenseCommand(feedback, length)) return true;
+                if (!IsExactNativeDualSenseCommand(feedback, length) ||
+                    IsUnsupportedEdgeNativeOutput(viiperType, feedback, length)) return true;
                 target = (DualSenseDevice)context.Target;
                 byte triggerLabValidity = PrepareNativeDualSenseOutputReportForProfileInto(feedback,
                     deviceIndex, nativeOutputScratch);
@@ -6617,6 +6626,18 @@ namespace DS4Windows
             byte[] nativeOutputScratch = null,
             long nativeOutputStreamGeneration = 0)
         {
+            // Edge profile-preview/extension commands authorize data beyond
+            // the common 48-byte native prefix carried by older V5 brokers.
+            // Forwarding that prefix alone can alter the physical Edge with
+            // missing parameters. Retire the complete unsupported command,
+            // never turn it into scalar rumble/trigger/LED fallback. Ordinary
+            // trigger validity and all standard DualSense reports are intact.
+            // Media-only callbacks are independent: the physical compositor
+            // ignores their imported state and retains its last valid state.
+            if (freshNativeOutput &&
+                IsUnsupportedEdgeNativeOutput(viiperType, feedback, feedbackLength))
+                return;
+
             int deviceIndex = Volatile.Read(ref lastInputDeviceIndex);
             if ((expectedDeviceIndex >= 0 &&
                     expectedDeviceIndex != deviceIndex) ||
@@ -9931,24 +9952,13 @@ namespace DS4Windows
 
         private bool IsNativeDualSenseFeedbackCompatible(DS4Device device)
         {
-            if (device is not DualSenseDevice dualSenseDevice ||
-                !IsCurrentPhysicalSonyDualSense(dualSenseDevice))
-            {
-                return false;
-            }
-
-            if (viiperType != ViiperVirtualDeviceType.DualSenseEdge ||
-                dualSenseDevice.SubType == DualSenseDevice.DeviceSubType.DSEdge)
-            {
-                return true;
-            }
-
-            if (Interlocked.Exchange(ref edgePhysicalMismatchLogged, 1) == 0)
-            {
-                AppLogger.LogToGui("VIIPER DualSense Edge native feedback is not being forwarded to a physical non-Edge DualSense. Use DualSense output for normal DualSense controllers, or connect a DualSense Edge for Edge native feedback.", true);
-            }
-
-            return false;
+            // Both Sony models share the native game-feedback prefix and
+            // audio format. The virtual persona must not reduce these effects
+            // to legacy rumble on a standard DualSense. Edge configuration
+            // extensions are rejected separately before command admission;
+            // onboard feature/profile writes are never forwarded here.
+            return device is DualSenseDevice dualSenseDevice &&
+                IsCurrentPhysicalSonyDualSense(dualSenseDevice);
         }
 
         private bool IsCurrentPhysicalSonyDualSense(DualSenseDevice device)

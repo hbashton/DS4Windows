@@ -17,6 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -579,7 +580,8 @@ namespace DS4Windows.InputDevices
             get => physicalOutputStateMailbox.ReadLatest().UseAccurateRumble;
             set
             {
-                if (physicalOutputStateMailbox.SetUseAccurateRumble(value))
+                if (physicalOutputStateMailbox.SetUseAccurateRumble(value &&
+                    SupportsImprovedRumble(subType, updateVersion)))
                 {
                     QueuePhysicalOutputUpdate();
                 }
@@ -4652,10 +4654,9 @@ namespace DS4Windows.InputDevices
 
                 updateVersion = firmwareInfoData[44] | (uint)(firmwareInfoData[45] << 8);
 
-                // Accurate rumble defaults to true. Made device default to false if
-                // grabbed update version is too old
-                int versionCheckAccurate = DSFeatureVersion(2, 21);
-                if (updateVersion < versionCheckAccurate)
+                // Edge has a separate firmware version series and supports
+                // improved rumble from launch. Never gate it by base firmware.
+                if (!SupportsImprovedRumble(subType, updateVersion))
                 {
                     UseAccurateRumble = false;
                 }
@@ -4673,40 +4674,49 @@ namespace DS4Windows.InputDevices
         }
 
         private bool ReadBTFeatureReport(byte[] buffer, int size)
+            => TryReadBluetoothFeatureReport(buffer, size, hDevice.readFeatureData);
+
+        internal static bool TryReadBluetoothFeatureReport(byte[] buffer, int size,
+            Func<byte[], bool> readFeature)
         {
-            bool result = true;
-            bool found = false;
+            ArgumentNullException.ThrowIfNull(buffer);
+            ArgumentNullException.ThrowIfNull(readFeature);
+            if (size < 5 || size > buffer.Length)
+                throw new ArgumentOutOfRangeException(nameof(size));
+
+            byte requestedReportId = buffer[0];
             int crc32Pos = size - 4;
-            for (int tries = 0; !found && tries < 5; tries++)
+            for (int tries = 0; tries < 5; tries++)
             {
-                hDevice.readFeatureData(buffer);
+                // Failed HID calls may leave their buffer unchanged. Never
+                // accept an old valid checksum as a successful firmware read,
+                // or let a malformed response change the next requested ID.
+                buffer[0] = requestedReportId;
+                buffer.AsSpan(1, size - 1).Clear();
+                if (!readFeature(buffer) || buffer[0] != requestedReportId)
+                    continue;
+
                 uint recvCrc32 = buffer[crc32Pos] |
                                 (uint)(buffer[crc32Pos + 1] << 8) |
                                 (uint)(buffer[crc32Pos + 2] << 16) |
                                 (uint)(buffer[crc32Pos + 3] << 24);
 
-                uint calcCrc32 = ~Crc32Algorithm.Compute(new byte[] { 0xA3 });
-                calcCrc32 = ~Crc32Algorithm.CalculateBasicHash(ref calcCrc32, ref buffer, 0, crc32Pos);
-                bool validCrc = recvCrc32 == calcCrc32;
-                if (!validCrc && tries >= 5)
-                {
-                    AppLogger.LogToGui("Feature report read failure", true);
-                    continue;
-                }
-                else if (validCrc)
-                {
-                    found = true;
-                }
+                // Sony feature-report CRC uses the same 0xA3 prefix for DS4,
+                // DualSense and Edge. This shared implementation needs no
+                // application-startup initialization of the fast CRC table.
+                uint calcCrc32 = DualShock4BluetoothAudioProtocol.ComputeBluetoothCrc(
+                    0xA3, buffer, crc32Pos);
+                if (recvCrc32 == calcCrc32)
+                    return true;
             }
-
-            result = found;
-            return result;
+            return false;
         }
 
-        private int DSFeatureVersion(int major, int minor)
-        {
-            return ((major & 0xFF) << 8 | (minor & 0xFF));
-        }
+        // Matches SDL's PS5 improved-rumble capability policy. Unknown firmware
+        // keeps the existing default; a known old base controller uses legacy
+        // rumble even when a profile requests the improved mode.
+        internal static bool SupportsImprovedRumble(DeviceSubType type, uint firmware)
+            => type == DeviceSubType.DSEdge || firmware == 0 || firmware >= 0x0224;
 
         private void DetermineSubType(HidDevice hidDevice)
         {
@@ -4783,42 +4793,40 @@ namespace DS4Windows.InputDevices
         }
 
         public override void RefreshCalibration()
+            => TryRefreshCalibration(sixAxis, conType == ConnectionType.BT,
+                hDevice.readFeatureData);
+
+        internal static bool TryRefreshCalibration(DS4SixAxis motion, bool bluetooth,
+            Func<byte[], bool> readFeature)
         {
             byte[] calibration = new byte[41];
-            calibration[0] = conType == ConnectionType.BT ? (byte)0x05 : (byte)0x05;
+            calibration[0] = 0x05;
+            bool valid = bluetooth
+                ? TryReadBluetoothFeatureReport(calibration, calibration.Length, readFeature)
+                : readFeature(calibration) && calibration[0] == 0x05;
+            // Keep a previously good calibration (or the uncalibrated default)
+            // when the device read fails. Corrupted calibration is not input.
+            if (!valid || !HasUsableCalibrationScales(calibration)) return false;
+            motion.setCalibrationData(ref calibration, true);
+            return true;
+        }
 
-            if (conType == ConnectionType.BT)
+        private static bool HasUsableCalibrationScales(ReadOnlySpan<byte> report)
+        {
+            // Zero gyro speed or any zero axis range would invalidate the
+            // calibration or divide by zero. Validate before touching the
+            // previously accepted coefficients; this is connection-time work.
+            if (BinaryPrimitives.ReadInt16LittleEndian(report.Slice(19)) +
+                BinaryPrimitives.ReadInt16LittleEndian(report.Slice(21)) == 0)
+                return false;
+            for (int axis = 0; axis < 6; axis++)
             {
-                bool found = false;
-                for (int tries = 0; !found && tries < 5; tries++)
-                {
-                    hDevice.readFeatureData(calibration);
-                    uint recvCrc32 = calibration[DS4_FEATURE_REPORT_5_CRC32_POS] |
-                                (uint)(calibration[DS4_FEATURE_REPORT_5_CRC32_POS + 1] << 8) |
-                                (uint)(calibration[DS4_FEATURE_REPORT_5_CRC32_POS + 2] << 16) |
-                                (uint)(calibration[DS4_FEATURE_REPORT_5_CRC32_POS + 3] << 24);
-
-                    uint calcCrc32 = ~Crc32Algorithm.Compute(new byte[] { 0xA3 });
-                    calcCrc32 = ~Crc32Algorithm.CalculateBasicHash(ref calcCrc32, ref calibration, 0, DS4_FEATURE_REPORT_5_LEN - 4);
-                    bool validCrc = recvCrc32 == calcCrc32;
-                    if (!validCrc && tries >= 5)
-                    {
-                        AppLogger.LogToGui("Gyro Calibration Failed", true);
-                        continue;
-                    }
-                    else if (validCrc)
-                    {
-                        found = true;
-                    }
-                }
-
-                sixAxis.setCalibrationData(ref calibration, true);
+                int offset = axis < 3 ? 7 + axis * 4 : 23 + (axis - 3) * 4;
+                if (BinaryPrimitives.ReadInt16LittleEndian(report.Slice(offset)) ==
+                    BinaryPrimitives.ReadInt16LittleEndian(report.Slice(offset + 2)))
+                    return false;
             }
-            else
-            {
-                hDevice.readFeatureData(calibration);
-                sixAxis.setCalibrationData(ref calibration, true);
-            }
+            return true;
         }
 
         public override void StartUpdate()
@@ -5183,16 +5191,7 @@ namespace DS4Windows.InputDevices
                     cState.R1 = (tempByte & (1 << 1)) != 0;
                     cState.L1 = (tempByte & (1 << 0)) != 0;
 
-                    tempByte = inputReport[10 + reportOffset];
-                    cState.PS = (tempByte & (1 << 0)) != 0;
-                    cState.TouchButton = (tempByte & 0x02) != 0;
-
-                    cState.OutputTouchButton = cState.TouchButton;
-                    cState.Mute = (tempByte & (1 << 2)) != 0;
-                    cState.FnL = (tempByte & (1 << 4)) != 0;
-                    cState.FnR = (tempByte & (1 << 5)) != 0;
-                    cState.BLP = (tempByte & (1 << 6)) != 0;
-                    cState.BRP = (tempByte & (1 << 7)) != 0;
+                    DecodeAuxiliaryButtons(inputReport[10 + reportOffset], cState);
 
                     if ((this.featureSet & VidPidFeatureSet.NoBatteryReading) == 0)
                     {
@@ -5456,6 +5455,20 @@ namespace DS4Windows.InputDevices
             }
 
             timeoutExecuted = true;
+        }
+
+        // Full USB byte 10 / Bluetooth byte 11. Bit 3 is reserved, not an
+        // Edge button; Fn and paddle bits agree with SDL's physical decoder.
+        internal static void DecodeAuxiliaryButtons(byte buttons, DS4State state)
+        {
+            state.PS = (buttons & 0x01) != 0;
+            state.TouchButton = (buttons & 0x02) != 0;
+            state.OutputTouchButton = state.TouchButton;
+            state.Mute = (buttons & 0x04) != 0;
+            state.FnL = (buttons & 0x10) != 0;
+            state.FnR = (buttons & 0x20) != 0;
+            state.BLP = (buttons & 0x40) != 0;
+            state.BRP = (buttons & 0x80) != 0;
         }
 
         internal static bool TryExtractPhysicalInputStatus(

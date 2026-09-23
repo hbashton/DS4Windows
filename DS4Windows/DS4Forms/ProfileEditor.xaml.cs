@@ -2779,9 +2779,9 @@ namespace DS4WinWPF.DS4Forms
                 OutContType.ViiperSwitch2Pro =>
                     "Switch 2 layout: Cross -> B, Circle -> A, Square -> Y, Triangle -> X, Share -> Minus, Options -> Plus, PS -> Home, Capture -> Capture.",
                 OutContType.ViiperDualSense =>
-                    "DualSense output exposes native DualSense identity with mute, touch, gyro, rumble, lightbar, and player LEDs. Adaptive triggers require the raw-output follow-up.",
+                    "DualSense output supports touch, motion, rumble, advanced haptics, adaptive triggers, and controller lighting. Available effects depend on your game and physical controller.",
                 OutContType.ViiperDualSenseEdge =>
-                    "DualSense Edge output exposes native Edge identity with mute, touch, gyro, Fn buttons, back paddles, rumble, lightbar, and player LEDs. Adaptive triggers require the raw-output follow-up.",
+                    "DualSense Edge output adds Fn buttons and back paddles alongside DualSense feedback. Available effects depend on your game and physical controller. Onboard profile editing is not supported on the virtual controller.",
                 OutContType.ViiperDS4 =>
                     "DualShock 4 output provides DS4 buttons, touch, gyro, rumble, lightbar, and flash feedback.",
                 OutContType.ViiperX360 =>

@@ -108,19 +108,18 @@ internal static class ViiperRecovery
 
     private static void WaitUntilReady(bool portable)
     {
-        Stopwatch elapsed = Stopwatch.StartNew();
-        string failure = null;
-        while (elapsed.Elapsed < TimeSpan.FromSeconds(8))
+        bool Probe(int timeoutMilliseconds, out string failure)
         {
+            failure = null;
             if (portable)
             {
                 if (!PortableBrokerContext.Current.InspectOwnedProcess(out bool running, out failure) || !running)
                     throw new IOException(failure ?? "VIIPER stopped before it was ready.");
                 if (ViiperSetupManager.ProbeServer(ViiperSetupManager.ApiHost, ViiperSetupManager.ApiPort,
-                        authenticated: true, out failure, totalTimeoutMilliseconds: 1000))
+                        authenticated: true, out failure, totalTimeoutMilliseconds: timeoutMilliseconds))
                 {
                     ViiperPrerequisiteStatus status = ViiperSetupManager.GetStatus();
-                    if (status.Ready && ViiperSetupManager.HasSafeRuntimePrerequisites(status)) return;
+                    if (status.Ready && ViiperSetupManager.HasSafeRuntimePrerequisites(status)) return true;
                     failure = status.DisplayText;
                 }
             }
@@ -130,11 +129,12 @@ internal static class ViiperRecovery
                 // the port after launch. Revalidate identity and prerequisites
                 // at the boundary where controller output will resume.
                 ViiperPrerequisiteStatus status = ViiperSetupManager.GetStatus();
-                if (IsManagedRecoveryReady(status, ViiperSetupManager.GetCanonicalViiperExePath())) return;
+                if (IsManagedRecoveryReady(status, ViiperSetupManager.GetCanonicalViiperExePath())) return true;
                 failure = status.DisplayText;
             }
-            Thread.Sleep(50);
+            return false;
         }
+        if (ViiperStartupReadiness.Wait(Probe, out string failure)) return;
         throw new IOException("VIIPER restarted but did not answer its connection check. " + failure);
     }
 

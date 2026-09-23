@@ -345,7 +345,8 @@ internal sealed class PortableBrokerContext : IDisposable
             if (peers.Any(peer => !IsOwned(peer))) { failure = CloseOtherBroker; return false; }
             if (peers.Count != 1 || !owned.IsRunning || !owned.IdentityMatches)
             {
-                failure = StartFailure;
+                failure = !owned.IsRunning
+                    ? PortableBrokerStartupDiagnostics.DescribeExit(owned.ExitCode) : StartFailure;
                 return false;
             }
             running = true;
@@ -430,6 +431,9 @@ internal sealed class PortableBrokerContext : IDisposable
             catch (Exception error)
             {
                 startFailed = true;
+                // A failed retirement must retain the exact child and pins.
+                // Explicit repair can then retry that identity; dropping it
+                // here would misclassify our surviving child as a newcomer.
                 StopOwnedProcess();
                 configurationPin?.Dispose();
                 configurationPin = null;
@@ -472,14 +476,25 @@ internal sealed class PortableBrokerContext : IDisposable
         {
             // A retained Process handle plus creation time prevents PID reuse
             // from turning cleanup into termination of someone else's broker.
-            if (owned.IsRunning && owned.IdentityMatches) owned.StopAndWait(5_000);
+            if (owned.IsRunning && owned.IdentityMatches)
+            {
+                owned.StopAndWait(5_000);
+                // Also fence a process boundary that returns without proving
+                // exit. Do not dispose the only handle authorizing a retry.
+                if (owned.IsRunning && owned.IdentityMatches)
+                    throw new TimeoutException();
+            }
         }
-        catch { /* Never fall back to name/PID enumeration or foreign termination. */ }
-        finally
+        catch (Exception error)
         {
-            try { owned.Dispose(); } catch { }
-            owned = null;
+            startFailed = true;
+            throw new PortableBrokerStartupException(
+                "The portable VIIPER process could not be confirmed stopped. Its exact ownership and files remain protected. Use Install / Repair VIIPER in Settings to retry; no unrelated broker was stopped.", error);
         }
+        // An exited child or a stale identity no longer authorizes a stop.
+        // Never use a path/name search to turn that into a successor's handle.
+        try { owned.Dispose(); } catch { }
+        owned = null;
     }
 
     public void Dispose()
@@ -487,8 +502,8 @@ internal sealed class PortableBrokerContext : IDisposable
         lock (gate)
         {
             if (disposed) return;
-            disposed = true;
             StopOwnedProcess(); // Caller has already drained its controller/output lifetimes.
+            disposed = true;
             try { configurationPin?.Dispose(); } catch { }
             try { keyPin?.Dispose(); } catch { }
             try { backendPin?.Dispose(); } catch { }
@@ -513,6 +528,7 @@ internal interface IPortableBrokerProcess : IDisposable
     long StartTimeUtcTicks { get; }
     bool IsRunning { get; }
     bool IdentityMatches { get; }
+    int? ExitCode => null;
     void StopAndWait(int timeoutMilliseconds);
 }
 
@@ -624,7 +640,10 @@ internal sealed class PortableBrokerProcessHost : IPortableBrokerProcessHost
                 !string.Equals(Path.GetFullPath(path.ToString(0, length)),
                     Path.GetFullPath(identity.ExecutablePath), StringComparison.OrdinalIgnoreCase))
                 throw new PortableBrokerStartupException("The selected VIIPER process identity changed. No replacement process was stopped.");
-            try { if (!process.HasExited) process.Kill(entireProcessTree: false); }
+            // The verified broker can still be waiting on its USB/IP prerequisite
+            // helper. Stopping only its parent abandons the helper and its driver
+            // handles. Never use a process-name sweep to perform this cleanup.
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
             catch (InvalidOperationException) when (process.HasExited) { return; }
             if (!process.WaitForExit(timeoutMilliseconds))
                 throw new PortableBrokerStartupException("The selected VIIPER process did not exit in time. Its image was not replaced.");
@@ -753,7 +772,7 @@ internal sealed class PortableBrokerProcessHost : IPortableBrokerProcessHost
         catch
         {
             // Process.Start supplied this exact handle; no name-based cleanup.
-            try { if (!process.HasExited) { process.Kill(entireProcessTree: false); process.WaitForExit(5_000); } } catch { }
+            try { if (!process.HasExited) { process.Kill(entireProcessTree: true); process.WaitForExit(5_000); } } catch { }
             process.Dispose();
             throw;
         }
@@ -772,12 +791,14 @@ internal sealed class PortableBrokerProcessHost : IPortableBrokerProcessHost
             StartTimeUtcTicks = process.StartTime.ToUniversalTime().Ticks;
         }
         public bool IsRunning => !process.HasExited;
+        public int? ExitCode => process.HasExited ? process.ExitCode : null;
         public bool IdentityMatches => process.Id == ProcessId && process.StartTime.ToUniversalTime().Ticks == StartTimeUtcTicks;
         public void StopAndWait(int timeoutMilliseconds)
         {
             if (!IsRunning || !IdentityMatches) return;
-            process.Kill(entireProcessTree: false);
-            process.WaitForExit(timeoutMilliseconds);
+            process.Kill(entireProcessTree: true);
+            if (!process.WaitForExit(timeoutMilliseconds))
+                throw new PortableBrokerStartupException("The portable VIIPER process did not exit in time. Its ownership was retained so Install / Repair VIIPER can retry safely.");
         }
         public void Dispose() => process.Dispose();
     }

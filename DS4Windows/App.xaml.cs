@@ -570,24 +570,19 @@ namespace DS4WinWPF
             try
             {
                 portable.Start();
-                Stopwatch startup = Stopwatch.StartNew();
-                const int startupBudgetMilliseconds = 8000;
-                string lastProbeFailure = null;
-                while (startup.ElapsedMilliseconds < startupBudgetMilliseconds)
+                bool Probe(int timeoutMilliseconds, out string lastProbeFailure)
                 {
                     if (!portable.InspectOwnedProcess(out bool running, out string failure) || !running)
                         throw new DS4Windows.PortableBrokerStartupException(failure ??
                             "The portable VIIPER process stopped before it was ready. Check that USB/IP 0.9.7.7 is installed and available, then restart DS4Windows.");
 
-                    int remaining = startupBudgetMilliseconds - (int)startup.ElapsedMilliseconds;
-                    if (DS4Windows.ViiperSetupManager.ProbeServer(
+                    return DS4Windows.ViiperSetupManager.ProbeServer(
                             DS4Windows.ViiperSetupManager.ApiHost,
                             DS4Windows.ViiperSetupManager.ApiPort, authenticated: true,
-                            out lastProbeFailure, totalTimeoutMilliseconds: Math.Max(1, Math.Min(1000, remaining))) &&
-                        portable.InspectOwnedProcess(out running, out _) && running)
-                        return true;
-                    Thread.Sleep(50);
+                            out lastProbeFailure, totalTimeoutMilliseconds: timeoutMilliseconds) &&
+                        portable.InspectOwnedProcess(out running, out _) && running;
                 }
+                if (DS4Windows.ViiperStartupReadiness.Wait(Probe, out string lastProbeFailure)) return true;
                 throw new DS4Windows.PortableBrokerStartupException(
                     DS4Windows.PortableBrokerContext.DescribeReadinessFailure(lastProbeFailure));
             }
@@ -597,8 +592,15 @@ namespace DS4WinWPF
                 // child before showing a modal dialog; otherwise its ports stay
                 // occupied until the user dismisses the error. Borrowed brokers
                 // are never stopped by this context, including this failure path.
-                portable.Dispose();
-                MessageBox.Show(exception.Message, "VIIPER needs attention",
+                string message = exception.Message;
+                try { portable.Dispose(); }
+                catch (DS4Windows.PortableBrokerStartupException retirementFailure)
+                {
+                    // A child Windows could not retire remains pinned for the
+                    // explicit repair path; keep the application available.
+                    message += "\n\n" + retirementFailure.Message;
+                }
+                MessageBox.Show(message, "VIIPER needs attention",
                     MessageBoxButton.OK, MessageBoxImage.Warning);
                 return true;
             }
@@ -1243,7 +1245,7 @@ namespace DS4WinWPF
             }
             finally
             {
-                DS4Windows.PortableBrokerContext.Current?.Dispose();
+                DisposePortableBrokerForShutdown();
                 DS4Windows.PortableLabContext.Current?.Dispose();
             }
         }
@@ -1366,6 +1368,14 @@ namespace DS4WinWPF
             try { classNameMmf?.Dispose(); }
             catch (ObjectDisposedException) { }
 
+            if (shutdownTimedOut)
+            {
+                // Environment.Exit bypasses Application_Exit's finally. Retire
+                // our child before closing the log; a failed stop must not throw
+                // through WPF shutdown or be hidden by the logger teardown.
+                DisposePortableBrokerForShutdown();
+            }
+
             try
             {
                 LogManager.Flush();
@@ -1375,10 +1385,16 @@ namespace DS4WinWPF
 
             if (shutdownTimedOut)
             {
-                // Environment.Exit bypasses the outer Application_Exit
-                // finally. Retire only our child after the attempted drain.
-                DS4Windows.PortableBrokerContext.Current?.Dispose();
                 Environment.Exit(0);
+            }
+        }
+
+        private static void DisposePortableBrokerForShutdown()
+        {
+            try { DS4Windows.PortableBrokerContext.Current?.Dispose(); }
+            catch (DS4Windows.PortableBrokerStartupException error)
+            {
+                logHolder?.Logger?.Warn("Portable VIIPER shutdown needs attention: " + error.Message);
             }
         }
     }

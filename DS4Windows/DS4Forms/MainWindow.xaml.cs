@@ -352,7 +352,10 @@ namespace DS4WinWPF.DS4Forms
 
                 if (launch)
                 {
-                    RequestApplicationShutdown();
+                    // The installed updater downloads first; the AIO installer
+                    // coordinates shutdown only when installation can begin.
+                    if (mainWinVM.UpdaterRequiresApplicationShutdown)
+                        RequestApplicationShutdown();
                 }
                 else
                 {
@@ -418,7 +421,8 @@ namespace DS4WinWPF.DS4Forms
 
                     if (launch)
                     {
-                        RequestApplicationShutdown();
+                        if (mainWinVM.UpdaterRequiresApplicationShutdown)
+                            RequestApplicationShutdown();
                     }
                     else
                     {

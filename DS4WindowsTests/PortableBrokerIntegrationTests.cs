@@ -65,7 +65,7 @@ public class PortableBrokerIntegrationTests
         StringAssert.Contains(start, "authenticated: true,");
         StringAssert.Contains(start, "totalTimeoutMilliseconds:");
         StringAssert.Contains(start,
-            "portable.InspectOwnedProcess(out running, out _) && running)");
+            "portable.InspectOwnedProcess(out running, out _) && running;");
         Before(start, "ViiperSetupManager.ProbeServer(",
             "portable.InspectOwnedProcess(out running, out _)");
         Assert.IsFalse(start.Contains("TryStartServer(", StringComparison.Ordinal));
@@ -78,7 +78,8 @@ public class PortableBrokerIntegrationTests
             "private bool StartPortableBroker()", "private static void ShowStartupDialog(");
         StringAssert.Contains(start, "out lastProbeFailure, totalTimeoutMilliseconds:");
         StringAssert.Contains(start, "DescribeReadinessFailure(lastProbeFailure)");
-        Before(start, "portable.Dispose();", "MessageBox.Show(exception.Message");
+        Before(start, "portable.Dispose();", "MessageBox.Show(message");
+        StringAssert.Contains(start, "catch (DS4Windows.PortableBrokerStartupException retirementFailure)");
         Assert.IsFalse(start.Contains("CancelPortableStartup(", StringComparison.Ordinal));
     }
 
@@ -221,12 +222,16 @@ public class PortableBrokerIntegrationTests
         string source = Read("App.xaml.cs");
         string exit = Section(source, "private void Application_Exit(",
             "private void Application_SessionEnding(");
-        Before(exit, "CleanShutdown();", "PortableBrokerContext.Current?.Dispose();");
+        Before(exit, "CleanShutdown();", "DisposePortableBrokerForShutdown();");
         StringAssert.Contains(exit, "finally");
         string stop = Section(source, "private void CleanShutdown()", "Environment.Exit(0);");
         Before(stop, "shutdownHub.StopAndShutDown(immediateUnplug: true);",
-            "PortableBrokerContext.Current?.Dispose();");
+            "DisposePortableBrokerForShutdown();");
         StringAssert.Contains(stop, "if (shutdownTimedOut)");
+        string cleanup = source[source.IndexOf("private static void DisposePortableBrokerForShutdown()", StringComparison.Ordinal)..];
+        StringAssert.Contains(cleanup, "PortableBrokerContext.Current?.Dispose();");
+        StringAssert.Contains(cleanup, "catch (DS4Windows.PortableBrokerStartupException error)");
+        StringAssert.Contains(cleanup, "Logger?.Warn");
     }
 
     [TestMethod]
@@ -245,6 +250,7 @@ public class PortableBrokerIntegrationTests
             Before(entry, guard, "mainWinVM.RunUpdaterCheck(");
             Before(entry, guard, "mainWinVM.LauchDS4Updater(");
             Before(entry, guard, "RequestApplicationShutdown();");
+            Before(entry, "mainWinVM.UpdaterRequiresApplicationShutdown", "RequestApplicationShutdown();");
         }
         string guidance = Section(source, "private bool CanStartPortableUpdate()",
             "private void Check_Version(");
@@ -267,7 +273,7 @@ public class PortableBrokerIntegrationTests
         StringAssert.Contains(System.Text.RegularExpressions.Regex.Replace(launch, @"\s+", " "),
             "if (PortableLabContext.IsActive) return false;");
         StringAssert.Contains(launch, "return PortableUpdaterBootstrap.Launch(preparedPortableUpdater,");
-        StringAssert.Contains(launch, "finally { preparedPortableUpdater = null; }");
+        StringAssert.Contains(launch, "finally { preparedPortableUpdater = null; preparedManagedUpdater = null; }");
         Before(launch, "PortableBrokerContext.IsActive",
             "new Process()");
         Before(launch, "PortableBrokerContext.IsActive",
@@ -276,6 +282,8 @@ public class PortableBrokerIntegrationTests
         // Only ordinary, unmarked managed updates retain the existing path.
         StringAssert.Contains(launch, "argList.Add(\"-autolaunch\");");
         StringAssert.Contains(launch, "argList.Add(\"--releaseTag\");");
+        Before(launch, "ManagedUpdaterBootstrap.Launch(", "new Process()");
+        StringAssert.Contains(launch, "PortableBrokerContext.FindPortableRoot(Global.exedirpath)");
     }
 
     [DataTestMethod]

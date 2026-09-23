@@ -22,6 +22,7 @@ using System.Security.Principal;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using Microsoft.Win32;
 using ExecAction = Microsoft.Win32.TaskScheduler.ExecAction;
@@ -191,6 +192,7 @@ namespace DS4Windows
         private const int ForeignViiperHelperTimeoutMilliseconds = 15000;
         private const string UsbipRelativePath = @"USBip\usbip.exe";
         private const int UsbipProbeTimeoutMilliseconds = 3000;
+        internal const int UsbipProbePipeDrainMilliseconds = 250;
         private const string CitrixUsbMonitorServiceName = "ctxusbm";
         private const string CitrixUsbMonitorImageName = "ctxusbmon.sys";
         private const string UsbipUdeServiceName = "usbip2_ude";
@@ -2837,6 +2839,7 @@ namespace DS4Windows
         {
             try
             {
+                Stopwatch probeElapsed = Stopwatch.StartNew();
                 ProcessStartInfo startInfo = new ProcessStartInfo
                 {
                     FileName = usbipPath,
@@ -2855,32 +2858,52 @@ namespace DS4Windows
                     return false;
                 }
 
-                System.Threading.Tasks.Task<string> stdout =
-                    process.StandardOutput.ReadToEndAsync();
-                System.Threading.Tasks.Task<string> stderr =
-                    process.StandardError.ReadToEndAsync();
-                if (!process.WaitForExit(UsbipProbeTimeoutMilliseconds))
+                using CancellationTokenSource readCancellation = new();
+                using StreamReader outputReader = process.StandardOutput;
+                using StreamReader errorReader = process.StandardError;
+                try
                 {
-                    try { process.Kill(entireProcessTree: true); } catch { }
-                    message = "usbip.exe port timed out; reboot or repair usbip-win2.";
-                    return false;
-                }
+                    Task<string> stdout = outputReader.ReadToEndAsync(readCancellation.Token);
+                    ObserveUsbipProbeRead(stdout);
+                    Task<string> stderr = errorReader.ReadToEndAsync(readCancellation.Token);
+                    ObserveUsbipProbeRead(stderr);
+                    int remaining = (int)Math.Max(0, UsbipProbeTimeoutMilliseconds - probeElapsed.ElapsedMilliseconds);
+                    if (!process.WaitForExit(remaining))
+                    {
+                        // This exact child belongs to this probe. Never use a
+                        // name/PID search when stopping a timed-out driver CLI.
+                        try
+                        {
+                            process.Kill(entireProcessTree: true);
+                            process.WaitForExit(UsbipProbePipeDrainMilliseconds);
+                        }
+                        catch { }
+                        message = "usbip.exe port timed out; reboot or repair usbip-win2.";
+                        return false;
+                    }
 
-                System.Threading.Tasks.Task.WhenAll(stdout, stderr)
-                    .GetAwaiter().GetResult();
-                string output = string.Join(Environment.NewLine,
-                    stdout.Result, stderr.Result).Trim();
-                if (!IsSuccessfulUsbipPortProbe(process.ExitCode, output))
+                    remaining = (int)Math.Max(0, UsbipProbeTimeoutMilliseconds - probeElapsed.ElapsedMilliseconds);
+                    if (!TryCompleteUsbipProbeOutput(stdout, stderr, remaining, out string output, out message))
+                        return false;
+                    if (!IsSuccessfulUsbipPortProbe(process.ExitCode, output))
+                    {
+                        string detail = string.IsNullOrWhiteSpace(output)
+                            ? "no diagnostic output"
+                            : output;
+                        message = $"usbip.exe port failed (exit {process.ExitCode}): {detail}";
+                        return false;
+                    }
+
+                    message = "usbip.exe port confirmed a compatible userspace/driver ABI.";
+                    return true;
+                }
+                finally
                 {
-                    string detail = string.IsNullOrWhiteSpace(output)
-                        ? "no diagnostic output"
-                        : output;
-                    message = $"usbip.exe port failed (exit {process.ExitCode}): {detail}";
-                    return false;
+                    // An exited CLI can leave a descendant holding a pipe.
+                    // Cancel both readers and close our exact pipe handles;
+                    // late read faults are observed without blocking startup.
+                    readCancellation.Cancel();
                 }
-
-                message = "usbip.exe port confirmed a compatible userspace/driver ABI.";
-                return true;
             }
             catch (Exception ex)
             {
@@ -2926,6 +2949,44 @@ namespace DS4Windows
                     return false;
                 return running || TryStartServer(viiperPath);
             }
+        }
+
+        internal static bool TryCompleteUsbipProbeOutput(Task<string> stdout, Task<string> stderr,
+            int remainingMilliseconds, out string output, out string message)
+        {
+            ArgumentNullException.ThrowIfNull(stdout);
+            ArgumentNullException.ThrowIfNull(stderr);
+            output = null;
+            Task<string[]> reads = Task.WhenAll(stdout, stderr);
+            ObserveUsbipProbeRead(reads);
+            try
+            {
+                if (remainingMilliseconds <= 0) throw new TimeoutException();
+                string[] completed = reads.WaitAsync(TimeSpan.FromMilliseconds(
+                    Math.Min(remainingMilliseconds, UsbipProbePipeDrainMilliseconds))).GetAwaiter().GetResult();
+                output = string.Join(Environment.NewLine, completed).Trim();
+                message = null;
+                return true;
+            }
+            catch (TimeoutException)
+            {
+                message = "usbip.exe port diagnostic output timed out; retry or repair usbip-win2.";
+                return false;
+            }
+            catch
+            {
+                // Do not include arbitrary reader exception text in the
+                // startup phase diagnostic or admit a partial driver response.
+                message = "usbip.exe port diagnostic output could not be read; retry or repair usbip-win2.";
+                return false;
+            }
+        }
+
+        private static void ObserveUsbipProbeRead(Task read)
+        {
+            _ = read.ContinueWith(completed => { _ = completed.Exception; },
+                CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted |
+                TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         }
 
         private static bool TryStartServer(string viiperPath)

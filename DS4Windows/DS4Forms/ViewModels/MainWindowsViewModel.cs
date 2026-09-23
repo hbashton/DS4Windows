@@ -1124,7 +1124,9 @@ namespace DS4WinWPF.DS4Forms.ViewModels
 
         public string updaterExe = Environment.Is64BitProcess ? "DS4Updater.exe" : "DS4Updater_x86.exe";
         private PortableUpdaterTicket preparedPortableUpdater;
+        private ManagedUpdaterTicket preparedManagedUpdater;
         public string LastUpdaterFailure { get; private set; }
+        public bool UpdaterRequiresApplicationShutdown { get; private set; }
 
         private string DownloadUpstreamUpdaterVersion()
         {
@@ -1150,22 +1152,36 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         {
             upstreamVersion = string.Empty;
             LastUpdaterFailure = null;
+            UpdaterRequiresApplicationShutdown = false;
             preparedPortableUpdater = null;
+            preparedManagedUpdater = null;
             if (PortableLabContext.IsActive) return false;
-            if (PortableBrokerContext.IsActive)
+            try
             {
-                try
+                // Deployment identity does not depend on whether VIIPER is
+                // currently available. A failed broker must not redirect a
+                // portable update into the installed/legacy lifecycle.
+                if (PortableBrokerContext.IsActive ||
+                    PortableBrokerContext.FindPortableRoot(Global.exedirpath) != null)
                 {
                     preparedPortableUpdater = PortableUpdaterBootstrap.PrepareAsync(
                         App.requestClient, Global.exedirpath).GetAwaiter().GetResult();
                     upstreamVersion = preparedPortableUpdater.Version.ToString(3);
+                    UpdaterRequiresApplicationShutdown = true;
                     return true;
                 }
-                catch (Exception exception)
+                if (ManagedUpdaterBootstrap.FindManagedRoot(Global.exedirpath) != null)
                 {
-                    LastUpdaterFailure = "Portable update was not started. " + exception.Message;
-                    return false;
+                    preparedManagedUpdater = ManagedUpdaterBootstrap.PrepareAsync(
+                        App.requestClient, Global.exedirpath).GetAwaiter().GetResult();
+                    upstreamVersion = preparedManagedUpdater.Image.Version.ToString(3);
+                    return true;
                 }
+            }
+            catch (Exception exception)
+            {
+                LastUpdaterFailure = "The update was not started. " + exception.Message;
+                return false;
             }
             string destPath = Path.Combine(Global.exedirpath, "DS4Updater.exe");
             bool updaterExists = File.Exists(destPath);
@@ -1201,6 +1217,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
                 }
             }
 
+            UpdaterRequiresApplicationShutdown = launch;
             return launch;
         }
 
@@ -1247,20 +1264,30 @@ namespace DS4WinWPF.DS4Forms.ViewModels
         public bool LauchDS4Updater(string releaseTag = null)
         {
             if (PortableLabContext.IsActive) return false;
-            if (PortableBrokerContext.IsActive)
+            // Prepared tickets bind the selected deployment through handoff.
+            // Re-read ownership before launch, never fall back to legacy after
+            // a repair or marker/registration change.
+            try
             {
-                try
+                if (preparedPortableUpdater != null || PortableBrokerContext.IsActive ||
+                    PortableBrokerContext.FindPortableRoot(Global.exedirpath) != null)
                 {
                     return PortableUpdaterBootstrap.Launch(preparedPortableUpdater,
                         releaseTag, Global.exeFileName);
                 }
-                catch (Exception exception)
+                if (preparedManagedUpdater != null ||
+                    ManagedUpdaterBootstrap.FindManagedRoot(Global.exedirpath) != null)
                 {
-                    LastUpdaterFailure = "Portable update was not started. " + exception.Message;
-                    return false;
+                    return ManagedUpdaterBootstrap.Launch(preparedManagedUpdater,
+                        releaseTag, Global.exeFileName);
                 }
-                finally { preparedPortableUpdater = null; }
             }
+            catch (Exception exception)
+            {
+                LastUpdaterFailure = "The update was not started. " + exception.Message;
+                return false;
+            }
+            finally { preparedPortableUpdater = null; preparedManagedUpdater = null; }
             bool launch = false;
             using (Process p = new Process())
             {

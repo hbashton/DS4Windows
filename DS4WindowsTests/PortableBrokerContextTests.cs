@@ -276,6 +276,76 @@ public class PortableBrokerContextTests
     }
 
     [DataTestMethod]
+    [DataRow(70, "could not be found")]
+    [DataRow(71, "does not match")]
+    [DataRow(72, "timed out")]
+    [DataRow(73, "compatibility check")]
+    [DataRow(74, "connection key")]
+    [DataRow(75, "USB/IP listener")]
+    [DataRow(76, "API listener")]
+    public void EarlyBrokerExitPreservesItsStartupCheckInTheFailure(int code, string expected)
+    {
+        Open();
+        host.AfterStart = () =>
+        {
+            host.Child.Running = false;
+            host.Child.StartupExitCode = code;
+            host.Peers.Clear();
+        };
+        var failure = Assert.ThrowsException<PortableBrokerStartupException>(() => context.Start());
+        StringAssert.Contains(failure.Message, expected);
+        Assert.AreEqual(0, host.Child.StopCalls, "An exited process needs no termination.");
+        Assert.AreEqual(1, host.Child.DisposeCalls);
+    }
+
+    [TestMethod]
+    public void ExitDuringReadinessPollingPreservesTheStartupCheck()
+    {
+        Open().Start();
+        host.Child.Running = false;
+        host.Child.StartupExitCode = 72;
+        host.Peers.Clear();
+        Assert.IsFalse(context.InspectOwnedProcess(out bool running, out string failure));
+        Assert.IsFalse(running);
+        StringAssert.Contains(failure, "USB/IP startup check timed out");
+    }
+
+    [TestMethod]
+    public void SlowReadinessPreservesOwnedProcessAndTimedOutAttemptCanBeRecreated()
+    {
+        Open().Start();
+        long now = 0;
+        bool Probe(int timeout, out string failure)
+        {
+            Assert.IsTrue(context.InspectOwnedProcess(out bool running, out failure));
+            Assert.IsTrue(running);
+            if (now >= 20_100) return true;
+            now += timeout;
+            return false;
+        }
+        Assert.IsTrue(ViiperStartupReadiness.Wait(Probe, out _, () => now, ms => now += ms));
+        Assert.AreEqual(0, host.Child.StopCalls, "Prerequisite startup must not be mistaken for a dead child.");
+        context.Dispose();
+        Assert.AreEqual(1, host.Child.StopCalls);
+
+        Open().Start();
+        now = 0;
+        bool NeverReady(int timeout, out string failure)
+        {
+            now += timeout;
+            failure = "Connect: SocketException";
+            return false;
+        }
+        Assert.IsFalse(ViiperStartupReadiness.Wait(NeverReady, out _, () => now, ms => now += ms));
+        context.Dispose();
+        Assert.AreEqual(2, host.Child.StopCalls);
+        Assert.AreEqual(0, host.Peers.Count);
+        Open().Start();
+        Assert.IsTrue(context.InspectOwnedProcess(out bool restarted, out _));
+        Assert.IsTrue(restarted, "A failed attempt must not require a machine reboot to recreate its owner.");
+    }
+
+    [DataTestMethod]
     [DataRow(true)]
     [DataRow(false)]
     public void CleanupTerminatesOnlyTheStillIdenticalOwnedChild(bool sameIdentity)
@@ -375,12 +445,14 @@ public class PortableBrokerContextTests
     {
         private readonly FakeHost host;
         internal bool Running, SameIdentity = true;
+        internal int? StartupExitCode;
         internal int StopCalls, DisposeCalls, StopTimeout;
         internal FakeProcess(FakeHost host) { this.host = host; }
         public int ProcessId => 123;
         public long StartTimeUtcTicks => 456;
         public bool IsRunning => Running;
         public bool IdentityMatches => SameIdentity;
+        public int? ExitCode => StartupExitCode;
         public void StopAndWait(int timeoutMilliseconds)
         {
             StopCalls++;

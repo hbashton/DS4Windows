@@ -31,10 +31,16 @@ internal static class PortableUpdaterBootstrap
 
     internal static async Task<PortableUpdaterTicket> PrepareAsync(HttpClient client,
         string directory, CancellationToken cancellationToken = default)
+        => await PrepareCoreAsync(client, directory, ValidatePackageRoot, MinimumVersion,
+            cancellationToken).ConfigureAwait(false);
+
+    internal static async Task<PortableUpdaterTicket> PrepareCoreAsync(HttpClient client,
+        string directory, Func<string, string> validateRoot, Version minimumVersion,
+        CancellationToken cancellationToken = default)
     {
         if (!Environment.Is64BitProcess)
             throw new InvalidOperationException("Safe portable updates currently require the x64 portable package.");
-        string root = ValidatePackageRoot(directory);
+        string root = validateRoot(directory);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromMinutes(3));
         using var metadataResponse = await client.GetAsync(ReleaseApi,
@@ -47,7 +53,7 @@ internal static class PortableUpdaterBootstrap
         using var metadataBuffer = new MemoryStream();
         await CopyBoundedAsync(metadataStream, metadataBuffer, 2 * 1024 * 1024, timeout.Token).ConfigureAwait(false);
         using var metadata = JsonDocument.Parse(metadataBuffer.ToArray());
-        var asset = ReadVerifiedAsset(metadata.RootElement);
+        var asset = ReadVerifiedAsset(metadata.RootElement, minimumVersion);
         string destination = Path.Combine(root, "DS4Updater.exe");
         var original = CaptureDestination(destination);
         if (File.Exists(destination) && Matches(destination, asset.Version, asset.Sha256, asset.Size))
@@ -73,7 +79,8 @@ internal static class PortableUpdaterBootstrap
             }
             if (!VerifyImage(temporary, asset.Version, asset.Sha256, asset.Size, out string mismatch))
                 throw new InvalidDataException("The updater failed its release verification: " + mismatch + ". The existing updater was kept.");
-            ValidatePackageRoot(root);
+            if (!string.Equals(validateRoot(root), root, StringComparison.OrdinalIgnoreCase))
+                throw new IOException("The updater destination changed during preparation.");
             if (CaptureDestination(destination) != original)
                 throw new IOException("The existing updater changed during preparation. Its current file was kept; retry the update.");
             // Same-directory replacement happens only after all download and
@@ -89,7 +96,7 @@ internal static class PortableUpdaterBootstrap
 
     internal readonly record struct Asset(Version Version, string Url, string Sha256, long Size);
 
-    internal static Asset ReadVerifiedAsset(JsonElement release)
+    internal static Asset ReadVerifiedAsset(JsonElement release, Version minimumVersion = null)
     {
         if (!release.TryGetProperty("draft", out var draft) || draft.ValueKind != JsonValueKind.False ||
             !release.TryGetProperty("prerelease", out var pre) || pre.ValueKind != JsonValueKind.False ||
@@ -100,8 +107,8 @@ internal static class PortableUpdaterBootstrap
             !Version.TryParse(tag.Substring(1), out var parsed))
             throw new InvalidDataException("The updater release version is invalid.");
         Version version = NormalizeVersion(parsed);
-        if (version < MinimumVersion)
-            throw new InvalidOperationException("Portable updates require DS4Updater 2.0.7 or newer. Download the latest updater, or extract the complete portable ZIP into a new folder.");
+        if (version < (minimumVersion ?? MinimumVersion))
+            throw new InvalidOperationException($"This update requires DS4Updater {(minimumVersion ?? MinimumVersion).ToString(3)} or newer. Download the latest compatible updater or complete installer/package.");
         string expectedUrl = $"https://github.com/hbashton/DS4Updater/releases/download/{tag}/DS4Updater.exe";
         if (!release.TryGetProperty("assets", out var assets) || assets.ValueKind != JsonValueKind.Array)
             throw new InvalidDataException("The updater release contains no download assets.");

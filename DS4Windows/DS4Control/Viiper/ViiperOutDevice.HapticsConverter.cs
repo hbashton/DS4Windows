@@ -13,9 +13,9 @@ internal static class ViiperHapticsConverter
     internal const string SonyBluetooth = "sony-bt-wdl-sinc64-v1";
 
     internal static bool ShouldRequest(ViiperVirtualDeviceType type, bool gamepadOnly,
-        bool physicalSonyVerified, ConnectionType connection, bool edgeCompatible) =>
+        bool physicalSonyVerified, ConnectionType connection, bool nativeFeedbackCompatible) =>
         (type == ViiperVirtualDeviceType.DualSense || type == ViiperVirtualDeviceType.DualSenseEdge) &&
-        !gamepadOnly && physicalSonyVerified && connection == ConnectionType.BT && edgeCompatible;
+        !gamepadOnly && physicalSonyVerified && connection == ConnectionType.BT && nativeFeedbackCompatible;
 
     // Older brokers ignore unknown create options. Only the broker's actual
     // selection, never our request or the raw-input alias, establishes the DSP.
@@ -61,8 +61,7 @@ public sealed partial class ViiperOutDevice
         return NegotiatesHapticsConverter && target?.ConnectionType == ConnectionType.BT &&
             ViiperHapticsConverter.ShouldRequest(viiperType,
             gamepadOnly, IsCurrentPhysicalSonyDualSense(target), target.ConnectionType,
-            viiperType != ViiperVirtualDeviceType.DualSenseEdge ||
-                target.SubType == DualSenseDevice.DeviceSubType.DSEdge);
+            IsNativeDualSenseFeedbackCompatible(target));
     }
 
     internal bool CanReuseForPhysicalController(int index) =>

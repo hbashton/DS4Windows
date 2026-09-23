@@ -85,6 +85,31 @@ internal sealed class PortableBrokerContext : IDisposable
         current = CreateUnavailable(executableDirectory, new PortableBrokerProcessHost(), ReadManagedRoots);
     }
 
+    internal static bool TryInitializeUnavailable(string executableDirectory, out string failure,
+        Func<string, PortableBrokerContext> createUnavailable = null)
+    {
+        try
+        {
+            if (current != null)
+                throw new PortableBrokerStartupException("The portable broker owner was already initialized.");
+            PortableBrokerContext placeholder = (createUnavailable ?? (directory =>
+                CreateUnavailable(directory, new PortableBrokerProcessHost(), ReadManagedRoots)))(executableDirectory)
+                ?? throw new PortableBrokerStartupException("This folder could not be verified as a portable package.");
+            current = placeholder;
+            failure = null;
+            return true;
+        }
+        catch (Exception error)
+        {
+            // A malformed marker, unavailable registry identity, or changed
+            // folder can also reject the fallback. Never fall through to the
+            // installed backend, replace an existing owner, or throw from the
+            // startup failure handler itself.
+            failure = error.Message;
+            return false;
+        }
+    }
+
     internal static PortableBrokerContext CreateUnavailable(string directory,
         IPortableBrokerProcessHost processHost, Func<IEnumerable<string>> managedRoots)
     {

@@ -163,12 +163,12 @@ namespace DS4Windows
             "--run-embedded-viiper-installer";
         private const string InstallerResourceName =
             "DS4Windows.install-viiper-backend.ps1";
-        internal const string BundledViiperName = "VIIPER-0.1.7-rc4.6.5-x64.exe";
-        internal const string SupportedViiperReleaseTag = "v0.1.7-rc4.6.5";
+        internal const string BundledViiperName = "VIIPER-0.1.9-rc4.6.6-x64.exe";
+        internal const string SupportedViiperReleaseTag = "v0.1.9-rc4.6.6";
         private const string BundledViiperHashName =
             BundledViiperName + ".sha256";
         internal const string SupportedViiperSha256 =
-            "6DD4DF8EA57801AE23AF3274B1FCA6398B4352F4CB970442D7841D103E6ACCDE";
+            "9392A49E619E1D9B7956EA4BEDAFD2E74CBF5065C011554E80F756D1524F892B";
         private const string BundledUsbipName = "USBip-0.9.7.7-x64.exe";
         private const string BundledHidHideName =
             "HidHide_1.5.230_x64.exe";
@@ -205,12 +205,12 @@ namespace DS4Windows
             "FC1660E3759D8AF4CEDE48DBE194285A5A1DE85CE6E3216724499AFD32BE92E8";
         private static readonly object serverStartLock = new object();
         private static readonly object foreignViiperProcessLock = new object();
-        private static readonly Lazy<(bool Conflict, string Message)>
-            citrixUsbMonitorStatus = new(EvaluateCitrixUsbMonitorConflict,
-                LazyThreadSafetyMode.ExecutionAndPublication);
-        private static readonly Lazy<(bool Safe, string Message)>
-            usbipDriverIntegrityStatus = new(EvaluateUsbipDriverIntegrity,
-                LazyThreadSafetyMode.ExecutionAndPublication);
+        private static readonly ViiperDependencyReadiness dependencyReadiness = new(() =>
+        {
+            var driver = EvaluateUsbipDriverIntegrity();
+            var conflict = EvaluateCitrixUsbMonitorConflict();
+            return new(driver.Safe, driver.Message, conflict.Conflict, conflict.Message);
+        });
         private static DateTime lastServerStartAttemptUtc = DateTime.MinValue;
         private static DateTime lastForeignViiperTerminationAttemptUtc =
             DateTime.MinValue;
@@ -242,7 +242,13 @@ namespace DS4Windows
 
         public static bool IsViiperOutputType(OutContType type) => ViiperOutDevice.IsViiperType(type);
 
-        public static ViiperPrerequisiteStatus GetStatus(bool tryStartServer = false)
+        public static ViiperPrerequisiteStatus GetStatus(bool tryStartServer = false) =>
+            GetStatusCore(tryStartServer, refreshDependencies: false);
+
+        internal static ViiperPrerequisiteStatus GetFreshDependencyStatus() =>
+            GetStatusCore(tryStartServer: false, refreshDependencies: true);
+
+        private static ViiperPrerequisiteStatus GetStatusCore(bool tryStartServer, bool refreshDependencies)
         {
             string canonicalViiperPath = GetCanonicalViiperExePath();
             // Location is not identity. Portable users may keep the exact
@@ -278,12 +284,11 @@ namespace DS4Windows
                 FileHasSha256(usbipPath, SupportedUsbipExecutableSha256);
             bool usbipRuntimeReady = false;
             string usbipProbeMessage;
-            (bool usbipDriverFilesSafe,
-                string usbipDriverIntegrityMessage) =
-                usbipDriverIntegrityStatus.Value;
-            bool citrixUsbMonitorConflict =
-                TryGetCitrixUsbMonitorConflict(
-                    out string citrixUsbMonitorConflictMessage);
+            ViiperDependencyStatus dependencies = dependencyReadiness.Read(refreshDependencies || tryStartServer);
+            bool usbipDriverFilesSafe = dependencies.UsbipDriverFilesSafe;
+            string usbipDriverIntegrityMessage = dependencies.UsbipDriverIntegrityMessage;
+            bool citrixUsbMonitorConflict = dependencies.CitrixUsbMonitorConflict;
+            string citrixUsbMonitorConflictMessage = dependencies.CitrixUsbMonitorConflictMessage;
 
             if (usbipInstalled && usbipExecutableSafe &&
                 usbipDriverFilesSafe)
@@ -2628,10 +2633,15 @@ namespace DS4Windows
             using ManagementObjectSearcher searcher = new(
                 "SELECT PathName FROM Win32_SystemDriver " +
                 $"WHERE Name='{serviceName}'");
-            foreach (ManagementObject driver in searcher.Get())
+            searcher.Options = CreateDependencyQueryOptions();
+            using ManagementObjectCollection drivers = searcher.Get();
+            foreach (ManagementObject driver in drivers)
             {
-                matches++;
-                pathName = driver["PathName"] as string;
+                using (driver)
+                {
+                    matches++;
+                    pathName = driver["PathName"] as string;
+                }
             }
 
             if (matches != 1)
@@ -2709,12 +2719,16 @@ namespace DS4Windows
         }
 
         internal static bool IsUnsafeCitrixUsbMonitorState(bool installed,
-            string state, int? startValue)
+            string state, int? startValue, bool runtimeStateVerified = true)
         {
             if (!installed)
             {
                 return false;
             }
+
+            // A disabled service can still have its kernel driver loaded.
+            // A failed runtime query cannot authorize USB/IP startup.
+            if (!runtimeStateVerified) return true;
 
             if (string.Equals(state, "Running",
                     StringComparison.OrdinalIgnoreCase))
@@ -2728,14 +2742,6 @@ namespace DS4Windows
             return !startValue.HasValue || startValue.Value != 4;
         }
 
-        private static bool TryGetCitrixUsbMonitorConflict(
-            out string conflictMessage)
-        {
-            (bool conflict, string message) = citrixUsbMonitorStatus.Value;
-            conflictMessage = message;
-            return conflict;
-        }
-
         private static (bool Conflict, string Message)
             EvaluateCitrixUsbMonitorConflict()
         {
@@ -2743,6 +2749,7 @@ namespace DS4Windows
             string state = null;
             string imagePath = null;
             int? startValue = null;
+            bool runtimeStateVerified = false;
 
             try
             {
@@ -2772,17 +2779,24 @@ namespace DS4Windows
                 using ManagementObjectSearcher searcher = new(
                     "SELECT State, PathName FROM Win32_SystemDriver " +
                     $"WHERE Name='{CitrixUsbMonitorServiceName}'");
-                foreach (ManagementObject driver in searcher.Get())
+                searcher.Options = CreateDependencyQueryOptions();
+                using ManagementObjectCollection drivers = searcher.Get();
+                foreach (ManagementObject driver in drivers)
                 {
-                    installed = true;
-                    state = driver["State"] as string;
-                    imagePath ??= driver["PathName"] as string;
-                    break;
+                    using (driver)
+                    {
+                        installed = true;
+                        state = driver["State"] as string;
+                        imagePath ??= driver["PathName"] as string;
+                        break;
+                    }
                 }
+                runtimeStateVerified = true;
             }
             catch
             {
-                // Registry state is sufficient when WMI is unavailable.
+                // Registry disablement does not prove that an already loaded
+                // filter has stopped. Preserve failed runtime verification.
             }
 
             if (!installed)
@@ -2801,10 +2815,13 @@ namespace DS4Windows
             }
 
             if (!IsUnsafeCitrixUsbMonitorState(installed, state,
-                    startValue))
+                    startValue, runtimeStateVerified))
             {
                 return (false, null);
             }
+
+            if (!runtimeStateVerified)
+                return (true, "Citrix USB Monitor is installed, but Windows could not verify whether its driver has stopped. Retry the check or restart Windows before using USB/IP controllers.");
 
             string conflictMessage =
                 "Citrix USB Monitor (ctxusbmon.sys) is enabled. " +
@@ -2814,6 +2831,16 @@ namespace DS4Windows
                 "generic USB redirection; restart Windows afterward.";
             return (true, conflictMessage);
         }
+
+        internal static System.Management.EnumerationOptions CreateDependencyQueryOptions() => new()
+        {
+            // Bound row retrieval from a stalled WMI enumerator and release
+            // each result promptly. This is not a cancellation guarantee for
+            // every COM connection/provider invocation inside WMI.
+            Timeout = TimeSpan.FromSeconds(2),
+            ReturnImmediately = true,
+            Rewindable = false,
+        };
 
         internal static bool IsSuccessfulUsbipPortProbe(int exitCode,
             string output)
@@ -2939,7 +2966,7 @@ namespace DS4Windows
         {
             // Recheck after the elevated replacement, not only when its UI
             // began: never bypass the ordinary driver's startup safety gate.
-            if (!HasSafeRuntimePrerequisites(GetStatus())) return false;
+            if (!HasSafeRuntimePrerequisites(GetFreshDependencyStatus())) return false;
             lock (serverStartLock)
             {
                 if (PortableLabContext.IsActive || PortableBrokerContext.IsActive ||

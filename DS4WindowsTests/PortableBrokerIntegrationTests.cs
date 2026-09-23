@@ -48,7 +48,7 @@ public class PortableBrokerIntegrationTests
             "if (!StartPortableBroker()) return;");
         Before(core, "if (!StartPortableBroker()) return;", "CreateTempWorkerThread();");
         Before(core, "if (!StartPortableBroker()) return;", "Global.FindConfigLocation();");
-        StringAssert.Contains(core, "requireNew: DS4Windows.PortableLabContext.IsActive ||");
+        StringAssert.Contains(core, "CreateSingleAppComEvent(SingleAppComEventName,\n                        requireNew: true)");
         Before(core, "AcquirePortableRepairStartupGate()", "PortableBrokerMaintenance.EnsureStartupPayload(");
         // A second ordinary launch can activate its existing matching mapper;
         // the explicit development lab retains its no-signal policy.
@@ -103,6 +103,19 @@ public class PortableBrokerIntegrationTests
         Before(maintenance, "PortableRepairProgress.Run<object>", "return true;");
     }
 
+    [TestMethod]
+    public void InvalidPortableFallbackClosesBeforeInstalledMaintenanceOrControllerStartup()
+    {
+        string selection = Section(Read("App.xaml.cs"), "bool startupMaintenanceAttempted = true;",
+            "// Preserve legacy startup retargeting");
+        StringAssert.Contains(selection, "if (!DS4Windows.PortableBrokerContext.TryInitializeUnavailable(");
+        StringAssert.Contains(selection, "out string identityFailure)");
+        StringAssert.Contains(selection, "CancelPortableStartup(exception.Message");
+        Before(selection, "CancelPortableStartup(exception.Message", "return;\n                    }");
+        Assert.IsFalse(selection.Contains("PortableBrokerContext.InitializeUnavailable(", StringComparison.Ordinal),
+            "The fallback must not throw through the original startup failure handler.");
+    }
+
     [DataTestMethod]
     [DataRow("Connect: SocketException")]
     [DataRow("Connect: timeout")]
@@ -147,6 +160,24 @@ public class PortableBrokerIntegrationTests
         StringAssert.Contains(status, "lab == null && portable == null && tryStartServer");
         StringAssert.Contains(status, "authenticated: lab != null || portable != null");
         Assert.IsFalse(status.Contains("PersistPreferredViiperPath(", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void StartupAndRepairRefreshDependencyAuthorityWithoutChangingOrdinaryStatusPolling()
+    {
+        string setup = Read("DS4Control", "Viiper", "ViiperSetupManager.cs");
+        StringAssert.Contains(setup, "dependencyReadiness.Read(refreshDependencies || tryStartServer)");
+        StringAssert.Contains(setup, "GetStatus(bool tryStartServer = false) =>\n            GetStatusCore(tryStartServer, refreshDependencies: false)");
+        string recovery = Read("DS4Control", "Viiper", "ViiperRecovery.cs");
+        Assert.AreEqual(4, recovery.Split("GetFreshDependencyStatus()").Length - 1,
+            "Repair admission, mutation, portable readiness, and installed readiness must each revalidate dependencies.");
+        string managedStart = Section(setup, "internal static bool TryStartRepairedServer(",
+            "private static bool TryStartServer(");
+        StringAssert.Contains(managedStart, "HasSafeRuntimePrerequisites(GetFreshDependencyStatus())");
+        Assert.IsFalse(setup.Contains("usbipDriverIntegrityStatus.Value", StringComparison.Ordinal));
+        Assert.IsFalse(setup.Contains("citrixUsbMonitorStatus.Value", StringComparison.Ordinal));
+        Assert.AreEqual(2, setup.Split("searcher.Options = CreateDependencyQueryOptions();").Length - 1);
+        Assert.AreEqual(2, setup.Split("using ManagementObjectCollection drivers = searcher.Get();").Length - 1);
     }
 
     [DataTestMethod]
@@ -425,9 +456,9 @@ public class PortableBrokerIntegrationTests
         string source = Read("DS4Control", "Viiper", "ViiperSetupManager.cs");
         string method = Section(source, "internal static bool TryStartRepairedServer(",
             "private static bool TryStartServer(");
-        Before(method, "HasSafeRuntimePrerequisites(GetStatus())", "TryStartServer(viiperPath)");
+        Before(method, "HasSafeRuntimePrerequisites(GetFreshDependencyStatus())", "TryStartServer(viiperPath)");
         string recovery = Read("DS4Control", "Viiper", "ViiperRecovery.cs");
-        Before(recovery, "HasSafeRuntimePrerequisites(ViiperSetupManager.GetStatus())", "PortableRepairProgress.Run");
+        Before(recovery, "HasSafeRuntimePrerequisites(ViiperSetupManager.GetFreshDependencyStatus())", "PortableRepairProgress.Run");
     }
 
     [TestMethod]

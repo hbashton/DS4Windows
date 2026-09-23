@@ -1,0 +1,79 @@
+VIIPER bundled artifact provenance
+
+Version: v0.1.9-rc4.6.6
+Status: Unsigned release candidate, built by the tagged GitHub Actions workflow; not a stable release.
+Source: https://github.com/hbashton/VIIPER
+Source commit: b78e31e93e84b4cb7c4b4c15b8aace10749106d2
+Source archive: VIIPER-0.1.9-rc4.6.6-SOURCE.zip
+Source archive SHA-256: FBDF251480A8A2AEF5F3C5BAE7F4EF288AFB3CD26A3A4AA60D1F491A301EF655
+Source archive layout: git archive --format=zip --prefix=VIIPER-0.1.9-rc4.6.6-SOURCE/ of the exact tagged source commit; ZIP commit comment verified.
+Release: https://github.com/hbashton/VIIPER/releases/tag/v0.1.9-rc4.6.6
+Tagged build: https://github.com/hbashton/VIIPER/actions/runs/35874100761
+Release archive: viiper-windows-amd64.zip
+Release archive SHA-256: C68D89319A12D4ADC408EE8C779917B943C2AE2FAC247F9933330E25B04C5842
+Build receipt: BUILD-INFO.json in the tagged release archive
+Build receipt SHA-256: 61B8A2B2F0EB6CDA92A8E843BC9FBC15BE4F61592EE008E20DB317E0DDDA97F0
+Toolchain: Go 1.27.0 windows/amd64
+Resource tool: github.com/josephspurrier/goversioninfo/cmd/goversioninfo v1.7.0
+Build: GOOS=windows GOARCH=amd64 CGO_ENABLED=0 BUILD_TYPE=Release
+Build flags: -tags release -trimpath; default Go VCS stamping verified clean.
+Link flags: -s -w -X main.Version=v0.1.9-rc4.6.6 -X main.Commit=b78e31e -X main.Date=2026-09-23T14:28:06Z -X github.com/Alia5/VIIPER/internal/codegen/common.Version=v0.1.9-rc4.6.6
+Embedded commit: b78e31e
+Embedded build date: 2026-09-23T14:28:06Z
+Embedded VCS revision: b78e31e93e84b4cb7c4b4c15b8aace10749106d2
+Embedded VCS time: 2026-09-23T14:24:21Z
+Embedded VCS modified: false
+PE file version: 0.1.9.0
+PE product version: 0.1.9-rc4.6.6
+Binary: VIIPER-0.1.9-rc4.6.6-x64.exe
+Binary size: 9445376 bytes
+Binary SHA-256: 9392A49E619E1D9B7956EA4BEDAFD2E74CBF5065C011554E80F756D1524F892B
+Authenticode status at packaging: NotSigned
+License notice: VIIPER-0.1.9-rc4.6.6-LICENSES.txt
+License notice SHA-256: 930FE76BD7315A5CB16A3A22C46337AFD378BA025C663AAAC720C627B3521881
+Full GPL-3.0 license: LICENSE.txt
+Full GPL-3.0 license SHA-256: F24EE094842DC3347A7A06B71373573CE18F6DCB935C81E95623723EE22E6CA6
+Local Windows tray modification notice: VIIPER-SYSTRAY-NOTICE.md
+Local Windows tray modification notice SHA-256: 6126849BBF404E8172729DAF992DDF7BE43C84F30721883F51C0FA52CC4CD192
+Local Windows tray full Apache-2.0 license: VIIPER-SYSTRAY-LICENSE.txt
+Local Windows tray full Apache-2.0 license SHA-256: 05C55BD8834035C143C17AA218BFF08E22B7A66C5603CBA8F070DCAAFC974B8F
+WDL resampler attribution and license: VIIPER-WDL-NOTICE.txt
+WDL resampler attribution and license SHA-256: 2485006947F464C2A69E9F863D50529261FB684A7AC5E6BAE0D03BFE65F9E025
+
+Artifact identity:
+
+The executable and all five notices are byte-for-byte members of the tagged
+Windows CI archive, not local rebuilds. Its BUILD-INFO.json binds source, PE
+versions, binary hash, complete Go module/settings metadata and notices to
+run 35874100761, attempt 1. Independent local inspection matched those fields
+without launching the broker. CI also performs a help-only executable check.
+
+The source ZIP contains 697 files and 139 directory entries. All files match
+the tagged Git blobs: 93 byte-identical and 604 differing only by CRLF/LF
+normalization from Git's Windows archive output. Its ZIP comment is the exact
+source commit. The _testing/e2e/deps/SDL test gitlink is not embedded; .gitmodules
+retains its origin and the tagged tree records its exact revision.
+
+Behavioral scope:
+
+Startup now propagates cancellation through prerequisite checks, reports the
+failing startup phase, and retires its owned listeners and accepted API clients.
+Packaged tray startup is managed by DS4Windows; the old bare-server autostart
+toggle requires the existing explicit developer-only opt-in. Existing user
+startup entries are not rewritten by the broker. Built-in self-updating remains
+disabled; DS4Windows installs and repairs this exact matching payload.
+
+Edge descriptors and feature sizing now distinguish the model correctly.
+Common native game feedback retains the 48-byte V5 prefix and independent PCM
+lane. Unsupported Edge configuration and onboard-profile commands are rejected
+transactionally instead of partially applied or falsely acknowledged. Virtual
+gyro calibration now matches the client's canonical 16-unit motion scale.
+Neither onboard-profile storage nor complete physical Edge hardware validation
+is claimed. See docs/devices/dualsense.md in the matching source.
+
+Existing Sony Bluetooth WDL conversion and ISO-OUT clock behavior remain; the
+application now negotiates that converter for either Sony model pairing.
+Nintendo and legacy target conversion are unchanged by this broker release.
+The complete GPL, Apache systray and altered WDL notices remain included.
+No private capture/trace recorder or speculative physical configuration writes
+are included. Automated tests do not prove identical effects in every game.

@@ -13,15 +13,18 @@ portable ZIP remains a separate CI artifact. The standard installer places
 VIIPER under protected `%ProgramFiles%\DS4Windows\VIIPER`. The marked portable
 ZIP instead starts its bundled, hash-verified broker when needed and does not
 create or retarget installed startup tasks. A verified matching running copy
-can be reused; a conflicting copy is reported without being terminated.
-Installed startup tasks continue to target the verified installed broker.
+can be reused. Recovery identifies conflicting brokers by executable, process ID
+and start time before stopping them; it never kills an unrelated port owner.
+An access-denied stop leaves DS4Windows open with actionable guidance.
+Installed startup tasks continue to target the verified installed broker;
+portable repair stays in the portable folder.
 
 ```powershell
 .\installer\build-installer.ps1 `
   -PublishRoot .\bin\x64\Release\output `
-  -ProductVersion 5.0.11.0 `
-  -BundleVersion 5.0.11.0 `
-  -DisplayVersion VIIPERRC4.6.5 `
+  -ProductVersion 5.0.12.0 `
+  -BundleVersion 5.0.12.0 `
+  -DisplayVersion VIIPERRC4.6.6 `
   -SkipApplicationPublish
 ```
 

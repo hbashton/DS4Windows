@@ -8,6 +8,28 @@ namespace DS4WindowsTests;
 [TestClass]
 public class DualSenseBluetoothFeatureReportTests
 {
+    [DataTestMethod]
+    [DataRow(0x20, 0x20, true, true)]
+    [DataRow(0x20, 0x05, true, false)]
+    [DataRow(0x20, 0x20, false, false)]
+    [DataRow(0x05, 0x05, true, true)]
+    [DataRow(0x05, 0x20, true, false)]
+    public void UsbFeatureReadRequiresSuccessAndTheRequestedReportId(
+        int requestedId, int returnedId, bool hidSuccess, bool expected)
+    {
+        byte[] buffer = new byte[requestedId == 0x20 ? 64 : 41];
+        buffer[0] = (byte)requestedId;
+        int reads = 0;
+        Assert.AreEqual(expected, DualSenseDevice.TryReadUsbFeatureReport(buffer, target =>
+        {
+            reads++;
+            Assert.AreEqual((byte)requestedId, target[0]);
+            target[0] = (byte)returnedId;
+            return hidSuccess;
+        }));
+        Assert.AreEqual(1, reads, "USB must not introduce Bluetooth CRC retries or delays.");
+    }
+
     [TestMethod]
     public void FailedHidReadsCannotAuthenticateStaleFirmwareBytes()
     {

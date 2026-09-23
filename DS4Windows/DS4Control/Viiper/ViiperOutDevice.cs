@@ -6454,8 +6454,10 @@ namespace DS4Windows
                  feedback[DualSenseCombinedBluetoothReportOffset] != 0x32));
 
         internal static bool IsUnsupportedEdgeNativeOutput(
-            ViiperVirtualDeviceType type, byte[] feedback, int length) =>
-            type == ViiperVirtualDeviceType.DualSenseEdge &&
+            ViiperVirtualDeviceType type, byte[] feedback, int length,
+            bool physicalEdge = false) =>
+            (type == ViiperVirtualDeviceType.DualSenseEdge ||
+                (type == ViiperVirtualDeviceType.DualSense && physicalEdge)) &&
             feedback != null && length <= feedback.Length &&
             length >= DualSenseNativeOutputReportOffset + DualSenseNativeOutputReportLength &&
             feedback[DualSenseNativeOutputReportOffset] == 0x02 &&
@@ -6473,7 +6475,9 @@ namespace DS4Windows
             {
                 DualSenseDevice target = ResolvePhysicalControllerTarget(deviceIndex);
                 if (deviceIndex != Volatile.Read(ref lastInputDeviceIndex) ||
-                    target == null || !IsNativeDualSenseFeedbackCompatible(target)) return false;
+                    target == null || !IsNativeDualSenseFeedbackCompatible(target) ||
+                    IsUnsupportedEdgeNativeOutput(viiperType, feedback, length,
+                        target.SubType == DualSenseDevice.DeviceSubType.DSEdge)) return false;
                 context = new(target, Interlocked.Read(ref physicalControllerBindingRevision),
                     Global.ReadProfileSwitchRevision(deviceIndex), feedbackDispatchBuffer.PendingBoundaryRevision);
                 return true;
@@ -6595,9 +6599,10 @@ namespace DS4Windows
                     sourceGeneration != Interlocked.Read(ref streamGeneration) ||
                     !IsNativeCommandTargetCurrent(deviceIndex, context) ||
                     !Global.EnableOutputDataToDS4[deviceIndex]) return true;
-                if (!IsExactNativeDualSenseCommand(feedback, length) ||
-                    IsUnsupportedEdgeNativeOutput(viiperType, feedback, length)) return true;
                 target = (DualSenseDevice)context.Target;
+                if (!IsExactNativeDualSenseCommand(feedback, length) ||
+                    IsUnsupportedEdgeNativeOutput(viiperType, feedback, length,
+                        target.SubType == DualSenseDevice.DeviceSubType.DSEdge)) return true;
                 byte triggerLabValidity = PrepareNativeDualSenseOutputReportForProfileInto(feedback,
                     deviceIndex, nativeOutputScratch);
                 if (!target.WriteRawOutputReportFromGame(nativeOutputScratch, 0,
@@ -6654,6 +6659,13 @@ namespace DS4Windows
             {
                 return;
             }
+            // A base virtual persona does not change the physical Edge's
+            // interpretation of its configuration bits. Apply the same atomic
+            // guard to that cross-model path before any scalar fallback.
+            if (freshNativeOutput && device is DualSenseDevice sonyTarget &&
+                IsUnsupportedEdgeNativeOutput(viiperType, feedback, feedbackLength,
+                    sonyTarget.SubType == DualSenseDevice.DeviceSubType.DSEdge))
+                return;
 
             // A report-thread rebind cannot approve a new recipient for an
             // immutable Sony DSP stream. Retain the complete compact/native

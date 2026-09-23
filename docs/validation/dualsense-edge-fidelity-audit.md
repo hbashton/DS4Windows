@@ -102,7 +102,7 @@ the normalized USB 0x01 input body.
 | Trigger feedback | USB input bytes 42/43 and mode nibbles at 48 preserved; same-report status travels with mapped input |
 | Edge-specific status | Raw USB 49..52 retained only for matching Edge layout, not mistaken for a base-controller timestamp |
 | Game trigger effects | Output validity 0x04 right / 0x08 left; complete 11-byte blocks at USB 11..21 and 22..32 preserved |
-| Output compatibility | The existing 48-byte native-effect prefix and V5 combined offset 76 remain unchanged; 64-byte Edge USB output accepts padding |
+| Output compatibility | The existing 48-byte native-effect prefix and V5 combined offset 76 remain unchanged; ordinary 64-byte Edge USB game output uses this prefix. Edge configuration commands are rejected, not truncated |
 | Remapping / Special Actions | FnL/FnR/BLP/BRP already reach both mappings and Special Actions; extra controls remain list-based rather than artwork hotspots |
 | Audio and reconnect | PID 0x0DF2 is accepted by existing physical audio/native-output paths; lifecycle and backlog regression suites retained |
 
@@ -126,16 +126,19 @@ the normalized USB 0x01 input body.
    Bluetooth hardware checks are still required: input, both Fn/paddle pairs,
    touch/motion, both trigger-stop positions, native/adaptive feedback, PCM,
    headset status/audio/microphone, multiple stored profiles and reconnects.
-2. Virtual onboard profiles (features 0x60..0x65, 0x68, 0x70..0x7B) are not
+2. Virtual onboard profiles (features 0x60..0x65, 0x68, 0x70..0x7B and
+   feature 0x80's profile-snapshot subcommand 0x70) are not
    implemented. They now fail honestly. A software profile store and verified
    transaction semantics would be separate implementation work, not arbitrary
    writes to the user's physical controller.
 3. Firmware feature 0x20 remains synthetic; this is not a captured full Edge
    firmware identity. HIDMaestro #47 confirms a difference in firmware series
    but does not supply a fully verified physical response. Do not invent one.
-4. Feature 0xF2 payload semantics and nonzero bytes after the common output
-   prefix are unverified. Correct descriptor sizes do not prove those features
-   work. Do not silently change the established V5 wire ABI to speculate.
+4. Feature 0xF2 payload semantics remain unverified. Known nonzero output
+   extensions include Edge configuration previews and profile controls, now
+   explicitly rejected; they are not padding and are not implemented by the
+   common game-feedback path. Correct descriptor sizes do not prove those
+   features work. Do not change the established V5 wire ABI to speculate.
 5. USB input bytes 56..63 are a physical authentication tag. They cannot simply
    be copied after altering virtual state. No authentication claim is made.
 6. Physical hardware profiles can remap/attenuate before DS4Windows receives
@@ -183,3 +186,56 @@ unchanged.
   binaries, push commits, or publish a release.
 - Remaining acceptance gates above are still open. A hardware-availability
   question was sent because no physical Edge was detected.
+
+## Final RC4.6.6 independent review
+
+- Rechecked the pinned SDL, edgemap and dualsense-tester sources against the
+  integrated physical/virtual input, calibration and shared output paths.
+  Existing Fn/paddle masks, motion/touch positions, 11-byte trigger blocks,
+  USB/BT normalization, model-specific status bytes and descriptor counts agree
+  with those source contracts. This remains source/test evidence, not a new
+  physical Edge capture.
+- Closed the remaining USB firmware-read validation gap: HID success alone
+  could previously accept another report ID as firmware bytes. USB firmware
+  and calibration now both require their requested ID; Bluetooth CRC and its
+  existing bounded retries are unchanged. No per-frame work or delay is added.
+- Cross-persona native game feedback is retained in both directions. Edge
+  configuration authorization is rejected when either the virtual source or
+  physical recipient is Edge: a base virtual identity does not change how an
+  actual Edge interprets USB byte 39/41 bit 7. Rejection precedes native writes
+  and compatibility fallback. Base-to-base reports retain their uninterpreted
+  high bits. Media-only PCM retains its independent lane and last safe state.
+- The pinned DS5Dongle implementation documents feature `0x80`, subcommand
+  `0x70/0x01`, preparing Edge profile snapshots. That previously reached the
+  generic feature-command success path despite no profile store. It now gets a
+  transactional STALL, including incomplete variants of that opcode, without
+  changing command response, feedback or media state. Ordinary common queries
+  and base-controller behavior are unchanged.
+- Removed a remaining base/Edge model restriction from cold Bluetooth haptics
+  converter negotiation. Although native feedback accepted the pairing, a
+  virtual Edge on a physical standard DualSense still silently requested the
+  legacy converter. Both physical Sony models now use the same verified native
+  compatibility gate; USB stays native PCM, and an unverified or changed
+  recipient cannot acquire the Sony-filtered media stream.
+- Corrected virtual gyro calibration to describe the mapped values actually
+  sent by DS4Windows: `SixAxis` defines 16 units per degree/second and the V5
+  mapper carries those calibrated values unchanged. The virtual feature `0x05`
+  endpoints remain +/-8192, but their reference speeds are now +/-512 instead
+  of +/-500. SDL's independent calibration equation shows the former values
+  multiplied angular speed by 125/128 (2.34375% low) when a game recalibrated
+  the already calibrated samples. Accelerometer scale remains 8192 units/g.
+  Paired C# and Go tests use the same exact wire vector to cover the actual
+  mapper, V5 decoder, USB input encoder and advertised calibration for both
+  personas. No physical factory calibration or raw HID sensor format changed.
+- Final focused .NET suite: **132 passed, 0 skipped, 0 failed** (Release x64),
+  `artifacts/rc466-edge-audit/rc466-final-edge-audit.trx`. It covers capability,
+  USB/BT feature validation, native command preservation/rejection, actual cold
+  converter negotiation and the canonical motion contract.
+- Broker checks: `go test ./device/dualsense ./internal/server/usb -run
+  'Edge|DualSense|VirtualSonyCalibration' -count=1` and the same command with
+  `-race` both passed after these final corrections. Full-release suites are
+  tracked separately by the release owner; no hardware was used by this review.
+- Additional primary reference (MIT; protocol facts, not copied source):
+  https://github.com/awalol/DS5Dongle/blob/c67c7f685fe8d8cc44f519d27710c5a639a1be7d/src/dse.cpp#L50-L75.
+  Its complete physical profile bridge does not establish standalone virtual
+  profile/firmware support for VIIPER; the remaining gates above still apply.

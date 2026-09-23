@@ -4637,7 +4637,8 @@ namespace DS4Windows.InputDevices
             }
             else
             {
-                featureFirmRead = hDevice.readFeatureData(firmwareInfoData);
+                featureFirmRead = TryReadUsbFeatureReport(firmwareInfoData,
+                    hDevice.readFeatureData);
             }
 
             if (featureFirmRead)
@@ -4675,6 +4676,19 @@ namespace DS4Windows.InputDevices
 
         private bool ReadBTFeatureReport(byte[] buffer, int size)
             => TryReadBluetoothFeatureReport(buffer, size, hDevice.readFeatureData);
+
+        internal static bool TryReadUsbFeatureReport(byte[] buffer,
+            Func<byte[], bool> readFeature)
+        {
+            ArgumentNullException.ThrowIfNull(buffer);
+            ArgumentNullException.ThrowIfNull(readFeature);
+            if (buffer.Length == 0) throw new ArgumentException("A report ID is required.", nameof(buffer));
+            byte requestedReportId = buffer[0];
+            // A successful HID operation alone does not identify its payload.
+            // In particular, another feature must not become firmware version
+            // bytes that alter improved-rumble capability on a physical pad.
+            return readFeature(buffer) && buffer[0] == requestedReportId;
+        }
 
         internal static bool TryReadBluetoothFeatureReport(byte[] buffer, int size,
             Func<byte[], bool> readFeature)
@@ -4803,7 +4817,7 @@ namespace DS4Windows.InputDevices
             calibration[0] = 0x05;
             bool valid = bluetooth
                 ? TryReadBluetoothFeatureReport(calibration, calibration.Length, readFeature)
-                : readFeature(calibration) && calibration[0] == 0x05;
+                : TryReadUsbFeatureReport(calibration, readFeature);
             // Keep a previously good calibration (or the uncalibrated default)
             // when the device read fails. Corrupted calibration is not input.
             if (!valid || !HasUsableCalibrationScales(calibration)) return false;

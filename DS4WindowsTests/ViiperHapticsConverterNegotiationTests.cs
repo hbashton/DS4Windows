@@ -12,6 +12,32 @@ namespace DS4WindowsTests;
 public sealed class ViiperHapticsConverterNegotiationTests
 {
     [DataTestMethod]
+    [DataRow(ViiperVirtualDeviceType.DualSense, false)]
+    [DataRow(ViiperVirtualDeviceType.DualSense, true)]
+    [DataRow(ViiperVirtualDeviceType.DualSenseEdge, false)]
+    [DataRow(ViiperVirtualDeviceType.DualSenseEdge, true)]
+    public void ActualConverterNegotiationAcceptsEveryVerifiedSonyBluetoothPersonaPair(
+        ViiperVirtualDeviceType virtualType, bool physicalEdge)
+    {
+        using var fixture = new Fixture(false, false, true);
+        Set(fixture.Output, "viiperType", virtualType);
+        Set(fixture.Source.HidDevice, "_deviceAttributes", new HidDeviceAttributes(new NativeMethods.HIDD_ATTRIBUTES
+            { VendorID = 0x054C, ProductID = physicalEdge ? (ushort)0x0DF2 : (ushort)0x0CE6 }));
+        Set(fixture.Source, "subType", physicalEdge ? DualSenseDevice.DeviceSubType.DSEdge : DualSenseDevice.DeviceSubType.DualSense);
+        var actualPolicy = typeof(ViiperOutDevice).GetMethod("WantsSonyBluetoothHaptics",
+            BindingFlags.Instance | BindingFlags.NonPublic)!;
+        Assert.AreEqual(true, actualPolicy.Invoke(fixture.Output, new object[] { fixture.Source }),
+            "A virtual Edge must not silently fall back to lower-quality conversion on a standard physical DualSense.");
+
+        Set(fixture.Output, "physicalDualSenseIdentityVerified", false);
+        Assert.AreEqual(false, actualPolicy.Invoke(fixture.Output, new object[] { fixture.Source }));
+        Set(fixture.Output, "physicalDualSenseIdentityVerified", true);
+        Set(fixture.Source, "conType", ConnectionType.USB);
+        Assert.AreEqual(false, actualPolicy.Invoke(fixture.Output, new object[] { fixture.Source }),
+            "USB retains its native PCM route without Bluetooth DSP.");
+    }
+
+    [DataTestMethod]
     [DataRow(ViiperVirtualDeviceType.DualSense, false, true, ConnectionType.BT, true, true)]
     [DataRow(ViiperVirtualDeviceType.DualSenseEdge, false, true, ConnectionType.BT, true, true)]
     [DataRow(ViiperVirtualDeviceType.DualSense, false, true, ConnectionType.USB, true, false)]

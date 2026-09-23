@@ -1,0 +1,19 @@
+VIIPER bundled artifact provenance
+
+Version: v0.1.9-rc4.6.6
+Source: https://github.com/hbashton/VIIPER
+Source commit: b78e31e93e84b4cb7c4b4c15b8aace10749106d2
+Toolchain: Go 1.27.0 windows/amd64
+Build: GOOS=windows GOARCH=amd64 CGO_ENABLED=0 BUILD_TYPE=Release
+Embedded commit: b78e31e
+Embedded build date: 2026-09-23T14:28:06Z
+Embedded VCS revision: b78e31e93e84b4cb7c4b4c15b8aace10749106d2
+Embedded VCS time: 2026-09-23T14:24:21Z
+Embedded VCS modified: false
+PE file version: 0.1.9.0
+PE product version: 0.1.9-rc4.6.6
+Binary: VIIPER-0.1.9-rc4.6.6-x64.exe
+Binary SHA-256: 9392A49E619E1D9B7956EA4BEDAFD2E74CBF5065C011554E80F756D1524F892B
+Authenticode status at packaging: NotSigned
+License notice: VIIPER-0.1.9-rc4.6.6-LICENSES.txt
+License notice SHA-256: 930FE76BD7315A5CB16A3A22C46337AFD378BA025C663AAAC720C627B3521881

@@ -266,8 +266,15 @@ namespace DS4WinWPF
                     // Preserve portable ownership even when offline repair
                     // fails. Settings must remain available; never fall back
                     // to an installed broker or migrate this user's package.
-                    DS4Windows.PortableBrokerContext.InitializeUnavailable(
-                        Path.GetDirectoryName(DS4Windows.Global.exelocation));
+                    if (!DS4Windows.PortableBrokerContext.TryInitializeUnavailable(
+                            Path.GetDirectoryName(DS4Windows.Global.exelocation), out string identityFailure))
+                    {
+                        // An unverified folder cannot safely become a portable
+                        // repair target or fall back to the installed broker.
+                        CancelPortableStartup(exception.Message + "\n\n" + identityFailure +
+                            "\n\nExtract a complete portable package into a writable local folder, then reopen DS4Windows. No installed broker was selected.");
+                        return;
+                    }
                     if (startupMaintenanceAttempted) DS4Windows.ViiperRecovery.TryBeginAutomaticRecovery();
                     MessageBox.Show(exception.Message, "VIIPER needs attention",
                         MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -335,9 +342,11 @@ namespace DS4WinWPF
             try
             {
                 if (threadComEvent == null)
+                    // The earlier open-existing check is only an activation
+                    // convenience. Another installed launch can win after it;
+                    // only creating the named event authorizes a mapper.
                     threadComEvent = CreateSingleAppComEvent(SingleAppComEventName,
-                        requireNew: DS4Windows.PortableLabContext.IsActive ||
-                            DS4Windows.PortableBrokerContext.IsActive);
+                        requireNew: true);
                 if (threadComEvent == null)
                 {
                     MessageBox.Show("Another DS4Windows instance started first. This startup was cancelled.",

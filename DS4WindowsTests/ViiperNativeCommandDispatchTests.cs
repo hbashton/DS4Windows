@@ -28,6 +28,10 @@ public sealed class ViiperNativeCommandDispatchTests
                 Assert.IsFalse(ViiperOutDevice.IsUnsupportedEdgeNativeOutput(
                     ViiperVirtualDeviceType.DualSense, envelope, envelope.Length),
                     "The policy must not reinterpret ordinary DualSense fields.");
+                Assert.AreEqual((value & 0x80) != 0,
+                    ViiperOutDevice.IsUnsupportedEdgeNativeOutput(
+                        ViiperVirtualDeviceType.DualSense, envelope, envelope.Length, physicalEdge: true),
+                    "The physical Edge's configuration semantics also govern cross-persona output.");
             }
             envelope[28 + offset] = 0;
         }
@@ -42,18 +46,22 @@ public sealed class ViiperNativeCommandDispatchTests
     }
 
     [DataTestMethod]
-    [DataRow(39, false, false)]
-    [DataRow(41, false, false)]
-    [DataRow(39, true, false)]
-    [DataRow(41, true, false)]
-    [DataRow(39, false, true)]
-    [DataRow(41, false, true)]
-    [DataRow(39, true, true)]
-    [DataRow(41, true, true)]
+    [DataRow(39, false, false, ViiperVirtualDeviceType.DualSenseEdge)]
+    [DataRow(41, false, false, ViiperVirtualDeviceType.DualSenseEdge)]
+    [DataRow(39, true, false, ViiperVirtualDeviceType.DualSenseEdge)]
+    [DataRow(41, true, false, ViiperVirtualDeviceType.DualSenseEdge)]
+    [DataRow(39, false, true, ViiperVirtualDeviceType.DualSenseEdge)]
+    [DataRow(41, false, true, ViiperVirtualDeviceType.DualSenseEdge)]
+    [DataRow(39, true, true, ViiperVirtualDeviceType.DualSenseEdge)]
+    [DataRow(41, true, true, ViiperVirtualDeviceType.DualSenseEdge)]
+    [DataRow(39, false, true, ViiperVirtualDeviceType.DualSense)]
+    [DataRow(41, false, true, ViiperVirtualDeviceType.DualSense)]
+    [DataRow(39, true, true, ViiperVirtualDeviceType.DualSense)]
+    [DataRow(41, true, true, ViiperVirtualDeviceType.DualSense)]
     public void OldBrokerEdgeConfigurationCommandsCannotReachPhysicalOrFallback(
-        int authorizationOffset, bool combined, bool physicalEdge)
+        int authorizationOffset, bool combined, bool physicalEdge, ViiperVirtualDeviceType virtualType)
     {
-        using var fixture = new AdmissionFixture(ViiperVirtualDeviceType.DualSenseEdge, physicalEdge);
+        using var fixture = new AdmissionFixture(virtualType, physicalEdge);
         byte[] envelope = Envelope(Led(31));
         Assert.IsTrue(fixture.Output.TryCaptureNativeCommandContext(envelope,
             envelope.Length, 0, out var context));
@@ -76,6 +84,24 @@ public sealed class ViiperNativeCommandDispatchTests
         Assert.AreEqual(0, fixture.Device.CompatibilityRumbleCalls);
         CollectionAssert.AreEqual(original, envelope,
             "Do not partially rewrite a configuration command into a game effect.");
+    }
+
+    [DataTestMethod]
+    [DataRow(39)]
+    [DataRow(41)]
+    public void BasePersonaToBasePhysicalKeepsItsUninterpretedHighBits(int offset)
+    {
+        using var fixture = new AdmissionFixture(ViiperVirtualDeviceType.DualSense, false);
+        byte[] raw = Led(31);
+        raw[offset] = 0x80;
+        byte[] envelope = Envelope(raw);
+        Assert.IsTrue(fixture.Output.TryCaptureNativeCommandContext(envelope,
+            envelope.Length, 0, out var context));
+        Assert.IsTrue(fixture.Output.TryApplyRetainedNativeCommand(envelope,
+            envelope.Length, 0, 0, context, new byte[48]));
+        Assert.AreEqual(DualSenseDevice.PhysicalOutputCommandProcessResult.Published,
+            fixture.Device.ProcessNextPhysicalOutputCommand());
+        Assert.AreEqual((byte)0x80, fixture.Reports.Single()[offset]);
     }
 
     [DataTestMethod]
@@ -130,10 +156,15 @@ public sealed class ViiperNativeCommandDispatchTests
             envelope.Length, 0, out _), "A matching VID/PID alone cannot authorize physical writes.");
     }
 
-    [TestMethod]
-    public void EdgeMediaSnapshotDoesNotImportUnsupportedConfigurationOrLosePcm()
+    [DataTestMethod]
+    [DataRow(ViiperVirtualDeviceType.DualSense, false)]
+    [DataRow(ViiperVirtualDeviceType.DualSense, true)]
+    [DataRow(ViiperVirtualDeviceType.DualSenseEdge, false)]
+    [DataRow(ViiperVirtualDeviceType.DualSenseEdge, true)]
+    public void EdgeMediaSnapshotDoesNotImportUnsupportedConfigurationOrLosePcm(
+        ViiperVirtualDeviceType virtualType, bool physicalEdge)
     {
-        using var fixture = new AdmissionFixture(ViiperVirtualDeviceType.DualSenseEdge);
+        using var fixture = new AdmissionFixture(virtualType, physicalEdge);
         var cache = typeof(DualSenseDevice).GetMethod("CacheBluetoothCombinedSpeakerReport", PrivateInstance)!;
         byte[] valid = new byte[398];
         valid[13] = 0x03;

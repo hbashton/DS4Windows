@@ -24,7 +24,7 @@ internal static class ViiperRecovery
             return false;
         try
         {
-            if (!ViiperSetupManager.HasSafeRuntimePrerequisites(ViiperSetupManager.GetStatus()))
+            if (!ViiperSetupManager.HasSafeRuntimePrerequisites(ViiperSetupManager.GetFreshDependencyStatus()))
                 throw new IOException("Windows controller-driver setup needs attention before VIIPER can restart safely.");
             // Capture destination once. A retired portable context must never
             // accidentally select the installed broker during the transaction.
@@ -45,7 +45,7 @@ internal static class ViiperRecovery
                     token.ThrowIfCancellationRequested();
                     Action repair = () =>
                     {
-                        if (!ViiperSetupManager.HasSafeRuntimePrerequisites(ViiperSetupManager.GetStatus()))
+                        if (!ViiperSetupManager.HasSafeRuntimePrerequisites(ViiperSetupManager.GetFreshDependencyStatus()))
                             throw new IOException("Windows controller-driver readiness changed during repair. No replacement broker was started.");
                         if (portableRoot != null)
                         {
@@ -118,7 +118,7 @@ internal static class ViiperRecovery
                 if (ViiperSetupManager.ProbeServer(ViiperSetupManager.ApiHost, ViiperSetupManager.ApiPort,
                         authenticated: true, out failure, totalTimeoutMilliseconds: timeoutMilliseconds))
                 {
-                    ViiperPrerequisiteStatus status = ViiperSetupManager.GetStatus();
+                    ViiperPrerequisiteStatus status = ViiperSetupManager.GetFreshDependencyStatus();
                     if (status.Ready && ViiperSetupManager.HasSafeRuntimePrerequisites(status)) return true;
                     failure = status.DisplayText;
                 }
@@ -128,7 +128,7 @@ internal static class ViiperRecovery
                 // A ping alone is not enough: another process could acquire
                 // the port after launch. Revalidate identity and prerequisites
                 // at the boundary where controller output will resume.
-                ViiperPrerequisiteStatus status = ViiperSetupManager.GetStatus();
+                ViiperPrerequisiteStatus status = ViiperSetupManager.GetFreshDependencyStatus();
                 if (IsManagedRecoveryReady(status, ViiperSetupManager.GetCanonicalViiperExePath())) return true;
                 failure = status.DisplayText;
             }

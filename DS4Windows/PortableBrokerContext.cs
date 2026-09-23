@@ -15,6 +15,7 @@ namespace DS4Windows;
 internal sealed class PortableBrokerStartupException : Exception
 {
     internal PortableBrokerStartupException(string message) : base(message) { }
+    internal PortableBrokerStartupException(string message, Exception innerException) : base(message, innerException) { }
 }
 
 // Owns only the broker started by this normal portable package. It does not
@@ -23,8 +24,8 @@ internal sealed class PortableBrokerContext : IDisposable
 {
     internal const string MarkerFileName = "DS4Windows.portable";
     internal const string MarkerText = "DS4Windows portable package v1";
-    private const string CloseOtherBroker = "Another VIIPER is running, or its ownership could not be verified. Close VIIPER, then reopen this portable DS4Windows. No existing broker was stopped.";
-    private const string StartFailure = "The portable VIIPER could not start safely. Close VIIPER and reopen DS4Windows. Check that this extracted folder is writable and the supported USB/IP driver is installed. If Windows denies driver access, run DS4Windows as administrator.";
+    private const string CloseOtherBroker = "Another VIIPER is running, or its ownership could not be verified. Use Install / Repair VIIPER in Settings to retry while DS4Windows stays open. An unidentified or inaccessible broker must be closed manually; no unverified process was stopped.";
+    private const string StartFailure = "The portable VIIPER could not start safely. Use Install / Repair VIIPER in Settings to retry while DS4Windows stays open. Check that this extracted folder is writable and the supported USB/IP driver is installed. If Windows denies access to a broker, close that identified broker manually or use administrator access.";
     private readonly object gate = new();
     private readonly IPortableBrokerProcessHost host;
     private readonly Action<string> validatePath;
@@ -66,7 +67,7 @@ internal sealed class PortableBrokerContext : IDisposable
         }
         return "Portable VIIPER did not become ready.\n\nReadiness check: " + detail +
             "\n\nInclude this check in your bug report. Use a complete extracted portable package and USB/IP 0.9.7.7. " +
-            "Close any conflicting VIIPER before reopening DS4Windows. Your key and profiles were not replaced.";
+            "Use Install / Repair VIIPER in Settings to retry without closing DS4Windows. If a conflicting broker cannot be identified or accessed, close it manually first. Your key and profiles were not replaced.";
     }
 
     internal static void Initialize(string executableDirectory)
@@ -77,11 +78,118 @@ internal sealed class PortableBrokerContext : IDisposable
             new PortableBrokerProcessHost(), ReadManagedRoots);
     }
 
+    internal static void InitializeUnavailable(string executableDirectory)
+    {
+        if (current != null)
+            throw new PortableBrokerStartupException("The portable broker owner was already initialized.");
+        current = CreateUnavailable(executableDirectory, new PortableBrokerProcessHost(), ReadManagedRoots);
+    }
+
+    internal static PortableBrokerContext CreateUnavailable(string directory,
+        IPortableBrokerProcessHost processHost, Func<IEnumerable<string>> managedRoots)
+    {
+        string root = FindPortableRoot(directory, managedRoots)
+            ?? throw new PortableBrokerStartupException("A portable repair placeholder requires a verified portable package.");
+        return new(root, null, processHost, PortableLabContext.ValidateNoReparsePoints, pinBackend: false);
+    }
+
+    // Only the explicit repair coordinator may retire a verified borrowed
+    // broker. Its caller has already drained all controller/output lifetimes.
+    // Ordinary Dispose below deliberately remains owned-process-only.
+    internal static void RetireCurrentForRepair(
+        IReadOnlyList<PortableBrokerProcessIdentity> captured = null, Action stopCaptured = null)
+    {
+        PortableBrokerContext context = current;
+        if (context == null) return;
+        context.RetireForRepair(captured, stopCaptured);
+        if (ReferenceEquals(current, context)) current = null;
+    }
+
+    internal void RetireForRepair(
+        IReadOnlyList<PortableBrokerProcessIdentity> captured = null, Action stopCaptured = null)
+    {
+        lock (gate)
+        {
+            captured ??= PortableBrokerProcessHost.CaptureForRepair(host);
+            IReadOnlyList<PortableBrokerProcessIdentity> peers =
+                PortableBrokerProcessHost.ValidateCapturedForRepair(captured, host);
+            var local = captured.Where(peer => string.Equals(Path.GetFullPath(peer.ExecutablePath), ViiperPath,
+                StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (!disposed && backendPin != null && local.Length > 1)
+                throw new PortableBrokerStartupException("The portable VIIPER repair target could not be identified. No unverified broker was stopped.");
+            PortableBrokerProcessIdentity? selected = owned != null
+                ? new(owned.ProcessId, owned.StartTimeUtcTicks, ViiperPath) : borrowed;
+            if (!disposed && backendPin != null && local.Length == 1)
+            {
+                // A same-path newcomer is not the previously verified owner.
+                // Do not silently authorize it just because repair was clicked.
+                if (selected == null || local[0].ProcessId != selected.Value.ProcessId ||
+                    local[0].StartTimeUtcTicks != selected.Value.StartTimeUtcTicks ||
+                    !string.Equals(Path.GetFullPath(local[0].ExecutablePath),
+                        Path.GetFullPath(selected.Value.ExecutablePath), StringComparison.OrdinalIgnoreCase))
+                    throw new PortableBrokerStartupException("The portable VIIPER owner changed. Close that broker and retry repair. No replacement process was stopped.");
+            }
+            // The coordinator may use a stop-only elevated helper for this
+            // same frozen set. Pins and trusted-owner validation remain here;
+            // no second path-based enumeration may adopt a newly started PID.
+            if (stopCaptured != null) stopCaptured();
+            else
+            {
+                var stopping = Stopwatch.StartNew();
+                foreach (PortableBrokerProcessIdentity peer in peers.Where(peer =>
+                             string.Equals(peer.ExecutablePath, ViiperPath, StringComparison.OrdinalIgnoreCase)))
+                {
+                    int remaining = 5_000 - (int)stopping.ElapsedMilliseconds;
+                    if (remaining <= 0)
+                        throw new PortableBrokerStartupException("Portable VIIPER retirement exceeded its deadline. Its pinned image was not released.");
+                    host.StopForRepair(peer, remaining);
+                }
+            }
+            IReadOnlyList<PortableBrokerProcessIdentity> after =
+                PortableBrokerProcessHost.ValidateCapturedForRepair(captured, host);
+            if (after.Any(peer => string.Equals(peer.ExecutablePath, ViiperPath, StringComparison.OrdinalIgnoreCase)))
+                throw new PortableBrokerStartupException("The portable VIIPER did not exit. Its pinned image was not released or replaced.");
+            if (disposed) return;
+            // Retire only after verified exit. StopForRepair has the explicit
+            // authority to stop a borrowed identity; Dispose does not.
+            disposed = true;
+            try { owned?.Dispose(); } catch { }
+            owned = null;
+            borrowed = null;
+            configurationPin?.Dispose();
+            configurationPin = null;
+            keyPin?.Dispose();
+            keyPin = null;
+            backendPin?.Dispose();
+        }
+    }
+
     // The production entry always supplies the compiled release digest. Tests
     // inject only the process boundary, managed-root lookup and path inspection.
     internal static PortableBrokerContext Create(string directory, string expectedDigest,
         IPortableBrokerProcessHost processHost, Func<IEnumerable<string>> managedRoots,
         Action<string> inspectPath = null)
+    {
+        string root = FindPortableRoot(directory, managedRoots, inspectPath);
+        if (root == null) return null;
+        try
+        {
+            PortableBrokerContext context = new(root, expectedDigest, processHost,
+                inspectPath ?? PortableLabContext.ValidateNoReparsePoints);
+            try { context.FindCompatibleCandidate(); return context; }
+            catch { context.Dispose(); throw; }
+        }
+        catch (PortableBrokerStartupException) { throw; }
+        catch
+        {
+            throw new PortableBrokerStartupException("The portable package could not be verified. Extract it into a writable local folder outside Program Files, without links, and reopen DS4Windows.");
+        }
+    }
+
+    // Resolve package identity without opening/pinning viiper.exe. Startup can
+    // recover a missing or older bundled broker before constructing its owner.
+    internal static string FindPortableRoot(string directory,
+        Func<IEnumerable<string>> managedRoots = null, Action<string> inspectPath = null)
     {
         try
         {
@@ -95,7 +203,7 @@ internal sealed class PortableBrokerContext : IDisposable
             // A marker copied into the registered managed installation is not
             // authority to change its broker/key/task policy, nor a reason to
             // brick installed startup. Do not read its contents or broker here.
-            foreach (string managed in managedRoots())
+            foreach (string managed in (managedRoots ?? ReadManagedRoots)())
                 if (!string.IsNullOrWhiteSpace(managed) && AtOrBelow(root, NormalizeManagedRoot(managed)))
                     return null;
             Action<string> inspect = inspectPath ?? PortableLabContext.ValidateNoReparsePoints;
@@ -105,9 +213,7 @@ internal sealed class PortableBrokerContext : IDisposable
                 File.ReadAllText(marker).TrimEnd('\r', '\n') != MarkerText)
                 throw new PortableBrokerStartupException("This portable package marker is invalid. Extract a fresh, complete DS4Windows portable package.");
             ValidateRoot(directory);
-            PortableBrokerContext context = new(root, expectedDigest, processHost, inspect);
-            try { context.FindCompatibleCandidate(); return context; }
-            catch { context.Dispose(); throw; }
+            return root;
         }
         catch (PortableBrokerStartupException) { throw; }
         catch
@@ -117,7 +223,7 @@ internal sealed class PortableBrokerContext : IDisposable
     }
 
     private PortableBrokerContext(string root, string expectedDigest,
-        IPortableBrokerProcessHost processHost, Action<string> inspect)
+        IPortableBrokerProcessHost processHost, Action<string> inspect, bool pinBackend = true)
     {
         host = processHost;
         validatePath = inspect;
@@ -126,6 +232,7 @@ internal sealed class PortableBrokerContext : IDisposable
         KeyPath = Path.Combine(DataPath, "viiper.key.txt");
         ConfigPath = Path.Combine(DataPath, "viiper.json");
         ValidateLocalPaths();
+        if (!pinBackend) return;
         backendPin = new FileStream(ViiperPath, FileMode.Open, FileAccess.Read, FileShare.Read);
         try
         {
@@ -207,7 +314,7 @@ internal sealed class PortableBrokerContext : IDisposable
     internal bool IsVerifiedBackend(string path)
     {
         lock (gate)
-            return !disposed && backendPin.CanRead && string.Equals(path, ViiperPath, StringComparison.OrdinalIgnoreCase);
+            return !disposed && backendPin?.CanRead == true && string.Equals(path, ViiperPath, StringComparison.OrdinalIgnoreCase);
     }
 
     internal bool InspectOwnedProcess(out bool running, out string failure)
@@ -219,7 +326,7 @@ internal sealed class PortableBrokerContext : IDisposable
     {
         running = false;
         failure = null;
-        if (disposed || startFailed) { failure = StartFailure; return false; }
+        if (disposed || startFailed || backendPin == null) { failure = StartFailure; return false; }
         try
         {
             IReadOnlyList<PortableBrokerProcessIdentity> peers = host.Snapshot();
@@ -256,6 +363,8 @@ internal sealed class PortableBrokerContext : IDisposable
         lock (gate)
         {
             if (disposed || startFailed) throw new PortableBrokerStartupException(StartFailure);
+            if (backendPin == null)
+                throw new PortableBrokerStartupException("Portable VIIPER is unavailable. Use Install/Repair VIIPER in Settings to restore the matching broker in this portable folder.");
             if (owned != null || borrowed != null)
             {
                 if (InspectOwnedProcessCore(out bool running, out string failure) && running) return;
@@ -382,7 +491,7 @@ internal sealed class PortableBrokerContext : IDisposable
             StopOwnedProcess(); // Caller has already drained its controller/output lifetimes.
             try { configurationPin?.Dispose(); } catch { }
             try { keyPin?.Dispose(); } catch { }
-            try { backendPin.Dispose(); } catch { }
+            try { backendPin?.Dispose(); } catch { }
         }
     }
 }
@@ -394,6 +503,8 @@ internal interface IPortableBrokerProcessHost
     IReadOnlyList<PortableBrokerProcessIdentity> Snapshot();
     IReadOnlyList<string> ReadArguments(PortableBrokerProcessIdentity identity);
     IPortableBrokerProcess Start(ProcessStartInfo startInfo);
+    void StopForRepair(PortableBrokerProcessIdentity identity, int timeoutMilliseconds) =>
+        throw new NotSupportedException("This process host does not authorize explicit repair termination.");
 }
 
 internal interface IPortableBrokerProcess : IDisposable
@@ -493,6 +604,146 @@ internal sealed class PortableBrokerProcessHost : IPortableBrokerProcessHost
         }
         finally { _ = CloseHandle(handle); }
     }
+
+    public void StopForRepair(PortableBrokerProcessIdentity identity, int timeoutMilliseconds)
+    {
+        if (identity.ProcessId <= 0 || identity.StartTimeUtcTicks <= 0 ||
+            !Path.IsPathFullyQualified(identity.ExecutablePath) || timeoutMilliseconds is < 1 or > 30_000)
+            throw new ArgumentException("Explicit VIIPER repair requires a complete process identity and bounded timeout.");
+        Process process;
+        try { process = Process.GetProcessById(identity.ProcessId); }
+        catch (ArgumentException) { return; } // The selected identity already exited.
+        using (process)
+        {
+            IntPtr handle = process.Handle; // Keep this exact process object alive throughout stop/wait.
+            if (process.HasExited) return;
+            var path = new StringBuilder(32_768);
+            int length = path.Capacity;
+            if (!QueryFullProcessImageName(handle, 0, path, ref length) || length <= 0 ||
+                process.StartTime.ToUniversalTime().Ticks != identity.StartTimeUtcTicks ||
+                !string.Equals(Path.GetFullPath(path.ToString(0, length)),
+                    Path.GetFullPath(identity.ExecutablePath), StringComparison.OrdinalIgnoreCase))
+                throw new PortableBrokerStartupException("The selected VIIPER process identity changed. No replacement process was stopped.");
+            try { if (!process.HasExited) process.Kill(entireProcessTree: false); }
+            catch (InvalidOperationException) when (process.HasExited) { return; }
+            if (!process.WaitForExit(timeoutMilliseconds))
+                throw new PortableBrokerStartupException("The selected VIIPER process did not exit in time. Its image was not replaced.");
+        }
+    }
+
+    internal static void StopSelectedForRepair(string path, IPortableBrokerProcessHost processHost = null)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path) ||
+            !string.Equals(Path.GetFileName(path), "viiper.exe", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("Explicit repair requires an absolute VIIPER image path.");
+        string selectedPath = Path.GetFullPath(path);
+        IPortableBrokerProcessHost host = processHost ?? new PortableBrokerProcessHost();
+        static bool Unknown(PortableBrokerProcessIdentity peer) => peer.ProcessId <= 0 ||
+            peer.StartTimeUtcTicks <= 0 || string.IsNullOrWhiteSpace(peer.ExecutablePath) ||
+            !Path.IsPathFullyQualified(peer.ExecutablePath);
+        bool Selected(PortableBrokerProcessIdentity peer) => string.Equals(
+            Path.GetFullPath(peer.ExecutablePath), selectedPath, StringComparison.OrdinalIgnoreCase);
+        IReadOnlyList<PortableBrokerProcessIdentity> before = host.Snapshot();
+        if (before.Count > 256 || before.Any(Unknown))
+            throw new PortableBrokerStartupException("A VIIPER repair target could not be identified. No process was stopped.");
+        var stopping = Stopwatch.StartNew();
+        foreach (PortableBrokerProcessIdentity identity in before.Where(Selected))
+        {
+            int remaining = 5_000 - (int)stopping.ElapsedMilliseconds;
+            if (remaining <= 0)
+                throw new PortableBrokerStartupException("The selected VIIPER processes did not exit within the repair deadline. Their images were not replaced.");
+            host.StopForRepair(identity, remaining);
+        }
+        IReadOnlyList<PortableBrokerProcessIdentity> after = host.Snapshot();
+        if (after.Any(Unknown) || after.Any(Selected))
+            throw new PortableBrokerStartupException("The selected VIIPER has not exited or its identity could not be verified. Its image was not replaced.");
+    }
+
+    // Explicit recovery authority is a frozen process identity set, not an
+    // executable name wildcard. Image path/PID/start time identify what the
+    // user authorized us to retire; they do not authenticate an old binary.
+    // The replacement is independently pinned to the compiled release hash.
+    internal static IReadOnlyList<PortableBrokerProcessIdentity> CaptureForRepair(
+        IPortableBrokerProcessHost processHost = null)
+    {
+        RejectLabRepair();
+        return Array.AsReadOnly(ValidateRepairIdentities(
+            (processHost ?? new PortableBrokerProcessHost()).Snapshot()));
+    }
+
+    internal static void StopCapturedForRepair(
+        IReadOnlyList<PortableBrokerProcessIdentity> captured,
+        string preserveImagePath = null, IPortableBrokerProcessHost processHost = null)
+    {
+        RejectLabRepair();
+        PortableBrokerProcessIdentity[] selected = ValidateRepairIdentities(captured);
+        if (preserveImagePath != null)
+            preserveImagePath = ValidateRepairImagePath(preserveImagePath);
+        IPortableBrokerProcessHost host = processHost ?? new PortableBrokerProcessHost();
+        IReadOnlyList<PortableBrokerProcessIdentity> before = ValidateCapturedForRepair(selected, host);
+        bool WasCaptured(PortableBrokerProcessIdentity process) =>
+            selected.Any(expected => SameRepairIdentity(expected, process));
+        bool Preserved(PortableBrokerProcessIdentity process) => preserveImagePath != null &&
+            string.Equals(process.ExecutablePath, preserveImagePath, StringComparison.OrdinalIgnoreCase);
+        var stopping = Stopwatch.StartNew();
+        foreach (PortableBrokerProcessIdentity identity in before.Where(process => !Preserved(process)))
+        {
+            int remaining = 5_000 - (int)stopping.ElapsedMilliseconds;
+            if (remaining <= 0)
+                throw new PortableBrokerStartupException("The captured VIIPER processes did not exit within the repair deadline. No replacement broker was started.");
+            host.StopForRepair(identity, remaining);
+        }
+        PortableBrokerProcessIdentity[] after = ValidateRepairIdentities(host.Snapshot());
+        if (after.Any(process => !WasCaptured(process) || !Preserved(process)))
+            throw new PortableBrokerStartupException("VIIPER ownership changed or a captured broker did not exit. No newly discovered process was stopped; the replacement broker was not started.");
+    }
+
+    internal static IReadOnlyList<PortableBrokerProcessIdentity> ValidateCapturedForRepair(
+        IReadOnlyList<PortableBrokerProcessIdentity> captured, IPortableBrokerProcessHost processHost = null)
+    {
+        RejectLabRepair();
+        PortableBrokerProcessIdentity[] selected = ValidateRepairIdentities(captured);
+        PortableBrokerProcessIdentity[] current = ValidateRepairIdentities(
+            (processHost ?? new PortableBrokerProcessHost()).Snapshot());
+        if (current.Any(process => !selected.Any(expected => SameRepairIdentity(expected, process))))
+            throw new PortableBrokerStartupException("A new or changed VIIPER process appeared during repair. No newly discovered process was stopped; retry after checking the conflicting broker.");
+        return Array.AsReadOnly(current);
+    }
+
+    private static void RejectLabRepair()
+    {
+        if (PortableLabContext.Requested || PortableLabContext.IsActive)
+            throw new PortableBrokerStartupException("Portable-lab sessions do not stop or replace VIIPER brokers.");
+    }
+
+    private static PortableBrokerProcessIdentity[] ValidateRepairIdentities(
+        IReadOnlyList<PortableBrokerProcessIdentity> identities)
+    {
+        if (identities == null || identities.Count > 256)
+            throw new PortableBrokerStartupException("VIIPER process identities could not be safely captured. No unverified process was stopped.");
+        PortableBrokerProcessIdentity[] result = identities.Select(identity =>
+        {
+            if (identity.ProcessId <= 0 || identity.StartTimeUtcTicks <= 0)
+                throw new PortableBrokerStartupException("A VIIPER process identity is incomplete. No unverified process was stopped.");
+            return identity with { ExecutablePath = ValidateRepairImagePath(identity.ExecutablePath) };
+        }).ToArray();
+        if (result.Length > 256 || result.Select(identity => identity.ProcessId).Distinct().Count() != result.Length)
+            throw new PortableBrokerStartupException("VIIPER process identities were ambiguous. No unverified process was stopped.");
+        return result;
+    }
+
+    private static string ValidateRepairImagePath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path) ||
+            path.StartsWith(@"\\", StringComparison.Ordinal) ||
+            !string.Equals(Path.GetFileName(path), "viiper.exe", StringComparison.OrdinalIgnoreCase))
+            throw new PortableBrokerStartupException("A VIIPER repair target is not an identified local viiper.exe. No unverified executable was stopped.");
+        return Path.GetFullPath(path);
+    }
+
+    private static bool SameRepairIdentity(PortableBrokerProcessIdentity left, PortableBrokerProcessIdentity right) =>
+        left.ProcessId == right.ProcessId && left.StartTimeUtcTicks == right.StartTimeUtcTicks &&
+        string.Equals(left.ExecutablePath, right.ExecutablePath, StringComparison.OrdinalIgnoreCase);
 
     public IPortableBrokerProcess Start(ProcessStartInfo startInfo)
     {

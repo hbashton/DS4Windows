@@ -162,11 +162,12 @@ namespace DS4Windows
             "--run-embedded-viiper-installer";
         private const string InstallerResourceName =
             "DS4Windows.install-viiper-backend.ps1";
-        private const string BundledViiperName = "VIIPER-0.1.6-rc4.6.4-x64.exe";
+        internal const string BundledViiperName = "VIIPER-0.1.7-rc4.6.5-x64.exe";
+        internal const string SupportedViiperReleaseTag = "v0.1.7-rc4.6.5";
         private const string BundledViiperHashName =
             BundledViiperName + ".sha256";
         internal const string SupportedViiperSha256 =
-            "CBADAD730A7E7A1FB806BF650F321A1B06475D5315BB418378C97D5C774B1AE1";
+            "6DD4DF8EA57801AE23AF3274B1FCA6398B4352F4CB970442D7841D103E6ACCDE";
         private const string BundledUsbipName = "USBip-0.9.7.7-x64.exe";
         private const string BundledHidHideName =
             "HidHide_1.5.230_x64.exe";
@@ -309,7 +310,7 @@ namespace DS4Windows
             bool viiperPackageCurrent = lab != null
                 ? lab.IsVerifiedBackend(viiperPath)
                 : portable != null ? portable.IsVerifiedBackend(viiperPath)
-                : IsBundledViiperAuthentic() && FilesHaveSameSha256(viiperPath, bundledViiperPath);
+                : FileHasSha256(viiperPath, SupportedViiperSha256);
             bool viiperStartupTaskReady = portable != null || !startupRequested ||
                 IsViiperStartupTaskValid(canonicalViiperPath, out _);
             bool canonicalViiperRunning;
@@ -376,12 +377,39 @@ namespace DS4Windows
 
         public static bool EnsureReadyWithPrompt(Window owner, bool forcePrompt = false)
         {
+            if (ViiperRecovery.IsRecovering) return false;
             ViiperPrerequisiteStatus status = GetStatus(tryStartServer: true);
+            bool runtimePrerequisitesReady = HasSafeRuntimePrerequisites(status);
+            // Unmarked copies still offer the existing full-setup workflow
+            // when no managed app installation exists. Broker-only repair
+            // never creates a new installation or migrates an extracted copy.
+            bool managedInstallationMissing = !PortableBrokerContext.IsActive &&
+                !Directory.Exists(Path.GetDirectoryName(Path.GetDirectoryName(GetCanonicalViiperExePath())));
+            if (!PortableLabContext.IsActive && runtimePrerequisitesReady && !managedInstallationMissing &&
+                (!status.ViiperPackageCurrent || !status.ServerRunning ||
+                    ViiperRecovery.RepairRequired) &&
+                (forcePrompt || ViiperRecovery.TryBeginAutomaticRecovery()))
+            {
+                if (!ViiperRecovery.Repair(owner)) return false;
+                status = GetStatus();
+            }
+            // A failed broker repair must not claim Ready. Missing/unsafe
+            // drivers still reach the managed prerequisite prompt below;
+            // broker replacement cannot repair a driver or a USB conflict.
+            if (ViiperRecovery.RepairRequired && !PortableLabContext.IsActive &&
+                runtimePrerequisitesReady && !managedInstallationMissing) return false;
+            if (forcePrompt && status.Ready)
+            {
+                ShowInstallerMessage(owner, "VIIPER is verified and ready. Your files stay in their current location.\n\n" + status.ViiperPath,
+                    "VIIPER ready", MessageBoxImage.Information);
+                return true;
+            }
             if (PortableBrokerContext.IsActive)
             {
                 if (!status.Ready || forcePrompt)
-                    ShowInstallerMessage(owner, status.DisplayText +
-                        "\n\nThis portable copy uses its bundled VIIPER. It does not replace an installed broker or change its startup task. Close conflicting VIIPER instances and restart DS4Windows. If the USB/IP drivers need setup, close this portable session and use the full installer.",
+                    ShowInstallerMessage(owner, status.Ready
+                        ? "VIIPER is verified and ready beside this portable DS4Windows. Your files stay in this folder."
+                        : status.DisplayText + "\n\nYour portable files have not moved. You can retry Install / Repair here.",
                         "DS4Windows portable", status.Ready ? MessageBoxImage.Information : MessageBoxImage.Warning);
                 return status.Ready;
             }
@@ -495,6 +523,11 @@ namespace DS4Windows
                     return status.Ready;
             }
         }
+
+        internal static bool HasSafeRuntimePrerequisites(ViiperPrerequisiteStatus status) =>
+            status != null && status.UsbipInstalled && status.UsbipExecutableSafe &&
+            status.UsbipDriverFilesSafe && status.UsbipRuntimeReady &&
+            !status.UsbipRebootOrRepairRequired && !status.CitrixUsbMonitorConflict;
 
         internal static bool RequiresVerifiedViiperUpdate(
             ViiperPrerequisiteStatus status)
@@ -1512,7 +1545,7 @@ namespace DS4Windows
             }
         }
 
-        private static string GetCanonicalViiperExePath()
+        internal static string GetCanonicalViiperExePath()
         {
             return Path.Combine(GetNativeProgramFilesPath(), "DS4Windows", "VIIPER",
                 "viiper.exe");
@@ -1632,9 +1665,7 @@ namespace DS4Windows
                     return false;
                 }
 
-                return IsBundledViiperAuthentic() &&
-                    FilesHaveSameSha256(normalized,
-                        GetBundledViiperPath());
+                return FileHasSha256(normalized, SupportedViiperSha256);
             }
             catch
             {
@@ -2878,6 +2909,22 @@ namespace DS4Windows
                         lastServerStartAttemptUtc = now;
                         return TryStartServer(viiperPath);
                     });
+            }
+        }
+
+        internal static bool TryStartRepairedServer(string viiperPath)
+        {
+            // Recheck after the elevated replacement, not only when its UI
+            // began: never bypass the ordinary driver's startup safety gate.
+            if (!HasSafeRuntimePrerequisites(GetStatus())) return false;
+            lock (serverStartLock)
+            {
+                if (PortableLabContext.IsActive || PortableBrokerContext.IsActive ||
+                    !IsExactViiperExecutablePath(viiperPath, GetCanonicalViiperExePath()) ||
+                    !FileHasSha256(viiperPath, SupportedViiperSha256) ||
+                    !InspectViiperProcessOwnership(viiperPath, out bool running, out _))
+                    return false;
+                return running || TryStartServer(viiperPath);
             }
         }
 

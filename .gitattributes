@@ -7,8 +7,8 @@
 # upstream license or build-note line endings when staging or checking out.
 # The generated aggregate can include CRLF and trailing blank lines. Preserve
 # each pinned document's exact bytes rather than reformatting a release input.
-extras/VIIPER-0.1.6-rc4.6.4-LICENSES.txt -text whitespace=cr-at-eol,-blank-at-eof
-extras/VIIPER-0.1.6-rc4.6.4-BUILD-NOTES.txt -text
+extras/VIIPER-0.1.7-rc4.6.5-LICENSES.txt -text whitespace=cr-at-eol,-blank-at-eof
+extras/VIIPER-0.1.7-rc4.6.5-BUILD-NOTES.txt -text
 extras/LICENSE.txt -text whitespace=cr-at-eol
 extras/VIIPER-SYSTRAY-NOTICE.md -text whitespace=cr-at-eol
 extras/VIIPER-SYSTRAY-LICENSE.txt -text whitespace=cr-at-eol

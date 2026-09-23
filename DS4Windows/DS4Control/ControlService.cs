@@ -124,6 +124,7 @@ namespace DS4Windows
         private bool stickMouseFakerInputMissingNoticeShown = false;
         private readonly object outputKbmHandlerLock = new object();
         private readonly object serviceLifecycleLock = new object();
+        private readonly BackendMaintenanceTransaction backendMaintenance = new();
         private readonly InputControllerRegistrationTable inputRegistrationTable;
         private readonly ControlServiceInputSlotAdmission inputSlotAdmission;
         private readonly ControlServiceLegacyHidSlotAuthority
@@ -1148,6 +1149,53 @@ namespace DS4Windows
                 return true;
             }
             finally { Monitor.Exit(outputKbmHandlerLock); }
+        }
+
+        internal bool BackendMaintenanceActive => backendMaintenance?.IsActive == true;
+        internal bool BackendMaintenanceRequiresRepair => backendMaintenance?.RequiresRepair == true;
+
+        // The caller stages any download before this transaction and runs it on
+        // a worker, keeping the STA free to service normal lifecycle events.
+        // The action must repair, start and verify the exact broker synchronously.
+        internal void ExecuteBackendMaintenance(Action operation)
+        {
+            ArgumentNullException.ThrowIfNull(operation);
+            if (Thread.CurrentThread.GetApartmentState() == ApartmentState.STA ||
+                ControlServiceMouseCallbackSubscription.IsInsideCallback)
+                throw new InvalidOperationException("Backend maintenance must run on a background worker, not the UI or an input callback.");
+
+            DSXUdpServer detached = null;
+            bool rejectedStop = false;
+            try
+            {
+                backendMaintenance.Execute(serviceLifecycleLock, () => running,
+                    () =>
+                    {
+                        // Mirror Stop's admission revocation before draining.
+                        ++dsxConfigurationRevision;
+                        detached = DetachDsxSession();
+                        bool stopped = StopCore(showlog: true, immediateUnplug: true);
+                        rejectedStop = !stopped;
+                        if (stopped)
+                        {
+                            lock (DsxOutputGate) dsxLastError = "";
+                            // Release the UDP port before StartCore creates its
+                            // replacement. The revoked DSX callbacks use only
+                            // DsxOutputGate/device lifetimes, never this service
+                            // gate; Start/HotPlug also reject while Active.
+                            detached?.Dispose();
+                            detached = null;
+                        }
+                        return stopped;
+                    }, operation, () => StartCore(showlog: true));
+            }
+            finally
+            {
+                // A failed/throwing drain still retires the detached listener.
+                detached?.Dispose();
+                if (rejectedStop && running && Global.IsUsingDSXUDPServer())
+                    ChangeDSXUDPStatus(true);
+            }
         }
 
         // Queued profile workers acquire this BEFORE pausing a source. A KBM
@@ -2586,9 +2634,13 @@ namespace DS4Windows
 
         public bool Start(bool showlog = true)
         {
-            if (ControlServiceMouseCallbackSubscription.IsInsideCallback) return false;
+            if (ControlServiceMouseCallbackSubscription.IsInsideCallback ||
+                backendMaintenance?.RejectControllerStart == true) return false;
             lock (serviceLifecycleLock)
             {
+                // Recheck after waiting: a failed repair must also reject a
+                // start that was queued before maintenance acquired this gate.
+                if (backendMaintenance?.RejectControllerStart == true) return false;
                 if (running)
                 {
                     StartupDiag("ControlService.Start ignored because the service is already running");
@@ -3485,9 +3537,11 @@ namespace DS4Windows
 
         public bool HotPlug()
         {
-            if (ControlServiceMouseCallbackSubscription.IsInsideCallback) return false;
+            if (ControlServiceMouseCallbackSubscription.IsInsideCallback ||
+                backendMaintenance?.RejectControllerStart == true) return false;
             lock (serviceLifecycleLock)
             {
+                if (backendMaintenance?.RejectControllerStart == true) return false;
                 return HotPlugCore();
             }
         }

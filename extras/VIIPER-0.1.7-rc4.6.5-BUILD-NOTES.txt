@@ -1,0 +1,79 @@
+VIIPER bundled artifact provenance
+
+Version: v0.1.7-rc4.6.5
+Status: Unsigned release candidate, built by the tagged GitHub Actions workflow; not a stable release.
+Source: https://github.com/hbashton/VIIPER
+Source commit: 89a78e80053de5b67d4b539a5325ee90366c2ebc
+Source archive: VIIPER-0.1.7-rc4.6.5-SOURCE.zip
+Source archive SHA-256: 9EE81AC49FFE838FC428389F7A277017E8410A5C2AE029265DD88B24240DB780
+Source archive layout: git archive --format=zip --prefix=VIIPER-0.1.7-rc4.6.5-SOURCE/ of the exact tagged source commit; ZIP commit comment verified.
+Release: https://github.com/hbashton/VIIPER/releases/tag/v0.1.7-rc4.6.5
+Tagged build: https://github.com/hbashton/VIIPER/actions/runs/35820002666
+Release archive: viiper-windows-amd64.zip
+Release archive SHA-256: 702EADC4AB1D414110CA2C4CC68E7031DAE7B176E5AD6143C4FD543AE55EDB69
+Build receipt: BUILD-INFO.json in the tagged release archive
+Build receipt SHA-256: 4959F566E2D5E648075880DB67C3C17866107FFEDDD00A4F0BDCB3EDB80639E6
+Toolchain: Go 1.27.0 windows/amd64
+Resource tool: github.com/josephspurrier/goversioninfo/cmd/goversioninfo v1.7.0
+Build: GOOS=windows GOARCH=amd64 CGO_ENABLED=0 BUILD_TYPE=Release
+Build flags: -tags release -trimpath; default Go VCS stamping verified clean.
+Link flags: -s -w -X main.Version=v0.1.7-rc4.6.5 -X main.Commit=89a78e8 -X main.Date=2026-09-23T04:53:24Z -X github.com/Alia5/VIIPER/internal/codegen/common.Version=v0.1.7-rc4.6.5
+Embedded commit: 89a78e8
+Embedded build date: 2026-09-23T04:53:24Z
+Embedded VCS revision: 89a78e80053de5b67d4b539a5325ee90366c2ebc
+Embedded VCS time: 2026-09-23T04:44:32Z
+Embedded VCS modified: false
+PE file version: 0.1.7.0
+PE product version: 0.1.7-rc4.6.5
+Binary: VIIPER-0.1.7-rc4.6.5-x64.exe
+Binary size: 9423872 bytes
+Binary SHA-256: 6DD4DF8EA57801AE23AF3274B1FCA6398B4352F4CB970442D7841D103E6ACCDE
+Authenticode status at packaging: NotSigned
+License notice: VIIPER-0.1.7-rc4.6.5-LICENSES.txt
+License notice SHA-256: 942E79C9E799B35907E18BF5992897640D63CE1AD4EBAD60593BE70BF3162DDD
+Full GPL-3.0 license: LICENSE.txt
+Full GPL-3.0 license SHA-256: F24EE094842DC3347A7A06B71373573CE18F6DCB935C81E95623723EE22E6CA6
+Local Windows tray modification notice: VIIPER-SYSTRAY-NOTICE.md
+Local Windows tray modification notice SHA-256: 6126849BBF404E8172729DAF992DDF7BE43C84F30721883F51C0FA52CC4CD192
+Local Windows tray full Apache-2.0 license: VIIPER-SYSTRAY-LICENSE.txt
+Local Windows tray full Apache-2.0 license SHA-256: 05C55BD8834035C143C17AA218BFF08E22B7A66C5603CBA8F070DCAAFC974B8F
+WDL resampler attribution and license: VIIPER-WDL-NOTICE.txt
+WDL resampler attribution and license SHA-256: 2485006947F464C2A69E9F863D50529261FB684A7AC5E6BAE0D03BFE65F9E025
+
+Artifact identity:
+
+The Windows executable and all five notices are copied byte-for-byte from the
+tagged CI archive, not rebuilt locally. The standalone EXE is the same archive
+member under the versioned repair filename. BUILD-INFO.json binds the binary,
+notice hashes, PE versions, source commit, build date and Go module/settings to
+run 35820002666, attempt 1. Downstream inspection independently matched all Go
+build metadata without launching the broker. The ZIP digest matched GitHub's
+asset digest. The tagged workflow succeeded, including ordinary and Release
+tests on Linux and Windows, package checks and CI's help-only smoke test.
+
+The corresponding-source ZIP contains 821 entries and 682 source files. All
+files match the exact tagged Git blobs: 93 directly and 589 after only CRLF-to-LF
+normalization of git archive output. Its ZIP comment is the source commit.
+The sole external gitlink, _testing/e2e/deps/SDL, is not embedded by git archive.
+
+Behavioral scope:
+
+This revision removes VIIPER's built-in automatic release checks, update
+notifications and self-update execution. The legacy update-notify flag,
+environment variable and configuration keys still parse for compatibility but
+are ignored and normalized to none. Existing dismissal state is not deleted.
+Normal server, startup registration, tray, explicit install/uninstall and the
+separate DS4Windows installer/repair workflow remain available. Unused updater
+dialog dependencies are removed; the locally vendored tray derivative and its
+complete Apache notice remain.
+
+The previously shipped, explicitly negotiated Sony Bluetooth WDL conversion and
+ISO-OUT clock behavior remain unchanged in this revision. Legacy and Nintendo
+targets retain their prior conversion. The altered Go resampler's pinned WDL
+origin and complete license remain in VIIPER-WDL-NOTICE.txt and source. No
+private capture/trace recorder or controller gain changes are included.
+
+The kong-yaml dependency remains pinned to a56dc1466c79ffc467aac6e158b878b2d7903bd2
+with its MIT COPYING grant. Aggregate, GPL, systray and WDL notices preserve the
+exact bytes of the tagged Windows CI archive. Automated and package validation
+do not promise identical controller effects in every game.

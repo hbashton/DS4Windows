@@ -7,6 +7,57 @@ namespace DS4Windows.Tests
     [TestClass]
     public class ViiperSetupManagerTests
     {
+        [DataTestMethod]
+        [DataRow(null, true)]
+        [DataRow("ViiperProcessConflict", false)]
+        [DataRow("ViiperPackageCurrent", false)]
+        [DataRow("ServerRunning", false)]
+        [DataRow("UsbipRuntimeReady", false)]
+        [DataRow("CitrixUsbMonitorConflict", false)]
+        public void ManagedRecoveryReadinessRequiresIdentityAndWorkingPrerequisites(string fault, bool expected)
+        {
+            const string target = @"C:\Program Files\DS4Windows\VIIPER\viiper.exe";
+            ViiperPrerequisiteStatus status = new()
+            {
+                ViiperPath = target, ViiperInstalled = true, ViiperPackageCurrent = true, ServerRunning = true,
+                UsbipInstalled = true, UsbipExecutableSafe = true, UsbipDriverFilesSafe = true, UsbipRuntimeReady = true,
+            };
+            if (fault != null)
+            {
+                var property = typeof(ViiperPrerequisiteStatus).GetProperty(fault);
+                property.SetValue(status, !(bool)property.GetValue(status));
+            }
+            Assert.AreEqual(expected, ViiperRecovery.IsManagedRecoveryReady(status, target));
+            Assert.IsFalse(ViiperRecovery.IsManagedRecoveryReady(status, @"C:\Other\viiper.exe"));
+            Assert.IsFalse(ViiperRecovery.IsManagedRecoveryReady(null, target));
+        }
+
+        [DataTestMethod]
+        [DataRow(null, true)]
+        [DataRow("UsbipInstalled", false)]
+        [DataRow("UsbipExecutableSafe", false)]
+        [DataRow("UsbipDriverFilesSafe", false)]
+        [DataRow("UsbipRuntimeReady", false)]
+        [DataRow("UsbipRebootOrRepairRequired", false)]
+        [DataRow("CitrixUsbMonitorConflict", false)]
+        public void BrokerRepairNeverSubstitutesForSafeDriverPrerequisites(string fault, bool expected)
+        {
+            ViiperPrerequisiteStatus status = new()
+            {
+                UsbipInstalled = true, UsbipExecutableSafe = true,
+                UsbipDriverFilesSafe = true, UsbipRuntimeReady = true,
+                // Missing broker is intentionally repairable, not a driver prerequisite.
+                ViiperInstalled = false, ViiperPackageCurrent = false, ServerRunning = false,
+            };
+            if (fault != null)
+            {
+                var property = typeof(ViiperPrerequisiteStatus).GetProperty(fault);
+                property.SetValue(status, !(bool)property.GetValue(status));
+            }
+            Assert.AreEqual(expected, ViiperSetupManager.HasSafeRuntimePrerequisites(status));
+            Assert.IsFalse(ViiperSetupManager.HasSafeRuntimePrerequisites(null));
+        }
+
         [TestMethod]
         public void UsbipVersionRequiresPinnedSafe0977()
         {

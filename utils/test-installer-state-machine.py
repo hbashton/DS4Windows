@@ -208,7 +208,7 @@ def main() -> None:
         "FindAlternativeViiperPath(canonicalViiperPath), startupRequested)",
         "IsSelectableViiperExecutable,",
         "startupPath => EnsureViiperStartupTask(startupPath,",
-        "FilesHaveSameSha256(normalized",
+        "FileHasSha256(normalized, SupportedViiperSha256)",
         "PersistPreferredViiperPath(selectedPath, canonicalPath)",
     )
     # Selection is now behind the production policy seam exercised by the C#

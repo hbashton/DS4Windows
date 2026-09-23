@@ -1,9 +1,34 @@
 {
-  "latest_version": "5.0.10.0",
-  "latest_version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 10},
-  "updated_at": "2026-09-22T11:00:00+0000",
+  "latest_version": "5.0.11.0",
+  "latest_version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 11},
+  "updated_at": "2026-09-23T04:30:00+0000",
   "changelog": {
     "versions": [
+    {
+      "version_str": "5.0.11.0",
+      "version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 11},
+      "base_header": "Release Candidate 4.6.5 — Smoother Logs & Easier Updates",
+      "release_date": "2026-09-23T04:30:00+0000",
+      "locales": [
+        {
+          "code": "en",
+          "header": "Release Candidate 4.6.5 — Smoother Logs & Easier Updates",
+          "log_text": [
+            "* Fixed a freeze when opening the Log page after long sessions",
+            "* Made scrolling, clearing and exporting the Log page more reliable",
+            "* Fixed cases where the DualSense lightbar did not return to your profile color after closing a game",
+            "* Fixed an update issue that could leave setup stuck on another installation finishing",
+            "* VIIPER repair restores the matching version without closing DS4Windows",
+            "* Portable VIIPER stays beside DS4Windows; repair does not move your files",
+            "* VIIPER updates now come with DS4Windows, without separate update pop-ups",
+            "* Refreshed the getting-started guide to make setup easier to follow"
+          ],
+          "editor": "hbashton",
+          "editors_note": ["Close your games, DS4Windows and VIIPER before updating. Choose the installer for the easiest setup, or extract the complete portable ZIP. This release candidate is unsigned, so Windows may show a publisher warning."],
+          "updated_at": "2026-09-23T04:30:00+0000"
+        }
+      ]
+    },
     {
       "version_str": "5.0.10.0",
       "version_number_info": {"majorPart": 5, "minorPart": 0, "buildPart": 10},

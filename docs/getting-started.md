@@ -44,6 +44,9 @@ avoid independently upgrading or downgrading USB/IP for this installation.
 
 The marked portable package does not create or retarget the installed
 DS4Windows/VIIPER startup tasks just by launching.
+VIIPER stays beside DS4Windows. Install / Repair restores the matching version
+in that folder, downloading it only if needed, without moving your files or
+closing DS4Windows. Controller output pauses briefly during an active repair.
 
 ## Connect and choose a profile
 
@@ -81,10 +84,10 @@ Close games, DS4Windows, and VIIPER first. Back up profiles and settings before
 updating, especially when moving between versions or installation types.
 
 - **Installed:** run the new release's Setup EXE. Existing profiles are retained.
-- **Portable:** extract the whole new ZIP into a new folder. If you keep settings
-  beside the app, copy your profiles and settings into the new folder before
-  launching. Do not overwrite the new bundled program or dependency files
-  with old ones.
+- **Portable:** extract the whole new ZIP into your existing portable folder,
+  replacing the packaged app files. Keep your profiles, settings and
+  `portable-data` folder. Do not copy old program or dependency files back over
+  the updated ones.
 
 Settings may be in `%APPDATA%\DS4Windows` **or beside the application**, depending
 on your configuration. Check both before removing an old portable folder.

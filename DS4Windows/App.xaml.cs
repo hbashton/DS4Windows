@@ -150,6 +150,20 @@ namespace DS4WinWPF
             DS4Windows.PortableLabContext.Initialize(e.Args,
                 Path.GetDirectoryName(DS4Windows.Global.exelocation));
 
+            if (DS4Windows.ViiperProcessRepair.TryRunHelper(e.Args, out int brokerStopExitCode))
+            {
+                runShutdown = false;
+                Current.Shutdown(brokerStopExitCode);
+                return;
+            }
+
+            if (DS4Windows.ViiperManagedRepair.TryRunHelper(e.Args, out int brokerRepairExitCode))
+            {
+                runShutdown = false;
+                Current.Shutdown(brokerRepairExitCode);
+                return;
+            }
+
             if (StartupMethods.TryRunTaskRefreshHelper(e.Args,
                     out int startupTaskExitCode))
             {
@@ -235,15 +249,28 @@ namespace DS4WinWPF
             // can be changed; development lab mode remains externally owned.
             if (!DS4Windows.PortableLabContext.IsActive)
             {
+                bool startupMaintenanceAttempted = true;
                 try
                 {
+                    string portableRoot = DS4Windows.PortableBrokerRepair.TryGetPortableRoot(
+                        Path.GetDirectoryName(DS4Windows.Global.exelocation));
+                    if (portableRoot != null && !AcquirePortableRepairStartupGate()) return;
+                    startupMaintenanceAttempted = DS4Windows.PortableBrokerMaintenance.EnsureStartupPayload(
+                        Path.GetDirectoryName(DS4Windows.Global.exelocation));
+                    if (startupMaintenanceAttempted) DS4Windows.ViiperRecovery.TryBeginAutomaticRecovery();
                     DS4Windows.PortableBrokerContext.Initialize(
                         Path.GetDirectoryName(DS4Windows.Global.exelocation));
                 }
-                catch (DS4Windows.PortableBrokerStartupException exception)
+                catch (Exception exception)
                 {
-                    CancelPortableStartup(exception.Message);
-                    return;
+                    // Preserve portable ownership even when offline repair
+                    // fails. Settings must remain available; never fall back
+                    // to an installed broker or migrate this user's package.
+                    DS4Windows.PortableBrokerContext.InitializeUnavailable(
+                        Path.GetDirectoryName(DS4Windows.Global.exelocation));
+                    if (startupMaintenanceAttempted) DS4Windows.ViiperRecovery.TryBeginAutomaticRecovery();
+                    MessageBox.Show(exception.Message, "VIIPER needs attention",
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
                 }
             }
 
@@ -272,7 +299,7 @@ namespace DS4WinWPF
             // another instance is already running if TryOpenExisting returns true.
             try
             {
-                if (EventWaitHandleAcl.TryOpenExisting(SingleAppComEventName,
+                if (threadComEvent == null && EventWaitHandleAcl.TryOpenExisting(SingleAppComEventName,
                 EventWaitHandleRights.Synchronize |
                 EventWaitHandleRights.Modify,
                 out EventWaitHandle tempComEvent))
@@ -307,9 +334,10 @@ namespace DS4WinWPF
             // Create the Event handle
             try
             {
-                threadComEvent = CreateSingleAppComEvent(SingleAppComEventName,
-                    requireNew: DS4Windows.PortableLabContext.IsActive ||
-                        DS4Windows.PortableBrokerContext.IsActive);
+                if (threadComEvent == null)
+                    threadComEvent = CreateSingleAppComEvent(SingleAppComEventName,
+                        requireNew: DS4Windows.PortableLabContext.IsActive ||
+                            DS4Windows.PortableBrokerContext.IsActive);
                 if (threadComEvent == null)
                 {
                     MessageBox.Show("Another DS4Windows instance started first. This startup was cancelled.",
@@ -503,6 +531,28 @@ namespace DS4WinWPF
             StartupDiag(logger, "MainWindow.LateChecks returned");
         }
 
+        private bool AcquirePortableRepairStartupGate()
+        {
+            try
+            {
+                if (EventWaitHandleAcl.TryOpenExisting(SingleAppComEventName,
+                        EventWaitHandleRights.Synchronize | EventWaitHandleRights.Modify,
+                        out EventWaitHandle existing))
+                {
+                    using (existing) existing.Set();
+                    runShutdown = false;
+                    Current.Shutdown();
+                    return false;
+                }
+                threadComEvent = CreateSingleAppComEvent(SingleAppComEventName, requireNew: true);
+                if (threadComEvent != null) return true;
+            }
+            catch (UnauthorizedAccessException) { ShowSingleInstanceAccessError(); }
+            runShutdown = false;
+            Current.Shutdown();
+            return false;
+        }
+
         private void CancelPortableStartup(string message)
         {
             MessageBox.Show(message, "DS4Windows portable",
@@ -516,6 +566,7 @@ namespace DS4WinWPF
             DS4Windows.PortableBrokerContext portable =
                 DS4Windows.PortableBrokerContext.Current;
             if (portable == null) return true;
+            if (!portable.IsVerifiedBackend(portable.ViiperPath)) return true;
             try
             {
                 portable.Start();
@@ -547,8 +598,9 @@ namespace DS4WinWPF
                 // occupied until the user dismisses the error. Borrowed brokers
                 // are never stopped by this context, including this failure path.
                 portable.Dispose();
-                CancelPortableStartup(exception.Message);
-                return false;
+                MessageBox.Show(exception.Message, "VIIPER needs attention",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return true;
             }
         }
 

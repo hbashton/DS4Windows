@@ -48,8 +48,8 @@ public class PortableBrokerIntegrationTests
             "if (!StartPortableBroker()) return;");
         Before(core, "if (!StartPortableBroker()) return;", "CreateTempWorkerThread();");
         Before(core, "if (!StartPortableBroker()) return;", "Global.FindConfigLocation();");
-        StringAssert.Contains(core,
-            "requireNew: DS4Windows.PortableLabContext.IsActive ||\n                        DS4Windows.PortableBrokerContext.IsActive");
+        StringAssert.Contains(core, "requireNew: DS4Windows.PortableLabContext.IsActive ||");
+        Before(core, "AcquirePortableRepairStartupGate()", "PortableBrokerMaintenance.EnsureStartupPayload(");
         // A second ordinary launch can activate its existing matching mapper;
         // the explicit development lab retains its no-signal policy.
         StringAssert.Contains(core,
@@ -78,7 +78,28 @@ public class PortableBrokerIntegrationTests
             "private bool StartPortableBroker()", "private static void ShowStartupDialog(");
         StringAssert.Contains(start, "out lastProbeFailure, totalTimeoutMilliseconds:");
         StringAssert.Contains(start, "DescribeReadinessFailure(lastProbeFailure)");
-        Before(start, "portable.Dispose();", "CancelPortableStartup(exception.Message);");
+        Before(start, "portable.Dispose();", "MessageBox.Show(exception.Message");
+        Assert.IsFalse(start.Contains("CancelPortableStartup(", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void StartupBorrowFailureKeepsOneAutomaticRecoveryButMaintenanceDoesNotChaseNewcomers()
+    {
+        string app = Read("App.xaml.cs");
+        string selection = Section(app, "bool startupMaintenanceAttempted = true;",
+            "// Preserve legacy startup retargeting");
+        StringAssert.Contains(selection,
+            "startupMaintenanceAttempted = DS4Windows.PortableBrokerMaintenance.EnsureStartupPayload(");
+        const string guarded = "if (startupMaintenanceAttempted) DS4Windows.ViiperRecovery.TryBeginAutomaticRecovery();";
+        Assert.AreEqual(2, selection.Split(new[] { guarded }, StringSplitOptions.None).Length - 1);
+        Before(selection, guarded, "PortableBrokerContext.Initialize(");
+        string startup = Section(app, "private bool StartPortableBroker()", "private static void ShowStartupDialog(");
+        Assert.IsFalse(startup.Contains("TryBeginAutomaticRecovery", StringComparison.Ordinal),
+            "A preserved same-path argv/start failure must allow the later guarded recovery attempt.");
+        string maintenance = Read("PortableBrokerMaintenance.cs");
+        StringAssert.Contains(maintenance, "internal static bool EnsureStartupPayload(");
+        StringAssert.Contains(maintenance, "if (!replace && !conflicting) return false;");
+        Before(maintenance, "PortableRepairProgress.Run<object>", "return true;");
     }
 
     [DataTestMethod]
@@ -154,13 +175,18 @@ public class PortableBrokerIntegrationTests
     }
 
     [TestMethod]
-    public void ForcedRepairPromptRemainsStatusOnlyAndPublicInstallerIsGuarded()
+    public void ForcedPortableRepairUsesLocalMaintenanceAndPublicInstallerIsGuarded()
     {
         string source = Read("DS4Control", "Viiper", "ViiperSetupManager.cs");
         string prompt = Section(source, "public static bool EnsureReadyWithPrompt(",
             "if (PortableLabContext.IsActive)");
         StringAssert.Contains(prompt, "if (PortableBrokerContext.IsActive)");
         StringAssert.Contains(prompt, "if (!status.Ready || forcePrompt)");
+        StringAssert.Contains(prompt, "if (!ViiperRecovery.Repair(owner)) return false;");
+        Before(prompt, "if (ViiperRecovery.RepairRequired && !PortableLabContext.IsActive &&",
+            "if (forcePrompt && status.Ready)");
+        StringAssert.Contains(prompt, "!PortableLabContext.IsActive && runtimePrerequisitesReady &&");
+        StringAssert.Contains(prompt, "runtimePrerequisitesReady && !managedInstallationMissing) return false;");
         StringAssert.Contains(prompt, "return status.Ready;");
         Assert.IsFalse(prompt.Contains("LaunchInstaller(", StringComparison.Ordinal));
         Assert.IsFalse(prompt.Contains("new DS4WinWPF.DS4Forms.ViiperSetupPrompt",
@@ -383,6 +409,31 @@ public class PortableBrokerIntegrationTests
             }
             finally { CryptographicOperations.ZeroMemory(key); }
         }
+    }
+
+    [TestMethod]
+    public void RepairedManagedLaunchRechecksDriverSafetyBeforeProcessStart()
+    {
+        string source = Read("DS4Control", "Viiper", "ViiperSetupManager.cs");
+        string method = Section(source, "internal static bool TryStartRepairedServer(",
+            "private static bool TryStartServer(");
+        Before(method, "HasSafeRuntimePrerequisites(GetStatus())", "TryStartServer(viiperPath)");
+        string recovery = Read("DS4Control", "Viiper", "ViiperRecovery.cs");
+        Before(recovery, "HasSafeRuntimePrerequisites(ViiperSetupManager.GetStatus())", "PortableRepairProgress.Run");
+    }
+
+    [TestMethod]
+    public void PortableRecoveryPrecedesBackendPinAndNeverMigrates()
+    {
+        string app = Read("App.xaml.cs");
+        Before(app, "PortableBrokerMaintenance.EnsureStartupPayload(", "PortableBrokerContext.Initialize(");
+        string maintenance = Read("PortableBrokerMaintenance.cs");
+        StringAssert.Contains(maintenance, "if (PortableLabContext.IsActive) return false;");
+        StringAssert.Contains(maintenance, "PortableBrokerRepair.RepairAsync(root,");
+        Assert.IsFalse(maintenance.Contains("LaunchInstaller(", StringComparison.Ordinal));
+        Assert.IsFalse(maintenance.Contains("RetargetExistingTask", StringComparison.Ordinal));
+        Assert.IsFalse(maintenance.Contains("Process.Kill", StringComparison.Ordinal));
+        Assert.IsFalse(maintenance.Contains("Application.Current.Shutdown();", StringComparison.Ordinal));
     }
 
     private static byte[] ReadProbeHello(NetworkStream wire, byte[] key)

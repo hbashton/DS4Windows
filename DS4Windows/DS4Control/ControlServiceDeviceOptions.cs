@@ -50,6 +50,20 @@ namespace DS4Windows
         private bool verboseLogMessages;
         public bool VerboseLogMessages { get => verboseLogMessages; set => verboseLogMessages = value; }
 
+        private bool sunshineControllerBridgeEnabled;
+        public bool SunshineControllerBridgeEnabled
+        {
+            get => sunshineControllerBridgeEnabled;
+            set
+            {
+                if (sunshineControllerBridgeEnabled == value) return;
+                sunshineControllerBridgeEnabled = value;
+                SunshineControllerBridgeEnabledChanged?.Invoke(this,
+                    EventArgs.Empty);
+            }
+        }
+        public event EventHandler SunshineControllerBridgeEnabledChanged;
+
         public ControlServiceDeviceOptions()
         {
             // If enabled then DS4Windows shows additional log messages when a gamepad is connected (may be useful to diagnose connection problems).

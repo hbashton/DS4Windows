@@ -385,6 +385,8 @@ namespace DS4Windows
                 EnsureHidHideDoesNotCloakVirtualSonyOutputs);
             //outputslotMan.SlotAssigned += OutputslotMan_SlotAssigned;
             deviceOptions = Global.DeviceOptions;
+            deviceOptions.SunshineControllerBridgeEnabledChanged +=
+                OnSunshineControllerBridgeEnabledChanged;
 
             DS4Devices.RequestElevation += DS4Devices_RequestElevation;
             DS4Devices.PrepareDS4Init = PrepareDS4DeviceInit;
@@ -2995,6 +2997,15 @@ namespace DS4Windows
 
                 StartupDiag("ControlService.Start setting running=true");
                 running = true;
+                try
+                {
+                    StartSunshineControllerBridge();
+                }
+                catch (Exception bridgeException)
+                {
+                    StartupDiag($"Sunshine controller bridge could not start: {bridgeException.GetType().Name}: {bridgeException.Message}");
+                    LogDebug($"Sunshine controller bridge could not start: {bridgeException.Message}", true);
+                }
                 StartGameBarStateTimer();
                 if (!switch2ProUsbProductionCoordinator.TryStart(
                         inputServiceGeneration))
@@ -3315,6 +3326,7 @@ namespace DS4Windows
                     }
 
                     running = false;
+                    StopSunshineControllerBridge();
                     legacyJoyConLinks.Clear();
                     foreach (DS4Device controller in DS4Controllers)
                         if (controller is InputDevices.JoyConDevice joyCon) joyCon.StopNintendoMousePresentation();
@@ -3411,7 +3423,8 @@ namespace DS4Windows
 
                             tempDevice.IsRemoved = true;
                             tempDevice.StopUpdate();
-                            DS4Devices.RemoveDevice(tempDevice);
+                            if (tempDevice.HasHidInterface)
+                                DS4Devices.RemoveDevice(tempDevice);
                             Thread.Sleep(50);
                         }
 
@@ -3944,11 +3957,13 @@ namespace DS4Windows
 
         private void BeginPrepareConnectedInputController(DS4Device device, bool showlog = false)
         {
-            if (DS4Devices.isExclusiveMode && EnsureHidHideSessionForDevice(device))
+            if (device.HasHidInterface && DS4Devices.isExclusiveMode &&
+                EnsureHidHideSessionForDevice(device))
             {
                 ChangeExclusiveStatus(device);
             }
-            else if (hidDeviceHidingEnabled && CheckAffected(device))
+            else if (device.HasHidInterface && hidDeviceHidingEnabled &&
+                CheckAffected(device))
             {
                 ChangeExclusiveStatus(device);
             }
@@ -4851,7 +4866,8 @@ namespace DS4Windows
                     RetireControllerPresentation(device, ind,
                         commitNeutralMapping: true);
                     if (!ClearExactControllerSlot(device, ind)) return;
-                    DS4Devices.RemoveDevice(device);
+                    if (device.HasHidInterface)
+                        DS4Devices.RemoveDevice(device);
                 }
             }
 

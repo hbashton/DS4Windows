@@ -191,6 +191,38 @@ namespace DS4WindowsTests
         }
 
         [TestMethod]
+        public void SunshineControllerBridgeOptInRoundTrips()
+        {
+            XmlSerializer serializer = new XmlSerializer(
+                typeof(AppSettingsDTO));
+            using StringReader legacyReader = new StringReader(
+                appSettingsXml);
+            AppSettingsDTO legacy = (AppSettingsDTO)serializer.Deserialize(
+                legacyReader);
+            BackingStore store = new BackingStore();
+            legacy.MapTo(store);
+            Assert.IsFalse(store.deviceOptions.
+                SunshineControllerBridgeEnabled);
+
+            store.deviceOptions.SunshineControllerBridgeEnabled = true;
+            AppSettingsDTO saved = new AppSettingsDTO();
+            saved.MapFrom(store);
+            using StringWriter writer = new StringWriter();
+            serializer.Serialize(writer, saved);
+            StringAssert.Contains(writer.ToString(),
+                "<SunshineControllerBridgeEnabled>true</SunshineControllerBridgeEnabled>");
+
+            using StringReader roundTripReader = new StringReader(
+                writer.ToString());
+            AppSettingsDTO roundTrip = (AppSettingsDTO)serializer.Deserialize(
+                roundTripReader);
+            BackingStore restored = new BackingStore();
+            roundTrip.MapTo(restored);
+            Assert.IsTrue(restored.deviceOptions.
+                SunshineControllerBridgeEnabled);
+        }
+
+        [TestMethod]
         public void CheckSettingsSave()
         {
             // Read the settings into BackingStore

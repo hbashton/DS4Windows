@@ -3284,6 +3284,29 @@ namespace DS4Windows
             Removal?.Invoke(this, EventArgs.Empty);
         }
 
+        /// <summary>
+        /// Publishes an externally received report through the existing
+        /// profile/mapping event. This is restricted to devices whose
+        /// transport lifetime is owned outside the HID registry.
+        /// </summary>
+        protected void PublishNoHidReport()
+        {
+            if (HasHidInterface)
+                throw new InvalidOperationException(
+                    "External reports are only valid for no-HID devices.");
+            if (fireReport && !IsRemoving && !IsRemoved)
+                Report?.Invoke(this, EventArgs.Empty);
+        }
+
+        /// <summary>Raises the battery notification for a no-HID runtime.</summary>
+        protected void PublishNoHidBatteryChanged()
+        {
+            if (HasHidInterface)
+                throw new InvalidOperationException(
+                    "External battery state is only valid for no-HID devices.");
+            BatteryChanged?.Invoke(this, EventArgs.Empty);
+        }
+
         public virtual void removeReportHandlers()
         {
             this.Report = null;

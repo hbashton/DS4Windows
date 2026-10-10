@@ -25,6 +25,9 @@
                 <CheckBox Content="Accept Moonlight / Sunshine virtual controllers"
                           IsChecked="{Binding UseMoonlight}"
                           ToolTip="Accept every supported virtual controller created while Sunshine is running. DS4Windows' own VIIPER outputs are always excluded." />
+                <CheckBox Content="Enable Sunshine direct controller bridge"
+                          IsChecked="{Binding SunshineControllerBridgeEnabled}"
+                          ToolTip="Let Sunshine send controller input directly to DS4Windows. DS4Windows will create the game-facing virtual controller; no Sunshine virtual input controller is created. Enable the matching option in Sunshine too." />
                 <TextBlock>
                     <Hyperlink NavigateUri="https://github.com/schmaldeo/DS4Windows/blob/moonlight/doc/moonlight_support.md"
                                RequestNavigate="Hyperlink_RequestNavigate">

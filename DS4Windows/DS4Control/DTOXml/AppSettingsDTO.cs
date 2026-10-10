@@ -970,6 +970,8 @@ namespace DS4WinWPF.DS4Control.DTOXml
 
             DeviceOptions = new InputDeviceOptions()
             {
+                SunshineControllerBridgeEnabled = source.deviceOptions.
+                    SunshineControllerBridgeEnabled,
                 DS4SupportSettings = new DS4SupportSettingsGroup()
                 {
                     Enabled = source.deviceOptions.DS4DeviceOpts.Enabled,
@@ -1096,6 +1098,8 @@ namespace DS4WinWPF.DS4Control.DTOXml
             }
 
             destination.deviceOptions.DS4DeviceOpts.Enabled = DeviceOptions.DS4SupportSettings.Enabled;
+            destination.deviceOptions.SunshineControllerBridgeEnabled =
+                DeviceOptions.SunshineControllerBridgeEnabled;
             destination.deviceOptions.DualSenseOpts.Enabled = DeviceOptions.DualSenseSupportSettings.Enabled;
             destination.deviceOptions.SwitchProDeviceOpts.Enabled = DeviceOptions.SwitchProSupportSettings.Enabled;
             destination.deviceOptions.JoyConDeviceOpts.Enabled = DeviceOptions.JoyConSupportSettings.Enabled;
@@ -1153,6 +1157,9 @@ namespace DS4WinWPF.DS4Control.DTOXml
 
     public class InputDeviceOptions
     {
+        [XmlElement("SunshineControllerBridgeEnabled")]
+        public bool SunshineControllerBridgeEnabled { get; set; }
+
         public DS4SupportSettingsGroup DS4SupportSettings
         {
             get; set;

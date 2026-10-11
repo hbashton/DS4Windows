@@ -39,7 +39,8 @@ namespace DS4Windows.InputDevices
         internal static byte[] ReadCalibration(
             Func<ushort, byte, byte[]> readSpi, ushort userMagicAddress,
             ushort userAddress, ushort factoryAddress, byte count,
-            Func<byte[], bool, bool> isValid, out bool userCalibration)
+            Func<byte[], bool, bool> isValid, out bool userCalibration,
+            string deviceName = "Switch Pro")
         {
             userCalibration = false;
             byte[] magic = readSpi(userMagicAddress, 2);
@@ -67,12 +68,12 @@ namespace DS4Windows.InputDevices
 
             // StartUpdate already turns an IOException into normal device
             // removal before either the input or rumble worker is started.
-            throw new IOException($"Switch Pro calibration at SPI 0x{factoryAddress:X4} " +
+            throw new IOException($"{deviceName} calibration at SPI 0x{factoryAddress:X4} " +
                 "was unavailable or invalid after bounded retries.");
         }
 
         internal static bool IsValidStick(ReadOnlySpan<byte> report,
-            bool right, bool userCalibration)
+            bool right, bool userCalibration, double minimumYCutoff = 1.04)
         {
             if (report.Length < SpiDataOffset + 9)
                 return false;
@@ -94,8 +95,9 @@ namespace DS4Windows.InputDevices
                 int maximum = center + above;
                 if (!userCalibration)
                 {
-                    // Keep the existing DS4Windows factory cutoff behavior.
-                    minimum = (int)(minimum * 1.04);
+                    // Joy-Cons retain their stronger Y-axis factory cutoff;
+                    // Switch Pro callers keep the existing default.
+                    minimum = (int)(minimum * (axis == 1 ? minimumYCutoff : 1.04));
                     maximum = (int)(maximum * 0.96);
                 }
 

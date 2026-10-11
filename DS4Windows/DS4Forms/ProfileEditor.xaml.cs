@@ -2301,40 +2301,8 @@ namespace DS4WinWPF.DS4Forms
                 temp.IndexOfAny(System.IO.Path.GetInvalidFileNameChars()) == -1)
             {
                 SetLateProperties(false);
-                DS4Windows.Global.ProfilePath[deviceNum] =
-                    DS4Windows.Global.OlderProfilePath[deviceNum] = temp;
-
-                if (currentProfile != null)
-                {
-                    if (temp != currentProfile.Name)
-                    {
-                        //File.Delete(DS4Windows.Global.appdatapath + @"\Profiles\" + currentProfile.Name + ".xml");
-                        currentProfile.DeleteFile();
-                        currentProfile.Name = temp;
-                    }
-                }
-
-                if (currentProfile != null)
-                {
-                    currentProfile.SaveProfile(deviceNum);
-                    currentProfile.FireSaved();
-                    result = true;
-                }
-                else
-                {
-                    string tempprof = Global.appdatapath + @"\Profiles\" + temp + ".xml";
-                    if (!File.Exists(tempprof))
-                    {
-                        Global.SaveProfile(deviceNum, temp);
-                        CreatedProfile?.Invoke(this, temp);
-                        result = true;
-                    }
-                    else
-                    {
-                        MessageBox.Show(Properties.Resources.ValidName, Properties.Resources.NotValid,
-                            MessageBoxButton.OK, MessageBoxImage.Exclamation);
-                    }
-                }
+                result = SaveProfileChanges(temp);
+                if (!result) ShowProfileSaveError();
             }
             else
             {
@@ -2343,6 +2311,29 @@ namespace DS4WinWPF.DS4Forms
             }
 
             return result;
+        }
+
+        // Publish saved state only after persistence succeeds. This also keeps
+        // Apply and Save on the same failure path, without closing the editor.
+        internal bool SaveProfileChanges(string profileName)
+        {
+            bool saved = currentProfile != null ?
+                currentProfile.SaveProfile(deviceNum, profileName) :
+                Global.SaveProfile(deviceNum, profileName, overwrite: false);
+            if (!saved) return false;
+
+            Global.ProfilePath[deviceNum] = Global.OlderProfilePath[deviceNum] = profileName;
+            if (currentProfile != null) currentProfile.FireSaved();
+            else CreatedProfile?.Invoke(this, profileName);
+            return true;
+        }
+
+        private void ShowProfileSaveError()
+        {
+            MessageBox.Show("The profile could not be saved. The editor will remain open. " +
+                "Check write permissions, free disk space, and whether the name is already in use. " +
+                "For rename errors, check Logs for details about any preserved copies.",
+                "DS4Windows", MessageBoxButton.OK, MessageBoxImage.Error);
         }
 
         private void KeepSizeBtn_Click(object sender, RoutedEventArgs e)

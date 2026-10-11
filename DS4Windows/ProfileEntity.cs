@@ -56,13 +56,16 @@ namespace DS4WinWPF
             }
         }
 
-        public void SaveProfile(int deviceNum)
+        public bool SaveProfile(int deviceNum, string newName = null)
         {
-            if (!string.IsNullOrWhiteSpace(name))
-            {
-                DS4Windows.Global.SaveProfile(deviceNum, name);
-                DS4Windows.Global.CacheExtraProfileInfo(deviceNum);
-            }
+            string targetName = newName ?? name;
+            if (string.IsNullOrWhiteSpace(targetName) ||
+                !DS4Windows.Global.SaveProfile(deviceNum, targetName, name))
+                return false;
+
+            Name = targetName;
+            DS4Windows.Global.CacheExtraProfileInfo(deviceNum);
+            return true;
         }
 
         public void FireSaved()

@@ -1,5 +1,8 @@
 # RC4.5.5 installer and startup recovery
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Reproduced cause
 
 The reported RC4.5.3 setup failed before USB/IP installation. Its infrastructure

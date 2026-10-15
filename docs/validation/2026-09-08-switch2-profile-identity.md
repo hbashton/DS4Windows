@@ -1,5 +1,8 @@
 # Switch 2 local identity and profile linking, 2026-09-08
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Confirmed source defect
 
 Switch 2 runtimes intentionally use the no-HID `DS4Device` constructor. It leaves `MacAddress` at `00:00:00:00:00:00` and does not grant legacy HID persistent-identity authority. That is not a decoded Nintendo serial or a failed read of a MAC. The controller list/overview and Link Profile/ID still used that legacy field. Consequently, the controllers looked identical and normal linked-profile lookup could not select a per-controller link.

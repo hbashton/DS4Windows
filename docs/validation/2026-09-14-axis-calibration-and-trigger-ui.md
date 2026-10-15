@@ -1,5 +1,8 @@
 # Axis Config calibration and legacy trigger UI cleanup
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Requested changes
 
 - Move the 360-degree calibration feature to Axis Config, not button remapping

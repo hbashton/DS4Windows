@@ -1,5 +1,8 @@
 # Controller diagram remapping repairs, 2026-09-08
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## User-visible defects and fixes
 
 - The Pro's C button had artwork but no interactive target/highlight. It now

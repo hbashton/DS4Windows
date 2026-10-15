@@ -1,5 +1,8 @@
 # RC4.6.6 startup, dependencies and Edge delivery
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Requested outcome
 
 Audit startup, detection, dependency checks, repair and update as one lifecycle;

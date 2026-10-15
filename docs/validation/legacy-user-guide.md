@@ -1,3 +1,8 @@
+# Legacy DS4Windows user guide
+
+This inherited guide records an earlier interface and its original screenshots.
+Use the [illustrated user guide](../user-guide.md) for the maintained instructions.
+
 ## User Guide
 After completing the initial setup of the required drivers and dependencies, you are greeted with the main DS4Windows tab, controllers.
 

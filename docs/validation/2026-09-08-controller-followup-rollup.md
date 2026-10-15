@@ -1,5 +1,8 @@
 # Controller follow-up rollup, 2026-09-08
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 This covers the user's requested roughly two-hour change window beginning with
 the 17:40 local checkpoints, plus the Joy-Con disconnect investigation added
 during final validation. Source/test evidence is distinguished from acceptance

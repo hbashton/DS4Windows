@@ -1,5 +1,8 @@
 # Left Joy-Con disconnect log review, 2026-09-08
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 **Superseded by retained-memory evidence:** the later joined-pair disconnect
 prompted an authorized local heap dump. It retained both incidents and proves
 that the earlier left-hand removal was a software rejection of a device-counter

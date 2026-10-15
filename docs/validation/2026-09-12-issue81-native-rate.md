@@ -1,5 +1,8 @@
 # Issue 81: separate native-feedback pacing from local settings
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 This follows `47cc945` (conservative pending-repeat suppression). It does not
 replace ordered feedback with latest-value state and does not relax unknown
 trigger-byte preservation.

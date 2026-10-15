@@ -1,5 +1,8 @@
 # Controller Readings update repair, 2026-09-08
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 The user reported no live axes for Switch 2 Pro in the profile editor's
 Controller Readings page. The old UI stopped its timer and waited indefinitely
 on `DS4Device.ReadWaitEv`. Switch 2's serialized runtime does not use or signal

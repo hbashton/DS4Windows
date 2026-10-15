@@ -1,5 +1,8 @@
 # Issue #68: Bluetooth Switch Pro startup, 2026-09-08
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 Status: the source-backed calibration null-reference failure class is covered
 by the existing `ed0e983` repair, now verified through additional Bluetooth
 initialization regressions. This pass adds tests, not another transport rewrite.

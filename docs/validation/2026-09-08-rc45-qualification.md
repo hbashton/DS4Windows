@@ -1,5 +1,8 @@
 # RC4.5 tester-package qualification
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 Local date: 2026-09-08; build work continues into 2026-09-09 UTC.
 
 This records the initial `12b2485` RC4.5 checkpoint, before normal portable
@@ -149,5 +152,5 @@ The live portable b93 session was not replaced for packaging. No actual MSI
 transaction or new controller/game acceptance is claimed on this host in this
 release-preparation pass. Bluetooth headset audio remains unsupported; the
 native-driver backend and sub-millisecond end-to-end latency are not shipping
-claims. See the [RC4.5 assessment](../RELEASE_CANDIDATE_4_5.md) for the full
+claims. See the [RC4.5 assessment](../../CHANGELOG.md#inherited-release-candidate-4-5) for the full
 feature scope, demonstrated hardware evidence and focused tester scenarios.

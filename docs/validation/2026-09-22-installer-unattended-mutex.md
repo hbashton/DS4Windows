@@ -1,5 +1,8 @@
 # Unattended setup prompt and mutex correction
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Confirmed cause
 
 The RC4.6.4 all-in-one installer repeatedly received 1618 from its

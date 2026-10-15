@@ -1,5 +1,8 @@
 # GitHub reported-bug audit, 2026-09-08
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 Scope: the 39 open issues returned by the authenticated GitHub API on this date.
 Prioritize owner-acknowledged reports and reproducible crashes, stalls, or
 unwanted behavior whose mechanism is present in the current source. This is not

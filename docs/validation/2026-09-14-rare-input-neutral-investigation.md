@@ -1,5 +1,8 @@
 # Rare movement interruption: investigation and admission guard, 2026-09-14
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Incident status: not yet attributed
 
 The user reported one unexpected movement stop in approximately 24 hours and

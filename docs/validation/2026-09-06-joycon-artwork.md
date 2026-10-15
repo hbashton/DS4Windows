@@ -1,5 +1,8 @@
 # Joy-Con 2 artwork and thumbnail bounds — 2026-09-06
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 Scope: presentation only. No controller transport, input mapping semantics,
 pairing, haptics, VIIPER, profile values, or driver changes.
 

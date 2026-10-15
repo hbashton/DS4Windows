@@ -1,5 +1,8 @@
 # Switch 2 Pro Bluetooth receiver setup experiments
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 Physical Bluetooth headphone playback remains **unconfirmed and silent in the
 measurements below**. Command acknowledgements, accepted GATT writes and passing
 software tests are not playback evidence. This ledger continues

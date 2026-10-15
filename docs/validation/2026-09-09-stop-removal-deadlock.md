@@ -1,5 +1,8 @@
 # RC4.5 Stop/removal regression — 2026-09-09
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Report and scope
 
 A Reddit user reports that clicking **Stop** after upgrading to RC4.5 logs

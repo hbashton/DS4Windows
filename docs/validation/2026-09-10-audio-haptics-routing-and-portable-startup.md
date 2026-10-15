@@ -1,5 +1,8 @@
 # Audio Haptics routing, Nintendo output, and portable startup
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 Status: source implemented, independently reviewed, automated validation passed, and complete private candidate F packaged and verified. Not launched; this is not a release or hardware acceptance record.
 
 ## Requested work

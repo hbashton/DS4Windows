@@ -1,5 +1,8 @@
 # Gyro-calibration reader contention, 2026-09-08
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 An integrated rerun of the reported-issue fixes failed
 `OrderedBackgroundWritesRoundTripOpaquePeerAndNewestBias`. This failure was
 investigated, not excluded or given a longer timeout. It exposed a pre-existing

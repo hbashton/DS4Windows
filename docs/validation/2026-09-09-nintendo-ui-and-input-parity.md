@@ -1,5 +1,8 @@
 # Nintendo UI and original Joy-Con integration — 2026-09-09
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 This records the current source changes, not a hardware or release acceptance.
 The running apps and published RC4.5.1 assets have not been replaced.
 

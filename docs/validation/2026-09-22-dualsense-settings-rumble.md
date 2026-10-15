@@ -1,5 +1,8 @@
 # DualSense Bluetooth settings-refresh rumble continuity
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Reproduction and scope
 
 A matched, fixed HID replay reproduced a Hades II rumble pulse being interrupted

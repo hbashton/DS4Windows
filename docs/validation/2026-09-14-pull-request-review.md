@@ -1,5 +1,8 @@
 # Pull request review — 2026-09-14
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 Scope: integrate PR #86 with current runtime behavior, then review all open PRs,
 retaining useful work from `anagnorisis2peripeteia` and closing stale or superseded
 proposals with evidence. No released tag or asset is replaced by this source work.

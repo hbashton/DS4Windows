@@ -1,5 +1,8 @@
 # RC4.6.3 mouse concurrency validation
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Scope and baseline
 
 Started from fetched `origin/main` at

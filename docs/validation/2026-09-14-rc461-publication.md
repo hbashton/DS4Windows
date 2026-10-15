@@ -1,5 +1,8 @@
 # RC4.6.1 publication evidence, 2026-09-14
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Identity and scope
 
 - Release tag: `VIIPERRC4.6.1`.

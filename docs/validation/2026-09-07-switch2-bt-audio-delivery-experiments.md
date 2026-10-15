@@ -1,5 +1,8 @@
 # Switch 2 Pro Bluetooth headphone delivery experiments
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 Status: **not working/verified yet**. This is a research checkpoint, not a
 production headphone-audio implementation or release candidate.
 

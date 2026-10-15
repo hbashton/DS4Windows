@@ -1,5 +1,8 @@
 # DualSense manual Bluetooth disconnect, 2026-09-14
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Report and evidence
 
 The user reported that pressing Disconnect turned off a Bluetooth DualSense,

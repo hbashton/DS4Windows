@@ -1,5 +1,8 @@
 # Issue 81: dense native feedback delay after RC4.5.8
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Evidence and limits
 
 The [reporter's RC4.5.8 follow-up](https://github.com/hbashton/DS4Windows/issues/81#issuecomment-5642437358)

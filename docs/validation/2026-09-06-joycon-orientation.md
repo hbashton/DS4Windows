@@ -1,5 +1,8 @@
 # Joy-Con orientation UI validation — 2026-09-06
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 Scope: single left/right Joy-Con diagrams and controller-list icons follow the
 effective Switch 2 holding style. A controller's saved override wins over the
 profile fallback; a joined pair remains paired. This is the selected holding

@@ -1,5 +1,8 @@
 # Joy-Con 2 Bluetooth mouse and motion startup — 2026-09-06
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Failure and evidence
 
 The user reported both desk mouse and gyro mouse failing in portable b83.

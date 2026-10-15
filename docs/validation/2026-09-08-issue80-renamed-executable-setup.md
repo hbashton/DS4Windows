@@ -1,5 +1,8 @@
 # Issue #80: renamed executable setup, 2026-09-08
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 Source changes following [the reported portable-executable failure](https://github.com/hbashton/DS4Windows/issues/80).
 Starting DS4Windows checkpoint: `ed0e983`. No real installer, process termination,
 Task Scheduler entry, registry mutation, controller operation or app replacement

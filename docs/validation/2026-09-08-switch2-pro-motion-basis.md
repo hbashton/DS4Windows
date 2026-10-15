@@ -1,5 +1,8 @@
 # Switch 2 Pro motion basis correction, 2026-09-08
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 The reported symptom was reversed left/right movement when using the Pro controller as a gyro mouse. A source-level basis mismatch was confirmed: the Pro projection treated the donor's already-semantic Cemuhook values as native DS report axes and then passed them through `SixAxis.populate`, which applies semantic signs again.
 
 ## Independent reference evidence

@@ -1,5 +1,8 @@
 # Native burst delivery and Joy-Con rumble follow-up
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## User reports
 
 - Test Heavy / Test Light on Switch 2 hardware has persistent slight stutter and

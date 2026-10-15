@@ -1,5 +1,8 @@
 # Switch 2 Pro Bluetooth audio: public-source research, 2026-09-08
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Outcome and scope
 
 This bounded public-source pass found a real decrypted console/controller capture and a useful console-facing emulator logger foundation, but **did not find a verified physical Switch 2 Pro Bluetooth headphone playback implementation or a downloadable successful headphone stream**. This is a finding about the inspected material, not proof that no such work exists.

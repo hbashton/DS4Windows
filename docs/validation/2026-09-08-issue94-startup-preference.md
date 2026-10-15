@@ -1,5 +1,8 @@
 # Issue #94: startup preference handling, 2026-09-08
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 Status: deterministic startup-state defects corrected and covered by isolated regressions. The original reporter's Windows task/shortcut state is unavailable; this does not establish which defect caused that specific report.
 
 [Issue #94](https://github.com/hbashton/DS4Windows/issues/94) reports that turning off **Run at startup** does not survive reopening DS4Windows. Source inspection identified an owned read-only shortcut being silently left behind, task repair recreating disabled tasks, and the Settings view updating its checkbox before confirming the Windows registration change. Opening Settings also performed startup mutations.

@@ -1,5 +1,8 @@
 # Draft-first release publication, 2026-09-09
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 The user explicitly authorized an unsigned release candidate. This exception
 requires both the same-repository GitHub release's actual prerelease flag and
 an exact named `VIIPERRC` ordinal tag (for example `VIIPERRC4.5`). Stable

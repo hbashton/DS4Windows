@@ -1,5 +1,8 @@
 # DualSense Edge fidelity audit
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Goal
 
 Complete evidence-backed physical DualSense Edge support and VIIPER Edge

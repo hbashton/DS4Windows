@@ -1,5 +1,8 @@
 # VIIPER recovery contract
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 RC4.6.5 keeps broker maintenance separate from full application installation.
 
 - A marked portable package repairs only `viiper.exe` beside its running app.

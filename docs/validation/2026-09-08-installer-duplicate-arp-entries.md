@@ -1,5 +1,8 @@
 # Duplicate Apps & Features entries, 2026-09-08
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Observed registration state
 
 The read-only machine inventory found 19 visible DS4Windows Burn registrations

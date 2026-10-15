@@ -17,8 +17,7 @@ The Visual C++ runtime remains a separate system prerequisite.
 ## Install
 
 Download only from [this repository's Releases page](https://github.com/hbashton/DS4Windows/releases).
-Current DS4Windows 5 builds are release candidates; check the notes for
-limitations and signing status.
+Check the release notes for package requirements, signing status and limitations. Use the matching app, updater and backend supplied by the release.
 
 ### Recommended: all-in-one installer
 
@@ -34,8 +33,9 @@ avoid independently upgrading or downgrading USB/IP for this installation.
 
 ### Portable ZIP
 
-1. Extract **all** of `DS4Windows_VIIPER_x64.zip` into a permanent, writable folder.
+1. Extract **all** of the release's `DS4Windows_<version>_x64.zip` (older RCs use `DS4Windows_VIIPER_x64.zip`) into a permanent, writable folder.
    Do not launch from inside the ZIP or copy only `DS4Windows.exe`.
+   Keep the `Lang` folder with the application; it contains the translations.
 2. Run `DS4Windows.exe` from that folder. On a new PC, complete driver setup
    when prompted; portable does not mean driver-free.
 3. DS4Windows starts its bundled VIIPER when needed. A verified matching
@@ -51,8 +51,8 @@ closing DS4Windows. Controller output pauses briefly during an active repair.
 ## Connect and choose a profile
 
 Connect a supported controller and select it in DS4Windows. Controller-family
-options are in **Settings > Device Options**; optional Moonlight/Sunshine input
-must be enabled separately. Some devices, including DualShock 3, need their
+options are in **Settings > Controllers > Device Options**; optional Moonlight/Sunshine input
+must be enabled separately; see [Moonlight / Sunshine](moonlight-support.md). Some devices, including DualShock 3, need their
 own compatible driver setup.
 
 For **Switch 2 Pro**, use USB or DS4Windows' Bluetooth discovery and
@@ -91,16 +91,14 @@ updating, especially when moving between versions or installation types.
 
 Settings may be in `%APPDATA%\DS4Windows` **or beside the application**, depending
 on your configuration. Check both before removing an old portable folder.
-Follow the release's update instructions when a matching backend update is
-required. In-app update checks use this fork's releases; stable builds do not
-automatically install prereleases.
+Follow the release's update instructions when a matching backend update is required. Use the matching updater or download the complete package from [DS4Windows Releases](https://github.com/hbashton/DS4Windows/releases).
 
 ## If something isn't working
 
 - **Double input:** check HidHide is installed and enabled for the physical
   controller, then disable overlapping remapping software for the game.
 - **No virtual controller / backend not ready:** follow the displayed startup
-  error. Use **Settings > Install / Repair VIIPER** when requested, and restart
+  error. Use **Settings > Controllers > Install / Repair VIIPER** when requested, and restart
   only if setup asks. Keep DS4Windows and its bundled VIIPER version together.
 - **No native haptics:** confirm the game supports them, the profile emulates
   DualSense, controller audio/speaker support is enabled, and Steam Input is

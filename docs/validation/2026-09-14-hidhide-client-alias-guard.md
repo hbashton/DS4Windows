@@ -1,5 +1,8 @@
 # HidHide client alias crash and DS4Windows safeguard
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Confirmed local cause
 
 The installed HidHide 1.5.230 configuration client failed while populating its

@@ -1,5 +1,8 @@
 # Joy-Con Link/Unlink and retained virtual pad — b87 preview
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## User-visible changes
 
 - Controllers cards now have a labeled Link button with the paired-controller

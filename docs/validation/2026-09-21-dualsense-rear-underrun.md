@@ -1,5 +1,8 @@
 # DualSense rear-channel underrun — 2026-09-21
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Evidence and limits
 
 External USB/IP source PCM and physical Bluetooth HID captures were compared

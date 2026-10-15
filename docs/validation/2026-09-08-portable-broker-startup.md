@@ -1,5 +1,8 @@
 # Normal portable broker startup
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 Follow-up to the initial RC4.5 packaging checkpoint. The user requested a
 top-level `viiper.exe` in the portable ZIP and automatic startup. They then
 clarified that an already-running compatible copy should be reusable, rather

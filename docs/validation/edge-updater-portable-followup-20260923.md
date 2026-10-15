@@ -1,5 +1,8 @@
 # Edge, updater and portable startup follow-up — 2026-09-23
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Requests and acceptance
 
 1. **Physical and emulated DualSense Edge fidelity.** Compare independent

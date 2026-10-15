@@ -1,5 +1,8 @@
 # DualSense Bluetooth feedback regression after RC4.5.6
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 Status: source fixes reviewed and full test suite green; physical game acceptance pending.
 This is not a release or a claim that subjective haptics have been verified.
 

@@ -1,5 +1,8 @@
 # Bindable 360-degree flick-stick calibration
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 This records the initial implementation in `62c6a6e`. The subsequent
 [Axis Config revision](2026-09-14-axis-calibration-and-trigger-ui.md) replaces
 the remapper UI described below; the runtime and binding compatibility tests

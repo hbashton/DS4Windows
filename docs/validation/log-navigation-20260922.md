@@ -1,5 +1,8 @@
 # Log navigation stall — 2026-09-22
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Observed failure
 
 An installed RC4.6.4 session intermittently became unresponsive when opening Log.

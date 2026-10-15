@@ -1,5 +1,8 @@
 # Switch 2 playstyle UI and Pro profile crash — b83
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Confirmed failure
 
 The b82 WPF dispatcher failure at 2026-09-06 14:41:21 UTC was a

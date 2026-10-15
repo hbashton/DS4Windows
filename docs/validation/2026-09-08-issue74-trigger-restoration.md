@@ -1,5 +1,8 @@
 # Issue #74: restore normal trigger effects after Trigger Lab, 2026-09-08
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 Status: the confirmed restoration inconsistency is fixed and covered by offline regressions. This does not establish that every restart/profile-switch symptom in [issue #74](https://github.com/hbashton/DS4Windows/issues/74) has the same cause, or that the report was user error.
 
 ## Defect and bounded change

@@ -1,5 +1,8 @@
 # Nintendo rumble: controlled comparison, September 10
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 This is a private validation record, not release notes or a smoothness claim.
 The user extended unattended work to one hour at approximately 12:56 UTC;
 the current work window ends at 13:56 UTC on September 10, 2026.

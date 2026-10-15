@@ -1,5 +1,8 @@
 # Issue #82: legacy joystick exposure investigation, 2026-09-08
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 Status: diagnostic lead and read-only tooling, **not a confirmed fix**. No game was launched, controller disconnected, app replaced, or HidHide/GameInput setting changed in this pass.
 
 ## Evidence and limits

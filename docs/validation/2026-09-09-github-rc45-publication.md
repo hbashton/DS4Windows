@@ -1,5 +1,8 @@
 # RC4.5 GitHub publication
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 The user authorized updating the versions, fast-forwarding both repositories to
 `main`, building and uploading the release candidates. The preceding tester
 kit was local only; it was not a public release or a push to either main branch.

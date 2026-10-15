@@ -1,5 +1,8 @@
 # DualShock 4 audio to physical DualSense / Sonar, 2026-09-12
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Confirmed live fault
 
 Installed DS4Windows PID 30652, Bluetooth helper PID 27428, VIIPER PID 30124.

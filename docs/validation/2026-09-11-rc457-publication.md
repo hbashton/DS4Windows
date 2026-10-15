@@ -1,5 +1,8 @@
 # RC4.5.7 hotfix publication ledger
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Release identity
 
 - Requested title: `Release Candidate 4.5.7 Hotfix — Sorry, broke Vibration/Triggers`.

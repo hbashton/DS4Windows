@@ -1,5 +1,8 @@
 # Reported-issue follow-up, 2026-09-08
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 Starting checkpoints: DS4Windows `ed0e983`, VIIPER `07db0a8`.
 This follows the [first reported-bug pass](2026-09-08-github-reported-bugs.md).
 The user authorized cautious implementation of the four follow-up candidates.

@@ -1,5 +1,8 @@
 # Active user-request ledger — 2026-09-09
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 This is the working checklist for the current follow-ups. Source implementation,
 automated verification, physical acceptance, and public release are separate
 milestones. Nothing in this ledger implies that an in-progress build is installed

@@ -1,5 +1,8 @@
 # RC4.3 to RC4.4 native DualSense haptics regression audit
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](README.md).
+
+
 Evidence checkpoint: September 5, 2026. The user reports that Hades II's
 advanced feedback worked with a physical DualSense emulating a DualSense in
 RC4.3, but not in the released RC4.4. This audit has reproduced and corrected

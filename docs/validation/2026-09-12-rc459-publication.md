@@ -1,5 +1,8 @@
 # RC4.5.9 publication ledger
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Published release identity
 
 - [VIIPERRC4.5.9](https://github.com/hbashton/DS4Windows/releases/tag/VIIPERRC4.5.9):

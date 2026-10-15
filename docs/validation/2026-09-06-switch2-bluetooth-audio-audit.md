@@ -1,5 +1,8 @@
 # Switch 2 Pro Bluetooth headset audio: evidence and remaining work
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 Status: **not implemented or hardware-verified**. Bluetooth controller input,
 HD rumble and LEDs are separate, already-existing paths. USB headphone output
 is physically verified in `2026-09-06-switch2-pro-usb-audio.md`. Neither fact

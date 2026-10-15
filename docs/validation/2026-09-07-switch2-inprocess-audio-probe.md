@@ -1,5 +1,8 @@
 # b90: persistent Switch 2 Pro Bluetooth audio probing
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Approach correction
 
 Do **not** close DS4Windows and try to take the controller with a second GATT

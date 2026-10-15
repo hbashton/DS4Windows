@@ -63,7 +63,7 @@ output semantics are verified. Calibration commands are never forwarded. Mods
 that require these unsupported modes or DSX-specific app discovery need further
 compatibility work; they should not be advertised as already supported.
 
-`test_dsx_mod.ps1` queries status by default. Its explicit `-TestEffects` switch
+[utils/test_dsx_mod.ps1](../test_dsx_mod.ps1) queries status by default. Its explicit `-TestEffects` switch
 briefly tests low-force right-trigger resistance and light output, then requests
 reset. Do not run effect tests while gaming. Unit tests use fake devices and
 ephemeral loopback ports, not physical controllers.

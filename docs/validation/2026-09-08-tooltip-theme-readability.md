@@ -1,5 +1,8 @@
 # Tooltip theme readability, 2026-09-08
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 Status: the source-level theme override defects are fixed, with isolated WPF resource/rendering regressions passing. No running application or controller was touched.
 
 ## Cause and scope

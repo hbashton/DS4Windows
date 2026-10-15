@@ -1,5 +1,8 @@
 # DualSense Bluetooth native command ordering, 2026-09-10
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 Final source validation: **5,185 passed, 0 failed, 11 gated skips** (5,196 total).
 The identified native-command coalescing defect is corrected in source. Complete
 portable E has subsequently been built and launched; physical GTA V Enhanced

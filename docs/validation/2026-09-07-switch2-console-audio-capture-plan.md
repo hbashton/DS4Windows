@@ -1,5 +1,8 @@
 # Switch 2 console headphone reference capture: feasibility and gates
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 Status: **not executed; dedicated sniffer unavailable**. The user confirmed
 owning a Switch 2 console and explicitly confirmed having no BLE sniffer.
 The live DS4Windows/VIIPER session and physical Pro connection remain untouched.

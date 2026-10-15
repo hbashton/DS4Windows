@@ -1,5 +1,8 @@
 # Native Bluetooth write-credit allocation gate — 2026-09-12
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Release held; same-workload attribution required
 
 The first RC4.5.9 rebuilt full run failed

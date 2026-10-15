@@ -1,5 +1,8 @@
 # Switch 2 held-rumble maintenance, 2026-09-08
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Scope and evidence
 
 The reported symptom was premature cutoff of Switch 2 Test Heavy/Test Light and held game rumble. This change is source/test validated, not a claim that the running portable build or physical controller has been updated or perceptually accepted.

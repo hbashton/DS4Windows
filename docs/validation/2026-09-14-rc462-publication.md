@@ -1,5 +1,8 @@
 # RC4.6.2 and updater 2.0.7 publication evidence, 2026-09-14
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Release identity
 
 - DS4Windows tag: `VIIPERRC4.6.2`, annotated at `6147981d7720636d1b46d3586efe48e6aaecd9a4` after exact-source main CI passed.

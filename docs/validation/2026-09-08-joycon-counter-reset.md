@@ -1,5 +1,8 @@
 # Joy-Con 2 counter-reset disconnect: live evidence, 2026-09-08
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Incident and capture
 
 The user reported a left-only disconnect at 19:11 and a joined-pair disconnect

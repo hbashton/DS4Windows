@@ -1,5 +1,8 @@
 # Native DualSense rumble and queued-disconnect investigation
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Observed environment
 
 The user was deliberately rolling back installed releases to find a haptics

@@ -1,5 +1,8 @@
 # Nintendo allocation-counter release gate — 2026-09-09
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Release held on independent CI failure
 
 CI run `34380417498`, source `6e99c44bef78dddd0c1ba440e62a1e9066f71643`,

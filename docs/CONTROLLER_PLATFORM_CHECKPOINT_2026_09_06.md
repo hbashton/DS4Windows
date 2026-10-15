@@ -1,5 +1,8 @@
 # Controller platform source checkpoint, 2026-09-06
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](README.md).
+
+
 This checkpoint preserves the accumulated Switch 2 Pro/Joy-Con USB/Bluetooth,
 canonical mapping, feedback/HD-rumble, profile/lifecycle and Xbox One VIIPER
 output work on `feature/native-udecx-landing-zone`. It is not a release tag or

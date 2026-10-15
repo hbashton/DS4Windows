@@ -1,5 +1,8 @@
 # Issue #32 startup-log diagnosis — 2026-09-08
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 Read-only review of [DS4Windows #32](https://github.com/hbashton/DS4Windows/issues/32), its comments, and all six attached text logs against current source `50c45e0f18e46ad275b63dd7fe4d989e0d9a8f19`. The text attachments were read in memory; no raw logs or controller identifiers are committed. The separately linked approximately 500 MB process dump was not acquired or analyzed. No application, controller, service, task, or driver state was changed.
 
 ## What each log establishes

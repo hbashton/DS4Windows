@@ -1,5 +1,8 @@
 # DualSense Bluetooth lightbar restore ordering, 2026-09-22
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Status and scope
 
 This is a follow-up to the report that the orange profile lightbar did not

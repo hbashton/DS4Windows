@@ -1,5 +1,8 @@
 # Startup-task recovery for issues #98 and #103
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Evidence and scope
 
 [Issue #103](https://github.com/hbashton/DS4Windows/issues/103) reports setup

@@ -1,5 +1,8 @@
 # Switch 2 RC4.5 rumble regression, 2026-09-09
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Report and scope
 
 After installing RC4.5, the user reported stuttering Test Heavy and Test Light

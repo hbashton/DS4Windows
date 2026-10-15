@@ -1,5 +1,8 @@
 # Complete Joy-Con thumbnails — b86 follow-up, 2026-09-06
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 The user's b85 screenshot showed a flat, truncated-looking upper controller.
 Live inspection of b85's overview/sidebar confirmed the same silhouette. The
 thumbnail factory still guarded painting ZL/ZR with `if (diagram)`, although

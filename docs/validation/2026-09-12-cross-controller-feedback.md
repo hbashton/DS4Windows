@@ -1,5 +1,8 @@
 # Cross-controller feedback throughput and stop audit
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Scope and rate interpretation
 
 The follow-up to RC4.5.9 asks whether other controllers have analogous feedback

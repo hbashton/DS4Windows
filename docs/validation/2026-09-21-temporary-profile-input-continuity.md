@@ -1,5 +1,8 @@
 # Temporary-profile input continuity — 2026-09-21
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Report and scope
 
 The reporter describes input freezes on both pressing and releasing a Profile

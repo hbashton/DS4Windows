@@ -1,5 +1,8 @@
 # Switch 2 Pro USB audio: physical headphone output confirmed
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Scope and result
 
 2026-09-06, user-connected Switch 2 Pro over USB, controller headphone jack

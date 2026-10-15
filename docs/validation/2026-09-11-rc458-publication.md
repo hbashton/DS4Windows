@@ -1,5 +1,8 @@
 # RC4.5.8 publication ledger
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Requested release
 
 - Tag: `VIIPERRC4.5.8`.

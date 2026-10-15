@@ -1,5 +1,8 @@
 # Read failure before Stop: recovery validation, 2026-09-09
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 ## Corrected report and scope
 
 The user clarified the sequence: a controller logs read failure 995 first, and

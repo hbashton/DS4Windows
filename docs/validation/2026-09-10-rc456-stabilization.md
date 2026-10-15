@@ -1,5 +1,8 @@
 # RC4.5.6 stabilization and publication ledger
 
+> **Historical record.** This preserves the source, tests and limitations recorded at the time; it is not current setup guidance. See the [documentation index](../README.md).
+
+
 Status: published; required pre-publication and post-publication gates passed. This record is an evidence ledger, not a claim that every possible race, controller/game combination, or installation failure has been eliminated.
 
 ## Scope and version contract

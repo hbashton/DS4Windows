@@ -9,7 +9,7 @@ internal static class PortableBrokerStartupDiagnostics
         string reason = code switch
         {
             70 => "USB/IP could not be found or its version could not be checked.",
-            71 => "The installed USB/IP version does not match the required version (0.9.7.7).",
+            71 => "The installed USB/IP version does not match the required version (0.9.8.1).",
             72 => "The USB/IP startup check timed out before VIIPER could open its connection.",
             73 => "The USB/IP driver did not pass its compatibility check.",
             74 => "VIIPER could not open or create its local connection key.",

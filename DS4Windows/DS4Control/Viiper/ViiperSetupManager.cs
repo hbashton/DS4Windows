@@ -106,8 +106,8 @@ namespace DS4Windows
                 if (!UsbipInstalled)
                 {
                     return string.IsNullOrWhiteSpace(UsbipVersion)
-                        ? "usbip-win2 0.9.7.7 is missing"
-                        : $"usbip-win2 {UsbipVersion} must be replaced with supported 0.9.7.7";
+                        ? "usbip-win2 0.9.8.1 is missing"
+                        : $"usbip-win2 {UsbipVersion} must be replaced with supported 0.9.8.1";
                 }
 
                 if (!UsbipExecutableSafe)
@@ -156,7 +156,7 @@ namespace DS4Windows
     {
         public const string ApiHost = "127.0.0.1";
         public const int ApiPort = 3242;
-        internal static readonly Version RequiredUsbipVersion = new Version(0, 9, 7, 7);
+        internal static readonly Version RequiredUsbipVersion = new Version(0, 9, 8, 1);
 
         private const string InstallerScriptName = "install-viiper-backend.ps1";
         private const string InstallerHostArgument =
@@ -169,7 +169,7 @@ namespace DS4Windows
             BundledViiperName + ".sha256";
         internal const string SupportedViiperSha256 =
             "9392A49E619E1D9B7956EA4BEDAFD2E74CBF5065C011554E80F756D1524F892B";
-        private const string BundledUsbipName = "USBip-0.9.7.7-x64.exe";
+        private const string BundledUsbipName = "USBip-0.9.8.1-x64.exe";
         private const string BundledHidHideName =
             "HidHide_1.5.230_x64.exe";
         private const string BundledFakerInputName =
@@ -198,11 +198,13 @@ namespace DS4Windows
         private const string UsbipUdeServiceName = "usbip2_ude";
         private const string UsbipFilterServiceName = "usbip2_filter";
         internal const string SupportedUsbipUdeSha256 =
-            "51DB440065393E588A6B2585508C50EB3E1510B7B06D9AFA6C5BDE583751EA7D";
+            "ABD4FC43DCE40E027E4ACC884CBFE92433E026206F6565C5EE5284A39441169A";
         internal const string SupportedUsbipFilterSha256 =
-            "C290299FF4D0F6A597DB5CE03E15B29A5349CDCE7C587EBFBD9ECAECA04F73ED";
+            "B93A5FC3C23D56F9B49634742374E32F269E53F764CAA2D5FCB43E3259F7ECED";
         internal const string SupportedUsbipExecutableSha256 =
-            "FC1660E3759D8AF4CEDE48DBE194285A5A1DE85CE6E3216724499AFD32BE92E8";
+            "817DA219FA153B4B37C3BC1AA8FCC63F33E046188C57CC3DD2C60A6EF0883C56";
+        internal const string SupportedUsbipLibrarySha256 =
+            "F123EF5D288B817A890CBE39A3C2D212B3D8B1765C691C8703CCB76C7337986C";
         private static readonly object serverStartLock = new object();
         private static readonly object foreignViiperProcessLock = new object();
         private static readonly ViiperDependencyReadiness dependencyReadiness = new(() =>
@@ -281,7 +283,9 @@ namespace DS4Windows
             Version usbipVersion = TryGetUsbipVersion(usbipPath);
             bool usbipInstalled = IsSupportedUsbipVersion(usbipVersion);
             bool usbipExecutableSafe = usbipInstalled &&
-                FileHasSha256(usbipPath, SupportedUsbipExecutableSha256);
+                FileHasSha256(usbipPath, SupportedUsbipExecutableSha256) &&
+                FileHasSha256(Path.Combine(Path.GetDirectoryName(usbipPath),
+                    "libusbip.dll"), SupportedUsbipLibrarySha256);
             bool usbipRuntimeReady = false;
             string usbipProbeMessage;
             ViiperDependencyStatus dependencies = dependencyReadiness.Read(refreshDependencies || tryStartServer);
@@ -304,7 +308,7 @@ namespace DS4Windows
             else
             {
                 usbipProbeMessage = !usbipExecutableSafe && usbipInstalled
-                    ? "The installed usbip.exe does not match the bundled 0.9.7.7 executable."
+                    ? "The installed usbip.exe or libusbip.dll does not match the bundled 0.9.8.1 package."
                     : !usbipDriverFilesSafe &&
                     usbipInstalled
                     ? usbipDriverIntegrityMessage
@@ -2611,7 +2615,7 @@ namespace DS4Windows
                 }
 
                 return (true,
-                    "The registered usbip-win2 0.9.7.7 driver files match the " +
+                    "The registered usbip-win2 0.9.8.1 driver files match the " +
                     "verified signed package.");
             }
             catch (Exception ex)

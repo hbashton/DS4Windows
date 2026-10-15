@@ -11705,7 +11705,7 @@ namespace DS4Windows
                 return false;
             }
 
-            // usbip-win2 0.9.7.7 has no attach-time serial override. Its
+            // The published usbip-win2 0.9.8.1 serial override is broken. Our
             // safe ownership identity is the exact VIIPER-only localhost
             // server port plus the remote bus/device tuple. If a newer port
             // listing does expose a serial, reject every foreign token.
@@ -11791,12 +11791,24 @@ namespace DS4Windows
                     continue;
                 }
 
+                // 0.9.8.1 prints "-> serial: value", including an empty value
+                // when no override is supplied. Keep the older quoted form
+                // for upgrade cleanup, and never treat a foreign plain value
+                // as an absent serial.
+                const string plainPrefix = "-> serial:";
+                if (line.StartsWith(plainPrefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    serial = line.Substring(plainPrefix.Length).Trim();
+                    return serial.Length > 0;
+                }
+
                 int openingQuote = line.IndexOf('\'');
                 int closingQuote = openingQuote >= 0 ?
                     line.IndexOf('\'', openingQuote + 1) : -1;
                 if (openingQuote < 0 || closingQuote <= openingQuote + 1)
                 {
-                    return false;
+                    serial = line.Substring("-> serial".Length).Trim();
+                    return serial.Length > 0 && serial != "''";
                 }
 
                 serial = line.Substring(openingQuote + 1,

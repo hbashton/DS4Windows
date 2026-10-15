@@ -10,13 +10,14 @@ namespace DS4Windows.Bootstrapper
 {
     internal static class InfrastructureProbe
     {
-        private const string ExpectedMarker = "VIIPER-0.1.9-rc4.6.6+USBIP-0.9.7.7";
+        private const string ExpectedMarker = "VIIPER-0.1.9-rc4.6.6+USBIP-0.9.8.1";
         private const string ExpectedViiperVersion = "0.1.9-rc4.6.6";
         private const string ExpectedViiperHash = "9392A49E619E1D9B7956EA4BEDAFD2E74CBF5065C011554E80F756D1524F892B";
-        private const string ExpectedUsbipVersion = "0.9.7.7";
-        private const string ExpectedUsbipHash = "FC1660E3759D8AF4CEDE48DBE194285A5A1DE85CE6E3216724499AFD32BE92E8";
-        private const string ExpectedUdeHash = "51DB440065393E588A6B2585508C50EB3E1510B7B06D9AFA6C5BDE583751EA7D";
-        private const string ExpectedFilterHash = "C290299FF4D0F6A597DB5CE03E15B29A5349CDCE7C587EBFBD9ECAECA04F73ED";
+        private const string ExpectedUsbipVersion = "0.9.8.1";
+        private const string ExpectedUsbipHash = "817DA219FA153B4B37C3BC1AA8FCC63F33E046188C57CC3DD2C60A6EF0883C56";
+        private const string ExpectedUsbipLibraryHash = "F123EF5D288B817A890CBE39A3C2D212B3D8B1765C691C8703CCB76C7337986C";
+        private const string ExpectedUdeHash = "ABD4FC43DCE40E027E4ACC884CBFE92433E026206F6565C5EE5284A39441169A";
+        private const string ExpectedFilterHash = "B93A5FC3C23D56F9B49634742374E32F269E53F764CAA2D5FCB43E3259F7ECED";
 
         internal static bool IsHealthy()
         {
@@ -30,7 +31,8 @@ namespace DS4Windows.Bootstrapper
                 if (!VersionMatches(viiper, ExpectedViiperVersion) ||
                     !HashMatches(viiper, ExpectedViiperHash) ||
                     !VersionMatches(usbip, ExpectedUsbipVersion) ||
-                    !HashMatches(usbip, ExpectedUsbipHash))
+                    !HashMatches(usbip, ExpectedUsbipHash) ||
+                    !HashMatches(Path.Combine(programFiles, "USBip", "libusbip.dll"), ExpectedUsbipLibraryHash))
                 {
                     return false;
                 }

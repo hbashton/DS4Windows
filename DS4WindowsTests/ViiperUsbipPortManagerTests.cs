@@ -8,6 +8,30 @@ namespace DS4WindowsTests
     public class ViiperUsbipPortManagerTests
     {
         [DataTestMethod]
+        [DataRow("", true)]
+        [DataRow("DS4W0123456789A", true)]
+        [DataRow("foreign", false)]
+        [DataRow("DS4WIN1234567", false)]
+        [DataRow("'foreign'", false)]
+        public void Usbip0981PortListingPreservesExactLocalOwnership(string serial, bool expected)
+        {
+            // Official 0.9.8.1 userspace/usbip/port.cpp output, including the
+            // new plain serial and receive-mode lines.
+            string output = "Imported USB devices\n====================\n" +
+                "Port 07: device in use at high-speed\n" +
+                "         Sony Corp. DualSense\n" +
+                "           -> usbip://localhost:3241/17-4\n" +
+                "           -> remote bus/dev: 017/004\n" +
+                $"           -> serial: {serial}\n" +
+                "           -> mode: low-latency\n";
+            var ports = ViiperUsbipPortManager.ParseImportedPorts(output);
+            Assert.AreEqual(1, ports.Count);
+            Assert.AreEqual(7, ports[0].Port);
+            Assert.AreEqual(expected, ViiperUsbipPortManager.IsDs4WindowsOwnedLocalPort(ports[0], "17-4"));
+            Assert.IsFalse(ViiperUsbipPortManager.IsDs4WindowsOwnedLocalPort(ports[0], "17-5"));
+        }
+
+        [DataTestMethod]
         [DataRow("localhost:3241/1-1", false)]
         [DataRow("127.0.0.1:3241/1-1", false)]
         [DataRow("[::1]:3241/1-1", false)]

@@ -83,11 +83,11 @@
                             </Grid.ColumnDefinitions>
                             <StackPanel>
                                 <TextBlock Text="&#x2022; Verify packaged files" />
-                                <TextBlock Text="&#x2022; Install VIIPER 0.1.9-rc4.6.6"
+                                <TextBlock Text="&#x2022; Install VIIPER backend"
                                            Margin="0,5,0,0" />
                             </StackPanel>
                             <StackPanel Grid.Column="1">
-                                <TextBlock Text="&#x2022; Verify USB-IP 0.9.7.7" />
+                                <TextBlock Text="&#x2022; Verify USB-IP 0.9.8.1" />
                                 <TextBlock Text="&#x2022; Verify startup and API"
                                            Margin="0,5,0,0" />
                             </StackPanel>

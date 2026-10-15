@@ -86,7 +86,7 @@ $script:UsbipReplacementPhaseOne = $false
 $script:SetupMutex = $null
 $script:SetupMutexOwned = $false
 $script:SetupTransactionStarted = $false
-$script:RequiredUsbipVersion = [Version]"0.9.7.7"
+$script:RequiredUsbipVersion = [Version]"0.9.8.1"
 $script:ViiperServerArguments =
     "server --usb.retained-import-authority-id=4923336367393615921"
 # RC4.5 / RC4.5.1-4 shipped this exact VIIPER executable. Their in-app
@@ -96,18 +96,20 @@ $script:ViiperServerArguments =
 $script:LegacyPortableViiperSha256 =
     "F1ECEF158F02D0BDCD1296C8D5097A281169081D0D59C1A8971592FAC78155EF"
 $script:UsbipInstallerSha256 =
-    "51620fa5f9f8be5932bc9d786deee557ce06d5407a99cab490dcfac71f185fea"
+    "38cad6d4432b52d5bb9409d9ad03b72fdffc4ada4cd3a48fbeca1a2752a8518a"
 $script:UsbipExecutableSha256 =
-    "fc1660e3759d8af4cede48dbe194285a5a1de85ce6e3216724499afd32be92e8"
+    "817da219fa153b4b37c3bc1aa8fcc63f33e046188c57cc3dd2c60a6ef0883c56"
+$script:UsbipLibrarySha256 =
+    "f123ef5d288b817a890cbe39a3c2d212b3d8b1765c691c8703ccb76c7337986c"
 $script:UsbipUdeDriverSha256 =
-    "51db440065393e588a6b2585508c50eb3e1510b7b06d9afa6c5bde583751ea7d"
+    "abd4fc43dce40e027e4acc884cbfe92433e026206f6565c5ee5284a39441169a"
 $script:UsbipFilterDriverSha256 =
-    "c290299ff4d0f6a597db5ce03e15b29a5349cdce7c587ebfbd9ecaeca04f73ed"
+    "b93a5fc3c23d56f9b49634742374e32f269e53f764caa2d5fcb43e3259f7eced"
 $script:BundledViiperPath = Join-Path $script:PackageExtrasRoot `
     "VIIPER-0.1.9-rc4.6.6-x64.exe"
 $script:BundledViiperSha256Path = $script:BundledViiperPath + ".sha256"
 $script:BundledUsbipInstallerPath = Join-Path $script:PackageExtrasRoot `
-    "USBip-0.9.7.7-x64.exe"
+    "USBip-0.9.8.1-x64.exe"
 $programFilesRoot = if ($env:ProgramW6432) {
     $env:ProgramW6432
 }
@@ -151,7 +153,7 @@ $script:UsbipReplacementStatePath = Join-Path $script:InstallDir `
 $script:UsbipUninstallKeyName = `
     "{199505b0-b93d-4521-a8c7-897818e0205a}_is1"
 $script:InfrastructureRegistryPath = "HKLM:\SOFTWARE\DS4Windows"
-$script:InfrastructureVersion = "VIIPER-0.1.9-rc4.6.6+USBIP-0.9.7.7"
+$script:InfrastructureVersion = "VIIPER-0.1.9-rc4.6.6+USBIP-0.9.8.1"
 $script:System32 = [Environment]::SystemDirectory
 $script:PnPUtilPath = Join-Path $script:System32 "pnputil.exe"
 $script:TaskKillPath = Join-Path $script:System32 "taskkill.exe"
@@ -551,7 +553,7 @@ function Get-UsbipDriverIntegrity {
         }
         if (-not [string]::Equals($hash, $expected[$serviceName],
                 [StringComparison]::OrdinalIgnoreCase)) {
-            $details.Add("$serviceName does not match signed 0.9.7.7")
+            $details.Add("$serviceName does not match signed 0.9.8.1")
             continue
         }
 
@@ -668,7 +670,7 @@ function Resolve-UsbipReplacementBoundary {
             $state.BootSessionId -eq $currentBootSessionId) {
         $script:RebootBoundaryPending = $true
         throw "USBIP replacement phase 1 is complete. Restart Windows before " +
-            "running Install / Repair again; 0.9.7.7 was not installed."
+            "running Install / Repair again; 0.9.8.1 was not installed."
     }
 
     Write-SetupLog (
@@ -789,16 +791,17 @@ function Test-Ds4WindowsOwnedUsbipPort([string]$block) {
     $serialLine = [regex]::Match(
         $block, '(?im)^\s*->\s+serial\b(?<value>.*)$')
     if (-not $serialLine.Success) {
-        # usbip-win2 0.9.7.7 cannot assign an attach-time owner serial. The
+        # The published 0.9.8.1 serial override is broken. The
         # exact localhost VIIPER endpoint and bus/device tuple are its identity.
         return $true
     }
 
     $serial = [regex]::Match(
-        $serialLine.Groups['value'].Value, "^\s*'(?<serial>[^']*)'\s*$")
+        $serialLine.Groups['value'].Value,
+        "^\s*(?::\s*(?<serial>[^\r\n]*)|'(?<serial>[^']*)')\s*$")
     if (-not $serial.Success) { return $false }
 
-    $serialValue = $serial.Groups['serial'].Value
+    $serialValue = $serial.Groups['serial'].Value.Trim()
     return [string]::IsNullOrEmpty($serialValue) -or
         $serialValue -cmatch '^DS4W[0-9A-Fa-f]{11}$'
 }
@@ -1112,11 +1115,13 @@ function Test-UsbipRuntime([string]$usbipPath) {
     }
 
     if (-not (Test-FileSha256 $usbipPath `
-            $script:UsbipExecutableSha256)) {
+            $script:UsbipExecutableSha256) -or
+            -not (Test-FileSha256 (Join-Path (Split-Path -Parent $usbipPath) `
+                "libusbip.dll") $script:UsbipLibrarySha256)) {
         $script:UsbipRuntimeProbeState = "executable-mismatch"
         Write-SetupLog (
-            "usbip.exe does not match the verified executable from the " +
-            "bundled 0.9.7.7 package. Repair is required."
+            "usbip.exe or libusbip.dll does not match the verified files from the " +
+            "bundled 0.9.8.1 package. Repair is required."
         ) Yellow
         return $false
     }
@@ -1143,7 +1148,7 @@ function Test-UsbipRuntime([string]$usbipPath) {
         if ($abiMismatch) {
             $script:UsbipRuntimeProbeState = "abi-mismatch"
             Write-SetupLog (
-                "usbip-win2 0.9.7.7 is installed, but Windows still has a " +
+                "usbip-win2 0.9.8.1 is installed, but Windows still has a " +
                 "different driver ABI loaded. A reboot is required."
             ) Yellow
             return $false
@@ -3097,7 +3102,7 @@ try {
     Write-Host "Planned order:" -ForegroundColor Cyan
     Write-Host "  1. Install VIIPER and register both elevated startup tasks." `
         -ForegroundColor Cyan
-    Write-Host "  2. Verify or install packaged usbip-win2 0.9.7.7." `
+    Write-Host "  2. Verify or install packaged usbip-win2 0.9.8.1." `
         -ForegroundColor Cyan
     Write-Host "  3. Verify the startup tasks remain exact and enabled." `
         -ForegroundColor Cyan
@@ -3113,7 +3118,7 @@ try {
                 "interactively, or use -Yes after reviewing the installation " +
                 "and restart requirements."
         }
-        Write-Host "VIIPER is bundled and installs first. An incompatible USBIP driver is removed only after VIIPER is in place, and 0.9.7.7 is installed only after a separate reboot." -ForegroundColor Yellow
+        Write-Host "VIIPER is bundled and installs first. An incompatible USBIP driver is removed only after VIIPER is in place, and 0.9.8.1 is installed only after a separate reboot." -ForegroundColor Yellow
         Write-Host "Save work before continuing; a driver replacement can require you to restart Windows and run Repair again." -ForegroundColor Yellow
         $answer = Read-Host "Install bundled VIIPER first and continue? [Y/N]"
         if ($answer -notmatch '^(?i:y|yes)$') {
@@ -3276,7 +3281,7 @@ try {
     Save-StartupSetupIntent "RepairRequired"
     Set-InfrastructureStartupFailClosed $viiperPath $script:Ds4WindowsRestartPath
 
-    Write-Step "Step 2 of 4 - Checking usbip-win2 0.9.7.7"
+    Write-Step "Step 2 of 4 - Checking usbip-win2 0.9.8.1"
     $requiredUsbipVersion = $script:RequiredUsbipVersion
     try {
         $usbipVersion = Get-UsbipInstalledVersion
@@ -3289,7 +3294,9 @@ try {
     $canonicalUsbipPresent = Test-Path -LiteralPath $script:CanonicalUsbipPath
     $usbipExecutableSafe = $canonicalUsbipPresent -and
         (Test-FileSha256 $script:CanonicalUsbipPath `
-            $script:UsbipExecutableSha256)
+            $script:UsbipExecutableSha256) -and
+        (Test-FileSha256 (Join-Path (Split-Path -Parent $script:CanonicalUsbipPath) `
+            "libusbip.dll") $script:UsbipLibrarySha256)
     $usbipDriverIntegrity = Get-UsbipDriverIntegrity
     if ($usbipDriverIntegrity.InstalledServiceCount -lt 0) {
         throw "USBIP driver integrity inspection failed: " +
@@ -3404,7 +3411,7 @@ try {
         }
         else {
             $usbipInstaller = Join-Path $script:TempDir `
-                "USBip-0.9.7.7-x64.exe"
+                "USBip-0.9.8.1-x64.exe"
             if (-not (Test-Path -LiteralPath `
                     $script:BundledUsbipInstallerPath -PathType Leaf)) {
                 $missingUsbipName = Split-Path -Leaf `
@@ -3413,7 +3420,7 @@ try {
                     "missing $missingUsbipName."
             }
             Write-SetupLog (
-                "Using the bundled usbip-win2 0.9.7.7 installer."
+                "Using the bundled usbip-win2 0.9.8.1 installer."
             ) Green
             Assert-FileSha256 $script:BundledUsbipInstallerPath `
                 $script:UsbipInstallerSha256
@@ -3440,7 +3447,9 @@ try {
             $canonicalUsbipPresent = Test-Path -LiteralPath $script:CanonicalUsbipPath
             $usbipExecutableSafe = $canonicalUsbipPresent -and
                 (Test-FileSha256 $script:CanonicalUsbipPath `
-                    $script:UsbipExecutableSha256)
+                    $script:UsbipExecutableSha256) -and
+                (Test-FileSha256 (Join-Path (Split-Path -Parent $script:CanonicalUsbipPath) `
+                    "libusbip.dll") $script:UsbipLibrarySha256)
             $usbipDriverIntegrity = Get-UsbipDriverIntegrity
             $usbipDriverFilesSafe = [bool]$usbipDriverIntegrity.Safe
             $usbipVersionReady = $canonicalUsbipPresent -and $usbipVersion -and
@@ -3484,7 +3493,7 @@ try {
         Write-Host ""
         Write-SetupLog (
             "VIIPER is installed and the old USBIP package removal was " +
-            "started. Packaged 0.9.7.7 was not installed. Restart Windows, " +
+            "started. Packaged 0.9.8.1 was not installed. Restart Windows, " +
             "then run Install / Repair again to complete phase 2."
         ) Yellow
     }

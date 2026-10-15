@@ -66,7 +66,7 @@ internal sealed class PortableBrokerContext : IDisposable
             }
         }
         return "Portable VIIPER did not become ready.\n\nReadiness check: " + detail +
-            "\n\nInclude this check in your bug report. Use a complete extracted portable package and USB/IP 0.9.7.7. " +
+            "\n\nInclude this check in your bug report. Use a complete extracted portable package and USB/IP 0.9.8.1. " +
             "Use Install / Repair VIIPER in Settings to retry without closing DS4Windows. If a conflicting broker cannot be identified or accessed, close it manually first. Your key and profiles were not replaced.";
     }
 

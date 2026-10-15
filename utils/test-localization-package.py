@@ -24,7 +24,7 @@ REQUIRED = (
     "extras/VIIPER-0.1.9-rc4.6.6-BUILD-NOTES.txt", "extras/LICENSE.txt",
     "extras/VIIPER-SYSTRAY-NOTICE.md", "extras/VIIPER-SYSTRAY-LICENSE.txt",
     "extras/VIIPER-WDL-NOTICE.txt",
-    "extras/USBip-0.9.7.7-x64.exe", "extras/HidHide_1.5.230_x64.exe",
+    "extras/USBip-0.9.8.1-x64.exe", "extras/HidHide_1.5.230_x64.exe",
     "extras/FakerInput_0.1.0_x64.msi",
 )
 SATELLITES = (

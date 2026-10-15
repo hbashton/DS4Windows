@@ -53,10 +53,33 @@ foreach ($functionName in @(
         "Set-UsbipReplacementBoundary",
         "Remove-MismatchedUsbipPackage",
         "Resolve-UsbipReplacementBoundary",
+        "Test-Ds4WindowsOwnedUsbipPort",
         "Suspend-StartupTasksUntilInfrastructureReady",
         "Set-InfrastructureStartupFailClosed")) {
     Invoke-Expression (Get-BackendFunctionDefinition $functionName)
 }
+
+# Parse the new upstream port output and the older quoted form without running
+# any installer top-level code or touching the installed USB/IP driver.
+foreach ($case in @(
+        @{ Line = '-> serial: '; Owned = $true },
+        @{ Line = '-> serial: DS4W0123456789A'; Owned = $true },
+        @{ Line = '-> serial: foreign'; Owned = $false },
+        @{ Line = "-> serial: 'foreign'"; Owned = $false },
+        @{ Line = "-> serial ''"; Owned = $true },
+        @{ Line = "-> serial 'DS4W0123456789A'"; Owned = $true },
+        @{ Line = "-> serial 'foreign'"; Owned = $false },
+        @{ Line = '-> serial foreign'; Owned = $false })) {
+    foreach ($location in @('localhost:3241/17-4', 'remote.example:3241/17-4',
+            'localhost:3240/17-4', 'localhost:3241/x1-protected')) {
+        $block = "Port 07: device in use at high-speed`n -> usbip://$location`n $($case.Line)`n -> mode: low-latency"
+        $expected = $case.Owned -and $location -eq 'localhost:3241/17-4'
+        if ((Test-Ds4WindowsOwnedUsbipPort $block) -ne $expected) {
+            throw "USB-IP cleanup ownership mismatch: $location / $($case.Line)"
+        }
+    }
+}
+Write-Host "USB-IP cleanup rejects foreign imports in both port-output formats."
 
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) (
     "DS4Windows-Usbip-Reboot-Test-" + [Guid]::NewGuid().ToString("N"))
@@ -178,23 +201,23 @@ try {
     }
 
     $entry = [pscustomobject]@{
-        DisplayVersion = "0.9.7.8"
+        DisplayVersion = "0.9.7.7"
         QuietUninstallString = '"' + $uninstaller + '"'
         UninstallString = $null
     }
     $removed = Remove-MismatchedUsbipPackage $entry `
-        ([Version]"0.9.7.8") ([Version]"0.9.7.7")
+        ([Version]"0.9.7.7") ([Version]"0.9.8.1")
     if (-not $removed -or -not $script:UsbipReplacementPhaseOne -or
             -not $script:RebootRecommended -or
             $script:UsbipRuntimeReady) {
-        throw "0.9.7.8 phase-one replacement contract did not converge."
+        throw "0.9.7.7 phase-one replacement contract did not converge."
     }
 
     $state = Get-Content -LiteralPath $script:UsbipReplacementStatePath `
         -Raw | ConvertFrom-Json
     if ($state.BootSessionId -ne "boot-a" -or
-            $state.RemovedVersion -ne "0.9.7.8" -or
-            $state.RequiredVersion -ne "0.9.7.7") {
+            $state.RemovedVersion -ne "0.9.7.7" -or
+            $state.RequiredVersion -ne "0.9.8.1") {
         throw "USB-IP replacement marker did not preserve exact versions."
     }
 
@@ -251,7 +274,7 @@ try {
     $failedUninstallRejected = $false
     try {
         [void](Remove-MismatchedUsbipPackage $entry `
-            ([Version]"0.9.7.8") ([Version]"0.9.7.7"))
+            ([Version]"0.9.7.7") ([Version]"0.9.8.1"))
     }
     catch {
         $failedUninstallRejected = $_.Exception.Message -match "exit code 5"
@@ -261,7 +284,7 @@ try {
         throw "A failed USB-IP uninstall could authorize a later phase."
     }
 
-    Write-Host "USB-IP 0.9.7.8 -> reboot -> 0.9.7.7 state simulation passed."
+    Write-Host "USB-IP 0.9.7.7 -> reboot -> 0.9.8.1 state simulation passed."
 }
 finally {
     Remove-Item -LiteralPath $testRoot -Recurse -Force `

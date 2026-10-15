@@ -64,8 +64,10 @@ namespace DS4Windows.Tests
             Assert.IsFalse(ViiperSetupManager.IsSupportedUsbipVersion(null));
             Assert.IsFalse(ViiperSetupManager.IsSupportedUsbipVersion(
                 new Version(0, 9, 7, 6)));
-            Assert.IsTrue(ViiperSetupManager.IsSupportedUsbipVersion(
+            Assert.IsFalse(ViiperSetupManager.IsSupportedUsbipVersion(
                 new Version(0, 9, 7, 7)));
+            Assert.IsTrue(ViiperSetupManager.IsSupportedUsbipVersion(
+                new Version(0, 9, 8, 1)));
             Assert.IsFalse(ViiperSetupManager.IsSupportedUsbipVersion(
                 new Version(0, 9, 7, 8)));
             Assert.IsFalse(ViiperSetupManager.IsSupportedUsbipVersion(
@@ -346,7 +348,7 @@ namespace DS4Windows.Tests
             Assert.IsTrue(ViiperSetupManager.
                 RequiresVerifiedViiperUpdate(status));
 
-            status.UsbipVersion = "0.9.7.7";
+            status.UsbipVersion = "0.9.8.1";
             status.UsbipInstalled = true;
             status.UsbipExecutableSafe = true;
             status.UsbipDriverFilesSafe = true;
@@ -360,7 +362,7 @@ namespace DS4Windows.Tests
         {
             ViiperPrerequisiteStatus status = new ViiperPrerequisiteStatus
             {
-                UsbipVersion = "0.9.7.7",
+                UsbipVersion = "0.9.8.1",
                 UsbipInstalled = true,
                 UsbipExecutableSafe = true,
                 UsbipDriverFilesSafe = false,

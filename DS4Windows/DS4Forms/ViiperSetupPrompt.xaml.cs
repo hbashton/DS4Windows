@@ -66,9 +66,9 @@ namespace DS4WinWPF.DS4Forms
                     : "The installed VIIPER does not match this DS4Windows package.";
                 requirementsHeadingText.Text = "Verified update required";
                 requirementsText.Text = usbipReplacementRequired
-                    ? "• Install and verify bundled VIIPER 0.1.9-rc4.6.6\n" +
+                    ? "• Install and verify bundled VIIPER backend\n" +
                       "• Safely remove the unsupported USB-IP package\n" +
-                      "• Restart, then finish installing USB-IP 0.9.7.7"
+                      "• Restart, then finish installing USB-IP 0.9.8.1"
                     : "• Install the exact bundled VIIPER build\n" +
                       "• Keep your existing installation location\n" +
                       "• The unverified backend will not be started";
@@ -88,8 +88,8 @@ namespace DS4WinWPF.DS4Forms
                 summaryText.Text = currentStatus;
                 requirementsHeadingText.Text = "Required before DS4Windows can run";
                 requirementsText.Text =
-                    "• Install the bundled VIIPER 0.1.9-rc4.6.6 build\n" +
-                    "• Install and verify USB-IP 0.9.7.7\n" +
+                    "• Install the bundled VIIPER backend build\n" +
+                    "• Install and verify USB-IP 0.9.8.1\n" +
                     "• Start DS4Windows only after the runtime probe passes";
                 installButton.Content = "Install / Repair";
                 installPortableButton.Content = "Keep DS4Windows portable";

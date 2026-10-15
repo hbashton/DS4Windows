@@ -29,7 +29,7 @@ REQUIRED_PUBLISH_FILES = {
     "extras/VIIPER-SYSTRAY-NOTICE.md",
     "extras/VIIPER-SYSTRAY-LICENSE.txt",
     "extras/VIIPER-WDL-NOTICE.txt",
-    "extras/USBip-0.9.7.7-x64.exe",
+    "extras/USBip-0.9.8.1-x64.exe",
     "extras/HidHide_1.5.230_x64.exe",
     "extras/FakerInput_0.1.0_x64.msi",
 }
@@ -62,7 +62,7 @@ VIIPER_NOTICE_HASHES = {
     "VIIPER-SYSTRAY-LICENSE.txt": "05C55BD8834035C143C17AA218BFF08E22B7A66C5603CBA8F070DCAAFC974B8F",
     "VIIPER-WDL-NOTICE.txt": "2485006947F464C2A69E9F863D50529261FB684A7AC5E6BAE0D03BFE65F9E025",
 }
-VIIPER_INFRASTRUCTURE_MARKER = "VIIPER-0.1.9-rc4.6.6+USBIP-0.9.7.7"
+VIIPER_INFRASTRUCTURE_MARKER = "VIIPER-0.1.9-rc4.6.6+USBIP-0.9.8.1"
 
 
 def parse_unique_provenance(source: str) -> dict[str, str]:
@@ -665,8 +665,8 @@ def main() -> int:
         "Test-RecognizedProductExecutable",
         '$script:InstallerLogRoot = Assert-SafeManagedDirectory',
         '"VIIPER-0.1.9-rc4.6.6-x64.exe"',
-        '[Version]"0.9.7.7"',
-        '"USBip-0.9.7.7-x64.exe"',
+        '[Version]"0.9.8.1"',
+        '"USBip-0.9.8.1-x64.exe"',
         'Start-AndVerifyViiper',
         'Start-AndVerifyViiperDirectly',
         'Suspend-StartupTasksUntilInfrastructureReady',

@@ -582,7 +582,7 @@ namespace DS4WinWPF
                 {
                     if (!portable.InspectOwnedProcess(out bool running, out string failure) || !running)
                         throw new DS4Windows.PortableBrokerStartupException(failure ??
-                            "The portable VIIPER process stopped before it was ready. Check that USB/IP 0.9.7.7 is installed and available, then restart DS4Windows.");
+                            "The portable VIIPER process stopped before it was ready. Check that USB/IP 0.9.8.1 is installed and available, then restart DS4Windows.");
 
                     return DS4Windows.ViiperSetupManager.ProbeServer(
                             DS4Windows.ViiperSetupManager.ApiHost,

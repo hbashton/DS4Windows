@@ -450,11 +450,7 @@
                                     </Grid.RowDefinitions>
 
                                     <StackPanel Orientation="Horizontal" Margin="4,0,0,20">
-                                        <Border Width="30" Height="30" CornerRadius="5"
-                                                Background="{DynamicResource AccentColor}" Margin="0,0,10,0">
-                                            <TextBlock Text="D" Foreground="White" FontSize="17" FontWeight="Bold"
-                                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                        </Border>
+                                        <Image Width="30" Height="30" Margin="0,0,10,0" Source="/DS4Windows;component/Resources/DS4Windows-sidebar.png" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality" />
                                         <StackPanel VerticalAlignment="Center">
                                             <TextBlock Text="DS4Windows" FontSize="17" FontWeight="SemiBold"
                                                        Foreground="{DynamicResource ForegroundColor}" />
@@ -571,11 +567,7 @@
                                     </Grid.RowDefinitions>
 
                                     <StackPanel Orientation="Horizontal" Margin="4,0,0,16">
-                                        <Border Width="30" Height="30" CornerRadius="5"
-                                                Background="{DynamicResource AccentColor}" Margin="0,0,10,0">
-                                            <TextBlock Text="P" Foreground="White" FontSize="17" FontWeight="Bold"
-                                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                        </Border>
+                                        <Image Width="30" Height="30" Margin="0,0,10,0" Source="/DS4Windows;component/Resources/DS4Windows-sidebar.png" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality" />
                                         <StackPanel VerticalAlignment="Center">
                                             <TextBlock Text="Profile Editor" FontSize="17" FontWeight="SemiBold"
                                                        Foreground="{DynamicResource ForegroundColor}" />

@@ -638,4 +638,7 @@
 	<ItemGroup>
 		<Folder Remove="extras\" />
 	</ItemGroup>
+  <ItemGroup>
+    <Resource Include="Resources\DS4Windows-sidebar.png" />
+  </ItemGroup>
 </Project>

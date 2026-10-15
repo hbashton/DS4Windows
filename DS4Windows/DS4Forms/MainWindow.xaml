@@ -871,7 +871,7 @@
                                 </StackPanel>
 
                                 <CheckBox x:Name="interpretingOscMonitoringCk" Content="{lex:Loc EnableInterpretingOscMonitoring}" Margin="0,4,0,10" IsChecked="{Binding InterpretingOscMonitoring}" IsEnabled="{Binding UseOSCServer}" />
-                                
+
                                 <StackPanel Orientation="Horizontal" MinHeight="20">
                                     <CheckBox x:Name="useOscSenderCk" Content="{lex:Loc EnableOscSender}" IsChecked="{Binding UseOSCSender}" Click="UseOscSenderCk_Click" VerticalAlignment="Center" />
                                     <TextBox x:Name="oscSenderTxt" IsEnabled="{Binding UseOSCSender,Mode=OneWay}" Text="{Binding OscSenderAddress, UpdateSourceTrigger=LostFocus,FallbackValue='127.0.0.1'}"
@@ -1018,24 +1018,7 @@
                                 MaxWidth="140"
                                 Content="{lex:Loc DeviceOptions}"
                                 Click="DeviceOptionSettingsBtn_Click" />
-                        <Border Margin="0,16,0,4" Padding="14,12" CornerRadius="6"
-                                Background="{DynamicResource RaisedBackgroundColor}"
-                                BorderBrush="{DynamicResource BorderColor}" BorderThickness="1">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <StackPanel>
-                                    <TextBlock Text="Support DS4Windows" FontWeight="SemiBold" />
-                                    <TextBlock Text="Help fund controller hardware, testing, and development."
-                                               Margin="0,3,18,0" TextWrapping="Wrap"
-                                               Foreground="{DynamicResource MutedForegroundColor}" />
-                                </StackPanel>
-                                <Button Grid.Column="1" Content="❤  PayPal" Padding="14,7"
-                                        VerticalAlignment="Center" Click="SupportPayPalBtn_Click" />
-                            </Grid>
-                        </Border>
+
                                 </StackPanel>
                             </Border>
                         </Expander>

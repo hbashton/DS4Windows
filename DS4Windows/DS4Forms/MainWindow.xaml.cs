@@ -1412,12 +1412,7 @@ Suspend support not enabled.", true);
             }
         }
 
-        private void SupportPayPalBtn_Click(object sender, RoutedEventArgs e)
-        {
-            Util.StartProcessHelper("https://www.paypal.com/paypalme/hbashton");
-        }
-
-        private void MainWinVM_QuickProfileSettingChanged(object sender,
+private void MainWinVM_QuickProfileSettingChanged(object sender,
             QuickProfileSettingChangedEventArgs e)
         {
             overviewDirtyControllerIndices.Add(e.DeviceIndex);

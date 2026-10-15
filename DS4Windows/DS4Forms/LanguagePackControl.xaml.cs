@@ -55,11 +55,8 @@ namespace DS4WinWPF.DS4Forms
 
         private void CheckForCultureChange(object sender, EventArgs e)
         {
-            if (langPackVM.ChangeLanguagePack())
-            {
-                MessageBox.Show(Properties.Resources.LanguagePackApplyRestartRequired,
-                    "DS4Windows", MessageBoxButton.OK, MessageBoxImage.Information);
-            }
+            langPackVM.ChangeLanguagePack();
+            languageRestartHint.Visibility = langPackVM.RequiresRestart ? Visibility.Visible : Visibility.Collapsed;
         }
 
         private void LangPackVM_ScanFinished(object sender, EventArgs e)

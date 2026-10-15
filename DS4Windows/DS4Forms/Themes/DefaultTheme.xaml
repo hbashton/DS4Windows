@@ -217,11 +217,25 @@
         BridgeShellStyles is loaded after either application theme and builds
         its component styles on these stable keys. DarkTheme supplies fully
         templated versions; the light/default theme intentionally inherits the
-        native Windows control chrome through empty keyed base styles.
+        native Windows control chrome, with shared input spacing.
     -->
     <Style x:Key="ButtonStyle" TargetType="{x:Type Button}" />
     <Style x:Key="CheckBoxStyle" TargetType="{x:Type CheckBox}" />
-    <Style x:Key="ComboBoxStyle" TargetType="{x:Type ComboBox}" />
+    <Style x:Key="ComboBoxStyle" TargetType="{x:Type ComboBox}">
+        <Setter Property="MinHeight" Value="26" />
+        <Setter Property="Padding" Value="5,4" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style x:Key="TextBoxStyle" TargetType="{x:Type TextBox}">
+        <Setter Property="CaretBrush" Value="{DynamicResource ForegroundColor}" />
+        <Setter Property="MinHeight" Value="26" />
+        <Setter Property="Padding" Value="6,4" />
+    </Style>
+    <Style TargetType="{x:Type TextBox}" BasedOn="{StaticResource TextBoxStyle}" />
+    <Style TargetType="{x:Type RichTextBox}">
+        <Setter Property="CaretBrush" Value="{DynamicResource ForegroundColor}" />
+    </Style>
+    <Style TargetType="{x:Type ComboBox}" BasedOn="{StaticResource ComboBoxStyle}" />
     <Style x:Key="ComboBoxItemStyle" TargetType="{x:Type ComboBoxItem}" />
     <Style x:Key="WindowStyle" TargetType="{x:Type Window}" />
 </ResourceDictionary>

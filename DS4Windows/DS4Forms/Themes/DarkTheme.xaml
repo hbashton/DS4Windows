@@ -346,12 +346,15 @@
     <Style x:Key="TextBoxStyle" TargetType="{x:Type TextBox}">
         <Setter Property="Background" Value="{StaticResource BackgroundColor}" />
         <Setter Property="Foreground" Value="{StaticResource ForegroundColor}" />
+        <Setter Property="CaretBrush" Value="{DynamicResource ForegroundColor}" />
+        <Setter Property="MinHeight" Value="26" />
+        <Setter Property="Padding" Value="6,4" />
         <Setter Property="BorderBrush" Value="{StaticResource BorderColor}" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="{x:Type TextBox}">
                     <Border x:Name="border" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Background="{TemplateBinding Background}" SnapsToDevicePixels="True">
-                        <ScrollViewer x:Name="PART_ContentHost" Focusable="false" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Hidden"/>
+                        <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" Focusable="false" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Hidden"/>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
@@ -373,6 +376,7 @@
     <Style x:Key="RichTextBoxStyle" TargetType="{x:Type RichTextBox}">
         <Setter Property="Background" Value="{StaticResource BackgroundColor}" />
         <Setter Property="Foreground" Value="{StaticResource ForegroundColor}" />
+        <Setter Property="CaretBrush" Value="{DynamicResource ForegroundColor}" />
     </Style>
 
     <Style x:Key="TextBlockStyle" TargetType="{x:Type TextBlock}">
@@ -819,6 +823,9 @@
     </Style>
 
     <Style x:Key="ComboBoxStyle" TargetType="{x:Type ComboBox}">
+        <Setter Property="MinHeight" Value="26"/>
+        <Setter Property="Padding" Value="5,4"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
         <Setter Property="Background" Value="{StaticResource BackgroundColor}"/>
         <Setter Property="Foreground" Value="{StaticResource ForegroundColor}"/>
         <Setter Property="BorderBrush" Value="{StaticResource BorderColor}"/>
@@ -837,12 +844,12 @@
 
                         <ContentPresenter x:Name="ContentSite" IsHitTestVisible="False" HorizontalAlignment="Left" VerticalAlignment="Center"
                                           Content="{TemplateBinding SelectionBoxItem}" ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}" 
-                                          ContentTemplate="{TemplateBinding ItemTemplate}" Margin="5,0,0,0"/>
+                                          ContentTemplate="{TemplateBinding ItemTemplate}" Margin="{TemplateBinding Padding}"/>
 
                         <Popup x:Name="PART_Popup" AllowsTransparency="True" Placement="Bottom" IsOpen="{TemplateBinding IsDropDownOpen}" PopupAnimation="Slide">
                             <Border BorderThickness="1" MinWidth="{TemplateBinding ActualWidth}" MaxHeight="{TemplateBinding MaxDropDownHeight}"
                                             Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}">
-                                <ScrollViewer>
+                                <ScrollViewer Style="{DynamicResource BridgeDropDownScrollViewerStyle}">
                                     <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Contained" Margin="0,5,0,5"/>
                                 </ScrollViewer>
                             </Border>
@@ -915,7 +922,7 @@
                                         BorderBrush="{TemplateBinding BorderBrush}" HorizontalContentAlignment="Stretch" IsTabStop="False" 
                                         ShowButtonSpinner="{Binding ShowButtonSpinner, RelativeSource={RelativeSource TemplatedParent}}" 
                                         VerticalContentAlignment="Stretch">
-                        <xctk:WatermarkTextBox x:Name="PART_TextBox" AutoMoveFocus="{Binding AutoMoveFocus, RelativeSource={RelativeSource TemplatedParent}}" AcceptsReturn="False" AutoSelectBehavior="{Binding AutoSelectBehavior, RelativeSource={RelativeSource TemplatedParent}}" Background="Transparent" BorderThickness="0" ContextMenu="{TemplateBinding ContextMenu}" FontStyle="{TemplateBinding FontStyle}" FontStretch="{TemplateBinding FontStretch}" FontWeight="{TemplateBinding FontWeight}" FontFamily="{TemplateBinding FontFamily}" Foreground="{TemplateBinding Foreground}" FontSize="{TemplateBinding FontSize}" HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}" IsUndoEnabled="{Binding IsUndoEnabled, RelativeSource={RelativeSource TemplatedParent}}" IsTabStop="True" MinWidth="20" MaxLength="{Binding MaxLength, RelativeSource={RelativeSource TemplatedParent}}" Padding="{TemplateBinding Padding}" TextWrapping="NoWrap" TabIndex="{TemplateBinding TabIndex}" TextAlignment="{Binding TextAlignment, RelativeSource={RelativeSource TemplatedParent}}" VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" WatermarkTemplate="{Binding WatermarkTemplate, RelativeSource={RelativeSource TemplatedParent}}" Watermark="{Binding Watermark, RelativeSource={RelativeSource TemplatedParent}}"/>
+                        <xctk:WatermarkTextBox CaretBrush="{TemplateBinding Foreground}" x:Name="PART_TextBox" AutoMoveFocus="{Binding AutoMoveFocus, RelativeSource={RelativeSource TemplatedParent}}" AcceptsReturn="False" AutoSelectBehavior="{Binding AutoSelectBehavior, RelativeSource={RelativeSource TemplatedParent}}" Background="Transparent" BorderThickness="0" ContextMenu="{TemplateBinding ContextMenu}" FontStyle="{TemplateBinding FontStyle}" FontStretch="{TemplateBinding FontStretch}" FontWeight="{TemplateBinding FontWeight}" FontFamily="{TemplateBinding FontFamily}" Foreground="{TemplateBinding Foreground}" FontSize="{TemplateBinding FontSize}" HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}" IsUndoEnabled="{Binding IsUndoEnabled, RelativeSource={RelativeSource TemplatedParent}}" IsTabStop="True" MinWidth="20" MaxLength="{Binding MaxLength, RelativeSource={RelativeSource TemplatedParent}}" Padding="{TemplateBinding Padding}" TextWrapping="NoWrap" TabIndex="{TemplateBinding TabIndex}" TextAlignment="{Binding TextAlignment, RelativeSource={RelativeSource TemplatedParent}}" VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" WatermarkTemplate="{Binding WatermarkTemplate, RelativeSource={RelativeSource TemplatedParent}}" Watermark="{Binding Watermark, RelativeSource={RelativeSource TemplatedParent}}"/>
                     </xctk:ButtonSpinner>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">

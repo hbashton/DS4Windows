@@ -18,6 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 
 namespace DS4WinWPF
 {
@@ -32,22 +33,20 @@ namespace DS4WinWPF
             logCol = col;
         }
 
+        internal static string Format(IEnumerable<LogItem> entries)
+        {
+            var text = new StringBuilder();
+            foreach (LogItem item in entries)
+                text.AppendLine($"{item.Datetime}: {item.Message}");
+            return text.ToString();
+        }
+
         public void Process()
         {
-            List<string> outputLines = new List<string>();
-            foreach(LogItem item in logCol)
-            {
-                outputLines.Add($"{item.Datetime}: {item.Message}");
-            }
-
             try
             {
-                StreamWriter stream = new StreamWriter(filename);
-                foreach(string line in outputLines)
-                {
-                    stream.WriteLine(line);
-                }
-                stream.Close();
+                using StreamWriter stream = new StreamWriter(filename);
+                stream.Write(Format(logCol));
             }
             catch { }
         }

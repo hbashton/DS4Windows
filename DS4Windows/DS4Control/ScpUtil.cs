@@ -1923,6 +1923,12 @@ namespace DS4Windows
             get { return m_Config.formLocationY; }
         }
 
+        public static string LastSettingsSection
+        {
+            get => SettingsSectionInfo.Normalize(m_Config.lastSettingsSection);
+            set => m_Config.lastSettingsSection = SettingsSectionInfo.Normalize(value);
+        }
+
         public static string UseLang
         {
             set { m_Config.useLang = value; }
@@ -5022,6 +5028,7 @@ namespace DS4Windows
               new Dictionary<string, int>(), new Dictionary<string, int>(), new Dictionary<string, int>(), new Dictionary<string, int>(), new Dictionary<string, int>(), new Dictionary<string, int>() };
 
         public string useLang = "";
+        public string lastSettingsSection = "General";
         public bool downloadLang = true;
         public TrayIconChoice useIconChoice;
         public const bool DEFAULT_FLASH_WHEN_LATE = true;

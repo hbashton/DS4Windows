@@ -277,10 +277,11 @@
                         <TextBox Text="{Binding Path, UpdateSourceTrigger=PropertyChanged}" Margin="{StaticResource spaceMargin}" ToolTip="{lex:Loc AutoProfPathTip}"
                                  TextWrapping="Wrap" AcceptsReturn="False" VerticalScrollBarVisibility="Auto" MaxHeight="90"/>
 
-                        <Grid>
-                            <TextBox x:Name="mainTxtBox" Text="{Binding Title, UpdateSourceTrigger=PropertyChanged}" Margin="{StaticResource spaceMargin}" ToolTip="{lex:Loc AutoProfTitleTip}" />
+                        <Grid Margin="{StaticResource spaceMargin}">
+                            <TextBox x:Name="mainTxtBox" Text="{Binding Title, UpdateSourceTrigger=PropertyChanged}"
+                                     VerticalContentAlignment="Center" ToolTip="{lex:Loc AutoProfTitleTip}" />
 
-                            <TextBlock Margin="5,2" MinWidth="50" Text="Window title..." Foreground="{DynamicResource ForegroundColor}" Opacity="0.7" IsHitTestVisible="False">
+                            <TextBlock Margin="7,0" VerticalAlignment="Center" MinWidth="50" Text="Window title..." Foreground="{DynamicResource ForegroundColor}" Opacity="0.7" IsHitTestVisible="False">
                                 <TextBlock.Style>
                                     <Style TargetType="TextBlock">
                                         <Style.Triggers>
@@ -333,8 +334,7 @@
                                Foreground="{DynamicResource MutedForegroundColor}"
                                HorizontalAlignment="Center" VerticalAlignment="Center" />
                     <TextBox x:Name="autoProfilesSearchTextBox" Grid.Column="1"
-                             BorderThickness="0" Background="Transparent"
-                             Padding="2,8" VerticalContentAlignment="Center"
+                             Style="{DynamicResource BridgeSearchTextBoxStyle}"
                              TextChanged="AutoProfilesSearchTextBox_TextChanged"
                              ToolTip="Search by profile, window title, executable, or path" />
                     <Button x:Name="clearAutoProfilesSearchBtn" Grid.Column="2" Content="&#xE711;"

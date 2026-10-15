@@ -10,9 +10,19 @@
              lex:ResxLocalizationProvider.DefaultDictionary="Strings"
              mc:Ignorable="d" 
              d:DesignHeight="30" d:DesignWidth="340">
-    <StackPanel Orientation="Horizontal">
-        <Label x:Name="label1" Content="{lex:Loc LangPackControl.UseLangPack}" ContentStringFormat="{}{0}:" />
-        <ComboBox x:Name="cbCulture" Width="200" Margin="10,0,0,0"
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <Label x:Name="label1" Content="{lex:Loc LangPackControl.UseLangPack}" ContentStringFormat="{}{0}:"
+               VerticalAlignment="Center" Padding="0" Margin="0,0,16,0" />
+        <ComboBox x:Name="cbCulture" Grid.Column="1" Width="220"
+                  Style="{DynamicResource BridgeSettingsComboBoxStyle}"
                   ItemsSource="{Binding LangPackList}" SelectedIndex="{Binding SelectedIndex,FallbackValue=0}" IsEnabled="False">
             <ComboBox.ItemTemplate>
                 <DataTemplate>
@@ -20,5 +30,9 @@
                 </DataTemplate>
             </ComboBox.ItemTemplate>
         </ComboBox>
-    </StackPanel>
+        <TextBlock x:Name="languageRestartHint" Grid.Row="1" Grid.ColumnSpan="2"
+                   Text="Restart required to apply the selected language."
+                   Visibility="Collapsed" Margin="0,12,0,0" TextWrapping="Wrap"
+                   FontWeight="SemiBold" Foreground="{DynamicResource AccentColor}" />
+    </Grid>
 </UserControl>

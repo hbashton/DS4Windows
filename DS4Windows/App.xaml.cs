@@ -416,6 +416,7 @@ namespace DS4WinWPF
             logger.Info($"DS4Windows version {version}");
             logger.Info($"DS4Windows exe file: {DS4Windows.Global.exeFileName}");
             logger.Info($"DS4Windows Assembly Architecture: {(Environment.Is64BitProcess ? "x64" : "x86")}");
+            logger.Info(DS4Windows.InstallationModeInfo.Read());
             foreach (string line in DS4Windows.WindowsVersionInfo.Read().LogLines)
                 logger.Info(line);
             logger.Info($"System Architecture: {(Environment.Is64BitOperatingSystem ? "x64" : "x86")}");

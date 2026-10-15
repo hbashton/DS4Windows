@@ -88,7 +88,7 @@
                                             <ColumnDefinition Width="*" />
                                         </Grid.ColumnDefinitions>
                                         <Border Width="116" Height="72" Margin="0,0,14,0" CornerRadius="5"
-                                                Background="{DynamicResource RaisedBackgroundColor}"
+                                                Background="{DynamicResource CardBackgroundColor}"
                                                 BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" Padding="5"
                                                 Visibility="{Binding HasControllerArtwork, Converter={StaticResource BooleanToVisibilityConverter}}">
                                             <Image Source="{Binding ControllerImageSource}" Stretch="Uniform"
@@ -143,7 +143,7 @@
                                             </Button>
                                         </StackPanel>
                                     </Grid>
-                                    <Border Grid.Column="1" Background="{DynamicResource RaisedBackgroundColor}"
+                                    <Border Grid.Column="1" Background="{DynamicResource CardBackgroundColor}"
                                             BorderBrush="{DynamicResource BorderColor}" BorderThickness="1"
                                             CornerRadius="3" Padding="10,5" VerticalAlignment="Top">
                                         <StackPanel Orientation="Horizontal">
@@ -157,6 +157,10 @@
                                                Background="{DynamicResource BorderColor}" />
 
                                     <Grid Grid.Row="2" Grid.ColumnSpan="2">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
@@ -165,28 +169,26 @@
                                             <ColumnDefinition Width="Auto" />
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
-                                        <StackPanel>
-                                            <TextBlock Text="ACTIVE PROFILE" FontSize="10" FontWeight="Bold"
+                                        <TextBlock Text="ACTIVE PROFILE" FontSize="10" FontWeight="Bold"
                                                        Foreground="{DynamicResource MutedForegroundColor}" Margin="0,0,0,5" />
-                                            <ComboBox x:Name="selectProfCombo" Style="{StaticResource BridgeProfileComboBoxStyle}"
+                                        <ComboBox Grid.Row="1" VerticalAlignment="Center" x:Name="selectProfCombo" Style="{StaticResource BridgeProfileComboBoxStyle}"
                                                       HorizontalAlignment="Left"
                                                       ItemsSource="{Binding ProfileListCol}" SelectedIndex="{Binding SelectedIndex}"
                                                       Tag="{Binding DevIndex, Mode=OneTime}"
                                                       Visibility="{Binding PrimaryDevice, Converter={StaticResource BooleanToVisibilityConverter}}"
                                                       SelectionChanged="SelectProfCombo_SelectionChanged" KeyDown="SelectProfCombo_KeyDown">
-                                                <ComboBox.ItemTemplate>
-                                                    <DataTemplate>
-                                                        <TextBlock Text="{Binding Name,Mode=OneWay,FallbackValue=''}"
-                                                                   TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}" />
-                                                    </DataTemplate>
-                                                </ComboBox.ItemTemplate>
-                                            </ComboBox>
-                                        </StackPanel>
-                                        <CheckBox Grid.Column="1" Content="{lex:Loc LinkProfileId}" IsChecked="{Binding LinkedProfile}"
-                                                  IsEnabled="{Binding CanLinkProfile}" Margin="12,20,12,0" VerticalAlignment="Center"
+                                            <ComboBox.ItemTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock Text="{Binding Name,Mode=OneWay,FallbackValue=''}"
+                                                               TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}" />
+                                                </DataTemplate>
+                                            </ComboBox.ItemTemplate>
+                                        </ComboBox>
+                                        <CheckBox Grid.Row="1" Grid.Column="1" Content="{lex:Loc LinkProfileId}" IsChecked="{Binding LinkedProfile}"
+                                                  IsEnabled="{Binding CanLinkProfile}" Margin="12,0,12,0" VerticalAlignment="Center"
                                                   ToolTip="Use the same profile whenever this physical controller reconnects." />
-                                        <xctk:SplitButton Grid.Column="2" x:Name="ProfEditSBtn" Content="{lex:Loc Edit}"
-                                                          MinWidth="84" Height="34" Margin="0,18,10,0"
+                                        <xctk:SplitButton Grid.Row="1" Grid.Column="2" x:Name="ProfEditSBtn" Content="{lex:Loc Edit}"
+                                                          MinWidth="84" Height="34" Margin="0,0,10,0"
                                                           Visibility="{Binding PrimaryDevice, Converter={StaticResource BooleanToVisibilityConverter}}"
                                                           Tag="{Binding DevIndex, Mode=OneTime}" Click="ProfEditSBtn_Click" VerticalAlignment="Center">
                                             <xctk:SplitButton.DropDownContent>
@@ -194,32 +196,26 @@
                                                         Tag="{Binding DevIndex, Mode=OneTime}" Click="NewProfBtn_Click" />
                                             </xctk:SplitButton.DropDownContent>
                                         </xctk:SplitButton>
-                                        <StackPanel Grid.Column="3" Margin="0,0,10,0"
-                                                    Visibility="{Binding SupportsSwitch2StandaloneHoldMode, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                            <TextBlock Text="JOY-CON HOLD" FontSize="10" FontWeight="Bold"
+                                        <TextBlock Grid.Column="3" Visibility="{Binding SupportsSwitch2StandaloneHoldMode, Converter={StaticResource BooleanToVisibilityConverter}}" Text="JOY-CON HOLD" FontSize="10" FontWeight="Bold"
                                                        Foreground="{DynamicResource MutedForegroundColor}" Margin="0,0,0,5" />
-                                            <Button Width="116" Height="34"
+                                        <Button Grid.Row="1" Grid.Column="3" VerticalAlignment="Center" Margin="0,0,10,0"
+                                                    Visibility="{Binding SupportsSwitch2StandaloneHoldMode, Converter={StaticResource BooleanToVisibilityConverter}}" Width="116" Height="34"
                                                     Content="{Binding Switch2StandaloneHoldModeText, Mode=OneWay}"
                                                     Click="Switch2JoyConHoldModeBtn_Click"
                                                     ToolTip="{Binding Switch2StandaloneHoldModeToolTip}" />
-                                        </StackPanel>
-                                        <StackPanel Grid.Column="4" Margin="0,0,10,0"
-                                                    Visibility="{Binding SupportsSwitch2Identification, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                            <TextBlock Text="IDENTIFY" FontSize="10" FontWeight="Bold"
+                                        <TextBlock Grid.Column="4" Visibility="{Binding SupportsSwitch2Identification, Converter={StaticResource BooleanToVisibilityConverter}}" Text="IDENTIFY" FontSize="10" FontWeight="Bold"
                                                        Foreground="{DynamicResource MutedForegroundColor}" Margin="0,0,0,5" />
-                                            <Button Width="92" Height="34"
+                                        <Button Grid.Row="1" Grid.Column="4" VerticalAlignment="Center" Margin="0,0,10,0"
+                                                    Visibility="{Binding SupportsSwitch2Identification, Converter={StaticResource BooleanToVisibilityConverter}}" Width="92" Height="34"
                                                     Content="Ping"
                                                     Click="Switch2IdentifyBtn_Click"
                                                     ToolTip="Vibrate this controller so you can tell which one it is." />
-                                        </StackPanel>
-                                        <StackPanel Grid.Column="5" HorizontalAlignment="Right">
-                                            <TextBlock Text="LIGHTBAR" FontSize="10" FontWeight="Bold"
+                                        <TextBlock Grid.Column="5" Text="LIGHTBAR" FontSize="10" FontWeight="Bold"
                                                        Foreground="{DynamicResource MutedForegroundColor}" Margin="0,0,0,5" />
-                                            <Button x:Name="LightColorBtn" Width="116" Height="34"
+                                        <Button Grid.Row="1" Grid.Column="5" VerticalAlignment="Center" x:Name="LightColorBtn" Width="116" Height="34"
                                                     Background="{Binding LightColor, Mode=OneWay}" BorderBrush="{DynamicResource BorderColor}"
                                                     Tag="{Binding DevIndex, Mode=OneTime}" Click="LightColorBtn_Click"
                                                     ToolTip="Choose a temporary lightbar color" />
-                                        </StackPanel>
                                     </Grid>
                                 </Grid>
                             </DataTemplate>
@@ -249,7 +245,7 @@
                                         <Border x:Name="candidateCard" MinWidth="230"
                                                 Margin="0,0,10,6" Padding="10,8"
                                                 CornerRadius="4"
-                                                Background="{DynamicResource RaisedBackgroundColor}">
+                                                Background="{DynamicResource CardBackgroundColor}">
                                             <Grid>
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="*" />
@@ -419,7 +415,7 @@
                                                        Margin="0,3,0,0" FontSize="11"
                                                        Foreground="{DynamicResource MutedForegroundColor}" />
                                         </StackPanel>
-                                        <Border Grid.Column="1" Background="{DynamicResource RaisedBackgroundColor}"
+                                        <Border Grid.Column="1" Background="{DynamicResource CardBackgroundColor}"
                                                 BorderBrush="{DynamicResource BorderColor}" BorderThickness="1"
                                                 CornerRadius="4" Padding="10,5" VerticalAlignment="Center">
                                             <TextBlock Text="{Binding ElementName=profilesListBox, Path=Items.Count, StringFormat={}{0} profiles}"
@@ -428,7 +424,7 @@
                                         </Border>
                                         <Border Grid.Row="1" Grid.ColumnSpan="2" Margin="0,12,0,0"
                                                 Width="340" MaxWidth="340" HorizontalAlignment="Left"
-                                                Background="{DynamicResource RaisedBackgroundColor}"
+                                                Background="{DynamicResource CardBackgroundColor}"
                                                 BorderBrush="{DynamicResource BorderColor}" BorderThickness="1"
                                                 CornerRadius="6">
                                             <Grid>
@@ -441,8 +437,7 @@
                                                            Foreground="{DynamicResource MutedForegroundColor}"
                                                            HorizontalAlignment="Center" VerticalAlignment="Center" />
                                                 <TextBox x:Name="profilesSearchTextBox" Grid.Column="1"
-                                                         BorderThickness="0" Background="Transparent"
-                                                         Padding="2,8" VerticalContentAlignment="Center"
+                                                         Style="{DynamicResource BridgeSearchTextBoxStyle}"
                                                          TextChanged="ProfilesSearchTextBox_TextChanged"
                                                          ToolTip="Search profiles by name" />
                                                 <Button x:Name="clearProfilesSearchBtn" Grid.Column="2" Content="&#xE711;"
@@ -481,7 +476,7 @@
                                                 <Setter Property="Template">
                                                     <Setter.Value>
                                                         <ControlTemplate TargetType="ListBoxItem">
-                                                            <Border x:Name="ProfileCard" Background="{DynamicResource RaisedBackgroundColor}"
+                                                            <Border x:Name="ProfileCard" Background="{DynamicResource CardBackgroundColor}"
                                                                     BorderBrush="{DynamicResource BorderColor}" BorderThickness="1"
                                                                     CornerRadius="5" Padding="13">
                                                                 <ContentPresenter />
@@ -545,7 +540,7 @@
                                             </Style>
                                         </StackPanel.Style>
                                         <Border Width="52" Height="52" CornerRadius="8"
-                                                Background="{DynamicResource RaisedBackgroundColor}"
+                                                Background="{DynamicResource CardBackgroundColor}"
                                                 BorderBrush="{DynamicResource BorderColor}" BorderThickness="1">
                                             <TextBlock Text="P" FontSize="20" FontWeight="Bold"
                                                        Foreground="{DynamicResource AccentColor}"
@@ -586,439 +581,305 @@
 
                 </local:OutputSlotManagerControl>
             </TabItem>
-            <TabItem x:Name="settingsTab" Header="{lex:Loc Settings}" Tag="&#xE713;" IsEnabled="{Binding ViewEnabled,Mode=OneWay}">
-                <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Background="{DynamicResource SurfaceBackgroundColor}">
-                    <StackPanel Margin="0,0,14,8" MaxWidth="900" HorizontalAlignment="Left">
-                        <StackPanel.Resources>
-                            <Thickness x:Key="spaceMargin" Left="4" Right="0" Bottom="8" Top="0" />
-                        </StackPanel.Resources>
-                        <Border Style="{StaticResource BridgeCardStyle}">
-                            <StackPanel>
-                                <TextBlock Text="General" Style="{StaticResource BridgeSectionTitleStyle}" />
-                                <TextBlock Text="Startup, notifications, charging, appearance, and update behavior used by most players."
-                                           Style="{StaticResource BridgeSectionDescriptionStyle}" />
-                        <CheckBox x:Name="hideDS4ContCk" Content="{lex:Loc HideDS4Controller}" x:Uid="hideDS4Checkbox"
-                              IsEnabled="{Binding SystemIntegrationEnabled}"
-                              Margin="{StaticResource spaceMargin}" IsChecked="{Binding HideDS4Controller}" Click="HideDS4ContCk_Click"
-                              ToolTip="Prevents games from seeing both the physical controller and its virtual output. HidHide is recommended on current Windows versions."
-                              Style="{StaticResource BridgeDescribedCheckBoxStyle}">
-                        </CheckBox>
-                        <CheckBox x:Name="reclaimSteamInputCk" Content="Reclaim controller from Steam Input automatically"
-                              IsEnabled="{Binding SystemIntegrationEnabled}"
-                              Margin="{StaticResource spaceMargin}" IsChecked="{Binding ReclaimSteamInput}"
-                              Click="ReclaimSteamInputCk_Click"
-                              ToolTip="Cloaks the physical controller with HidHide, then safely restarts only its HID collection so Steam releases any handle it opened first. The virtual controller remains available to games."
-                              Style="{StaticResource BridgeDescribedCheckBoxStyle}" />
-                        <StackPanel Orientation="Horizontal" Margin="{StaticResource spaceMargin}">
-                            <CheckBox x:Name="swipeTouchCk" Content="{lex:Loc SwipeTouchpadToSwitchProfiles}" VerticalAlignment="Center"
-                                  IsChecked="{Binding SwipeTouchSwitchProfile}"
-                                  ToolTip="{lex:Loc Resources:TwoFingerSwipe}" Click="SwipeTouchCk_Click"
-                                  Style="{StaticResource BridgeDescribedCheckBoxStyle}" />
-                            <Button x:Name="configSwipeProfilesBtn" Content="Config Swipe Profiles" Margin="12,0,0,0"
-                                  Padding="8,2" Click="ConfigSwipeProfilesBtn_Click"
-                                  ToolTip="Choose which profiles the two-finger swipe is allowed to switch between" />
-                        </StackPanel>
-                        <CheckBox x:Name="runAtStartCk" Content="{lex:Loc RunAtStartup}" Margin="{StaticResource spaceMargin}"
-                              IsEnabled="{Binding CanChangeStartupPreference}"
-                              IsChecked="{Binding RunAtStartup}"
-                              ToolTip="Choose whether DS4Windows should open when you sign in to Windows. If setup is pending, your choice is saved and the message below explains the next step." Click="RunAtStartCk_Click"
-                              Style="{StaticResource BridgeDescribedCheckBoxStyle}" />
-                        <TextBlock Text="{Binding StartupStatusText}" TextWrapping="Wrap"
-                                   Visibility="{Binding StartupStatusVisibility}"
-                                   MaxWidth="420" HorizontalAlignment="Left"
-                                   Margin="{StaticResource spaceMargin}" />
-                        <GroupBox x:Name="runAsGroupBox" Header="{lex:Loc RunAs}" BorderThickness="2" Visibility="{Binding ShowRunStartPanel}"
-                              IsEnabled="{Binding CanChangeStartupMode}"
-                              Margin="{StaticResource spaceMargin}">
-                            <StackPanel Orientation="Horizontal">
-                                <StackPanel>
-                                    <RadioButton Content="{lex:Loc Program}" GroupName="RunAsOpt" Margin="{StaticResource spaceMargin}" IsChecked="{Binding RunStartProg}" />
-                                    <RadioButton Content="{lex:Loc Task}" GroupName="RunAsOpt" Margin="{StaticResource spaceMargin}"
-                                                 IsChecked="{Binding RunStartTask}" IsEnabled="{Binding CanWriteTask}" />
-                                </StackPanel>
-                                <Image x:Name="uacImg" Source="{Binding UACSource, Mode=OneTime}" Width="30" Height="30"
-                                   ToolTip="{lex:Loc Resources:UACTask}" Margin="20,0,0,0" />
-                            </StackPanel>
-                        </GroupBox>
-                        <StackPanel Orientation="Horizontal" Margin="{StaticResource spaceMargin}">
-                            <Label Content="{lex:Loc ShowNotifications}" />
-                            <ComboBox MinWidth="100" SelectedIndex="{Binding ShowNotificationsIndex}" Margin="8,0,0,0">
-                                <ComboBoxItem Content="{lex:Loc None}" />
-                                <ComboBoxItem Content="{lex:Loc WarningsOnly}" />
-                                <ComboBoxItem Content="{lex:Loc All}" />
-                            </ComboBox>
-                        </StackPanel>
-                        <CheckBox Content="{lex:Loc ProfileSwitchNotification}" IsChecked="{Binding ProfileChangedNotification}"
-                                  Visibility="{Binding IsProfileChangedCheckVisible}" Margin="16 0 0 10"/>
-                        <CheckBox Content="{lex:Loc DisconnectFromBtWhenStopping}" Margin="{StaticResource spaceMargin}"
-                              IsChecked="{Binding DisconnectBTStop}"
-                              ToolTip="Disconnect Bluetooth controllers when the DS4Windows service is stopped."
-                              Style="{StaticResource BridgeDescribedCheckBoxStyle}" />
-                        <StackPanel Orientation="Horizontal" Margin="{StaticResource spaceMargin}">
-                            <CheckBox Content="{lex:Loc FlashLightbarAtHighLatency}" VerticalAlignment="Center"
-                                  IsChecked="{Binding FlashHighLatency}" />
-                            <StackPanel Orientation="Horizontal" Margin="8,0,0,0"
-                                    IsEnabled="{Binding FlashHighLatency,FallbackValue='False'}">
-                                <!--<TextBox Text="20" VerticalContentAlignment="Center" />-->
-                                <xctk:IntegerUpDown d:IsHidden="True" Value="{Binding FlashHighLatencyAt}" MinWidth="30" ButtonSpinnerLocation="Right" Increment="1" Maximum="100" Minimum="10" />
-                                <Label Content="ms" />
-                            </StackPanel>
-                        </StackPanel>
-                        <CheckBox Content="{lex:Loc StartMinimized}" Margin="{StaticResource spaceMargin}"
-                              IsChecked="{Binding StartMinimize}" ToolTip="Open DS4Windows quietly without showing the main window."
-                              Style="{StaticResource BridgeDescribedCheckBoxStyle}" />
-                        <CheckBox Content="{lex:Loc MinimizeToTaskbar}"
-                                  ToolTip="{lex:Loc MinimizeToTaskbarTip}"
-                                  IsChecked="{Binding MinimizeToTaskbar}" Margin="{StaticResource spaceMargin}"
-                                  Style="{StaticResource BridgeDescribedCheckBoxStyle}" />
-                        <CheckBox Content="{lex:Loc CloseMinimizes}" Margin="{StaticResource spaceMargin}"
-                              IsChecked="{Binding CloseMinimizes}"
-                              ToolTip="{lex:Loc Resources:CloseMinimize}"
-                              Style="{StaticResource BridgeDescribedCheckBoxStyle}" />
-                        <CheckBox Content="{lex:Loc QuickCharge}" Margin="{StaticResource spaceMargin}"
-                              IsChecked="{Binding QuickCharge}"
-                              ToolTip="{lex:Loc Resources:QuickCharge}"
-                              Style="{StaticResource BridgeDescribedCheckBoxStyle}" />
-                        <CheckBox x:Name="verboseLoggingCheck" Content="Verbose logging" Margin="{StaticResource spaceMargin}"
-                              IsChecked="{Binding VerboseStartupLogging}"
-                              ToolTip="Writes detailed diagnostic markers to the log. Disable after testing."
-                              Style="{StaticResource BridgeDescribedCheckBoxStyle}" />
-                        <StackPanel Orientation="Horizontal" Margin="{StaticResource spaceMargin}">
-                            <Label Content="{lex:Loc IconChoice}" ContentStringFormat="{}{0}:"/>
-                            <ComboBox x:Name="useIconChoiceCom" SelectedIndex="{Binding IconChoiceIndex,FallbackValue='0'}" Margin="10,0,0,0">
-                                <ComboBoxItem Content="{lex:Loc Default}"/>
-                                <ComboBoxItem Content="{lex:Loc Colored}"/>
-                                <ComboBoxItem Content="{lex:Loc White}"/>
-                                <ComboBoxItem Content="{lex:Loc Black}"/>
-                                <ComboBoxItem Content="{lex:Loc Battery}"/>
-                            </ComboBox>
-                        </StackPanel>
-                        <StackPanel Orientation="Horizontal" Margin="{StaticResource spaceMargin}">
-                            <Label Content="{lex:Loc AppTheme}" ContentStringFormat="{}{0}:"/>
-                            <ComboBox x:Name="appThemeCom" SelectedIndex="{Binding AppChoiceIndex,FallbackValue='0'}" Margin="10,0,0,0">
-                                <ComboBoxItem Content="{lex:Loc Default}"/>
-                                <ComboBoxItem Content="{lex:Loc Light}"/>
-                                <ComboBoxItem Content="{lex:Loc Dark}"/>
-                            </ComboBox>
-                        </StackPanel>
-
-                        <CheckBox Content="{lex:Loc CheckUpdateStartup}" Margin="{StaticResource spaceMargin}"
-                              IsEnabled="{Binding SystemIntegrationEnabled}"
-                              IsChecked="{Binding CheckForUpdates}" ToolTip="Periodically check GitHub for a newer DS4Windows release."
-                              Style="{StaticResource BridgeDescribedCheckBoxStyle}" />
-                        <StackPanel x:Name="checkEveryOptionsStack" Orientation="Horizontal" Margin="{StaticResource spaceMargin}"
-                                IsEnabled="{Binding CheckForUpdates}">
-                            <Label Content="{lex:Loc CheckEvery}" />
-                            <!--<TextBox Text="0" VerticalAlignment="Center" />-->
-                            <xctk:IntegerUpDown d:IsHidden="True" Value="{Binding CheckEvery}" MinWidth="30" Margin="8,0,0,0"
-                                            ButtonSpinnerLocation="Right" Increment="1" Maximum="30" Minimum="0" />
-                            <ComboBox SelectedIndex="{Binding CheckEveryUnit,FallbackValue=1}" Margin="8,0,0,0" Foreground="{DynamicResource ForegroundColor}" MinWidth="60">
-                                <ComboBoxItem Content="{lex:Loc Hours}" />
-                                <ComboBoxItem Content="{lex:Loc Days}" />
-                            </ComboBox>
-                        </StackPanel>
-                        <GroupBox Header="VIIPER Virtual Controller Support" Padding="8" Margin="{StaticResource spaceMargin}" HorizontalAlignment="Left">
-                            <StackPanel>
-                                <TextBlock x:Name="viiperStatusText"
-                                           Text="VIIPER status unknown"
-                                           TextWrapping="Wrap"
-                                           MaxWidth="420"
-                                           Margin="0,0,0,6" />
-                                <StackPanel Orientation="Horizontal">
-                                    <Button x:Name="viiperSetupBtn"
-                                            Content="Install / Repair VIIPER"
-                                            Padding="8,2"
-                                            Click="ViiperSetupBtn_Click" />
-                                    <Button x:Name="viiperRefreshBtn"
-                                            Content="Refresh"
-                                            Padding="8,2"
-                                            Margin="8,0,0,0"
-                                            Click="ViiperRefreshBtn_Click" />
-                                </StackPanel>
-                                <TextBlock Text="Required for VIIPER outputs: DualSense, DualSense Edge, Switch 2 Pro, DS4, Xbox 360, and Xbox One / Series over USB/IP."
-                                           TextWrapping="Wrap"
-                                           MaxWidth="420"
-                                           Opacity="0.75"
-                                           Margin="0,6,0,0" />
-                                <CheckBox Content="Prompt me when VIIPER needs setup"
-                                          IsChecked="{Binding PromptForViiperSetup}"
-                                          ToolTip="Turn this off to suppress automatic VIIPER setup prompts. Install / Repair and Refresh remain available here."
-                                          Style="{StaticResource BridgeDescribedCheckBoxStyle}"
-                                          Margin="0,8,0,0" />
-                            </StackPanel>
-                        </GroupBox>
-                        <GroupBox Header="Switch 2 wireless controllers" Padding="16" Margin="{StaticResource spaceMargin}" HorizontalAlignment="Left">
-                            <StackPanel>
-                                <TextBlock Text="Hold the controller’s sync button until its lights flash, then select it below. Controllers you have already added reconnect when you wake them."
-                                           TextWrapping="Wrap"
-                                           MaxWidth="520"
-                                           Opacity="0.8"
-                                           Margin="0,0,0,8" />
-                                <CheckBox x:Name="switch2AutomaticJoyConPairingCheck"
-                                          Content="Joy-Cons are automatically paired"
-                                          IsChecked="{Binding AutomaticJoyConPairing}"
-                                          Click="Switch2AutomaticJoyConPairingCheck_Click"
-                                          ToolTip="Join available left and right Joy-Cons into one controller. A Joy-Con on its own still works separately."
-                                          Style="{StaticResource BridgeDescribedCheckBoxStyle}"
-                                          Margin="0,0,0,10" />
-                                <TextBlock x:Name="switch2DiscoveryStatusText"
-                                           Text="Refresh to check Bluetooth discovery status."
-                                           TextWrapping="Wrap"
-                                           MaxWidth="520"
-                                           Margin="0,0,0,8" />
-                                <ListBox x:Name="switch2AssociationCandidatesList"
-                                         MinWidth="420"
-                                         MaxWidth="520"
-                                         Height="88"
-                                         DisplayMemberPath="Label"
-                                         SelectionChanged="Switch2AssociationCandidatesList_SelectionChanged" />
-                                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                                    <Button x:Name="switch2AssociationRefreshBtn"
-                                            Content="Refresh"
-                                            Padding="8,2"
-                                            Click="Switch2AssociationRefreshBtn_Click" />
-                                    <Button x:Name="switch2AssociateBtn"
-                                            Content="Add controller"
-                                            IsEnabled="False"
-                                            Padding="8,2"
-                                            Margin="8,0,0,0"
-                                            Click="Switch2AssociateBtn_Click" />
-                                </StackPanel>
-                                <TextBlock x:Name="switch2AssociationStatusText"
-                                           TextWrapping="Wrap"
-                                           MaxWidth="520"
-                                           Margin="0,8,0,0" />
-                                <Separator Margin="0,12,0,10" />
-                                <TextBlock Text="Join Joy-Cons"
-                                           FontWeight="SemiBold"
-                                           Margin="0,0,0,6" />
-                                <TextBlock Text="Each Joy-Con works on its own. To join two, select them here or use their link buttons on the Controllers tab."
-                                           TextWrapping="Wrap"
-                                           MaxWidth="520"
-                                           Opacity="0.8"
-                                           Margin="0,0,0,8" />
-                                <TextBlock x:Name="switch2JoyConCandidateStatusText"
-                                           Text="No unmatched Joy-Con 2 connections have been observed yet."
-                                           TextWrapping="Wrap"
-                                           MaxWidth="520"
-                                           Margin="0,0,0,8" />
-                                <Grid MaxWidth="520" HorizontalAlignment="Left">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="250" />
-                                        <ColumnDefinition Width="20" />
-                                        <ColumnDefinition Width="250" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0">
-                                        <TextBlock Text="Left Joy-Con 2" Margin="0,0,0,3" />
-                                        <ComboBox x:Name="switch2JoyConLeftCandidates"
-                                                  MinWidth="250"
-                                                  IsEnabled="False"
-                                                  DisplayMemberPath="Label"
-                                                  SelectionChanged="Switch2JoyConCandidates_SelectionChanged" />
-                                    </StackPanel>
-                                    <StackPanel Grid.Column="2">
-                                        <TextBlock Text="Right Joy-Con 2" Margin="0,0,0,3" />
-                                        <ComboBox x:Name="switch2JoyConRightCandidates"
-                                                  MinWidth="250"
-                                                  IsEnabled="False"
-                                                  DisplayMemberPath="Label"
-                                                  SelectionChanged="Switch2JoyConCandidates_SelectionChanged" />
-                                    </StackPanel>
-                                </Grid>
-                                <Button x:Name="switch2CreateJoyConPairBtn"
-                                        Content="Join selected Joy-Con 2 pair"
-                                        IsEnabled="False"
-                                        Padding="8,2"
-                                        HorizontalAlignment="Left"
-                                        Margin="0,8,0,0"
-                                        Click="Switch2CreateJoyConPairBtn_Click" />
-                                <StackPanel Orientation="Horizontal"
-                                            Margin="0,6,0,0" Visibility="Collapsed">
-                                    <Button x:Name="switch2UseLeftJoyConSeparatelyBtn"
-                                            Content="Use selected left separately"
-                                            IsEnabled="False"
-                                            Padding="8,2"
-                                            Click="Switch2UseLeftJoyConSeparatelyBtn_Click" />
-                                    <Button x:Name="switch2UseRightJoyConSeparatelyBtn"
-                                            Content="Use selected right separately"
-                                            IsEnabled="False"
-                                            Padding="8,2"
-                                            Margin="8,0,0,0"
-                                            Click="Switch2UseRightJoyConSeparatelyBtn_Click" />
-                                </StackPanel>
-                                <TextBlock x:Name="switch2JoyConPairStatusText"
-                                           TextWrapping="Wrap"
-                                           MaxWidth="520"
-                                           Margin="0,8,0,0" />
-                            </StackPanel>
-                        </GroupBox>
-                            </StackPanel>
+            <TabItem xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:local="clr-namespace:DS4WinWPF.DS4Forms" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:xctk="http://schemas.xceed.com/wpf/xaml/toolkit" PreviewKeyDown="SettingsTab_PreviewKeyDown" x:Name="settingsTab" Header="{lex:Loc Settings}" Tag="" IsEnabled="{Binding ViewEnabled,Mode=OneWay}">
+                <Grid HorizontalAlignment="Stretch">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <DockPanel Margin="0,0,0,12">
+                        <Button x:Name="clearSettingsSearchBtn" DockPanel.Dock="Right" Content="Clear" Visibility="Collapsed" Margin="8,0,0,0" Style="{DynamicResource BridgeSecondaryButtonStyle}" Click="ClearSettingsSearchBtn_Click" />
+                        <Border Background="{DynamicResource CardBackgroundColor}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="6" Padding="8,0">
+                        <Grid>
+                            <TextBox x:Name="settingsSearchTextBox" Style="{DynamicResource BridgeSearchTextBoxStyle}" AutomationProperties.Name="Search settings" ToolTip="Search all settings (Ctrl+F)" TextChanged="SettingsSearchTextBox_TextChanged" />
+                            <TextBlock Text="Search settings…" Margin="12,0" VerticalAlignment="Center" IsHitTestVisible="False" Foreground="{DynamicResource MutedForegroundColor}">
+                                <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed" /><Style.Triggers><DataTrigger Binding="{Binding Text, ElementName=settingsSearchTextBox}" Value=""><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+                            </TextBlock>
+                        </Grid>
                         </Border>
-
-                        <Expander Header="Advanced settings" IsExpanded="False" Margin="0,0,0,14">
-                            <Border Style="{StaticResource BridgeCardStyle}" Margin="0,8,0,0">
-                                <StackPanel>
-                                    <TextBlock Text="Advanced" Style="{StaticResource BridgeSectionTitleStyle}" />
-                                    <TextBlock Text="Network servers, compatibility overrides, device registration, diagnostics, and maintenance tools. Defaults are best for most users."
-                                               Style="{StaticResource BridgeSectionDescriptionStyle}" />
-                        <GroupBox Header="{lex:Loc OscServerHeading}" Padding="0,10,0,0" Margin="{StaticResource spaceMargin}">
-                            <StackPanel>
-                                <StackPanel Orientation="Horizontal" MinHeight="20">
-                                    <CheckBox x:Name="useOscServerCk" Content="{lex:Loc EnableOscServer}" IsChecked="{Binding UseOSCServer}" Click="UseOscServerCk_Click" VerticalAlignment="Center" />
-                                    <Label Content="Port" Padding="0" VerticalAlignment="Center" Margin="20,0,0,0" />
-                                    <xctk:IntegerUpDown d:IsHidden="False" x:Name="oscPortNum" IsEnabled="{Binding UseOSCServer}" MinWidth="20" Margin="8,0,0,0"
-                                        Value="{Binding OscPort, UpdateSourceTrigger=LostFocus,FallbackValue='9000'}" ButtonSpinnerLocation="Right" Increment="1" Maximum="65535" Minimum="0" />
-                                </StackPanel>
-
-                                <CheckBox x:Name="interpretingOscMonitoringCk" Content="{lex:Loc EnableInterpretingOscMonitoring}" Margin="0,4,0,10" IsChecked="{Binding InterpretingOscMonitoring}" IsEnabled="{Binding UseOSCServer}" />
-                                
-                                <StackPanel Orientation="Horizontal" MinHeight="20">
-                                    <CheckBox x:Name="useOscSenderCk" Content="{lex:Loc EnableOscSender}" IsChecked="{Binding UseOSCSender}" Click="UseOscSenderCk_Click" VerticalAlignment="Center" />
-                                    <TextBox x:Name="oscSenderTxt" IsEnabled="{Binding UseOSCSender,Mode=OneWay}" Text="{Binding OscSenderAddress, UpdateSourceTrigger=LostFocus,FallbackValue='127.0.0.1'}"
-                                 Margin="8,0,0,0" />
-                                    <Label Content="Port" Padding="0" Margin="20,0,0,0" VerticalAlignment="Center"/>
-                                    <xctk:IntegerUpDown d:IsHidden="False" x:Name="oscSendPort" IsEnabled="{Binding UseOSCSender}" MinWidth="20" Margin="8,0,0,0"
-                                            Value="{Binding OscSendPort, UpdateSourceTrigger=LostFocus,FallbackValue='9000'}" ButtonSpinnerLocation="Right" Increment="1" Maximum="65535" Minimum="0" />
-                                </StackPanel>
-                            </StackPanel>
-                        </GroupBox>
-                        <GroupBox Header="{lex:Loc UDPServer}" Padding="0,10,0,0" Margin="{StaticResource spaceMargin}">
-                            <StackPanel>
-                                <StackPanel Orientation="Horizontal" MinHeight="20">
-                                    <CheckBox x:Name="useUdpServerCk" Content="{lex:Loc MainWin.EnableServer}" IsChecked="{Binding UseUDPServer}" Click="UseUdpServerCk_Click" VerticalAlignment="Center" />
-                                    <TextBox x:Name="udpServerTxt" IsEnabled="{Binding UseUDPServer,Mode=OneWay}" Text="{Binding UdpIpAddress, UpdateSourceTrigger=LostFocus,FallbackValue='127.0.0.1'}"
-                                 Margin="8,0,0,0" />
-                                    <Label Content="{lex:Loc Port}" Padding="0" Margin="20,0,0,0" VerticalAlignment="Center" />
-                                    <!--<TextBox x:Name="updPortNum" IsEnabled="{Binding UseUDPServer}" Text="{Binding UdpPort, UpdateSourceTrigger=LostFocus,FallbackValue='26760'}" />-->
-                                    <xctk:IntegerUpDown d:IsHidden="True" x:Name="updPortNum" IsEnabled="{Binding UseUDPServer}" MinWidth="20" Margin="8,0,0,0"
-                                            Value="{Binding UdpPort, UpdateSourceTrigger=LostFocus,FallbackValue='26760'}" ButtonSpinnerLocation="Right" Increment="1" Maximum="65535" Minimum="0" />
-                                </StackPanel>
-
-                                <CheckBox Content="{lex:Loc UseSmoothing}" IsChecked="{Binding UseUdpSmoothing,FallbackValue='False'}" IsEnabled="{Binding UseUDPServer,Mode=OneWay}" Margin="0,4,0,10" />
-                                <StackPanel x:Name="udpEuroPanel" Orientation="Horizontal" Margin="{StaticResource spaceMargin}" Visibility="{Binding UdpServerOneEuroPanelVisibility,FallbackValue='Collapsed'}">
-                                    <StackPanel Orientation="Horizontal">
-                                        <Label Content="{lex:Loc MainWin.OneEuroMinCutoff}" />
-                                        <xctk:DoubleUpDown d:IsHidden="True" FormatString="F5" Value="{Binding UdpSmoothMinCutoff,FallbackValue=1.0,UpdateSourceTrigger=LostFocus}"
-                                                           Minimum="0.00001" Maximum="100.0" Increment="0.1" MinWidth="60" />
+                    </DockPanel>
+                    <TextBlock x:Name="settingsSearchStatus" Grid.Row="2" Visibility="Collapsed" Margin="0,0,0,12" Foreground="{DynamicResource MutedForegroundColor}" />
+                    <Border x:Name="settingsNoResults" Grid.Row="3" Visibility="Collapsed" VerticalAlignment="Top" Style="{DynamicResource BridgeCardStyle}"><StackPanel><TextBlock Text="No matching settings" Style="{DynamicResource BridgeSectionTitleStyle}" /><TextBlock Text="Try a different term, such as startup, USB/IP or language, or clear the search." TextWrapping="Wrap" Foreground="{DynamicResource MutedForegroundColor}" /></StackPanel></Border>
+                    <WrapPanel Grid.Row="1" Margin="0,0,0,12" KeyboardNavigation.TabNavigation="Continue">
+                        <RadioButton x:Name="settingsGeneralNav" Tag="General" Click="SettingsCategory_Checked" GroupName="SettingsCategory" Content="General" IsChecked="True" Style="{DynamicResource BridgeSettingsCategoryStyle}" Checked="SettingsCategory_Checked" />
+                        <RadioButton x:Name="settingsAppearanceNav" Tag="Appearance" Click="SettingsCategory_Checked" GroupName="SettingsCategory" Content="Appearance" IsChecked="False" Style="{DynamicResource BridgeSettingsCategoryStyle}" Checked="SettingsCategory_Checked" />
+                        <RadioButton x:Name="settingsControllersNav" Tag="Controllers" Click="SettingsCategory_Checked" GroupName="SettingsCategory" Content="Controllers" IsChecked="False" Style="{DynamicResource BridgeSettingsCategoryStyle}" Checked="SettingsCategory_Checked" />
+                        <RadioButton x:Name="settingsToolsNav" Tag="Tools" Click="SettingsCategory_Checked" GroupName="SettingsCategory" Content="Updates &amp; tools" IsChecked="False" Style="{DynamicResource BridgeSettingsCategoryStyle}" Checked="SettingsCategory_Checked" />
+                        <RadioButton x:Name="settingsIntegrationsNav" Tag="Integrations" Click="SettingsCategory_Checked" GroupName="SettingsCategory" Content="Integrations" IsChecked="False" Style="{DynamicResource BridgeSettingsCategoryStyle}" Checked="SettingsCategory_Checked" />
+                        <RadioButton x:Name="settingsAdvancedNav" Tag="Advanced" Click="SettingsCategory_Checked" GroupName="SettingsCategory" Content="Advanced" IsChecked="False" Style="{DynamicResource BridgeSettingsCategoryStyle}" Checked="SettingsCategory_Checked" />
+                    </WrapPanel>
+                    <ScrollViewer x:Name="settingsScrollViewer" Grid.Row="3" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Background="{DynamicResource SurfaceBackgroundColor}">
+                        <Grid x:Name="settingsPages" Margin="0,0,0,8" Grid.IsSharedSizeScope="True">
+                            <Grid.Resources>
+                                <Thickness x:Key="spaceMargin" Left="0" Right="0" Bottom="14" Top="0" />
+                            </Grid.Resources>
+                            <StackPanel x:Name="settingsGeneralPage">
+                                <StackPanel.Style>
+                                    <Style TargetType="StackPanel">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsChecked, ElementName=settingsGeneralNav}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </StackPanel.Style>
+                                <TextBlock Text="Startup, window behavior and notifications." Style="{DynamicResource BridgeSectionDescriptionStyle}" Margin="0,0,0,16" />
+                                <Border Style="{DynamicResource BridgeCardStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="Startup" Style="{DynamicResource BridgeSectionTitleStyle}" />
+                                        <TextBlock Text="Choose how DS4Windows opens when you sign in." Style="{DynamicResource BridgeSectionDescriptionStyle}" />
+                                        <CheckBox x:Name="runAtStartCk" Content="{lex:Loc RunAtStartup}" Margin="{StaticResource spaceMargin}" IsEnabled="{Binding CanChangeStartupPreference}" IsChecked="{Binding RunAtStartup}" ToolTip="Open DS4Windows automatically when you sign in to Windows." Click="RunAtStartCk_Click" Style="{DynamicResource BridgeSettingsCheckBoxStyle}" />
+                                        <TextBlock Text="{Binding StartupStatusText}" TextWrapping="Wrap" Visibility="{Binding StartupStatusVisibility}" MaxWidth="420" HorizontalAlignment="Left" Margin="{StaticResource spaceMargin}" />
+                                        <GroupBox x:Name="runAsGroupBox" Header="{lex:Loc RunAs}" BorderThickness="0" Visibility="{Binding ShowRunStartPanel}" IsEnabled="{Binding CanChangeStartupMode}" Margin="24,0,0,14" Padding="0">
+                                            <WrapPanel Margin="0,8,0,4">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <RadioButton Content="{lex:Loc Program}" GroupName="RunAsOpt" Margin="0,0,18,0" IsChecked="{Binding RunStartProg}" />
+                                                    <RadioButton Content="{lex:Loc Task}" GroupName="RunAsOpt" Margin="0,0,18,0" IsChecked="{Binding RunStartTask}" IsEnabled="{Binding CanWriteTask}" />
+                                                </StackPanel>
+                                                <Image x:Name="uacImg" Source="{Binding UACSource, Mode=OneTime}" Width="30" Height="30" ToolTip="{lex:Loc Resources:UACTask}" Margin="20,0,0,0" />
+                                            </WrapPanel>
+                                        </GroupBox>
+                                        <CheckBox Content="{lex:Loc StartMinimized}" Margin="{StaticResource spaceMargin}" IsChecked="{Binding StartMinimize}" ToolTip="Open DS4Windows quietly without showing the main window." Style="{DynamicResource BridgeSettingsCheckBoxStyle}" />
                                     </StackPanel>
-                                    <StackPanel Orientation="Horizontal" Margin="30,0,0,0">
-                                        <Label Content="{lex:Loc MainWin.OneEuroBeta}" />
-                                        <xctk:DoubleUpDown  d:IsHidden="True" FormatString="F5" Value="{Binding UdpSmoothBeta,FallbackValue=0.0,UpdateSourceTrigger=LostFocus}"
-                                                           Minimum="0.0" Maximum="1.0" Increment="0.1" MinWidth="60" />
+                                </Border>
+                                <Border Style="{DynamicResource BridgeCardStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="Window behavior" Style="{DynamicResource BridgeSectionTitleStyle}" />
+                                        <TextBlock Text="Choose where the app goes when you minimize or close it." Style="{DynamicResource BridgeSectionDescriptionStyle}" />
+                                        <CheckBox Content="{lex:Loc MinimizeToTaskbar}" ToolTip="{lex:Loc MinimizeToTaskbarTip}" IsChecked="{Binding MinimizeToTaskbar}" Margin="{StaticResource spaceMargin}" Style="{DynamicResource BridgeSettingsCheckBoxStyle}" />
+                                        <CheckBox Content="{lex:Loc CloseMinimizes}" Margin="{StaticResource spaceMargin}" IsChecked="{Binding CloseMinimizes}" ToolTip="{lex:Loc Resources:CloseMinimize}" Style="{DynamicResource BridgeSettingsCheckBoxStyle}" />
                                     </StackPanel>
-                                </StackPanel>
+                                </Border>
+                                <Border Style="{DynamicResource BridgeCardStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="Notifications" Style="{DynamicResource BridgeSectionTitleStyle}" />
+                                        <TextBlock Text="Control notifications and high-latency warnings." Style="{DynamicResource BridgeSectionDescriptionStyle}" />
+                                        <Grid Margin="{StaticResource spaceMargin}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Label Content="{lex:Loc ShowNotifications}" VerticalAlignment="Center" Padding="0" Margin="0,0,16,0" />
+                                            <ComboBox MinWidth="100" SelectedIndex="{Binding ShowNotificationsIndex}" Margin="0" Grid.Column="1" Width="220" Style="{DynamicResource BridgeSettingsComboBoxStyle}">
+                                                <ComboBoxItem Content="{lex:Loc None}" />
+                                                <ComboBoxItem Content="{lex:Loc WarningsOnly}" />
+                                                <ComboBoxItem Content="{lex:Loc All}" />
+                                            </ComboBox>
+                                        </Grid>
+                                        <CheckBox Content="{lex:Loc ProfileSwitchNotification}" IsChecked="{Binding ProfileChangedNotification}" Visibility="{Binding IsProfileChangedCheckVisible}" Margin="{StaticResource spaceMargin}" Style="{DynamicResource BridgeLabeledCheckBoxStyle}" />
+                                        <StackPanel Orientation="Horizontal" Margin="{StaticResource spaceMargin}">
+                                            <CheckBox Content="{lex:Loc FlashLightbarAtHighLatency}" VerticalAlignment="Center" IsChecked="{Binding FlashHighLatency}" Style="{DynamicResource BridgeLabeledCheckBoxStyle}" Margin="0" />
+                                            <StackPanel Orientation="Horizontal" Margin="8,0,0,0" IsEnabled="{Binding FlashHighLatency,FallbackValue='False'}">
+                                                <xctk:IntegerUpDown d:IsHidden="True" Value="{Binding FlashHighLatencyAt}" MinWidth="80" ButtonSpinnerLocation="Right" Increment="1" Maximum="100" Minimum="10" MinHeight="34" VerticalContentAlignment="Center" />
+                                                <Label Content="ms" VerticalAlignment="Center" Padding="0" Margin="8,0,0,0" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
                             </StackPanel>
-
-                        </GroupBox>
-                        <GroupBox Header="Game mod support (DSX)" Padding="0,10,0,0" Margin="{StaticResource spaceMargin}">
-                            <StackPanel>
-                                <CheckBox x:Name="useDSXUdpServerCk" Content="Let game mods control triggers and lights"
-                                          IsChecked="{Binding UseDSXUDPServer}" Click="UseDSXUdpServerCk_Click" />
-                                <TextBlock Text="For compatible DSX game mods on this PC and a DualSense or DualSense Edge. Trigger Lab takes priority on each trigger you enable. This does not stream audio haptics."
-                                           Margin="0,6,0,6" TextWrapping="Wrap" />
-                                <TextBlock x:Name="dsxUdpStatusText" TextWrapping="Wrap" Margin="0,0,0,6" />
-                                <Expander Header="Connection details" IsEnabled="{Binding UseDSXUDPServer}">
-                                    <StackPanel Margin="0,6,0,0">
-                                        <TextBlock Text="Use the same address and port in your mod. Most mods use 127.0.0.1 and port 6969. Close DSX or another listener using that port first."
-                                                   TextWrapping="Wrap" Margin="0,0,0,6" />
-                                        <WrapPanel VerticalAlignment="Center">
-                                            <Label Content="This PC address" Padding="0" VerticalAlignment="Center" />
-                                            <TextBox x:Name="dsxUdpServerTxt" MinWidth="110" Margin="8,0,0,0"
-                                                     Text="{Binding DSXUdpIpAddress, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True}" />
-                                            <Label Content="Port" Padding="0" Margin="16,0,0,0" VerticalAlignment="Center" />
-                                            <xctk:IntegerUpDown x:Name="dsxUpdPortNum" MinWidth="75" Margin="8,0,0,0"
-                                                               Value="{Binding DSXUdpPort, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True}"
-                                                               ButtonSpinnerLocation="Right" Increment="1" Maximum="65535" Minimum="1" />
-                                            <Button x:Name="dsxUdpApplyBtn" Content="Apply / Retry" Margin="12,0,0,0" Padding="10,3"
-                                                    Click="DSXUdpApplyBtn_Click" />
+                            <StackPanel x:Name="settingsAppearancePage">
+                                <StackPanel.Style>
+                                    <Style TargetType="StackPanel">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsChecked, ElementName=settingsAppearanceNav}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </StackPanel.Style>
+                                <TextBlock Text="Personalize the interface, tray icon and language." Style="{DynamicResource BridgeSectionDescriptionStyle}" Margin="0,0,0,16" />
+                                <Border Style="{DynamicResource BridgeCardStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="Theme and tray icon" Style="{DynamicResource BridgeSectionTitleStyle}" />
+                                        <TextBlock Text="The default theme follows your Windows app theme." Style="{DynamicResource BridgeSectionDescriptionStyle}" />
+                                        <Grid Margin="{StaticResource spaceMargin}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Label Content="{lex:Loc AppTheme}" ContentStringFormat="{}{0}:" VerticalAlignment="Center" Padding="0" Margin="0,0,16,0" />
+                                            <ComboBox x:Name="appThemeCom" SelectedIndex="{Binding AppChoiceIndex,FallbackValue='0'}" Margin="0" Grid.Column="1" Width="220" Style="{DynamicResource BridgeSettingsComboBoxStyle}">
+                                                <ComboBoxItem Content="{lex:Loc Default}" />
+                                                <ComboBoxItem Content="{lex:Loc Light}" />
+                                                <ComboBoxItem Content="{lex:Loc Dark}" />
+                                            </ComboBox>
+                                        </Grid>
+                                        <Grid Margin="{StaticResource spaceMargin}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Label Content="{lex:Loc IconChoice}" ContentStringFormat="{}{0}:" VerticalAlignment="Center" Padding="0" Margin="0,0,16,0" />
+                                            <ComboBox x:Name="useIconChoiceCom" SelectedIndex="{Binding IconChoiceIndex,FallbackValue='0'}" Margin="0" Grid.Column="1" Width="220" Style="{DynamicResource BridgeSettingsComboBoxStyle}">
+                                                <ComboBoxItem Content="{lex:Loc Default}" />
+                                                <ComboBoxItem Content="{lex:Loc Colored}" />
+                                                <ComboBoxItem Content="{lex:Loc White}" />
+                                                <ComboBoxItem Content="{lex:Loc Black}" />
+                                                <ComboBoxItem Content="{lex:Loc Battery}" />
+                                            </ComboBox>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+                                <Border Style="{DynamicResource BridgeCardStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="Language" Style="{DynamicResource BridgeSectionTitleStyle}" />
+                                        <TextBlock Text="Language changes take effect after restarting DS4Windows." Style="{DynamicResource BridgeSectionDescriptionStyle}" />
+                                        <local:LanguagePackControl Margin="{StaticResource spaceMargin}" />
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                            <StackPanel x:Name="settingsControllersPage">
+                                <StackPanel.Style>
+                                    <Style TargetType="StackPanel">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsChecked, ElementName=settingsControllersNav}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </StackPanel.Style>
+                                <TextBlock Text="Virtual output, physical-controller access and connection preferences." Style="{DynamicResource BridgeSectionDescriptionStyle}" Margin="0,0,0,16" />
+                                <Border Style="{DynamicResource BridgeCardStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="Virtual controller support" Style="{DynamicResource BridgeSectionTitleStyle}" />
+                                        <TextBlock Text="VIIPER and USB/IP provide controller output to your games." Style="{DynamicResource BridgeSectionDescriptionStyle}" />
+                                        <TextBlock x:Name="viiperStatusText" Text="VIIPER status unknown" TextWrapping="Wrap" Margin="0,0,0,14" FontWeight="SemiBold" />
+                                        <WrapPanel>
+                                            <Button x:Name="viiperSetupBtn" Content="Install / Repair VIIPER" Click="ViiperSetupBtn_Click" Style="{DynamicResource BridgeSecondaryButtonStyle}" Margin="0,0,10,10" HorizontalAlignment="Left" VerticalAlignment="Center" />
+                                            <Button x:Name="viiperRefreshBtn" Content="Refresh" Margin="0,0,10,10" Click="ViiperRefreshBtn_Click" Style="{DynamicResource BridgeSecondaryButtonStyle}" HorizontalAlignment="Left" VerticalAlignment="Center" />
+                                        </WrapPanel>
+                                        <CheckBox Content="Prompt me when VIIPER needs setup" IsChecked="{Binding PromptForViiperSetup}" ToolTip="Turn this off to suppress automatic VIIPER setup prompts. Install / Repair and Refresh remain available here." Style="{DynamicResource BridgeSettingsCheckBoxStyle}" Margin="0,4,0,0" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Style="{DynamicResource BridgeCardStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="Prevent double input" Style="{DynamicResource BridgeSectionTitleStyle}" />
+                                        <TextBlock Text="Keep games from receiving input from both the physical and virtual controllers." Style="{DynamicResource BridgeSectionDescriptionStyle}" />
+                                        <CheckBox x:Name="hideDS4ContCk" Content="{lex:Loc HideDS4Controller}" x:Uid="hideDS4Checkbox" IsEnabled="{Binding SystemIntegrationEnabled}" Margin="{StaticResource spaceMargin}" IsChecked="{Binding HideDS4Controller}" Click="HideDS4ContCk_Click" ToolTip="Prevents games from seeing both the physical controller and its virtual output. HidHide is recommended on current Windows versions." Style="{DynamicResource BridgeSettingsCheckBoxStyle}" />
+                                        <CheckBox x:Name="reclaimSteamInputCk" Content="Reclaim controller from Steam Input automatically" IsEnabled="{Binding SystemIntegrationEnabled}" Margin="{StaticResource spaceMargin}" IsChecked="{Binding ReclaimSteamInput}" Click="ReclaimSteamInputCk_Click" ToolTip="Release Steam Input's hold on the physical controller so DS4Windows can use it. Virtual controller output remains available to games." Style="{DynamicResource BridgeSettingsCheckBoxStyle}" />
+                                        <WrapPanel>
+                                            <Button x:Name="hidHideBtn" Margin="0,0,10,10" IsEnabled="{Binding SystemIntegrationEnabled}" Style="{DynamicResource BridgeSecondaryButtonStyle}" Click="HidHideBtn_Click" Visibility="{Binding HidHideClientFound, Converter={StaticResource BooleanToVisibilityConverter}, Mode=OneWay}" HorizontalAlignment="Left" Content="{lex:Loc HidHideConfigClient}" VerticalAlignment="Center" />
                                         </WrapPanel>
                                     </StackPanel>
+                                </Border>
+                                <Border Style="{DynamicResource BridgeCardStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="Connection and device options" Style="{DynamicResource BridgeSectionTitleStyle}" />
+                                        <TextBlock Text="Manage Bluetooth behavior and supported devices." Style="{DynamicResource BridgeSectionDescriptionStyle}" />
+                                        <CheckBox Content="{lex:Loc DisconnectFromBtWhenStopping}" Margin="{StaticResource spaceMargin}" IsChecked="{Binding DisconnectBTStop}" ToolTip="Disconnect Bluetooth controllers when the DS4Windows service is stopped." Style="{DynamicResource BridgeSettingsCheckBoxStyle}" />
+                                        <CheckBox Content="{lex:Loc QuickCharge}" Margin="{StaticResource spaceMargin}" IsChecked="{Binding QuickCharge}" ToolTip="{lex:Loc Resources:QuickCharge}" Style="{DynamicResource BridgeSettingsCheckBoxStyle}" />
+                                        <Button x:Name="deviceOptionSettingsBtn" Style="{DynamicResource BridgeSecondaryButtonStyle}" HorizontalAlignment="Left" Margin="0" MinWidth="140" Content="{lex:Loc DeviceOptions}" Click="DeviceOptionSettingsBtn_Click" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Style="{DynamicResource BridgeCardStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="Profile switching" Style="{DynamicResource BridgeSectionTitleStyle}" />
+                                        <TextBlock Text="Choose how touchpad swipes switch between profiles." Style="{DynamicResource BridgeSectionDescriptionStyle}" />
+                                        <StackPanel Margin="0">
+                                            <CheckBox x:Name="swipeTouchCk" Content="{lex:Loc SwipeTouchpadToSwitchProfiles}" VerticalAlignment="Center" Margin="0,0,0,8" IsChecked="{Binding SwipeTouchSwitchProfile}" ToolTip="{lex:Loc Resources:TwoFingerSwipe}" Click="SwipeTouchCk_Click" Style="{DynamicResource BridgeSettingsCheckBoxStyle}" />
+                                            <Button x:Name="configSwipeProfilesBtn" Content="Config Swipe Profiles" Margin="24,0,0,0" Style="{DynamicResource BridgeSecondaryButtonStyle}" Click="ConfigSwipeProfilesBtn_Click" ToolTip="Choose which profiles the two-finger swipe is allowed to switch between" HorizontalAlignment="Left" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+                                <Expander Header="Nintendo Switch 2 controllers" IsExpanded="False" Margin="0,6,0,0">
+                                    <Border Style="{DynamicResource BridgeCardStyle}" Margin="0,12,0,0">
+                                        <StackPanel>
+                                            <TextBlock Text="Hold the controller’s sync button until its lights flash, then select it below. Controllers you have already added reconnect when you wake them." TextWrapping="Wrap" Opacity="0.8" Margin="0,0,0,8" />
+                                            <CheckBox x:Name="switch2AutomaticJoyConPairingCheck" Content="Joy-Cons are automatically paired" IsChecked="{Binding AutomaticJoyConPairing}" Click="Switch2AutomaticJoyConPairingCheck_Click" ToolTip="Join available left and right Joy-Cons into one controller. A Joy-Con on its own still works separately." Style="{DynamicResource BridgeSettingsCheckBoxStyle}" Margin="0,0,0,10" />
+                                            <TextBlock x:Name="switch2DiscoveryStatusText" Text="Refresh to check Bluetooth discovery status." TextWrapping="Wrap" Margin="0,0,0,8" />
+                                            <ListBox x:Name="switch2AssociationCandidatesList" MinWidth="420" MaxWidth="520" Height="88" DisplayMemberPath="Label" SelectionChanged="Switch2AssociationCandidatesList_SelectionChanged" />
+                                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                                <Button x:Name="switch2AssociationRefreshBtn" Content="Refresh" Click="Switch2AssociationRefreshBtn_Click" Style="{DynamicResource BridgeSecondaryButtonStyle}" Margin="0,0,10,10" HorizontalAlignment="Left" VerticalAlignment="Center" />
+                                                <Button x:Name="switch2AssociateBtn" Content="Add controller" IsEnabled="False" Margin="0,0,10,10" Click="Switch2AssociateBtn_Click" Style="{DynamicResource BridgeSecondaryButtonStyle}" HorizontalAlignment="Left" VerticalAlignment="Center" />
+                                            </StackPanel>
+                                            <TextBlock x:Name="switch2AssociationStatusText" TextWrapping="Wrap" Margin="0,8,0,0" />
+                                            <Separator Margin="0,12,0,10" />
+                                            <TextBlock Text="Join Joy-Cons" FontWeight="SemiBold" Margin="0,0,0,6" />
+                                            <TextBlock Text="Each Joy-Con works on its own. To join two, select them here or use their link buttons on the Controllers tab." TextWrapping="Wrap" Opacity="0.8" Margin="0,0,0,8" />
+                                            <TextBlock x:Name="switch2JoyConCandidateStatusText" Text="No unmatched Joy-Con 2 connections have been observed yet." TextWrapping="Wrap" Margin="0,0,0,8" />
+                                            <Grid MaxWidth="520" HorizontalAlignment="Left">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="250" />
+                                                    <ColumnDefinition Width="20" />
+                                                    <ColumnDefinition Width="250" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel Grid.Column="0">
+                                                    <TextBlock Text="Left Joy-Con 2" Margin="0,0,0,3" />
+                                                    <ComboBox x:Name="switch2JoyConLeftCandidates" MinWidth="250" IsEnabled="False" DisplayMemberPath="Label" SelectionChanged="Switch2JoyConCandidates_SelectionChanged" Style="{DynamicResource BridgeSettingsComboBoxStyle}" />
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="2">
+                                                    <TextBlock Text="Right Joy-Con 2" Margin="0,0,0,3" />
+                                                    <ComboBox x:Name="switch2JoyConRightCandidates" MinWidth="250" IsEnabled="False" DisplayMemberPath="Label" SelectionChanged="Switch2JoyConCandidates_SelectionChanged" Style="{DynamicResource BridgeSettingsComboBoxStyle}" />
+                                                </StackPanel>
+                                            </Grid>
+                                            <Button x:Name="switch2CreateJoyConPairBtn" Content="Join selected Joy-Con 2 pair" IsEnabled="False" HorizontalAlignment="Left" Margin="0,0,10,10" Click="Switch2CreateJoyConPairBtn_Click" Style="{DynamicResource BridgeSecondaryButtonStyle}" VerticalAlignment="Center" />
+                                            <StackPanel Orientation="Horizontal" Margin="0,6,0,0" Visibility="Collapsed">
+                                                <Button x:Name="switch2UseLeftJoyConSeparatelyBtn" Content="Use selected left separately" IsEnabled="False" Click="Switch2UseLeftJoyConSeparatelyBtn_Click" Style="{DynamicResource BridgeSecondaryButtonStyle}" Margin="0,0,10,10" HorizontalAlignment="Left" VerticalAlignment="Center" />
+                                                <Button x:Name="switch2UseRightJoyConSeparatelyBtn" Content="Use selected right separately" IsEnabled="False" Margin="0,0,10,10" Click="Switch2UseRightJoyConSeparatelyBtn_Click" Style="{DynamicResource BridgeSecondaryButtonStyle}" HorizontalAlignment="Left" VerticalAlignment="Center" />
+                                            </StackPanel>
+                                            <TextBlock x:Name="switch2JoyConPairStatusText" TextWrapping="Wrap" Margin="0,8,0,0" />
+                                        </StackPanel>
+                                    </Border>
                                 </Expander>
                             </StackPanel>
-                        </GroupBox>
-
-                        <!--<StackPanel Orientation="Horizontal">
-                        <Label Content="Use language pack" />
-                        <ComboBox x:Name="langPackCombo" MinWidth="100" IsEnabled="False">
-                        </ComboBox>
-                    </StackPanel>
-                    -->
-                        <local:LanguagePackControl Margin="{StaticResource spaceMargin}" />
-                        <StackPanel Margin="{StaticResource spaceMargin}">
-                            <CheckBox x:Name="customSteamCk" Content="{lex:Loc UseCustomSteamFolder}" Margin="{StaticResource spaceMargin}"
-                                  IsChecked="{Binding UseCustomSteamFolder}" />
-                            <TextBox x:Name="customSteamTxt" Text="{Binding CustomSteamFolder, UpdateSourceTrigger=LostFocus}"
-                                 IsEnabled="{Binding UseCustomSteamFolder}" />
-                        </StackPanel>
-                        <DockPanel Margin="{StaticResource spaceMargin}">
-                            <Label Content="{lex:Loc CustomExeName}" />
-                            <Button x:Name="fakeExeNameExplainBtn" DockPanel.Dock="Right" Margin="8,0,0,0" Click="FakeExeNameExplainBtn_Click">
-                                <Image Source="{Binding QuestionMarkSource, Mode=OneTime}"
-                                   Width="20" Height="20" Stretch="UniformToFill" />
-                            </Button>
-                            <TextBox x:Name="fakeExeNameTxt" Text="{Binding FakeExeName, UpdateSourceTrigger=LostFocus}" MinWidth="200" IsEnabled="{Binding SystemIntegrationEnabled}" />
-                        </DockPanel>
-
-                        <StackPanel Orientation="Horizontal" Margin="{StaticResource spaceMargin}">
-                            <Label Content="{lex:Loc ProcessPriority}" ContentStringFormat="{}{0}:"/>
-                            <ComboBox x:Name="ProcessPriorityComboBox" Margin="10,0,0,0" SelectedIndex="{Binding ProcessPriorityIndex}" SelectionChanged="ProcessPriorityComboBox_OnSelectionChanged" />
-                        </StackPanel>
-
-                        <StackPanel Orientation="Horizontal" Margin="{StaticResource spaceMargin}">
-                            <Label Content="{lex:Loc MainWin.AbsDisplayMonitor}" ContentStringFormat="{}{0}:" />
-                            <ComboBox ItemsSource="{Binding AbsMonitorChoices}" DisplayMemberPath="DisplayItemString" SelectedValuePath="EDID"
-                                      SelectedValue="{Binding AbsMonitorSettingEDID}" Margin="10,0,0,0">
-                            </ComboBox>
-                        </StackPanel>
-
-                        <GroupBox Header="{lex:Loc Utils}" BorderThickness="2" Margin="{StaticResource spaceMargin}"
-                              Padding="8" HorizontalAlignment="Left">
-                            <WrapPanel HorizontalAlignment="Left" Orientation="Vertical">
-                                <Button x:Name="profFolderBtn" BorderThickness="0" Margin="0,0,4,4" Background="{x:Null}" BorderBrush="{x:Null}"
-                                    Style="{StaticResource NoBGHoverBtn}" Click="ProfFolderBtn_Click">
-                                    <TextBlock Text="{lex:Loc ProfileFolder}" TextDecorations="Underline" Foreground="{DynamicResource AccentColor}" Cursor="Hand" />
-                                </Button>
-                                <Button x:Name="controlPanelBtn" BorderThickness="0" Margin="0,0,4,4" Background="{x:Null}" BorderBrush="{x:Null}"
-                                    Style="{StaticResource NoBGHoverBtn}" Click="ControlPanelBtn_Click" >
-                                    <TextBlock Text="{lex:Loc ControlPanel}" TextDecorations="Underline" Foreground="{DynamicResource AccentColor}" Cursor="Hand" />
-                                </Button>
-                                <Button x:Name="html5GameBtn" BorderThickness="0" Margin="0,0,4,4" Background="{x:Null}" BorderBrush="{x:Null}"
-                                    Style="{StaticResource NoBGHoverBtn}" Click="Html5GameBtn_Click" >
-                                    <TextBlock Text="{lex:Loc GamepadTest}" TextDecorations="Underline" Foreground="{DynamicResource AccentColor}" Cursor="Hand" />
-                                </Button>
-                                <Button x:Name="xinputCheckerBtn" BorderThickness="0" Margin="0,0,4,4" Background="{x:Null}" BorderBrush="{x:Null}"
-                                    Style="{StaticResource NoBGHoverBtn}" Click="XinputCheckerBtn_Click" >
-                                    <TextBlock Text="{lex:Loc XInputChecker}" TextDecorations="Underline" Foreground="{DynamicResource AccentColor}" Cursor="Hand" />
-                                </Button>
-                                <Button x:Name="hidHideBtn" BorderThickness="0" Margin="0,0,4,4" Background="{x:Null}" BorderBrush="{x:Null}"
-                                    IsEnabled="{Binding SystemIntegrationEnabled}"
-                                    Style="{StaticResource NoBGHoverBtn}" Click="HidHideBtn_Click" Visibility="{Binding HidHideClientFound, Converter={StaticResource BooleanToVisibilityConverter}, Mode=OneWay}" >
-                                    <TextBlock Text="{lex:Loc HidHideConfigClient}" TextDecorations="Underline" Foreground="{DynamicResource AccentColor}" Cursor="Hand" />
-                                </Button>
-                                <Button x:Name="driverSetupBtn" BorderThickness="0" Margin="0,0,4,4" Background="{x:Null}" BorderBrush="{x:Null}"
-                                   Style="{StaticResource NoBGHoverBtn}" IsEnabled="{Binding SystemIntegrationEnabled}" Click="DriverSetupBtn_Click">
-                                    <TextBlock Text="{lex:Loc DriverSetup}" TextDecorations="Underline" Foreground="{DynamicResource AccentColor}" Cursor="Hand" />
-                                </Button>
-                                <Button x:Name="checkUpdatesBtn" BorderThickness="0" Margin="0,0,4,4" Background="{x:Null}" BorderBrush="{x:Null}"
-                                    Style="{StaticResource NoBGHoverBtn}" IsEnabled="{Binding SystemIntegrationEnabled}" Click="CheckUpdatesBtn_Click">
-                                    <!--="CheckUpdatesBtn_Click">-->
-                                    <TextBlock Text="{lex:Loc CheckUpdateNow}" TextDecorations="Underline" Foreground="{DynamicResource AccentColor}" Cursor="Hand" />
-                                </Button>
-                                <Button x:Name="checklogViewBtn" BorderThickness="0" Background="{x:Null}" BorderBrush="{x:Null}"
-                                    Style="{StaticResource NoBGHoverBtn}" Click="ChecklogViewBtn_Click" Margin="0,0,4,4">
-                                    <!--="CheckUpdatesBtn_Click">-->
-                                    <TextBlock Text="{lex:Loc Changelog}" TextDecorations="Underline" Foreground="{DynamicResource AccentColor}" Cursor="Hand" />
-                                </Button>
-                            </WrapPanel>
-                        </GroupBox>
-
-                        <Button x:Name="deviceOptionSettingsBtn"
-                                HorizontalAlignment="Center"
-                                Margin="{StaticResource spaceMargin}"
-                                MaxWidth="140"
-                                Content="{lex:Loc DeviceOptions}"
-                                Click="DeviceOptionSettingsBtn_Click" />
-                        <Border Margin="0,16,0,4" Padding="14,12" CornerRadius="6"
+                            <StackPanel x:Name="settingsToolsPage">
+                                <StackPanel.Style>
+                                    <Style TargetType="StackPanel">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsChecked, ElementName=settingsToolsNav}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </StackPanel.Style>
+                                <TextBlock Text="Updates, useful shortcuts and troubleshooting." Style="{DynamicResource BridgeSectionDescriptionStyle}" Margin="0,0,0,16" />
+                                <Border Style="{DynamicResource BridgeCardStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="Updates" Style="{DynamicResource BridgeSectionTitleStyle}" />
+                                        <TextBlock Text="Check this fork for new releases." Style="{DynamicResource BridgeSectionDescriptionStyle}" />
+                                        <CheckBox Content="{lex:Loc CheckUpdateStartup}" Margin="{StaticResource spaceMargin}" IsEnabled="{Binding SystemIntegrationEnabled}" IsChecked="{Binding CheckForUpdates}" ToolTip="Periodically check GitHub for a newer DS4Windows release." Style="{DynamicResource BridgeSettingsCheckBoxStyle}" />
+                                        <StackPanel x:Name="checkEveryOptionsStack" Orientation="Horizontal" Margin="{StaticResource spaceMargin}" IsEnabled="{Binding CheckForUpdates}">
+                                            <Label Content="{lex:Loc CheckEvery}" VerticalAlignment="Center" Padding="0" />
+                                            <xctk:IntegerUpDown d:IsHidden="True" Value="{Binding CheckEvery}" MinWidth="80" Margin="8,0,0,0" ButtonSpinnerLocation="Right" Increment="1" Maximum="30" Minimum="0" MinHeight="34" VerticalContentAlignment="Center" />
+                                            <ComboBox SelectedIndex="{Binding CheckEveryUnit,FallbackValue=1}" Margin="8,0,0,0" Foreground="{DynamicResource ForegroundColor}" MinWidth="60" Style="{DynamicResource BridgeSettingsComboBoxStyle}">
+                                                <ComboBoxItem Content="{lex:Loc Hours}" />
+                                                <ComboBoxItem Content="{lex:Loc Days}" />
+                                            </ComboBox>
+                                        </StackPanel>
+                                        <WrapPanel>
+                                            <Button x:Name="checkUpdatesBtn" Margin="0,0,10,10" Style="{DynamicResource BridgeSecondaryButtonStyle}" IsEnabled="{Binding SystemIntegrationEnabled}" Click="CheckUpdatesBtn_Click" HorizontalAlignment="Left" Content="{lex:Loc CheckUpdateNow}" VerticalAlignment="Center" />
+                                            <Button x:Name="checklogViewBtn" Style="{DynamicResource BridgeSecondaryButtonStyle}" Click="ChecklogViewBtn_Click" Margin="0,0,10,10" HorizontalAlignment="Left" Content="{lex:Loc Changelog}" VerticalAlignment="Center" />
+                                        </WrapPanel>
+                                    </StackPanel>
+                                </Border>
+                                <Border Style="{DynamicResource BridgeCardStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="Tools" Style="{DynamicResource BridgeSectionTitleStyle}" />
+                                        <TextBlock Text="Open your profiles, test controller input or manage installed drivers." Style="{DynamicResource BridgeSectionDescriptionStyle}" />
+                                        <WrapPanel>
+                                            <Button x:Name="profFolderBtn" Margin="0,0,10,10" Style="{DynamicResource BridgeSecondaryButtonStyle}" Click="ProfFolderBtn_Click" HorizontalAlignment="Left" Content="{lex:Loc ProfileFolder}" VerticalAlignment="Center" />
+                                            <Button x:Name="controlPanelBtn" Margin="0,0,10,10" Style="{DynamicResource BridgeSecondaryButtonStyle}" Click="ControlPanelBtn_Click" HorizontalAlignment="Left" Content="{lex:Loc ControlPanel}" VerticalAlignment="Center" />
+                                            <Button x:Name="html5GameBtn" Margin="0,0,10,10" Style="{DynamicResource BridgeSecondaryButtonStyle}" Click="Html5GameBtn_Click" HorizontalAlignment="Left" Content="{lex:Loc GamepadTest}" VerticalAlignment="Center" />
+                                            <Button x:Name="xinputCheckerBtn" Margin="0,0,10,10" Style="{DynamicResource BridgeSecondaryButtonStyle}" Click="XinputCheckerBtn_Click" HorizontalAlignment="Left" Content="{lex:Loc XInputChecker}" VerticalAlignment="Center" />
+                                            <Button x:Name="driverSetupBtn" Margin="0,0,10,10" Style="{DynamicResource BridgeSecondaryButtonStyle}" IsEnabled="{Binding SystemIntegrationEnabled}" Click="DriverSetupBtn_Click" HorizontalAlignment="Left" Content="{lex:Loc DriverSetup}" VerticalAlignment="Center" />
+                                        </WrapPanel>
+                                    </StackPanel>
+                                </Border>
+                                <Border Style="{DynamicResource BridgeCardStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="Diagnostics" Style="{DynamicResource BridgeSectionTitleStyle}" />
+                                        <TextBlock Text="Enable detailed logging only while investigating a problem." Style="{DynamicResource BridgeSectionDescriptionStyle}" />
+                                        <CheckBox x:Name="verboseLoggingCheck" Content="Verbose logging" Margin="{StaticResource spaceMargin}" IsChecked="{Binding VerboseStartupLogging}" ToolTip="Writes detailed diagnostic markers to the log. Disable after testing." Style="{DynamicResource BridgeSettingsCheckBoxStyle}" />
+                                        <Button Content="Open log" HorizontalAlignment="Left" Style="{DynamicResource BridgeSecondaryButtonStyle}" Click="OpenSettingsLog_Click" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Border>
+                            <Border Margin="0,16,0,4" Padding="14,12" CornerRadius="6"
                                 Background="{DynamicResource RaisedBackgroundColor}"
                                 BorderBrush="{DynamicResource BorderColor}" BorderThickness="1">
                             <Grid>
@@ -1036,22 +897,175 @@
                                         VerticalAlignment="Center" Click="SupportPayPalBtn_Click" />
                             </Grid>
                         </Border>
-                                </StackPanel>
-                            </Border>
-                        </Expander>
-                    </StackPanel>
-                </ScrollViewer>
-
+</StackPanel>
+                            <StackPanel x:Name="settingsIntegrationsPage">
+                                <StackPanel.Style>
+                                    <Style TargetType="StackPanel">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsChecked, ElementName=settingsIntegrationsNav}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </StackPanel.Style>
+                                <TextBlock Text="Connect compatible games and external tools to DS4Windows." Style="{DynamicResource BridgeSectionDescriptionStyle}" Margin="0,0,0,16" />
+                                <Border Style="{DynamicResource BridgeCardStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="Game mod support (DSX)" Style="{DynamicResource BridgeSectionTitleStyle}" />
+                                        <TextBlock Text="Allow compatible local mods to control triggers and lights." Style="{DynamicResource BridgeSectionDescriptionStyle}" />
+                                        <CheckBox x:Name="useDSXUdpServerCk" Content="Let game mods control triggers and lights" IsChecked="{Binding UseDSXUDPServer}" Click="UseDSXUdpServerCk_Click" Style="{DynamicResource BridgeLabeledCheckBoxStyle}" Margin="{StaticResource spaceMargin}" />
+                                        <TextBlock Text="For compatible DSX game mods on this PC and a DualSense or DualSense Edge. Trigger Lab takes priority on each trigger you enable. This does not stream audio haptics." Margin="0,6,0,6" TextWrapping="Wrap" Foreground="{DynamicResource MutedForegroundColor}" />
+                                        <TextBlock x:Name="dsxUdpStatusText" TextWrapping="Wrap" Margin="0,0,0,6" />
+                                        <Expander Header="Connection details" IsEnabled="{Binding UseDSXUDPServer}">
+                                            <StackPanel Margin="0,6,0,0">
+                                                <TextBlock Text="Use the same address and port in your mod. Most mods use 127.0.0.1 and port 6969. Close DSX or another listener using that port first." TextWrapping="Wrap" Margin="0,0,0,6" />
+                                                <WrapPanel VerticalAlignment="Center">
+                                                    <Label Content="This PC address" Padding="0" VerticalAlignment="Center" />
+                                                    <TextBox x:Name="dsxUdpServerTxt" MinWidth="110" Margin="8,0,0,0" Text="{Binding DSXUdpIpAddress, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True}" MinHeight="34" VerticalContentAlignment="Center" />
+                                                    <Label Content="Port" Padding="0" Margin="16,0,0,0" VerticalAlignment="Center" />
+                                                    <xctk:IntegerUpDown x:Name="dsxUpdPortNum" MinWidth="80" Margin="8,0,0,0" Value="{Binding DSXUdpPort, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True}" ButtonSpinnerLocation="Right" Increment="1" Maximum="65535" Minimum="1" MinHeight="34" VerticalContentAlignment="Center" />
+                                                    <Button x:Name="dsxUdpApplyBtn" Content="Apply / Retry" Margin="0,0,10,10" Click="DSXUdpApplyBtn_Click" Style="{DynamicResource BridgeSecondaryButtonStyle}" HorizontalAlignment="Left" VerticalAlignment="Center" />
+                                                </WrapPanel>
+                                            </StackPanel>
+                                        </Expander>
+                                    </StackPanel>
+                                </Border>
+                                <Border Style="{DynamicResource BridgeCardStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="UDP server" Style="{DynamicResource BridgeSectionTitleStyle}" />
+                                        <TextBlock Text="Share controller and motion input with compatible applications." Style="{DynamicResource BridgeSectionDescriptionStyle}" />
+                                        <CheckBox x:Name="useUdpServerCk" Content="{lex:Loc MainWin.EnableServer}" IsChecked="{Binding UseUDPServer}" Click="UseUdpServerCk_Click" VerticalAlignment="Center" Style="{DynamicResource BridgeLabeledCheckBoxStyle}" Margin="{StaticResource spaceMargin}" />
+                                        <WrapPanel>
+                                            <StackPanel Width="180" Margin="0,8,16,8">
+                                                <TextBlock Text="Listen address" Style="{DynamicResource BridgeSettingsFieldLabelStyle}" />
+                                                <TextBox x:Name="udpServerTxt" IsEnabled="{Binding UseUDPServer,Mode=OneWay}" Text="{Binding UdpIpAddress, UpdateSourceTrigger=LostFocus,FallbackValue='127.0.0.1'}" MinHeight="34" VerticalContentAlignment="Center" />
+                                            </StackPanel>
+                                            <StackPanel Width="180" Margin="0,8,16,8">
+                                                <TextBlock Text="Port" Style="{DynamicResource BridgeSettingsFieldLabelStyle}" />
+                                                <xctk:IntegerUpDown d:IsHidden="True" x:Name="updPortNum" IsEnabled="{Binding UseUDPServer}" MinWidth="80" Value="{Binding UdpPort, UpdateSourceTrigger=LostFocus,FallbackValue='26760'}" ButtonSpinnerLocation="Right" Increment="1" Maximum="65535" Minimum="0" MinHeight="34" VerticalContentAlignment="Center" />
+                                            </StackPanel>
+                                        </WrapPanel>
+                                        <CheckBox Content="{lex:Loc UseSmoothing}" IsChecked="{Binding UseUdpSmoothing,FallbackValue='False'}" IsEnabled="{Binding UseUDPServer,Mode=OneWay}" Margin="0,4,0,10" Style="{DynamicResource BridgeLabeledCheckBoxStyle}" />
+                                        <WrapPanel x:Name="udpEuroPanel" Margin="{StaticResource spaceMargin}" Visibility="{Binding UdpServerOneEuroPanelVisibility,FallbackValue='Collapsed'}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <Label Content="{lex:Loc MainWin.OneEuroMinCutoff}" />
+                                                <xctk:DoubleUpDown d:IsHidden="True" FormatString="F5" Value="{Binding UdpSmoothMinCutoff,FallbackValue=1.0,UpdateSourceTrigger=LostFocus}" Minimum="0.00001" Maximum="100.0" Increment="0.1" MinWidth="80" MinHeight="34" VerticalContentAlignment="Center" />
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="30,0,0,0">
+                                                <Label Content="{lex:Loc MainWin.OneEuroBeta}" />
+                                                <xctk:DoubleUpDown d:IsHidden="True" FormatString="F5" Value="{Binding UdpSmoothBeta,FallbackValue=0.0,UpdateSourceTrigger=LostFocus}" Minimum="0.0" Maximum="1.0" Increment="0.1" MinWidth="80" MinHeight="34" VerticalContentAlignment="Center" />
+                                            </StackPanel>
+                                        </WrapPanel>
+                                    </StackPanel>
+                                </Border>
+                                <Border Style="{DynamicResource BridgeCardStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="OSC control and monitoring" Style="{DynamicResource BridgeSectionTitleStyle}" />
+                                        <TextBlock Text="Receive external commands or send controller monitoring messages." Style="{DynamicResource BridgeSectionDescriptionStyle}" />
+                                        <CheckBox x:Name="useOscServerCk" Content="{lex:Loc EnableOscServer}" IsChecked="{Binding UseOSCServer}" Click="UseOscServerCk_Click" VerticalAlignment="Center" Style="{DynamicResource BridgeLabeledCheckBoxStyle}" Margin="{StaticResource spaceMargin}" />
+                                        <WrapPanel>
+                                            <StackPanel Width="180" Margin="0,8,16,8">
+                                                <TextBlock Text="Control port" Style="{DynamicResource BridgeSettingsFieldLabelStyle}" />
+                                                <xctk:IntegerUpDown d:IsHidden="False" x:Name="oscPortNum" IsEnabled="{Binding UseOSCServer}" MinWidth="80" Value="{Binding OscPort, UpdateSourceTrigger=LostFocus,FallbackValue='9000'}" ButtonSpinnerLocation="Right" Increment="1" Maximum="65535" Minimum="0" MinHeight="34" VerticalContentAlignment="Center" />
+                                            </StackPanel>
+                                        </WrapPanel>
+                                        <CheckBox x:Name="interpretingOscMonitoringCk" Content="{lex:Loc EnableInterpretingOscMonitoring}" Margin="0,4,0,10" IsChecked="{Binding InterpretingOscMonitoring}" IsEnabled="{Binding UseOSCServer}" Style="{DynamicResource BridgeLabeledCheckBoxStyle}" />
+                                        <CheckBox x:Name="useOscSenderCk" Content="{lex:Loc EnableOscSender}" IsChecked="{Binding UseOSCSender}" Click="UseOscSenderCk_Click" VerticalAlignment="Center" Style="{DynamicResource BridgeLabeledCheckBoxStyle}" Margin="{StaticResource spaceMargin}" />
+                                        <WrapPanel>
+                                            <StackPanel Width="180" Margin="0,8,16,8">
+                                                <TextBlock Text="Monitoring address" Style="{DynamicResource BridgeSettingsFieldLabelStyle}" />
+                                                <TextBox x:Name="oscSenderTxt" IsEnabled="{Binding UseOSCSender,Mode=OneWay}" Text="{Binding OscSenderAddress, UpdateSourceTrigger=LostFocus,FallbackValue='127.0.0.1'}" MinHeight="34" VerticalContentAlignment="Center" />
+                                            </StackPanel>
+                                            <StackPanel Width="180" Margin="0,8,16,8">
+                                                <TextBlock Text="Monitoring port" Style="{DynamicResource BridgeSettingsFieldLabelStyle}" />
+                                                <xctk:IntegerUpDown d:IsHidden="False" x:Name="oscSendPort" IsEnabled="{Binding UseOSCSender}" MinWidth="80" Value="{Binding OscSendPort, UpdateSourceTrigger=LostFocus,FallbackValue='9000'}" ButtonSpinnerLocation="Right" Increment="1" Maximum="65535" Minimum="0" MinHeight="34" VerticalContentAlignment="Center" />
+                                            </StackPanel>
+                                        </WrapPanel>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                            <StackPanel x:Name="settingsAdvancedPage">
+                                <StackPanel.Style>
+                                    <Style TargetType="StackPanel">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsChecked, ElementName=settingsAdvancedNav}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </StackPanel.Style>
+                                <TextBlock Text="Compatibility and process options. Defaults suit most users." Style="{DynamicResource BridgeSectionDescriptionStyle}" Margin="0,0,0,16" />
+                                <Border Style="{DynamicResource BridgeCardStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="Steam compatibility" Style="{DynamicResource BridgeSectionTitleStyle}" />
+                                        <TextBlock Text="Override the Steam folder only if automatic detection does not find your installation." Style="{DynamicResource BridgeSectionDescriptionStyle}" />
+                                        <StackPanel Margin="{StaticResource spaceMargin}">
+                                            <CheckBox x:Name="customSteamCk" Content="{lex:Loc UseCustomSteamFolder}" Margin="0,0,0,8" IsChecked="{Binding UseCustomSteamFolder}" Style="{DynamicResource BridgeLabeledCheckBoxStyle}" />
+                                            <TextBox x:Name="customSteamTxt" Text="{Binding CustomSteamFolder, UpdateSourceTrigger=LostFocus}" IsEnabled="{Binding UseCustomSteamFolder}" MinHeight="34" VerticalContentAlignment="Center" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+                                <Border Style="{DynamicResource BridgeCardStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="Process options" Style="{DynamicResource BridgeSectionTitleStyle}" />
+                                        <TextBlock Text="Use these overrides only when required by your setup." Style="{DynamicResource BridgeSectionDescriptionStyle}" />
+                                        <DockPanel Margin="{StaticResource spaceMargin}">
+                                            <Label Content="{lex:Loc CustomExeName}" VerticalAlignment="Center" Padding="0" Margin="0,0,16,0" />
+                                            <Button x:Name="fakeExeNameExplainBtn" DockPanel.Dock="Right" Margin="8,0,0,0" Click="FakeExeNameExplainBtn_Click" Style="{DynamicResource BridgeSecondaryButtonStyle}" Padding="6" ToolTip="Why use a custom executable name?" VerticalAlignment="Center">
+                                                <Image Source="{Binding QuestionMarkSource, Mode=OneTime}" Width="20" Height="20" Stretch="UniformToFill" />
+                                            </Button>
+                                            <TextBox x:Name="fakeExeNameTxt" Text="{Binding FakeExeName, UpdateSourceTrigger=LostFocus}" MinWidth="140" IsEnabled="{Binding SystemIntegrationEnabled}" MinHeight="34" VerticalContentAlignment="Center" />
+                                        </DockPanel>
+                                        <TextBlock x:Name="executableRestartHint" Visibility="Collapsed" Margin="0,0,0,14" TextWrapping="Wrap" FontWeight="SemiBold" Foreground="{DynamicResource AccentColor}" />
+                                        <Grid Margin="{StaticResource spaceMargin}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Label Content="{lex:Loc ProcessPriority}" ContentStringFormat="{}{0}:" VerticalAlignment="Center" Padding="0" Margin="0,0,16,0" />
+                                            <ComboBox x:Name="ProcessPriorityComboBox" Margin="0" SelectedIndex="{Binding ProcessPriorityIndex}" SelectionChanged="ProcessPriorityComboBox_OnSelectionChanged" Grid.Column="1" Width="220" Style="{DynamicResource BridgeSettingsComboBoxStyle}" />
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+                                <Border Style="{DynamicResource BridgeCardStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="Absolute mouse display" Style="{DynamicResource BridgeSectionTitleStyle}" />
+                                        <TextBlock Text="Choose the display used by absolute mouse mappings." Style="{DynamicResource BridgeSectionDescriptionStyle}" />
+                                        <Grid Margin="{StaticResource spaceMargin}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Label Content="{lex:Loc MainWin.AbsDisplayMonitor}" ContentStringFormat="{}{0}:" VerticalAlignment="Center" Padding="0" Margin="0,0,16,0" />
+                                            <ComboBox ItemsSource="{Binding AbsMonitorChoices}" DisplayMemberPath="DisplayItemString" SelectedValuePath="EDID" SelectedValue="{Binding AbsMonitorSettingEDID}" Margin="0" Grid.Column="1" Width="220" Style="{DynamicResource BridgeSettingsComboBoxStyle}" />
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </Grid>
+                    </ScrollViewer>
+                </Grid>
             </TabItem>
             <TabItem x:Name="logTab" Header="{lex:Loc Log}" Tag="&#xE9D9;">
                 <DockPanel>
-                    <DockPanel Height="20" DockPanel.Dock="Bottom" Margin="4,8">
-                        <Button x:Name="exportLogBtn" Content="{lex:Loc Export}" HorizontalAlignment="Left" Padding="20,1" Click="ExportLogBtn_Click" />
-                        <Button x:Name="clearLogBtn" Content="{lex:Loc Clear}" DockPanel.Dock="Right" Padding="20,1" Margin="100,0,0,0" Click="ClearLogBtn_Click" />
-                        <TextBlock Text="Latest 1,000 entries" VerticalAlignment="Center" Margin="16,0"
+                    <Grid x:Name="logFooter" DockPanel.Dock="Bottom" Margin="4,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Button x:Name="copyLogBtn" Content="Copy Text" Margin="0,0,8,0"
+                                Style="{DynamicResource BridgeSecondaryButtonStyle}" Click="CopyLogBtn_Click"
+                                ToolTip="Copy the latest log entries as plain text for pasting into GitHub." />
+                        <Button x:Name="exportLogBtn" Grid.Column="1" Content="{lex:Loc Export}" Style="{DynamicResource BridgeSecondaryButtonStyle}" Click="ExportLogBtn_Click" />
+                        <Button x:Name="clearLogBtn" Grid.Column="3" Content="{lex:Loc Clear}" Style="{DynamicResource BridgeSecondaryButtonStyle}" Click="ClearLogBtn_Click" />
+                        <TextBlock Grid.Column="2" Text="Latest 1,000 entries" VerticalAlignment="Center" Margin="16,0"
                                    Foreground="{DynamicResource MutedForegroundColor}"
                                    ToolTip="Older saved entries are available in the Logs folder." />
-                    </DockPanel>
+                    </Grid>
                     <ListView x:Name="logListView" DockPanel.Dock="Top" ItemsSource="{Binding LogItems}" MouseDoubleClick="LogListView_MouseDoubleClick" Margin="0"
                               ScrollViewer.CanContentScroll="True" VirtualizingPanel.IsVirtualizing="True"
                               VirtualizingPanel.VirtualizationMode="Recycling">

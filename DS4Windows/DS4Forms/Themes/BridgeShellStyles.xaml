@@ -48,6 +48,71 @@
         <Setter Property="MinHeight" Value="34" />
     </Style>
 
+    <!-- Dropdowns need no page-content gutter; only visible scrollbars occupy space. -->
+    <Style x:Key="BridgeDropDownScrollViewerStyle" TargetType="ScrollViewer">
+        <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
+        <Setter Property="HorizontalScrollBarVisibility" Value="Disabled" />
+        <Setter Property="CanContentScroll" Value="True" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ScrollViewer">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ScrollContentPresenter x:Name="PART_ScrollContentPresenter"
+                                                CanContentScroll="{TemplateBinding CanContentScroll}" />
+                        <ScrollBar x:Name="PART_VerticalScrollBar" Grid.Column="1"
+                                   Orientation="Vertical" Maximum="{TemplateBinding ScrollableHeight}"
+                                   ViewportSize="{TemplateBinding ViewportHeight}"
+                                   Value="{TemplateBinding VerticalOffset}"
+                                   Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}" />
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="BridgeDropDownItemStyle" TargetType="ComboBoxItem" BasedOn="{StaticResource ComboBoxItemStyle}">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{DynamicResource ForegroundColor}" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Margin" Value="0" />
+        <Setter Property="Padding" Value="8,5" />
+        <Setter Property="HorizontalAlignment" Value="Stretch" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ComboBoxItem">
+                    <Border x:Name="ItemChrome" Background="{TemplateBinding Background}"
+                            Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
+                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                          RecognizesAccessKey="True" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter TargetName="ItemChrome" Property="Background" Value="{DynamicResource NavigationSelectionColor}" />
+                        </Trigger>
+                        <Trigger Property="IsHighlighted" Value="True">
+                            <Setter TargetName="ItemChrome" Property="Background" Value="{DynamicResource NavigationSelectionColor}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                            <Setter TargetName="ItemChrome" Property="Background" Value="{DynamicResource NavigationSelectionColor}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.45" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style TargetType="ComboBoxItem" BasedOn="{StaticResource BridgeDropDownItemStyle}" />
+
     <Style x:Key="BridgeProfileComboBoxStyle" TargetType="ComboBox" BasedOn="{StaticResource ComboBoxStyle}">
         <Setter Property="Width" Value="196" />
         <Setter Property="Height" Value="42" />
@@ -58,33 +123,10 @@
         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
         <Setter Property="ItemContainerStyle">
             <Setter.Value>
-                <Style TargetType="ComboBoxItem" BasedOn="{StaticResource ComboBoxItemStyle}">
+                <Style TargetType="ComboBoxItem" BasedOn="{StaticResource BridgeDropDownItemStyle}">
                     <Setter Property="Padding" Value="10,8" />
                     <Setter Property="Margin" Value="0,1" />
                     <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                    <Setter Property="Template">
-                        <Setter.Value>
-                            <ControlTemplate TargetType="ComboBoxItem">
-                                <Border x:Name="ItemChrome" Background="Transparent" CornerRadius="4"
-                                        Padding="{TemplateBinding Padding}">
-                                    <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
-                                                      VerticalAlignment="Center" />
-                                </Border>
-                                <ControlTemplate.Triggers>
-                                    <Trigger Property="IsHighlighted" Value="True">
-                                        <Setter TargetName="ItemChrome" Property="Background" Value="{DynamicResource NavigationSelectionColor}" />
-                                    </Trigger>
-                                    <Trigger Property="IsSelected" Value="True">
-                                        <Setter TargetName="ItemChrome" Property="Background" Value="{DynamicResource NavigationSelectionColor}" />
-                                        <Setter Property="Foreground" Value="{DynamicResource ForegroundColor}" />
-                                    </Trigger>
-                                    <Trigger Property="IsEnabled" Value="False">
-                                        <Setter Property="Opacity" Value="0.45" />
-                                    </Trigger>
-                                </ControlTemplate.Triggers>
-                            </ControlTemplate>
-                        </Setter.Value>
-                    </Setter>
                 </Style>
             </Setter.Value>
         </Setter>
@@ -132,7 +174,7 @@
                                     Background="{DynamicResource CardBackgroundColor}"
                                     BorderBrush="{DynamicResource AccentColor}" BorderThickness="1"
                                     CornerRadius="6" Padding="4">
-                                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                                <ScrollViewer Style="{DynamicResource BridgeDropDownScrollViewerStyle}" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                                               CanContentScroll="True">
                                     <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Contained" />
                                 </ScrollViewer>
@@ -161,6 +203,26 @@
         </Setter>
     </Style>
 
+    <Style x:Key="BridgeSearchTextBoxStyle" TargetType="TextBox" BasedOn="{StaticResource TextBoxStyle}">
+        <Setter Property="MinHeight" Value="34" />
+        <Setter Property="Padding" Value="4,8" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="CaretBrush" Value="{DynamicResource ForegroundColor}" />
+    </Style>
+
+    <Style x:Key="BridgeLabeledCheckBoxStyle" TargetType="CheckBox" BasedOn="{StaticResource CheckBoxStyle}">
+        <Setter Property="ContentTemplate">
+            <Setter.Value>
+                <DataTemplate>
+                    <TextBlock Text="{Binding}" Margin="3,0,0,0" FontWeight="SemiBold"
+                               Foreground="{DynamicResource ForegroundColor}" />
+                </DataTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <Style x:Key="BridgeDescribedCheckBoxStyle" TargetType="CheckBox" BasedOn="{StaticResource CheckBoxStyle}">
         <Setter Property="Margin" Value="4,2,4,13" />
         <Setter Property="ContentTemplate">
@@ -171,6 +233,74 @@
                                    Foreground="{DynamicResource ForegroundColor}" />
                         <TextBlock Text="{Binding RelativeSource={RelativeSource AncestorType=CheckBox}, Path=ToolTip}"
                                    Margin="0,3,0,0" MaxWidth="620" TextWrapping="Wrap" FontSize="11"
+                                   Foreground="{DynamicResource MutedForegroundColor}" />
+                    </StackPanel>
+                </DataTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="BridgeSettingsCategoryStyle" TargetType="RadioButton">
+        <Setter Property="Foreground" Value="{DynamicResource MutedForegroundColor}" />
+        <Setter Property="Background" Value="{DynamicResource CardBackgroundColor}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderColor}" />
+        <Setter Property="Padding" Value="14,9" />
+        <Setter Property="Margin" Value="0,0,8,6" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Border x:Name="CategoryChrome" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
+                            CornerRadius="5" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="CategoryChrome" Property="Background" Value="{DynamicResource RaisedBackgroundColor}" />
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="CategoryChrome" Property="Background" Value="{DynamicResource NavigationSelectionColor}" />
+                            <Setter TargetName="CategoryChrome" Property="BorderBrush" Value="{DynamicResource AccentColor}" />
+                            <Setter Property="Foreground" Value="{DynamicResource ForegroundColor}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="CategoryChrome" Property="BorderBrush" Value="{DynamicResource AccentColor}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.45" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="BridgeSettingsComboBoxStyle" TargetType="ComboBox" BasedOn="{StaticResource ComboBoxStyle}">
+        <Setter Property="MinHeight" Value="34" />
+        <Setter Property="Padding" Value="8,6" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="MinWidth" Value="110" />
+    </Style>
+
+    <Style x:Key="BridgeSettingsFieldLabelStyle" TargetType="TextBlock" BasedOn="{StaticResource BridgeSectionDescriptionStyle}">
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Margin" Value="0,0,0,6" />
+    </Style>
+
+    <Style x:Key="BridgeSettingsCheckBoxStyle" TargetType="CheckBox" BasedOn="{StaticResource CheckBoxStyle}">
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="VerticalContentAlignment" Value="Top" />
+        <Setter Property="Margin" Value="0,0,0,14" />
+        <Setter Property="ContentTemplate">
+            <Setter.Value>
+                <DataTemplate>
+                    <StackPanel Margin="3,0,0,0">
+                        <TextBlock Text="{Binding}" TextWrapping="Wrap" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource ForegroundColor}" />
+                        <TextBlock Text="{Binding RelativeSource={RelativeSource AncestorType=CheckBox}, Path=ToolTip}"
+                                   Margin="0,4,0,0" TextWrapping="Wrap" FontSize="11"
                                    Foreground="{DynamicResource MutedForegroundColor}" />
                     </StackPanel>
                 </DataTemplate>

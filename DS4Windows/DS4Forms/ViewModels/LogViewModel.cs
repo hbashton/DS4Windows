@@ -49,6 +49,7 @@ namespace DS4WinWPF.DS4Forms.ViewModels
             string version = DS4Windows.Global.exeDisplayVersion;
             logItems.Add(new LogItem { Datetime = DateTime.Now, Message = $"DS4Windows version {version}" });
             logItems.Add(new LogItem { Datetime = DateTime.Now, Message = $"DS4Windows Assembly Architecture: {(Environment.Is64BitProcess ? "x64" : "x86")}" });
+            logItems.Add(new LogItem { Datetime = DateTime.Now, Message = InstallationModeInfo.Read() });
             foreach (string line in WindowsVersionInfo.Read().LogLines)
                 logItems.Add(new LogItem { Datetime = DateTime.Now, Message = line });
             logItems.Add(new LogItem { Datetime = DateTime.Now, Message = $"System Architecture: {(Environment.Is64BitOperatingSystem ? "x64" : "x32")}" });

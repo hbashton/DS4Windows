@@ -1012,7 +1012,7 @@ namespace DS4Windows
                 LogDebug($"{ExeName} was not added to HidHide: {rejection}", warning: true);
                 return;
             }
-            LogDebug("HidHide control device found");
+            LogDebug("HidHide control device found; driver " + DriverDiagnostics.Describe("HidHide"));
             lock (hidHideDriverMutationLock)
             {
                 using (HidHideAPIDevice hidHideDevice = new HidHideAPIDevice())
@@ -2872,7 +2872,18 @@ namespace DS4Windows
                 }
 
                 LogDebug($"Using output KB+M handler: {Global.outputKBMHandler.GetFullDisplayName()}");
-                LogDebug("VIIPER virtual-controller backend ready");
+                try
+                {
+                    var backendStatus = ViiperSetupManager.GetStatus();
+                    foreach (string line in ViiperStartupDiagnostics.Describe(backendStatus))
+                        LogDebug(line, warning: !backendStatus.Ready);
+                    LogDebug("USB/IP virtual host driver (usbip2_ude): " + DriverDiagnostics.Describe("usbip2_ude"));
+                    LogDebug("USB/IP filter driver (usbip2_filter): " + DriverDiagnostics.Describe("usbip2_filter"));
+                }
+                catch (Exception error)
+                {
+                    LogDebug("VIIPER/USB/IP diagnostics unavailable: " + error.Message, warning: true);
+                }
 
                 DS4Devices.isExclusiveMode = getUseExclusiveMode(); //Re-enable Exclusive Mode
 

@@ -448,6 +448,13 @@ namespace DS4WinWPF.DS4Control.DTOXml
             }
         }
 
+        private string lastSettingsSection = "General";
+        public string LastSettingsSection
+        {
+            get => lastSettingsSection;
+            set => lastSettingsSection = SettingsSectionInfo.Normalize(value);
+        }
+
         // Default UseLang to empty string. Not null
         public string UseLang
         {
@@ -939,6 +946,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
             PreferredViiperPath = source.preferredViiperPath;
             CloseMinimizes = source.closeMini;
             UseLang = source.useLang;
+            LastSettingsSection = source.lastSettingsSection;
             DownloadLang = source.downloadLang;
             FlashWhenLate = source.flashWhenLate;
             FlashWhenLateAt = source.flashWhenLateAt;
@@ -1052,6 +1060,7 @@ namespace DS4WinWPF.DS4Control.DTOXml
                 string.Empty;
             destination.closeMini = CloseMinimizes;
             destination.useLang = UseLang;
+            destination.lastSettingsSection = LastSettingsSection;
             destination.downloadLang = DownloadLang;
             destination.flashWhenLate = FlashWhenLate;
             destination.flashWhenLateAt = FlashWhenLateAt;

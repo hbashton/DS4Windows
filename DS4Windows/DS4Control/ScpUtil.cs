@@ -3685,10 +3685,10 @@ namespace DS4Windows
             return m_Config.Save();
         }
 
-        public static void SaveProfile(int device, string proName)
+        public static bool SaveProfile(int device, string proName,
+            string originalName = null, bool overwrite = true)
         {
-            m_Config.SaveProfileNew(device, proName);
-            //m_Config.SaveProfile(device, proName);
+            return m_Config.SaveProfileNew(device, proName, originalName, overwrite);
         }
 
         public static void SaveAsNewProfile(int device, string propath)
@@ -5563,56 +5563,62 @@ namespace DS4Windows
             return Saved;
         }
 
-        public bool SaveProfileNew(int device, string proName)
+        public bool SaveProfileNew(int device, string proName,
+            string originalName = null, bool overwrite = true)
         {
             bool saved = true;
             if (proName.EndsWith(Global.XML_EXTENSION))
             {
                 proName = proName.Remove(proName.LastIndexOf(Global.XML_EXTENSION));
             }
+            if (originalName?.EndsWith(Global.XML_EXTENSION) == true)
+                originalName = originalName.Remove(originalName.LastIndexOf(Global.XML_EXTENSION));
 
             string path = Path.Combine(Global.appdatapath, "Profiles",
                 $"{proName}{Global.XML_EXTENSION}");
-            string testStr = string.Empty;
-            XmlSerializer serializer = ProfileDTO.Serializer;
-            using (Utf8StringWriter strWriter = new Utf8StringWriter())
-            {
-                using XmlWriter xmlWriter = XmlWriter.Create(strWriter,
-                    new XmlWriterSettings()
-                    {
-                        Encoding = Encoding.UTF8,
-                        Indent = true,
-                    });
-
-                // Write header explicitly
-                //xmlWriter.WriteStartDocument();
-                xmlWriter.WriteComment(string.Format(" DS4Windows Configuration Data. {0} ", DateTime.Now));
-                xmlWriter.WriteComment(string.Format(" Made with DS4Windows version {0} ", Global.exeversion));
-                xmlWriter.WriteWhitespace("\r\n");
-                xmlWriter.WriteWhitespace("\r\n");
-
-                // Write root element and children
-                ProfileDTO dto = new ProfileDTO();
-                dto.DeviceIndex = device;
-                dto.MapFrom(this);
-                // Omit xmlns:xsi and xmlns:xsd from output
-                serializer.Serialize(xmlWriter, dto,
-                    new XmlSerializerNamespaces(new[] { XmlQualifiedName.Empty }));
-                xmlWriter.Flush();
-                xmlWriter.Close();
-
-                testStr = strWriter.ToString();
-                //Trace.WriteLine("TEST OUTPUT");
-                //Trace.WriteLine(testStr);
-            }
-
+            string originalPath = string.IsNullOrWhiteSpace(originalName) ? null :
+                Path.Combine(Global.appdatapath, "Profiles", $"{originalName}{Global.XML_EXTENSION}");
             try
             {
-                ProfilePersistence.Save(path, testStr);
+                string testStr = string.Empty;
+                XmlSerializer serializer = ProfileDTO.Serializer;
+                using (Utf8StringWriter strWriter = new Utf8StringWriter())
+                {
+                    using XmlWriter xmlWriter = XmlWriter.Create(strWriter,
+                        new XmlWriterSettings()
+                        {
+                            Encoding = Encoding.UTF8,
+                            Indent = true,
+                        });
+
+                    // Write header explicitly
+                    //xmlWriter.WriteStartDocument();
+                    xmlWriter.WriteComment(string.Format(" DS4Windows Configuration Data. {0} ", DateTime.Now));
+                    xmlWriter.WriteComment(string.Format(" Made with DS4Windows version {0} ", Global.exeversion));
+                    xmlWriter.WriteWhitespace("\r\n");
+                    xmlWriter.WriteWhitespace("\r\n");
+
+                    // Write root element and children
+                    ProfileDTO dto = new ProfileDTO();
+                    dto.DeviceIndex = device;
+                    dto.MapFrom(this);
+                    // Omit xmlns:xsi and xmlns:xsd from output
+                    serializer.Serialize(xmlWriter, dto,
+                        new XmlSerializerNamespaces(new[] { XmlQualifiedName.Empty }));
+                    xmlWriter.Flush();
+                    xmlWriter.Close();
+
+                    testStr = strWriter.ToString();
+                    //Trace.WriteLine("TEST OUTPUT");
+                    //Trace.WriteLine(testStr);
+                }
+
+                ProfilePersistence.Save(path, testStr, originalPath: originalPath, overwrite: overwrite);
             }
-            catch (UnauthorizedAccessException)
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException ||
+                ex is InvalidOperationException)
             {
-                AppLogger.LogToGui("Unauthorized Access - Save failed to path: " + path, false);
+                AppLogger.LogToGui("Profile save failed to path: " + path + ". " + ex.Message, false);
                 saved = false;
             }
 
